@@ -143,6 +143,30 @@ Hold Secure ______________________|‾‾‾‾‾‾‾‾‾‾‾‾
 | Position Tolerance | 0.1 mm | "At position" threshold |
 | Position Stable Time | 20 ms | Time in tolerance before "done" |
 
+### Position Mode Move Timing
+
+`FB_PositionCommandGate` shapes each position setpoint as a trapezoidal (or, for small steps,
+triangular) velocity move at the configured velocity limit `V` (`G_cfgVelLimitNormal`) and
+acceleration limit `A` (`G_cfgPosGateAccelMax`). For a setpoint step of size `d`, move time is:
+
+| Profile | Condition | Move Time |
+|---------|-----------|-----------|
+| Trapezoidal | `d > V^2/A` | `d/V + V/A` |
+| Triangular | `d <= V^2/A` | `2*SQRT(d/A)` |
+
+**Worked example at defaults** (`V` = 3 mm/s, `A` = 5 mm/s², so `V^2/A` = 1.8 mm):
+
+| Step Size | Profile | Move Time |
+|-----------|---------|-----------|
+| 50 mm | Trapezoidal | ≈ 17.3 s |
+| 1 mm | Triangular | ≈ 0.89 s |
+
+`A` (`G_cfgPosGateAccelMax`) is a commissioning parameter, started conservatively at 5 mm/s²
+and expected to be raised once bench testing confirms available torque headroom (see
+`docs/development/ConfigurationGuide.md`). The move times above therefore represent
+**upper-bound** times at the conservative starting value — actual moves will be faster once
+`A` is tuned up.
+
 ### Velocity Mode
 
 | Parameter | Value | Description |

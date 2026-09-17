@@ -50,6 +50,7 @@
        fbPistonExitGuard   : FB_PistonExitGuard
        fbGoHome            : FB_GoHome
        fbHomeLimit         : FB_HomeLimit
+       fbPosGate           : FB_PositionCommandGate
        (* Enum-helper FBs (replacing FN_* with user-enum signatures — MWIEC bug)
        fbIsOperational     : FB_IsOperationalMode
        fbIsHoming          : FB_IsHomingMode
@@ -90,6 +91,9 @@
        bBlockPos           : BOOL             (* Positive travel blocked by pos switch or above SoftLimitMax
        bLimitConditionActive : BOOL           (* Either direction blocked - a limit is currently active
        bRecoveryPending    : BOOL             (* Latched at ST_FAULT_IDLE reset; routes activation to ST_RECOVERY at brake release
+       (* Position command gate (ST_POSITION_CTRL / ST_RECOVERY_POSITION)
+       rPosTarget          : LREAL            (* Soft-limit-clamped position target from the master, input to fbPosGate
+       bPosGateActive      : BOOL             (* Set by a position state body this scan; gates fbPosGate.Enable
    ============================================================================ *)
 
 (* ============================================================================
@@ -115,7 +119,7 @@ IF bFirstScan THEN
     bRecoveryPending := FALSE;
 
     IF G_cfgAnalogFilterTimeConst > T#0MS THEN
-        rAnalogFilterAlpha := LREAL#0.001 / ((DINT_TO_LREAL(TIME_TO_DINT(G_cfgAnalogFilterTimeConst)) / LREAL#1000.0) + LREAL#0.001);
+        rAnalogFilterAlpha := G_cfgScanTime / ((DINT_TO_LREAL(TIME_TO_DINT(G_cfgAnalogFilterTimeConst)) / LREAL#1000.0) + G_cfgScanTime);
     ELSE
         rAnalogFilterAlpha := LREAL#1.0;
     END_IF;
@@ -164,6 +168,12 @@ bLimitConditionActive := bBlockNeg OR bBlockPos;
    No inline FB calls. Uses G_sta* for built-in FB status and
    previous-scan outputs for user FB status.
    -------------------------------------------------------------------------- *)
+
+(* Cleared every scan; a position state body sets it when it has produced a
+   fresh rPosTarget. On the scan a transition lands in a position state the
+   body has not yet run, so the gate stays disabled and commands actual
+   position for that scan rather than a stale target. *)
+bPosGateActive := FALSE;
 
 bEnterState := (G_sysCurrentState <> G_sysPreviousState);
 IF bEnterState THEN
@@ -314,15 +324,12 @@ ELSIF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
             stCurrentLimits.TorqueMax := G_cfgTorqueLimitNormal;
         END_IF;
 
-        G_sysCommandedPosition := fbAnalogProc.ScaledPosition;
-        G_sysCommandedPosition := LIMIT(stCurrentLimits.PosMin,
-                                      G_sysCommandedPosition,
-                                      stCurrentLimits.PosMax);
-
-		G_sysCommandedPosition := LIMIT(
-            G_sysActualPosition - G_cfgPosCommandDeviationLimit,
-            G_sysCommandedPosition,
-            G_sysActualPosition + G_cfgPosCommandDeviationLimit);
+        (* Raw target only; fbPosGate shapes it into G_sysCommandedPosition *)
+        rPosTarget := fbAnalogProc.ScaledPosition;
+        rPosTarget := LIMIT(stCurrentLimits.PosMin,
+                            rPosTarget,
+                            stCurrentLimits.PosMax);
+        bPosGateActive := TRUE;
 
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
@@ -646,18 +653,20 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
             stCurrentLimits.TorqueMax := G_cfgTorqueLimitNormal;
         END_IF;
 
-        G_sysCommandedPosition := fbAnalogProc.ScaledPosition;
-        G_sysCommandedPosition := LIMIT(stCurrentLimits.PosMin,
-                                      G_sysCommandedPosition,
-                                      stCurrentLimits.PosMax);
+        (* Raw target only; fbPosGate shapes it into G_sysCommandedPosition *)
+        rPosTarget := fbAnalogProc.ScaledPosition;
+        rPosTarget := LIMIT(stCurrentLimits.PosMin,
+                            rPosTarget,
+                            stCurrentLimits.PosMax);
 
         (* Block any target that would drive further toward the active limit *)
-        IF bBlockNeg AND (G_sysCommandedPosition < G_sysActualPosition) THEN
-            G_sysCommandedPosition := G_sysActualPosition;
+        IF bBlockNeg AND (rPosTarget < G_sysActualPosition) THEN
+            rPosTarget := G_sysActualPosition;
         END_IF;
-        IF bBlockPos AND (G_sysCommandedPosition > G_sysActualPosition) THEN
-            G_sysCommandedPosition := G_sysActualPosition;
+        IF bBlockPos AND (rPosTarget > G_sysActualPosition) THEN
+            rPosTarget := G_sysActualPosition;
         END_IF;
+        bPosGateActive := TRUE;
 
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
@@ -809,7 +818,7 @@ END_IF;
 IF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
     G_cmdDirectControl.Enable := TRUE;
     G_cmdDirectControl.ControlMode := Y_ControlMode#PositionMode;
-    G_cmdDirectControl.Position := G_sysCommandedPosition;
+    G_cmdDirectControl.Position := G_sysCommandedPosition;   (* previous scan; overridden by fbPosGate in Route Active FB Command Outputs *)
     G_cmdDirectControl.Velocity := stCurrentLimits.VelMax;
     G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
 
@@ -828,7 +837,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_TORQUE_CTRL THEN
 ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
     G_cmdDirectControl.Enable := TRUE;
     G_cmdDirectControl.ControlMode := Y_ControlMode#PositionMode;
-    G_cmdDirectControl.Position := G_sysCommandedPosition;
+    G_cmdDirectControl.Position := G_sysCommandedPosition;   (* previous scan; overridden by fbPosGate in Route Active FB Command Outputs *)
     G_cmdDirectControl.Velocity := stCurrentLimits.VelMax;
     G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
 
@@ -1018,6 +1027,21 @@ fbPosOutput(
     Stage2VoltMax := G_cfgPosMapStage2VoltMax
 );
 
+(* Position command gate - shapes rPosTarget into the Y_DirectControl command.
+   Enable is bPosGateActive (set only by a position state body that ran this
+   scan), not the state itself, so the transition scan commands actual position.
+   While disabled it seeds from actual, so every entry is bumpless. *)
+fbPosGate(
+    Enable := bPosGateActive,
+    Reset := bEnterState AND bPosGateActive,
+    Target := rPosTarget,
+    ActualPosition := G_sysActualPosition,
+    VelMax := stCurrentLimits.VelMax,
+    AccelMax := G_cfgPosGateAccelMax,
+    MaxDeviation := G_cfgPosGateMaxDeviation,
+    CycleTime := G_cfgScanTime
+);
+
 
 (* --------------------------------------------------------------------------
    Route Active FB Command Outputs -> G_cmd*
@@ -1033,6 +1057,12 @@ ELSIF G_sysCurrentState = E_SystemState#ST_HOME_LIMIT THEN
     G_cmdJog := fbHomeLimit.CmdJog;
     G_cmdMoveAbsolute := fbHomeLimit.CmdMoveAbsolute;
     G_cmdSetPosition := fbHomeLimit.CmdSetPosition;
+
+ELSIF (G_sysCurrentState = E_SystemState#ST_POSITION_CTRL) OR
+      (G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION) THEN
+    (* Gated command (= actual position on the transition scan) *)
+    G_sysCommandedPosition := fbPosGate.CommandedPosition;
+    G_cmdDirectControl.Position := fbPosGate.CommandedPosition;
 
 END_IF;
 
