@@ -319,6 +319,11 @@ ELSIF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
                                       G_sysCommandedPosition,
                                       stCurrentLimits.PosMax);
 
+		G_sysCommandedPosition := LIMIT(
+            G_sysActualPosition - G_cfgPosCommandDeviationLimit,
+            G_sysCommandedPosition,
+            G_sysActualPosition + G_cfgPosCommandDeviationLimit);
+
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
         IF fTrigMotionEnable.Q THEN
