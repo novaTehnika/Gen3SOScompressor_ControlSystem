@@ -31,6 +31,11 @@ This document provides step-by-step instructions for configuring the hardware in
 2. Add the MP2600iec controller
 3. Configure the Mechatrolink network for the SGD7S servo drive
 
+### 2.3 Task Configuration
+1. Assign `PRG_Main` (and the LD POU) to a cyclic task
+2. Set the task interval to **2 ms** (the MP2600iec minimum)
+3. Set `G_cfgScanTime` to the same value in seconds (`0.002`); the position command gate integrates with it
+
 ---
 
 ## 3. Axis Configuration

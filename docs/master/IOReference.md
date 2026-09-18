@@ -360,7 +360,7 @@ float voltage_to_position(float voltage) {
 | Input Debounce (FaultReset) | 20 ms | `G_cfgDebounceTimeFault` |
 | Input Debounce (LimitRetract) | 5 ms | `G_cfgDebounceTimeLimitStd` |
 | Input Debounce (LimitHome) | 2 ms | `G_cfgDebounceTimeLimitHome` |
-| Output Update | 1 ms | Scan cycle time |
+| Output Update | 2 ms | Scan cycle time |
 | Handshake Timeout | 500 ms | Mode confirmation |
 | Fault Code Stable | 10 ms | Before reading after `G_doFaultActive` rises |
 

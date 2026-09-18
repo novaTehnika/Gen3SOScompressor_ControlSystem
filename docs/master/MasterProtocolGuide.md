@@ -157,7 +157,7 @@ HANDSHAKE_TIMEOUT:
 When changing between operational modes (e.g., Position to Velocity):
 
 1. **Drop G_diMotionEnable LOW** - signals mode change request
-2. **Wait for G_doInMotion = FALSE** - slave performs controlled halt
+2. **Wait for G_doInMotion = FALSE** - slave performs controlled halt (from Position mode the command is first ramped to rest at `G_cfgPosGateAccelMax`, up to 0.6 s at defaults, before the halt)
 3. **Set new mode bits** - while G_diMotionEnable still LOW
 4. **Raise G_diMotionEnable HIGH** - initiates handshake for new mode
 5. **Wait for confirmation** - slave confirms new mode

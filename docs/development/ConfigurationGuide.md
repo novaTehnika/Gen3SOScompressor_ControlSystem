@@ -55,7 +55,7 @@ Parameters for `fbPosGate` (`FB_PositionCommandGate`), which shapes the direct-c
 
 | Parameter | Default Value | Units | Description & Tuning Considerations |
 |---|---|---|---|
-| `G_cfgScanTime` | 0.001 | s | Task scan period (`LREAL`), used as `dt` by the position command gate and as the basis for the analog input filter's time-constant alpha. |
+| `G_cfgScanTime` | 0.002 | s | Cyclic task period (`LREAL`), used as `dt` by the position command gate and as the basis for the analog input filter's time-constant alpha. **Must equal the cyclic task interval set in the MotionWorks IEC task configuration** (2 ms is the MP2600iec minimum); a mismatch scales every commanded velocity and the filter time constant by the same ratio. |
 | `G_cfgPosGateAccelMax` | 5.0 | mm/s² | Acceleration limit applied to the gated position command. Conservative starting value — raise during commissioning once bench testing shows torque headroom. **Tuning:** This is the transparency knob for an incidental master ramp: the gate lags a ramp at velocity `v` by `v²/(2·A)`, e.g. 0.9 mm at 3 mm/s with `A` = 5 mm/s², vs. 0.09 mm with `A` = 50 mm/s². |
 | `G_cfgPosGateMaxDeviation` | 2.0 | mm | Tether window: once the gated command leads `G_sysActualPosition` by this much in the direction of travel, the command holds until the axis catches up or the target reverses. **Tuning:** Must sit comfortably below the drive's `Pn520` excessive-deviation level so the tether acts first, and comfortably above normal following error. Replaces the undocumented `G_cfgPosCommandDeviationLimit`, which has been deleted. |
 

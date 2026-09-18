@@ -9,10 +9,10 @@
 
 | Category | Parameter | Value | Notes |
 |----------|-----------|-------|-------|
-| PLC Scan | Cycle Time | 1 ms | Target task period |
-| Motion | Position Loop | 1 ms | Synchronized with scan |
-| I/O | Digital Update | 1 ms | Per scan cycle |
-| I/O | Analog Update | 1 ms | Per scan cycle |
+| PLC Scan | Cycle Time | 2 ms | Cyclic task interval (MP2600iec minimum); `G_cfgScanTime` must match |
+| Motion | Position Loop | 2 ms | Synchronized with scan |
+| I/O | Digital Update | 2 ms | Per scan cycle |
+| I/O | Analog Update | 2 ms | Per scan cycle |
 
 ---
 
@@ -116,7 +116,7 @@ Hold Secure ______________________|‾‾‾‾‾‾‾‾‾‾‾‾
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| Sample Rate | 1 kHz | Per scan cycle |
+| Sample Rate | 500 Hz | Per scan cycle |
 | Filter Time Constant | 50 ms | First-order IIR low-pass (`G_cfgAnalogFilterTimeConst`) |
 | Median Filter Size | 3 samples | `G_cfgAnalogMedianSize` (valid: 3 or 5) |
 | Step Response (10%) | 5.3 ms | Time to 10% of final value (τ = 50 ms) |
@@ -127,7 +127,7 @@ Hold Secure ______________________|‾‾‾‾‾‾‾‾‾‾‾‾
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| Update Rate | 1 kHz | Per scan cycle |
+| Update Rate | 500 Hz | Per scan cycle |
 | Output Settling | < 1 ms | DAC settling time |
 | Noise Filter | 10 kHz | Hardware output filter |
 
@@ -139,7 +139,7 @@ Hold Secure ______________________|‾‾‾‾‾‾‾‾‾‾‾‾
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| Following Error Update | 1 ms | Calculated each scan |
+| Following Error Update | 2 ms | Calculated each scan |
 | Position Tolerance | 0.1 mm | "At position" threshold |
 | Position Stable Time | 20 ms | Time in tolerance before "done" |
 
@@ -167,11 +167,18 @@ and expected to be raised once bench testing confirms available torque headroom 
 **upper-bound** times at the conservative starting value — actual moves will be faster once
 `A` is tuned up.
 
+### Position Mode Exit
+
+When `G_diMotionEnable` drops in position mode, the command is ramped to rest under
+`G_cfgPosGateAccelMax` before the axis is handed to `MC_Stop`, so `G_doInMotion` stays
+TRUE for up to `V/A` after the drop (0.6 s at `V` = 3 mm/s, `A` = 5 mm/s²) plus the
+`MC_Stop` settling time.
+
 ### Velocity Mode
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| Velocity Update | 1 ms | Reference applied each scan |
+| Velocity Update | 2 ms | Reference applied each scan |
 | Acceleration Rate | Axis default | From axis configuration |
 | Velocity Threshold | 0.5 mm/s | "Stopped" detection threshold |
 
@@ -179,7 +186,7 @@ and expected to be raised once bench testing confirms available torque headroom 
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| Torque Update | 1 ms | Reference applied each scan |
+| Torque Update | 2 ms | Reference applied each scan |
 | Torque Ramp | Axis default | From axis configuration |
 
 ---
@@ -223,7 +230,7 @@ and expected to be raised once bench testing confirms available torque headroom 
 
 | Fault Type | Detection Time | Description |
 |------------|----------------|-------------|
-| Drive Fault | 1 scan (1 ms) | Direct from drive status (includes encoder alarms A.810/A.CC0/A.830) |
+| Drive Fault | 1 scan (2 ms) | Direct from drive status (includes encoder alarms A.810/A.CC0/A.830) |
 | Limit Switch | 1 scan + 5 ms debounce | Unexpected activation |
 | Position Limit | 1 scan | Software limit exceeded |
 | Piston Exit | 1 scan | Guard condition met |
@@ -250,25 +257,25 @@ Master (1 kHz)     |  |  |  |  |  |  |  |  |  |
 NI DAQ I/O         ________________________________
                    |  |  |  |  |  |  |  |  |  |
 
-MP2600iec (1 ms)   |  |  |  |  |  |  |  |  |  |
-                   v  v  v  v  v  v  v  v  v  v
+MP2600iec (2 ms)   |     |     |     |     |     |
+                   v     v     v     v     v     v
 Internal Scan      ________________________________
 ```
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | Master Sample Rate | 1 kHz | NI DAQ sample rate |
-| Slave Scan Rate | 1 ms | PLC task period |
-| I/O Latency | 1-2 ms | Master command to slave response |
-| Round Trip | 2-4 ms | Command to feedback |
+| Slave Scan Rate | 2 ms | PLC task period |
+| I/O Latency | 2-4 ms | Master command to slave response |
+| Round Trip | 4-8 ms | Command to feedback |
 
 ### Worst-Case Latency
 
 | Scenario | Latency | Components |
 |----------|---------|------------|
-| Best Case | 1 ms | Aligned samples |
-| Typical | 2 ms | 1 scan each direction |
-| Worst Case | 4 ms | Misaligned + processing |
+| Best Case | 2 ms | Aligned samples |
+| Typical | 4 ms | 1 scan each direction |
+| Worst Case | 8 ms | Misaligned + processing |
 
 ---
 
