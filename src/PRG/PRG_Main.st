@@ -94,10 +94,9 @@
        (* Position command gate (ST_POSITION_CTRL / ST_RECOVERY_POSITION)
        rPosTarget          : LREAL            (* Soft-limit-clamped position target from the master, input to fbPosGate
        bPosGateActive      : BOOL             (* Set by a position state body this scan; gates fbPosGate.Enable
-       (* Hold-position ownership restore (zero-distance MC_MoveAbsolute after MC_Stop)
-       bHoldRestoreExecute : BOOL             (* MC_MoveAbsolute.Execute during ST_HOLD_POSITION
-       bHoldRestored       : BOOL             (* Restore move finished; mode transitions may proceed
-       rHoldRestorePos     : LREAL            (* Position latched for the restore move
+       (* Y_DirectControl hand-off to MC_Stop (see Command Arbitration)
+       bKeepDirectControl  : BOOL             (* Keep Y_DirectControl enabled (zero command) until MC_Stop aborts it
+       eKeepDirectMode     : Y_ControlMode    (* ControlMode of the direct-control session being stopped
    ============================================================================ *)
 
 (* ============================================================================
@@ -457,46 +456,25 @@ ELSIF G_sysCurrentState = E_SystemState#ST_HOLD_POSITION THEN
 
         IF bEnterState THEN
             G_sysHalted := FALSE;
-            bHoldRestoreExecute := FALSE;
-            bHoldRestored := FALSE;
         END_IF;
 
         IF NOT G_sysHalted THEN
             IF G_staStop.Done THEN
                 G_sysHalted := TRUE;
             END_IF;
-
-        ELSIF NOT bHoldRestored THEN
-            (* ------------------------------------------------------------
-               Position-mode ownership restore. After Y_DirectControl in
-               VelocityTLMode/TorqueVLMode, MC_Stop halts the axis but does
-               not hand it back to a position-mode owner; a subsequent
-               Y_DirectControl PositionMode enable fails with ErrorID 4370.
-               Any position-mode motion block clears it (MC_MoveAbsolute in
-               ST_GO_HOME was shown to), so issue a zero-distance
-               MC_MoveAbsolute to the current position once MC_Stop has fully
-               released the axis. Done always, regardless of previous mode -
-               after position mode it is a harmless no-op.
-               ------------------------------------------------------------ *)
-            IF NOT bHoldRestoreExecute THEN
-                IF NOT G_staStop.Busy THEN
-                    rHoldRestorePos := G_sysActualPosition;
-                    bHoldRestoreExecute := TRUE;
-                END_IF;
-            ELSIF G_staMoveAbsolute.Done OR G_staMoveAbsolute.Error OR
-                  G_staMoveAbsolute.CommandAborted THEN
-                bHoldRestoreExecute := FALSE;
-                bHoldRestored := TRUE;
-            END_IF;
         END_IF;
 
         G_doInMotion := NOT G_sysHalted;
 
-        IF G_sysHalted AND (G_sysRequestedMode = E_OperatingMode#MODE_IDLE) THEN
+        (* Transitions wait for MC_Stop to have aborted Y_DirectControl
+           (bKeepDirectControl cleared in Command Arbitration); otherwise the
+           servo can be left in velocity/torque control - see arbitration. *)
+        IF G_sysHalted AND NOT bKeepDirectControl AND
+           (G_sysRequestedMode = E_OperatingMode#MODE_IDLE) THEN
             (* Master wants IDLE - no handshake required, shut down cleanly *)
             G_sysCurrentState := E_SystemState#ST_BRAKE_ENGAGE;
 
-        ELSIF bHoldRestored AND fbHandshake.HandshakeComplete THEN
+        ELSIF G_sysHalted AND NOT bKeepDirectControl AND fbHandshake.HandshakeComplete THEN
             eTargetMode := G_sysRequestedMode;
             fbIsOperational(Mode := eTargetMode);
 
@@ -843,25 +821,44 @@ ELSIF G_sysCurrentState = E_SystemState#ST_FAULT_IDLE THEN
     END_IF;
 END_IF;
 
-(* State-direct commands for built-in FBs *)
+(* State-direct commands for built-in FBs.
+
+   Y_DirectControl -> MC_Stop hand-off: in VelocityTLMode/TorqueVLMode the
+   SERVOPACK itself is switched to velocity/torque control. It is switched
+   back to position control only when MC_Stop *aborts an active*
+   Y_DirectControl (Yaskawa AN.MPIEC.30 §4.1.3, Fig. 11: Enable held TRUE
+   while MC_Stop executes). Dropping Enable in the same scan MC_Stop starts
+   lets Y_DirectControl release the axis first; MC_Stop then finds nothing to
+   abort, reports Done at once, and the servo stays in velocity/torque
+   control. Symptoms: Y_DirectControl PositionMode -> ErrorID 4370,
+   MC_MoveAbsolute -> drive alarm, Jog -> limit fault, until a cold start.
+   So each direct-control state records its mode in eKeepDirectMode and sets
+   bKeepDirectControl; the stopping states keep Y_DirectControl enabled with
+   a zero command until its Active output drops (aborted) or MC_Stop is Done. *)
 IF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
     G_cmdDirectControl.Enable := TRUE;
     G_cmdDirectControl.ControlMode := Y_ControlMode#PositionMode;
     G_cmdDirectControl.Position := G_sysCommandedPosition;   (* previous scan; overridden by fbPosGate in Route Active FB Command Outputs *)
     G_cmdDirectControl.Velocity := stCurrentLimits.VelMax;
     G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
+    bKeepDirectControl := TRUE;
+    eKeepDirectMode := Y_ControlMode#PositionMode;
 
 ELSIF G_sysCurrentState = E_SystemState#ST_VELOCITY_CTRL THEN
     G_cmdDirectControl.Enable := TRUE;
     G_cmdDirectControl.ControlMode := Y_ControlMode#VelocityTLMode;
     G_cmdDirectControl.Velocity := G_sysCommandedVelocity;
     G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
+    bKeepDirectControl := TRUE;
+    eKeepDirectMode := Y_ControlMode#VelocityTLMode;
 
 ELSIF G_sysCurrentState = E_SystemState#ST_TORQUE_CTRL THEN
     G_cmdDirectControl.Enable := TRUE;
     G_cmdDirectControl.ControlMode := Y_ControlMode#TorqueVLMode;
     G_cmdDirectControl.Velocity := stCurrentLimits.VelMax;
     G_cmdDirectControl.Torque := G_sysCommandedTorque;
+    bKeepDirectControl := TRUE;
+    eKeepDirectMode := Y_ControlMode#TorqueVLMode;
 
 ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
     G_cmdDirectControl.Enable := TRUE;
@@ -869,26 +866,58 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
     G_cmdDirectControl.Position := G_sysCommandedPosition;   (* previous scan; overridden by fbPosGate in Route Active FB Command Outputs *)
     G_cmdDirectControl.Velocity := stCurrentLimits.VelMax;
     G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
+    bKeepDirectControl := TRUE;
+    eKeepDirectMode := Y_ControlMode#PositionMode;
 
 ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_VELOCITY THEN
     G_cmdDirectControl.Enable := TRUE;
     G_cmdDirectControl.ControlMode := Y_ControlMode#VelocityTLMode;
     G_cmdDirectControl.Velocity := G_sysCommandedVelocity;
     G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
+    bKeepDirectControl := TRUE;
+    eKeepDirectMode := Y_ControlMode#VelocityTLMode;
 
-ELSIF G_sysCurrentState = E_SystemState#ST_HOLD_POSITION THEN
-    G_cmdStop.Execute := NOT G_sysHalted;
-    (* Zero-distance restore move; see ST_HOLD_POSITION body *)
-    G_cmdMoveAbsolute.Execute := bHoldRestoreExecute;
-    G_cmdMoveAbsolute.Position := rHoldRestorePos;
-    G_cmdMoveAbsolute.Velocity := G_cfgGoHomeVelocity;
+ELSIF (G_sysCurrentState = E_SystemState#ST_HOLD_POSITION) OR
+      (G_sysCurrentState = E_SystemState#ST_FAULT) OR
+      (G_sysCurrentState = E_SystemState#ST_RECOVERY) THEN
+
+    IF G_sysCurrentState = E_SystemState#ST_HOLD_POSITION THEN
+        G_cmdStop.Execute := NOT G_sysHalted;
+    ELSE
+        G_cmdStop.Execute := NOT G_staStop.Done;
+    END_IF;
+
+    (* Hand-off: hold Y_DirectControl enabled (zero command, last mode) so
+       MC_Stop aborts it and restores servo position control. *)
+    IF bKeepDirectControl THEN
+        (* Release once MC_Stop has taken the axis (Busy) and Y_DirectControl
+           reports aborted (Active low); Done/Error are fallbacks. Requiring
+           Busy guards against an unwired Active reading FALSE forever. *)
+        IF (G_staStop.Busy AND NOT G_staDirectControl.Active) OR
+           G_staStop.Done OR G_staStop.Error OR G_staDirectControl.Error THEN
+            bKeepDirectControl := FALSE;
+        ELSE
+            G_cmdDirectControl.Enable := TRUE;
+            G_cmdDirectControl.ControlMode := eKeepDirectMode;
+            G_cmdDirectControl.Position := G_sysCommandedPosition;
+            G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
+            IF eKeepDirectMode = Y_ControlMode#VelocityTLMode THEN
+                G_cmdDirectControl.Velocity := LREAL#0.0;
+            ELSE
+                G_cmdDirectControl.Velocity := stCurrentLimits.VelMax;
+            END_IF;
+            IF eKeepDirectMode = Y_ControlMode#TorqueVLMode THEN
+                G_cmdDirectControl.Torque := LREAL#0.0;
+            END_IF;
+        END_IF;
+    END_IF;
 
 ELSIF G_sysCurrentState = E_SystemState#ST_DRIVE_RESET THEN
     G_cmdReset.Execute := TRUE;
 
-ELSIF (G_sysCurrentState = E_SystemState#ST_FAULT) OR
-      (G_sysCurrentState = E_SystemState#ST_RECOVERY) THEN
-    G_cmdStop.Execute := NOT G_staStop.Done;
+ELSE
+    (* Any other state: no direct-control session to hand off *)
+    bKeepDirectControl := FALSE;
 
 END_IF;
 
