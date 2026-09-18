@@ -282,7 +282,7 @@ FAULT_PERSISTENT:
 | Velocity | -10V..+10V = -100..+100 mm/s | `voltage = velocity / 10` |
 | Torque | -10V..+10V = -100%..+100% | `voltage = torque_percent / 10` |
 
-**Note**: Position command uses the same two-stage mapping as position feedback — sending the voltage that corresponds to a given position in feedback will command that same position. See [AnalogScalingReference](../reference/AnalogScalingReference.md) for the full formulas and derivation.
+**Note**: Position command uses the same two-stage mapping as position feedback — sending the voltage that corresponds to a given position in feedback will command that same position. See [AnalogScalingReference](../slave/reference/AnalogScalingReference.md) for the full formulas and derivation.
 
 ### Analog Input (Slave to Master): Position Feedback
 

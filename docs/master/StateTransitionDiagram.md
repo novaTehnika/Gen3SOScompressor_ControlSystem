@@ -102,7 +102,7 @@
 
 ## 3. Homing State Sequences
 
-> **Note on FB-to-motion-FB references.** The `MC_MoveVelocity`, `MC_Stop`, `Y_DirectControl`, and `MC_MoveAbsolute` labels in the diagrams below are shorthand. The actual control flow is: the custom homing FB writes to its `CmdXxx` `VAR_OUTPUT`, `PRG_Main` copies that into the `G_cmd*` global, and the Ladder Diagram POU's built-in FB acts on it. Status returns via the paired `G_sta*` global into the FB's `StaXxx` `VAR_INPUT`. See the [System Architecture](../development/SystemArchitecture.md) document for the full wiring.
+> **Note on FB-to-motion-FB references.** The `MC_MoveVelocity`, `MC_Stop`, `Y_DirectControl`, and `MC_MoveAbsolute` labels in the diagrams below are shorthand. The actual control flow is: the custom homing FB writes to its `CmdXxx` `VAR_OUTPUT`, `PRG_Main` copies that into the `G_cmd*` global, and the Ladder Diagram POU's built-in FB acts on it. Status returns via the paired `G_sta*` global into the FB's `StaXxx` `VAR_INPUT`. See the [System Architecture](../slave/development/SystemArchitecture.md) document for the full wiring.
 
 ### Mode 110: Home to Limit Switch
 

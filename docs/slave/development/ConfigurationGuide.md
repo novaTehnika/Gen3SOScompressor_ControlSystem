@@ -7,7 +7,7 @@
 
 ## 1. Introduction
 
-This document provides a detailed reference for all configurable parameters documented in `src/GVL/GlobalVariables_Reference.st` and defined in the MWiec GUI. These variables allow the system's behavior to be tuned and adapted without changing the core application logic.
+This document provides a detailed reference for all configurable parameters documented in `slave-src/GVL/GlobalVariables_Reference.st` and defined in the MWiec GUI. These variables allow the system's behavior to be tuned and adapted without changing the core application logic.
 
 **Warning:** Modifying these parameters can have a significant impact on machine performance and safety. Changes should be made carefully and tested thoroughly.
 
@@ -119,7 +119,7 @@ These parameters define the behavior of the three homing modes.
 
 ## 7. Analog I/O Scaling
 
-These parameters define how analog voltages are mapped to physical units. For more details, see the [IOReference](./master/IOReference.md).
+These parameters define how analog voltages are mapped to physical units. For more details, see the [IOReference](../../master/IOReference.md).
 
 | Parameter | Default Value | Units | Description |
 |---|---|---|---|

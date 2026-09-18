@@ -9,7 +9,7 @@
 
 This guide is intended for developers who need to understand, maintain, or extend the Structured Text (ST) source code for the MP2600iec servo controller (the "slave"). It assumes a basic understanding of IEC 61131-3 programming languages and PLC concepts.
 
-For information regarding the master controller interface, see the [Master Protocol Guide](./master/MasterProtocolGuide.md).
+For information regarding the master controller interface, see the [Master Protocol Guide](../../master/MasterProtocolGuide.md).
 
 ---
 
@@ -19,10 +19,10 @@ The MotionWorks IEC project is organized into several key folders, following sta
 
 | Folder | Name | Purpose |
 |--------|------|---------|
-| `src/PRG/` | Programs | Contains the main program entry point, `PRG_Main.st` (Structured Text), which houses the core state machine. A separate Ladder Diagram POU owns `G_sysAxis` and every built-in motion FB (`MC_Power`, `MC_Stop`, `MC_Reset`, `MC_MoveAbsolute`, `MC_MoveVelocity`, `MC_SetPosition`, `MC_ReadActual*`, `Y_DirectControl`). |
-| `src/FB/` | Function Blocks | Contains reusable modules of encapsulated logic (e.g., `FB_HandshakeManager`, `FB_HomeEOT`) as well as the enum-conversion helpers (`FB_BitsToMode`, `FB_IsOperationalMode`, etc.). This is where most of the application logic resides. |
-| `src/GVL/` | Global Variable Lists | Contains a single comment-only reference file (`GlobalVariables_Reference.st`). Variables are defined in the MWiec GUI; this file documents their names, types, and defaults. It also documents the `G_cmd*` / `G_sta*` structured globals used to connect ST and LD POUs. |
-| `src/DUT/` | Data Unit Types | Contains all custom data structures (`STRUCT`) and enumerations (`ENUM`) in a single `DataTypes.st` file, including the `ST_Cmd*` / `ST_Sta*` structs that shape the ST↔LD command/status interface. |
+| `slave-src/PRG/` | Programs | Contains the main program entry point, `PRG_Main.st` (Structured Text), which houses the core state machine. A separate Ladder Diagram POU owns `G_sysAxis` and every built-in motion FB (`MC_Power`, `MC_Stop`, `MC_Reset`, `MC_MoveAbsolute`, `MC_MoveVelocity`, `MC_SetPosition`, `MC_ReadActual*`, `Y_DirectControl`). |
+| `slave-src/FB/` | Function Blocks | Contains reusable modules of encapsulated logic (e.g., `FB_HandshakeManager`, `FB_HomeEOT`) as well as the enum-conversion helpers (`FB_BitsToMode`, `FB_IsOperationalMode`, etc.). This is where most of the application logic resides. |
+| `slave-src/GVL/` | Global Variable Lists | Contains a single comment-only reference file (`GlobalVariables_Reference.st`). Variables are defined in the MWiec GUI; this file documents their names, types, and defaults. It also documents the `G_cmd*` / `G_sta*` structured globals used to connect ST and LD POUs. |
+| `slave-src/DUT/` | Data Unit Types | Contains all custom data structures (`STRUCT`) and enumerations (`ENUM`) in a single `DataTypes.st` file, including the `ST_Cmd*` / `ST_Sta*` structs that shape the ST↔LD command/status interface. |
 
 ### ST ↔ LD POU Interface
 
@@ -72,7 +72,7 @@ Global variables defined in a `GVL` use a prefix to indicate their scope.
 | `di` / `do` | I/O | `G_diModeBit0` | A digital input (`di`) or output (`do`). |
 | `ai` / `ao` | I/O | `G_aiReference` | An analog input (`ai`) or output (`ao`). |
 
-> All global variables are documented in `src/GVL/GlobalVariables_Reference.st` and defined in the MWiec GUI.
+> All global variables are documented in `slave-src/GVL/GlobalVariables_Reference.st` and defined in the MWiec GUI.
 
 ### Constant Prefixes
 
@@ -144,16 +144,16 @@ The core logic resides in a state machine within `PRG_Main.st`. Understanding th
 
 Let's say you want to add `MODE_NEW_FEATURE` with a value of `101` (currently unused).
 
-1.  **Define Enum:** In `src/DUT/DataTypes.st`, add the new mode member in the correct ordinal position (the enum uses dense sequential numbering):
+1.  **Define Enum:** In `slave-src/DUT/DataTypes.st`, add the new mode member in the correct ordinal position (the enum uses dense sequential numbering):
     ```structuredtext
     MODE_NEW_FEATURE, (* Binary 101 - new feature mode *)
     ```
 
-2.  **Update Conversions:** Update the mode helpers in `src/FB/` to handle the new mode: `FB_ModeToInt.st` (add an `ELSIF` branch for the new enum → int value) and `FB_BitsToMode.st` (add an `ELSIF` branch for the new int → enum value). `FB_ModeToBits` delegates to `FB_ModeToInt` and needs no direct change.
+2.  **Update Conversions:** Update the mode helpers in `slave-src/FB/` to handle the new mode: `FB_ModeToInt.st` (add an `ELSIF` branch for the new enum → int value) and `FB_BitsToMode.st` (add an `ELSIF` branch for the new int → enum value). `FB_ModeToBits` delegates to `FB_ModeToInt` and needs no direct change.
 
 3.  **Update Master Docs:** In `docs/master/MasterProtocolGuide.md` and `docs/master/IOReference.md`, add the new mode to the mode tables so the master developer knows about it.
 
-4.  **Create a State:** In `src/DUT/DataTypes.st`, add a corresponding state in `E_SystemState`, e.g., `ST_NEW_FEATURE`.
+4.  **Create a State:** In `slave-src/DUT/DataTypes.st`, add a corresponding state in `E_SystemState`, e.g., `ST_NEW_FEATURE`.
 
 5.  **Add State Logic:** In `PRG_Main.st`, add a new `ELSIF` branch in the main state machine for `ST_NEW_FEATURE`. Implement the logic for this state.
     ```structuredtext
@@ -178,13 +178,13 @@ Let's say you want to add `MODE_NEW_FEATURE` with a value of `101` (currently un
 
 Let's say you want to add `FAULT_NEW_CONDITION` with a value of `5` (currently `FAULT_PISTON_EXIT`).
 
-1.  **Define Enum:** In `src/DUT/DataTypes.st`, add the new fault to `E_FaultCode`. Note that ordinal position matters for bit encoding.
+1.  **Define Enum:** In `slave-src/DUT/DataTypes.st`, add the new fault to `E_FaultCode`. Note that ordinal position matters for bit encoding.
 
-2.  **Update Conversions:** Update the fault helpers in `src/FB/` to handle the new fault: `FB_FaultToInt.st` (add an `ELSIF` branch for the new enum → int value) and `FB_BitsToFaultCode.st` (add an `ELSIF` branch for the new int → enum value). `FB_FaultToBits` delegates to `FB_FaultToInt` and needs no direct change.
+2.  **Update Conversions:** Update the fault helpers in `slave-src/FB/` to handle the new fault: `FB_FaultToInt.st` (add an `ELSIF` branch for the new enum → int value) and `FB_BitsToFaultCode.st` (add an `ELSIF` branch for the new int → enum value). `FB_FaultToBits` delegates to `FB_FaultToInt` and needs no direct change.
 
 3.  **Update Master Docs:** Add the new fault to the tables in `docs/master/FaultCodeReference.md` and other relevant guides.
 
-4.  **Add Detection Logic:** In `src/FB/FB_SafetyMonitor.st`, add the logic that detects the new fault condition.
+4.  **Add Detection Logic:** In `slave-src/FB/FB_SafetyMonitor.st`, add the logic that detects the new fault condition.
     ```structuredtext
     (* --------------------------------------------------------------------------
        NEW FAULT MONITORING

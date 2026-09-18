@@ -1,3 +1,7 @@
+# System Overview
+
+## Gen3 SOS Compressor
+
 ## Introduction
 This project aims to develop IEC Structured Text source code for a Yaskawa MP2600iec servo drive controller.
 The application is a third generation, pre-clinical medical device being used to study an intervention for hypoxia in a university research context.
@@ -56,47 +60,5 @@ That E-stop circuit controls the brake and the Safety Torque Off (STO) inputs to
 One of the slave's digital outputs will be wired to an additional relay that provides input to the brake's actuation without affecting the STO.
 (The brake is normally engaged and the circuit provides 24V power to disengage it allow servo motion.)
 
-
-## Functionality
-There are two primary modes of operation required: motion control (position/velocity) and torque control.
-Additional modes include an idle state, a braked holding state, a mode for homing to a limit switch, and a mode for homing to the end-of-travel for the piston in the cylinder.
-
-Three digital inputs to the servo controller from the NI DAQ will be used to set the mode of operation.
-Three bits will be used as such:
-- 000: idle
-- 001: brake holding
-- 010: position control
-- 011: velocity control
-- 100: torque control
-- 101: not used
-- 110: home to limit switch
-- 111: home to end-of-travel
-
-A master-slave handshake will be used to ensure agreement.
-Three digital outputs from the servo controller to the NI DAQ will confirm the mode of operation.
-An digital input to the slave from the master will then allow motion to occur.
-
-The slave will have one digital output dedicated to disengaging the brake, allowing for
-1) verification that the servo drive is working before releasing the brake and
-2) activation of the brake in the brake holding mode.
-
-For motion control the master will provide a -10V to 10V analog reference signal for position/velocity.
-The servo controller will condition and pass the signal to the servo drive.
-
-For the torque control mode, the master will be reading the pressure transducer signal to determine the pressure in the compression chamber and will send a -10V to 10V signal to the slave to as a reference for its torque control.
-The master will determine this reference from a combining feed-forward and feed-back signals.
-The desired compression chamber pressure, the area of the piston, the gearing of the lead screw and gearbox to the servo motor, and a simple model of the friction in the system will be used for calculating a feed-forward term while error between the pressure transducer signal and the desired pressure will be used to provide compensation.
-From the slave's perspective, it receives, conditions, and passes the torque reference to the servo drive.
-
-The servo controller will use its analog output pin to communicate the actuator position to the master in all modes.
-
-The servo controller will also use a digital output to communicate its performance depending on it's control mode.
-For motion and torque control, it will communicate when it is limited in its motion due to constraints other than it's control objective (e.g. when torque control, the pin will be active when it's motion is velocity or position limited).
-For the homing modes, the pin will communicate when it has completed it's routine and the master should note the position.
-
-Finally, a digital output pin will be used to communicate when the controller enters an error or fault state.
-
-## Implementation
-The program for the MP2600 iec implements a state machine for the basic modes of operation given in the section Functionality, error or fault states, and transition states.
-The state machine lives in `PRG_Main` (Structured Text). Built-in motion function blocks (`MC_Power`, `MC_Stop`, `MC_Reset`, `MC_MoveAbsolute`, `MC_MoveVelocity`, `MC_ReadActual*`, `Y_DirectControl`, and `AbsolutePositionManager`) are instantiated in a Ladder Diagram POU and exchange data with `PRG_Main` through structured globals (`G_cmd*` for commands, `G_sta*` for status). `Y_DirectControl` is used to communicate reference commands and control modes to the servo drive during the motion/torque operating modes.
-The structure of the code follows best practices for IEC 61131-3 compliant Structured Text, with custom logic encapsulated in function blocks under `src/FB/`.
+For the slave-side software architecture and state machine, see [docs/slave/development/SystemArchitecture.md](./slave/development/SystemArchitecture.md).
+For the master-slave I/O and protocol contract, see [docs/master/MasterProtocolGuide.md](./master/MasterProtocolGuide.md).

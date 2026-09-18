@@ -359,7 +359,7 @@ MASTER:
 
 ## 5. Homing Configuration Parameters
 
-> These parameters are global variables documented in `src/GVL/GlobalVariables_Reference.st` and configured in the MWiec GUI.
+> These parameters are global variables documented in `slave-src/GVL/GlobalVariables_Reference.st` and configured in the MWiec GUI.
 
 ### Mode 110 Parameters
 

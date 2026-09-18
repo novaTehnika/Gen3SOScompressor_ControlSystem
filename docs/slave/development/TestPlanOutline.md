@@ -21,11 +21,11 @@ This plan covers the verification of the Structured Text application running on 
 This plan does **not** cover the testing of the Simulink master controller software, except where its interaction is required to stimulate the slave.
 
 ### 1.3 Reference Documents
--   Overview.md
+-   docs/SystemOverview.md
 -   docs/master/MasterProtocolGuide.md
 -   docs/master/IOReference.md
 -   docs/master/FaultCodeReference.md
--   docs/development/ConfigurationGuide.md
+-   docs/slave/development/ConfigurationGuide.md
 
 ---
 

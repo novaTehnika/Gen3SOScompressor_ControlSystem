@@ -1,7 +1,7 @@
 # Function Block Review Summary
 ## Original Review Date: 2025-12-29
 
-This document summarizes the agent reviews of the function blocks in `src/FB/`.
+This document summarizes the agent reviews of the function blocks in `slave-src/FB/`.
 
 > **Architecture update**
 >
