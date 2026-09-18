@@ -94,6 +94,7 @@
        (* Position command gate (ST_POSITION_CTRL / ST_RECOVERY_POSITION)
        rPosTarget          : LREAL            (* Soft-limit-clamped position target from the master, input to fbPosGate
        bPosGateActive      : BOOL             (* Set by a position state body this scan; gates fbPosGate.Enable
+       bPosStopping        : BOOL             (* Motion enable dropped; braking under the gate before ST_HOLD_POSITION
        (* Y_DirectControl hand-off to MC_Stop (see Command Arbitration)
        bKeepDirectControl  : BOOL             (* Keep Y_DirectControl enabled (zero command) until MC_Stop aborts it
        eKeepDirectMode     : Y_ControlMode    (* ControlMode of the direct-control session being stopped
@@ -325,18 +326,30 @@ ELSIF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
             stCurrentLimits.PosMin := G_cfgPosSoftLimitMin;
             stCurrentLimits.VelMax := G_cfgVelLimitNormal;
             stCurrentLimits.TorqueMax := G_cfgTorqueLimitNormal;
+            bPosStopping := FALSE;
         END_IF;
 
-        (* Raw target only; fbPosGate shapes it into G_sysCommandedPosition *)
-        rPosTarget := fbAnalogProc.ScaledPosition;
-        rPosTarget := LIMIT(stCurrentLimits.PosMin,
-                            rPosTarget,
-                            stCurrentLimits.PosMax);
+        IF fTrigMotionEnable.Q THEN
+            bPosStopping := TRUE;
+        END_IF;
+
+        IF bPosStopping THEN
+            (* Brake under the gate's accel limit before handing off to
+               MC_Stop: pinning the target to the current command makes the
+               distance-to-go zero, so the rate ramps down at AccelMax. *)
+            rPosTarget := fbPosGate.CommandedPosition;
+        ELSE
+            (* Raw target only; fbPosGate shapes it into G_sysCommandedPosition *)
+            rPosTarget := fbAnalogProc.ScaledPosition;
+            rPosTarget := LIMIT(stCurrentLimits.PosMin,
+                                rPosTarget,
+                                stCurrentLimits.PosMax);
+        END_IF;
         bPosGateActive := TRUE;
 
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
-        IF fTrigMotionEnable.Q THEN
+        IF bPosStopping AND (ABS(fbPosGate.CommandedRate) < LREAL#0.001) THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
         END_IF;
 
@@ -658,26 +671,36 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
             stCurrentLimits.PosMin := G_cfgPosSoftLimitMin;
             stCurrentLimits.VelMax := G_cfgVelLimitNormal;
             stCurrentLimits.TorqueMax := G_cfgTorqueLimitNormal;
+            bPosStopping := FALSE;
         END_IF;
 
-        (* Raw target only; fbPosGate shapes it into G_sysCommandedPosition *)
-        rPosTarget := fbAnalogProc.ScaledPosition;
-        rPosTarget := LIMIT(stCurrentLimits.PosMin,
-                            rPosTarget,
-                            stCurrentLimits.PosMax);
-
-        (* Block any target that would drive further toward the active limit *)
-        IF bBlockNeg AND (rPosTarget < G_sysActualPosition) THEN
-            rPosTarget := G_sysActualPosition;
+        IF fTrigMotionEnable.Q THEN
+            bPosStopping := TRUE;
         END_IF;
-        IF bBlockPos AND (rPosTarget > G_sysActualPosition) THEN
-            rPosTarget := G_sysActualPosition;
+
+        IF bPosStopping THEN
+            (* Brake under the gate's accel limit before handing off to MC_Stop *)
+            rPosTarget := fbPosGate.CommandedPosition;
+        ELSE
+            (* Raw target only; fbPosGate shapes it into G_sysCommandedPosition *)
+            rPosTarget := fbAnalogProc.ScaledPosition;
+            rPosTarget := LIMIT(stCurrentLimits.PosMin,
+                                rPosTarget,
+                                stCurrentLimits.PosMax);
+
+            (* Block any target that would drive further toward the active limit *)
+            IF bBlockNeg AND (rPosTarget < G_sysActualPosition) THEN
+                rPosTarget := G_sysActualPosition;
+            END_IF;
+            IF bBlockPos AND (rPosTarget > G_sysActualPosition) THEN
+                rPosTarget := G_sysActualPosition;
+            END_IF;
         END_IF;
         bPosGateActive := TRUE;
 
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
-        IF fTrigMotionEnable.Q THEN
+        IF bPosStopping AND (ABS(fbPosGate.CommandedRate) < LREAL#0.001) THEN
             IF bLimitConditionActive THEN
                 G_sysCurrentState := E_SystemState#ST_RECOVERY;
             ELSE
