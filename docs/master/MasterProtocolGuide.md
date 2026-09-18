@@ -157,7 +157,7 @@ HANDSHAKE_TIMEOUT:
 When changing between operational modes (e.g., Position to Velocity):
 
 1. **Drop G_diMotionEnable LOW** - signals mode change request
-2. **Wait for G_doInMotion = FALSE** - slave performs controlled halt
+2. **Wait for G_doInMotion = FALSE** - slave performs controlled halt (from Position mode the command is first ramped to rest at `G_cfgPosGateAccelMax`, up to 0.6 s at defaults, before the halt)
 3. **Set new mode bits** - while G_diMotionEnable still LOW
 4. **Raise G_diMotionEnable HIGH** - initiates handshake for new mode
 5. **Wait for confirmation** - slave confirms new mode
@@ -301,6 +301,36 @@ ELSE
     position = 200 + (voltage - 5) / 5 * 105  // 200 to 305mm
 END_IF
 ```
+
+### Position Mode: Entry Requirement and Command Shaping
+
+**WARNING**: Before asserting `G_diMotionEnable` for Position mode (010), the master must
+drive its analog position reference (AO, per the two-stage mapping above) to match the
+slave's currently reported actual position (read back via the inverse formulas above). On
+entry to `ST_POSITION_CTRL` the slave seeds its internal command at the actual position and
+then ramps it toward whatever the reference commands, at the configured velocity/acceleration
+limits — it no longer faults on a mismatch at entry, so an unmatched reference will now be
+**executed as a move** rather than rejected.
+
+Recall that the analog position map is **not** centre-zero: 0V corresponds to **133.3mm**
+(-10V -> 0mm, +5V -> 200mm, +10V -> 305mm), which is a position inside the cylinder. A DAC
+resting at 0V with the piston retracted (near 300mm) would therefore command a long
+compression stroke the moment motion is enabled. Match the reference to actual position
+first.
+
+**Setpoint behavior**: Position setpoints (steps in the reference) are executed as
+trapezoidal-velocity moves at the slave's configured limits — velocity `G_cfgVelLimitNormal`
+(3mm/s default) and acceleration `G_cfgPosGateAccelMax` — landing on the setpoint without
+overshoot. If the master instead ramps the reference itself, the slave's command follows with
+a small lag of approximately `v^2 / (2*A)`, where `v` is the reference's rate of change and
+`A` is `G_cfgPosGateAccelMax`.
+
+**Stall behavior**: If the axis cannot follow the reference (e.g., the torque limit is
+reached during compression, or the axis is mechanically blocked), the slave holds its
+internal command no more than `G_cfgPosGateMaxDeviation` (2.0mm default) ahead of the actual
+position rather than faulting. Motion resumes automatically once the axis catches up or the
+reference reverses direction. The master should judge arrival using position feedback (AI),
+not elapsed time.
 
 ---
 

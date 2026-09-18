@@ -152,6 +152,26 @@
 
 
      (* ========================================================================
+        POSITION COMMAND GATE (FB_PositionCommandGate, position modes only)
+        Y_DirectControl adds no profiling in PositionMode, so the gate shapes
+        the master's setpoint into a command the axis can follow: rate limited
+        to stCurrentLimits.VelMax, accel limited to G_cfgPosGateAccelMax, and
+        tethered to within G_cfgPosGateMaxDeviation of actual position.
+        ======================================================================== *)
+
+     G_cfgScanTime             : LREAL := 0.002       (* Task period (s). dt for the gate and the analog filter alpha.
+                                                          Must match the cyclic task interval in the MWiec task
+                                                          configuration (2 ms is the MP2600iec lower bound). *)
+     G_cfgPosGateAccelMax      : LREAL := 5.0         (* Command accel limit (mm/s^2). Conservative start - raise on the
+                                                          bench. A master ramp at v is followed with lag v^2/(2A):
+                                                          0.9 mm at 3 mm/s with A=5, 0.09 mm with A=50. *)
+     G_cfgPosGateMaxDeviation  : LREAL := 2.0         (* Tether window (mm). Command never leads actual by more than this
+                                                          (stall / torque limit). Must be well below drive Pn520
+                                                          (excessive deviation) and well above normal following error
+                                                          (~VelMax/Kp). <= 0 disables the tether. *)
+
+
+     (* ========================================================================
         TORQUE LIMITS (% of rated torque)
         100 = 100% rated, up to 800% peak
         ======================================================================== *)

@@ -50,6 +50,7 @@
        fbPistonExitGuard   : FB_PistonExitGuard
        fbGoHome            : FB_GoHome
        fbHomeLimit         : FB_HomeLimit
+       fbPosGate           : FB_PositionCommandGate
        (* Enum-helper FBs (replacing FN_* with user-enum signatures — MWIEC bug)
        fbIsOperational     : FB_IsOperationalMode
        fbIsHoming          : FB_IsHomingMode
@@ -90,6 +91,13 @@
        bBlockPos           : BOOL             (* Positive travel blocked by pos switch or above SoftLimitMax
        bLimitConditionActive : BOOL           (* Either direction blocked - a limit is currently active
        bRecoveryPending    : BOOL             (* Latched at ST_FAULT_IDLE reset; routes activation to ST_RECOVERY at brake release
+       (* Position command gate (ST_POSITION_CTRL / ST_RECOVERY_POSITION)
+       rPosTarget          : LREAL            (* Soft-limit-clamped position target from the master, input to fbPosGate
+       bPosGateActive      : BOOL             (* Set by a position state body this scan; gates fbPosGate.Enable
+       bPosStopping        : BOOL             (* Motion enable dropped; braking under the gate before ST_HOLD_POSITION
+       (* Y_DirectControl hand-off to MC_Stop (see Command Arbitration)
+       bKeepDirectControl  : BOOL             (* Keep Y_DirectControl enabled (zero command) until MC_Stop aborts it
+       eKeepDirectMode     : Y_ControlMode    (* ControlMode of the direct-control session being stopped
    ============================================================================ *)
 
 (* ============================================================================
@@ -115,7 +123,7 @@ IF bFirstScan THEN
     bRecoveryPending := FALSE;
 
     IF G_cfgAnalogFilterTimeConst > T#0MS THEN
-        rAnalogFilterAlpha := LREAL#0.001 / ((DINT_TO_LREAL(TIME_TO_DINT(G_cfgAnalogFilterTimeConst)) / LREAL#1000.0) + LREAL#0.001);
+        rAnalogFilterAlpha := G_cfgScanTime / ((DINT_TO_LREAL(TIME_TO_DINT(G_cfgAnalogFilterTimeConst)) / LREAL#1000.0) + G_cfgScanTime);
     ELSE
         rAnalogFilterAlpha := LREAL#1.0;
     END_IF;
@@ -164,6 +172,12 @@ bLimitConditionActive := bBlockNeg OR bBlockPos;
    No inline FB calls. Uses G_sta* for built-in FB status and
    previous-scan outputs for user FB status.
    -------------------------------------------------------------------------- *)
+
+(* Cleared every scan; a position state body sets it when it has produced a
+   fresh rPosTarget. On the scan a transition lands in a position state the
+   body has not yet run, so the gate stays disabled and commands actual
+   position for that scan rather than a stale target. *)
+bPosGateActive := FALSE;
 
 bEnterState := (G_sysCurrentState <> G_sysPreviousState);
 IF bEnterState THEN
@@ -312,16 +326,30 @@ ELSIF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
             stCurrentLimits.PosMin := G_cfgPosSoftLimitMin;
             stCurrentLimits.VelMax := G_cfgVelLimitNormal;
             stCurrentLimits.TorqueMax := G_cfgTorqueLimitNormal;
+            bPosStopping := FALSE;
         END_IF;
 
-        G_sysCommandedPosition := fbAnalogProc.ScaledPosition;
-        G_sysCommandedPosition := LIMIT(stCurrentLimits.PosMin,
-                                      G_sysCommandedPosition,
-                                      stCurrentLimits.PosMax);
+        IF fTrigMotionEnable.Q THEN
+            bPosStopping := TRUE;
+        END_IF;
+
+        IF bPosStopping THEN
+            (* Brake under the gate's accel limit before handing off to
+               MC_Stop: pinning the target to the current command makes the
+               distance-to-go zero, so the rate ramps down at AccelMax. *)
+            rPosTarget := fbPosGate.CommandedPosition;
+        ELSE
+            (* Raw target only; fbPosGate shapes it into G_sysCommandedPosition *)
+            rPosTarget := fbAnalogProc.ScaledPosition;
+            rPosTarget := LIMIT(stCurrentLimits.PosMin,
+                                rPosTarget,
+                                stCurrentLimits.PosMax);
+        END_IF;
+        bPosGateActive := TRUE;
 
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
-        IF fTrigMotionEnable.Q THEN
+        IF bPosStopping AND (ABS(fbPosGate.CommandedRate) < LREAL#0.001) THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
         END_IF;
 
@@ -451,11 +479,15 @@ ELSIF G_sysCurrentState = E_SystemState#ST_HOLD_POSITION THEN
 
         G_doInMotion := NOT G_sysHalted;
 
-        IF G_sysHalted AND (G_sysRequestedMode = E_OperatingMode#MODE_IDLE) THEN
+        (* Transitions wait for MC_Stop to have aborted Y_DirectControl
+           (bKeepDirectControl cleared in Command Arbitration); otherwise the
+           servo can be left in velocity/torque control - see arbitration. *)
+        IF G_sysHalted AND NOT bKeepDirectControl AND
+           (G_sysRequestedMode = E_OperatingMode#MODE_IDLE) THEN
             (* Master wants IDLE - no handshake required, shut down cleanly *)
             G_sysCurrentState := E_SystemState#ST_BRAKE_ENGAGE;
 
-        ELSIF fbHandshake.HandshakeComplete THEN
+        ELSIF G_sysHalted AND NOT bKeepDirectControl AND fbHandshake.HandshakeComplete THEN
             eTargetMode := G_sysRequestedMode;
             fbIsOperational(Mode := eTargetMode);
 
@@ -639,24 +671,36 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
             stCurrentLimits.PosMin := G_cfgPosSoftLimitMin;
             stCurrentLimits.VelMax := G_cfgVelLimitNormal;
             stCurrentLimits.TorqueMax := G_cfgTorqueLimitNormal;
+            bPosStopping := FALSE;
         END_IF;
 
-        G_sysCommandedPosition := fbAnalogProc.ScaledPosition;
-        G_sysCommandedPosition := LIMIT(stCurrentLimits.PosMin,
-                                      G_sysCommandedPosition,
-                                      stCurrentLimits.PosMax);
+        IF fTrigMotionEnable.Q THEN
+            bPosStopping := TRUE;
+        END_IF;
 
-        (* Block any target that would drive further toward the active limit *)
-        IF bBlockNeg AND (G_sysCommandedPosition < G_sysActualPosition) THEN
-            G_sysCommandedPosition := G_sysActualPosition;
+        IF bPosStopping THEN
+            (* Brake under the gate's accel limit before handing off to MC_Stop *)
+            rPosTarget := fbPosGate.CommandedPosition;
+        ELSE
+            (* Raw target only; fbPosGate shapes it into G_sysCommandedPosition *)
+            rPosTarget := fbAnalogProc.ScaledPosition;
+            rPosTarget := LIMIT(stCurrentLimits.PosMin,
+                                rPosTarget,
+                                stCurrentLimits.PosMax);
+
+            (* Block any target that would drive further toward the active limit *)
+            IF bBlockNeg AND (rPosTarget < G_sysActualPosition) THEN
+                rPosTarget := G_sysActualPosition;
+            END_IF;
+            IF bBlockPos AND (rPosTarget > G_sysActualPosition) THEN
+                rPosTarget := G_sysActualPosition;
+            END_IF;
         END_IF;
-        IF bBlockPos AND (G_sysCommandedPosition > G_sysActualPosition) THEN
-            G_sysCommandedPosition := G_sysActualPosition;
-        END_IF;
+        bPosGateActive := TRUE;
 
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
-        IF fTrigMotionEnable.Q THEN
+        IF bPosStopping AND (ABS(fbPosGate.CommandedRate) < LREAL#0.001) THEN
             IF bLimitConditionActive THEN
                 G_sysCurrentState := E_SystemState#ST_RECOVERY;
             ELSE
@@ -800,48 +844,101 @@ ELSIF G_sysCurrentState = E_SystemState#ST_FAULT_IDLE THEN
     END_IF;
 END_IF;
 
-(* State-direct commands for built-in FBs *)
+(* State-direct commands for built-in FBs.
+
+   Y_DirectControl -> MC_Stop hand-off: in VelocityTLMode/TorqueVLMode the
+   SERVOPACK itself is switched to velocity/torque control. It is switched
+   back to position control only when MC_Stop aborts an *active*
+   Y_DirectControl (Yaskawa AN.MPIEC.30 §4.1.3: Enable held TRUE while
+   MC_Stop executes). If Enable drops before MC_Stop takes the axis, no
+   abort occurs and the servo stays in velocity/torque control, and later
+   position-mode blocks are refused. So each direct-control state records
+   its mode in eKeepDirectMode and sets bKeepDirectControl; the stopping
+   states keep Y_DirectControl enabled with a zero command until MC_Stop is
+   Busy and Y_DirectControl.Active drops (Done/Error as fallbacks). *)
 IF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
     G_cmdDirectControl.Enable := TRUE;
     G_cmdDirectControl.ControlMode := Y_ControlMode#PositionMode;
-    G_cmdDirectControl.Position := G_sysCommandedPosition;
+    G_cmdDirectControl.Position := G_sysCommandedPosition;   (* previous scan; overridden by fbPosGate in Route Active FB Command Outputs *)
     G_cmdDirectControl.Velocity := stCurrentLimits.VelMax;
     G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
+    bKeepDirectControl := TRUE;
+    eKeepDirectMode := Y_ControlMode#PositionMode;
 
 ELSIF G_sysCurrentState = E_SystemState#ST_VELOCITY_CTRL THEN
     G_cmdDirectControl.Enable := TRUE;
     G_cmdDirectControl.ControlMode := Y_ControlMode#VelocityTLMode;
     G_cmdDirectControl.Velocity := G_sysCommandedVelocity;
     G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
+    bKeepDirectControl := TRUE;
+    eKeepDirectMode := Y_ControlMode#VelocityTLMode;
 
 ELSIF G_sysCurrentState = E_SystemState#ST_TORQUE_CTRL THEN
     G_cmdDirectControl.Enable := TRUE;
     G_cmdDirectControl.ControlMode := Y_ControlMode#TorqueVLMode;
     G_cmdDirectControl.Velocity := stCurrentLimits.VelMax;
     G_cmdDirectControl.Torque := G_sysCommandedTorque;
+    bKeepDirectControl := TRUE;
+    eKeepDirectMode := Y_ControlMode#TorqueVLMode;
 
 ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
     G_cmdDirectControl.Enable := TRUE;
     G_cmdDirectControl.ControlMode := Y_ControlMode#PositionMode;
-    G_cmdDirectControl.Position := G_sysCommandedPosition;
+    G_cmdDirectControl.Position := G_sysCommandedPosition;   (* previous scan; overridden by fbPosGate in Route Active FB Command Outputs *)
     G_cmdDirectControl.Velocity := stCurrentLimits.VelMax;
     G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
+    bKeepDirectControl := TRUE;
+    eKeepDirectMode := Y_ControlMode#PositionMode;
 
 ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_VELOCITY THEN
     G_cmdDirectControl.Enable := TRUE;
     G_cmdDirectControl.ControlMode := Y_ControlMode#VelocityTLMode;
     G_cmdDirectControl.Velocity := G_sysCommandedVelocity;
     G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
+    bKeepDirectControl := TRUE;
+    eKeepDirectMode := Y_ControlMode#VelocityTLMode;
 
-ELSIF G_sysCurrentState = E_SystemState#ST_HOLD_POSITION THEN
-    G_cmdStop.Execute := NOT G_sysHalted;
+ELSIF (G_sysCurrentState = E_SystemState#ST_HOLD_POSITION) OR
+      (G_sysCurrentState = E_SystemState#ST_FAULT) OR
+      (G_sysCurrentState = E_SystemState#ST_RECOVERY) THEN
+
+    IF G_sysCurrentState = E_SystemState#ST_HOLD_POSITION THEN
+        G_cmdStop.Execute := NOT G_sysHalted;
+    ELSE
+        G_cmdStop.Execute := NOT G_staStop.Done;
+    END_IF;
+
+    (* Hand-off: hold Y_DirectControl enabled (zero command, last mode) so
+       MC_Stop aborts it and restores servo position control. *)
+    IF bKeepDirectControl THEN
+        (* Release once MC_Stop has taken the axis (Busy) and Y_DirectControl
+           reports aborted (Active low); Done/Error are fallbacks. Requiring
+           Busy guards against an unwired Active reading FALSE forever. *)
+        IF (G_staStop.Busy AND NOT G_staDirectControl.Active) OR
+           G_staStop.Done OR G_staStop.Error OR G_staDirectControl.Error THEN
+            bKeepDirectControl := FALSE;
+        ELSE
+            G_cmdDirectControl.Enable := TRUE;
+            G_cmdDirectControl.ControlMode := eKeepDirectMode;
+            G_cmdDirectControl.Position := G_sysCommandedPosition;
+            G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
+            IF eKeepDirectMode = Y_ControlMode#VelocityTLMode THEN
+                G_cmdDirectControl.Velocity := LREAL#0.0;
+            ELSE
+                G_cmdDirectControl.Velocity := stCurrentLimits.VelMax;
+            END_IF;
+            IF eKeepDirectMode = Y_ControlMode#TorqueVLMode THEN
+                G_cmdDirectControl.Torque := LREAL#0.0;
+            END_IF;
+        END_IF;
+    END_IF;
 
 ELSIF G_sysCurrentState = E_SystemState#ST_DRIVE_RESET THEN
     G_cmdReset.Execute := TRUE;
 
-ELSIF (G_sysCurrentState = E_SystemState#ST_FAULT) OR
-      (G_sysCurrentState = E_SystemState#ST_RECOVERY) THEN
-    G_cmdStop.Execute := NOT G_staStop.Done;
+ELSE
+    (* Any other state: no direct-control session to hand off *)
+    bKeepDirectControl := FALSE;
 
 END_IF;
 
@@ -1013,6 +1110,21 @@ fbPosOutput(
     Stage2VoltMax := G_cfgPosMapStage2VoltMax
 );
 
+(* Position command gate - shapes rPosTarget into the Y_DirectControl command.
+   Enable is bPosGateActive (set only by a position state body that ran this
+   scan), not the state itself, so the transition scan commands actual position.
+   While disabled it seeds from actual, so every entry is bumpless. *)
+fbPosGate(
+    Enable := bPosGateActive,
+    Reset := bEnterState AND bPosGateActive,
+    Target := rPosTarget,
+    ActualPosition := G_sysActualPosition,
+    VelMax := stCurrentLimits.VelMax,
+    AccelMax := G_cfgPosGateAccelMax,
+    MaxDeviation := G_cfgPosGateMaxDeviation,
+    CycleTime := G_cfgScanTime
+);
+
 
 (* --------------------------------------------------------------------------
    Route Active FB Command Outputs -> G_cmd*
@@ -1028,6 +1140,12 @@ ELSIF G_sysCurrentState = E_SystemState#ST_HOME_LIMIT THEN
     G_cmdJog := fbHomeLimit.CmdJog;
     G_cmdMoveAbsolute := fbHomeLimit.CmdMoveAbsolute;
     G_cmdSetPosition := fbHomeLimit.CmdSetPosition;
+
+ELSIF (G_sysCurrentState = E_SystemState#ST_POSITION_CTRL) OR
+      (G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION) THEN
+    (* Gated command (= actual position on the transition scan) *)
+    G_sysCommandedPosition := fbPosGate.CommandedPosition;
+    G_cmdDirectControl.Position := fbPosGate.CommandedPosition;
 
 END_IF;
 

@@ -18,7 +18,7 @@ The application spans two POUs: `PRG_Main` (Structured Text) contains the state 
 - **`G_cmd*`** — written by `PRG_Main`, read by the LD POU. Each struct mirrors the pin names of its target built-in FB (`G_cmdPower`, `G_cmdStop`, `G_cmdReset`, `G_cmdMoveAbsolute`, `G_cmdMoveVelocity`, `G_cmdDirectControl`, `G_cmdSetPosition`).
 - **`G_sta*`** — written by the LD POU, read by `PRG_Main` and by custom FBs that need built-in FB status (`G_staPower`, `G_staStop`, `G_staReset`, `G_staMoveAbsolute`, `G_staMoveVelocity`, `G_staDirectControl`, `G_staSetPosition`).
 
-`PRG_Main` is structured as a series of processing stages that execute on every 1 ms scan cycle.
+`PRG_Main` is structured as a series of processing stages that execute on every 2 ms scan cycle (the cyclic task interval, mirrored by `G_cfgScanTime`).
 
 ```
 +-----------------------------------------------------------------------------+
@@ -94,10 +94,11 @@ This flow describes how a voltage from the master controller becomes motion.
 
 1.  **Analog Input:** The master's analog voltage arrives at `G_aiReference`, typed as `LREAL` volts (`AT %IW0 : LREAL`).
 2.  **Filtering:** `FB_AnalogInputFilter` applies a median filter to reject outliers and a low-pass filter to smooth the signal. The output is `nFilteredAnalog`.
-3.  **Scaling:** `FB_AnalogProcessor` takes `nFilteredAnalog` and, based on the `CurrentMode` being `MODE_POSITION`, scales it using the two-stage mapping parameters into a physical position setpoint in millimeters. The result is stored in `G_sysCommandedPosition`.
-4.  **State Machine Execution:** The `ST_POSITION_CTRL` state is active and passes `G_sysCommandedPosition` through as the commanded value.
-5.  **Safety Check:** The setpoint is clamped to the active software limits (`stCurrentLimits.PosMin`, `stCurrentLimits.PosMax`).
-6.  **Drive Command:** `PRG_Main` writes the clamped setpoint into `G_cmdDirectControl.Position` and enables direct control. The LD POU's `Y_DirectControl` instance reads `G_cmdDirectControl` each scan, commands the Yaskawa drive, and the motor moves.
+3.  **Scaling:** `FB_AnalogProcessor` takes `nFilteredAnalog` and, based on the `CurrentMode` being `MODE_POSITION`, scales it using the two-stage mapping parameters into a physical position setpoint in millimeters.
+4.  **State Machine Execution:** The `ST_POSITION_CTRL` state (and, during fault recovery, `ST_RECOVERY_POSITION`) is active and clamps the scaled setpoint to the active software limits (`stCurrentLimits.PosMin`, `stCurrentLimits.PosMax`), storing the result in a local `rPosTarget`.
+5.  **Command Gate:** `fbPosGate` (`FB_PositionCommandGate`) shapes `rPosTarget` into a per-scan command: it limits command velocity to `stCurrentLimits.VelMax` and acceleration to `G_cfgPosGateAccelMax`, seeds from `G_sysActualPosition` on state entry, and tethers the command to within `G_cfgPosGateMaxDeviation` of actual position so it cannot run away from the real axis if motion stalls. This stage runs in both `ST_POSITION_CTRL` and `ST_RECOVERY_POSITION`; velocity mode and torque mode are unchanged.
+6.  **Route Active FB Command Outputs:** `fbPosGate.CommandedPosition` becomes `G_sysCommandedPosition` and is written into `G_cmdDirectControl.Position`, enabling direct control.
+7.  **Drive Command:** The LD POU's `Y_DirectControl` instance reads `G_cmdDirectControl` each scan, commands the Yaskawa drive, and the motor moves.
 
 ### Scenario 2: Position Feedback Output
 
@@ -122,9 +123,10 @@ The main program orchestrates a number of critical function blocks.
 | `fbHandshake`| `FB_HandshakeManager`| **Mode Synchronization:** Manages the mode entry handshake protocol with the master (confirmation, timeout, verification). |
 | `fbFaultReset`| `FB_FaultResetHandler`| **Fault Reset Validation:** Validates fault reset conditions — FaultReset HIGH, MotionEnable LOW, bits stable, and master fault code acknowledgement matches active fault. |
 | `fbAnalogProc`| `FB_AnalogProcessor`| **Command Scaling:** Translates the filtered analog input voltage into a physical setpoint (position, velocity, or torque). |
+| `fbPosGate` | `FB_PositionCommandGate` | **Command Shaping:** In `ST_POSITION_CTRL` and `ST_RECOVERY_POSITION`, limits the position command's velocity (`stCurrentLimits.VelMax`) and acceleration (`G_cfgPosGateAccelMax`), seeds from `G_sysActualPosition` on state entry, and tethers the command to within `G_cfgPosGateMaxDeviation` of actual position. Velocity and torque modes are unchanged. |
 | `fbReadActual*`| `MC_ReadActual*` | **Feedback:** The primary source of feedback from the drive, providing real-time position, velocity, and torque. |
 | `fbPower` | `MC_Power` | **Drive Control:** Enables and disables power to the servo drive. |
-| `fbStop` | `MC_Stop` | **Safe Stop:** Used to execute a controlled stop when changing modes or entering a fault state. |
+| `fbStop` | `MC_Stop` | **Safe Stop:** Used to execute a controlled stop when changing modes or entering a fault state. `Y_DirectControl` is kept enabled with a zero command until `MC_Stop` has aborted it, which is what returns the SERVOPACK from velocity/torque control to position control (Yaskawa AN.MPIEC.30 §4.1.3). |
 | `fbDirectControl`| `Y_DirectControl`| **Motion Command:** The primary interface for sending real-time position, velocity, or torque commands to the drive during operational states. |
 | `fbHome*` | `FB_HomeLimit`, `FB_HomeEOT` | **Homing Logic:** Encapsulates the complex, multi-step homing sequences. |
 | `fbSafetyMonitor`| `FB_SafetyMonitor` | **System Watchdog:** The central authority for detecting unsafe conditions and triggering a fault. |
