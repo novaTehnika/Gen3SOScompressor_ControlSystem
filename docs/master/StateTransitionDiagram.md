@@ -14,7 +14,7 @@
 +------------------------------------------------------------------+
 |                    INITIALIZATION PHASE                           |
 |  +----------+                                                     |
-|  | ST_INIT  | --> First scan sets both homing flags TRUE and      |
+|  | ST_INIT  | --> First scan sets G_flagHomingRequired TRUE and    |
 |  |          |     transitions directly to ST_IDLE                 |
 |  +----------+                                                     |
 +------------------------|-----------------------------------------+
@@ -29,7 +29,9 @@
             +--------------+--------------+               |
             |                             |               |
      (Homing Modes              (Operational Modes        |
-      101,110,111)               001,010,011,100)         |
+      101,110)                   001,010,011,100)         |
+      [Mode 111 is reserved -                              |
+       no handler, no action]                              |
             |                             |               |
             |              Check homing requirements      |
             |                     /     \                 |
@@ -55,12 +57,12 @@
               | _RELEASE       |
               +----------------+
                        |
-         +------+------+------+------+------+------+------+
-         |      |      |      |      |      |      |      |
-         v      v      v      v      v      v      v      v
-       001    010    011    100    101    110    111
-       BRAKE  POS    VEL    TRQ    GO     HOME   HOME
-       HOLD   CTRL   CTRL   CTRL   HOME   LIMIT  EOT
+         +------+------+------+------+------+------+
+         |      |      |      |      |      |      |
+         v      v      v      v      v      v
+       001    010    011    100    101    110
+       BRAKE  POS    VEL    TRQ    GO     HOME
+       HOLD   CTRL   CTRL   CTRL   HOME   LIMIT
 ```
 
 ---
@@ -102,7 +104,7 @@
 
 ## 3. Homing State Sequences
 
-> **Note on FB-to-motion-FB references.** The `MC_MoveVelocity`, `MC_Stop`, `Y_DirectControl`, and `MC_MoveAbsolute` labels in the diagrams below are shorthand. The actual control flow is: the custom homing FB writes to its `CmdXxx` `VAR_OUTPUT`, `PRG_Main` copies that into the `G_cmd*` global, and the Ladder Diagram POU's built-in FB acts on it. Status returns via the paired `G_sta*` global into the FB's `StaXxx` `VAR_INPUT`. See the [System Architecture](../slave/development/SystemArchitecture.md) document for the full wiring.
+> **Note on FB-to-motion-FB references.** The `Jog` and `MC_MoveAbsolute` labels in the diagrams below are shorthand. The actual control flow is: the custom homing FB writes to its `CmdXxx` `VAR_OUTPUT`, `PRG_Main` copies that into the `G_cmd*` global, and the Ladder Diagram POU's built-in FB acts on it. Status returns via the paired `G_sta*` global into the FB's `StaXxx` `VAR_INPUT`. See the [System Architecture](../slave/development/SystemArchitecture.md) document for the full wiring.
 
 ### Mode 110: Home to Limit Switch
 
@@ -115,79 +117,69 @@
   [FB_HomeLimit internal steps]
         |
 +-------------------+
-| HL_APPROACH       |  MC_MoveVelocity (negative direction)
-|                   |  Moving toward home limit switch
+| FAST_APPROACH      |  Jog Reverse @ FastApproachVelocity
+|                   |  Moving toward negative overtravel / home switch
 +-------+-----------+
         |
-        | (LimitHomeActive = TRUE)
+        | (OvertravelNegActive = TRUE)
         v
 +-------------------+
-| HL_DETECT         |  MC_Stop
-|                   |  Confirm switch triggered
+| FAST_AWAIT         |  Wait for Jog to decelerate to a stop
 +-------+-----------+
         |
         v
 +-------------------+
-| HL_BACKOFF        |  MC_MoveVelocity (positive, slow)
-|                   |  Back away from switch
+| INTER_BACKOFF      |  Jog Forward @ BackoffVelocity
+|                   |  Off the switch, just far enough to clear it
 +-------+-----------+
         |
-        | (LimitHomeActive = FALSE)
+        | (OvertravelNegActive = FALSE)
         v
 +-------------------+
-| HL_SETREF         |  CmdSetPosition.Execute -> G_cmdSetPosition
-|                   |  -> MC_SetPosition (LD POU)
-+-------+-----------+  PRG_Main clears G_flagAbsHomeRequired
-                        after StaSetPosition.Done
+| INTER_AWAIT        |  Wait for Jog to decelerate to a stop
++-------+-----------+
+        |
+        v
++-------------------+
+| SLOW_APPROACH      |  Jog Reverse @ SlowApproachVelocity
+|                   |  Precise re-detect; captures switch position
++-------+-----------+
+        |
+        | (OvertravelNegActive = TRUE)
+        v
++-------------------+
+| SLOW_AWAIT         |  Wait for Jog to decelerate to a stop
++-------+-----------+
+        |
+        v
++-------------------+
+| RETRACT            |  MC_MoveAbsolute(switch position + RetractDist)
+|                   |  Backs off the switch by exactly RetractDist
++-------+-----------+
+        |
+        v
++-------------------+
+| RETRACT_AWAIT      |  Wait for MC_MoveAbsolute.Done
++-------+-----------+
+        |
+        v
++-------------------+
+| SETREF             |  CmdSetPosition.Execute -> G_cmdSetPosition
+|                   |  -> MC_SetPosition (LD POU); retract endpoint
++-------+-----------+  becomes the new coordinate-frame zero
         |
         v
 +---------------+
-| ST_HOME       |  Wait for mode change
-| _COMPLETE     |
+| ST_HOME       |  PRG_Main clears G_flagHomingRequired here;
+| _COMPLETE     |  wait for mode change
 +---------------+
 ```
 
-### Mode 111: Home to End-of-Travel
+### Mode 111: Reserved
 
-```
-+---------------+
-| ST_HOME_EOT   |  Entry point from mode command
-+-------+-------+  (FB_HomeEOT executes internally)
-        |
-        v
-  [FB_HomeEOT internal steps]
-        |
-+-------------------+
-| HE_FAST_APPROACH  |  MC_MoveVelocity (positive, fast)
-|                   |  Fast jog toward EOT region
-+-------+-----------+
-        |
-        | (Near expected EOT region)
-        v
-+-------------------+
-| HE_SLOW_APPROACH  |  Y_DirectControl (velocity + torque limit)
-|                   |  Slow approach with torque limiting
-+-------+-----------+
-        |
-        | (Stall detected: vel < 0.5mm/s AND torque >= 90%)
-        v
-+-------------------+
-| HE_STALL_DETECT   |  Confirm stall for 200ms
-|                   |  Validate mechanical stop reached
-+-------+-----------+
-        |
-        v
-+-------------------+
-| HE_SETREF         |  Calculate EOTOffset
-|                   |  EOTOffset := Expected - Actual
-+-------+-----------+  (PRG_Main clears G_flagEOTHomeRequired)
-        |
-        v
-+---------------+
-| ST_HOME       |  Wait for mode change
-| _COMPLETE     |
-+---------------+
-```
+Mode 111 has no state handler. It is neither an operational nor a homing
+mode, so the slave confirms the handshake but stays in its current state and
+raises no fault. The master must not command it.
 
 ### Mode 101: Go Home
 
@@ -196,7 +188,7 @@
 | ST_GO_HOME    |  Entry point from mode command
 +-------+-------+
         |
-        | Check G_flagAbsHomeRequired
+        | Check G_flagHomingRequired
         |
    +----+----+
    |         |
@@ -304,14 +296,14 @@ the master-side procedure.
 | 100 (Torque) | Homing met | DRIVE_ENABLE → BRAKE_RELEASE → TORQUE_CTRL |
 | 101 (Go Home) | Always allowed | DRIVE_ENABLE → BRAKE_RELEASE → GO_HOME |
 | 110 (Home Limit) | Always allowed | DRIVE_ENABLE → BRAKE_RELEASE → HOME_LIMIT |
-| 111 (Home EOT) | Always allowed | DRIVE_ENABLE → BRAKE_RELEASE → HOME_EOT |
+| 111 (Reserved) | Never - no state handler | Handshake confirmed, no state change, no fault |
 
 ### From Operational Modes
 
 | From | To | Condition | Path |
 |------|----|-----------| -----|
 | Any Operational | Different Mode | G_diMotionEnable LOW→HIGH | HOLD_POSITION → DRIVE_ENABLE → New Mode |
-| Any Operational | IDLE (000) | G_diMotionEnable LOW | HOLD_POSITION → timeout → FAULT |
+| Any Operational | IDLE (000) | G_diMotionEnable LOW (mode bits 000), or the hold-position watchdog times out | HOLD_POSITION → BRAKE_ENGAGE → DRIVE_DISABLE → IDLE (graceful, no fault) |
 | Any Operational | FAULT | Fault detected | Direct transition |
 
 ### Homing Mode Exits
@@ -340,7 +332,6 @@ ST_VELOCITY_CTRL           Mode 011: Velocity control
 ST_TORQUE_CTRL             Mode 100: Torque control
 ST_GO_HOME                 Mode 101: Go home sequence
 ST_HOME_LIMIT              Mode 110: Homing (FB_HomeLimit)
-ST_HOME_EOT                Mode 111: Homing (FB_HomeEOT)
 ST_HOME_COMPLETE           Homing done
 ST_HOLD_POSITION           Controlled stop, await mode
 ST_BRAKE_ENGAGE            Engaging brake
@@ -374,13 +365,15 @@ MASTER STATES
 |       | (Mode request)                                   |
 |       v        |                                         |
 |  +----------+  |                                         |
-|  | REQUEST  |  |  Set mode bits, raise G_diMotionEnable    |
-|  | _MODE    |  |  Start handshake timer                  |
+|  | REQUEST  |  |  Set mode bits (G_diMotionEnable stays   |
+|  | _MODE    |  |  LOW); start handshake timer             |
 |  +----+-----+  |                                         |
 |       |        |                                         |
 |   +---+---+    |                                         |
 |   |       |    |                                         |
-| (Match) (Timeout)                                        |
+| (Match:  (Timeout)                                       |
+|  raise                                                    |
+|  G_diMotionEnable)                                        |
 |   |       |    |                                         |
 |   v       v    |                                         |
 |  +------+ +----+---+                                     |
@@ -420,7 +413,7 @@ MASTER STATES
 | Mode request → Confirm | < 500 ms | Handshake timeout |
 | G_diMotionEnable LOW → G_doInMotion LOW | Variable | Deceleration time |
 | Fault detect → Fault code stable | < 10 ms | Wait before reading |
-| G_diFaultReset edge → G_doFaultActive LOW | < 1000 ms | Reset timeout |
+| G_diFaultReset asserted → G_doFaultActive LOW | < 1000 ms | Reset timeout (level-based, not edge) |
 | Brake engage → Brake hold | 200 ms | Mechanical delay |
 | Brake release → Motion allowed | 100 ms | Mechanical delay |
 
@@ -429,19 +422,23 @@ MASTER STATES
 ```
 Time ------>
 
-G_diMotionEnable  _____/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\___________
-                     ^                        ^
-                     |                        |
-                  Request                   Stop
-                  mode                      motion
+G_diMotionEnable  __________/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\___________
+                            ^                        ^
+                            |                        |
+                         Confirmed ->              Stop
+                         raised HIGH               motion
 
 Slave State     IDLE | ENABLE | RELEASE | OPERATING | HOLD | ENGAGE | IDLE
                      |<-100ms->|<-100ms->|           |      |<-200ms>|
 
-Mode Confirm    000__|________/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\_____|__000___
-                     ^        ^                             ^
-                     |        |                             |
-                  Request  Confirmed                     Cleared
+Mode Confirm    000_/‾‾‾\_____000________________________|__000___
+                    ^   ^
+                    |   |
+                 Request Confirmed - handshake manager disables as
+                 mode    soon as ST_IDLE is left, so confirm bits
+                 bits    read 000 through OPERATING/HOLD (unless a
+                         fault is active); this is normal, not a
+                         loss of mode
 ```
 
 ---
@@ -461,6 +458,9 @@ Mode Confirm    000__|________/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾�
 ### At ST_HOLD_POSITION
 - Check: New mode handshake started?
 - Check: Handshake timeout → ST_FAULT
+- Check: Mode bits = 000, or hold-position watchdog (`G_cfgHoldPositionTimeout`)
+  expires → graceful shutdown to ST_IDLE via ST_BRAKE_ENGAGE → ST_DRIVE_DISABLE
+  (no fault, no handshake needed)
 
 ### At ST_FAULT
 - Check: Valid reset handshake?

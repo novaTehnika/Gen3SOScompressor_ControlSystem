@@ -33,26 +33,40 @@ This document provides step-by-step guidance for implementing the Simulink Deskt
 
 ### Master Outputs (Slave Digital Inputs)
 
-| NI DAQ Pin | Signal Name | Function |
-|------------|-------------|----------|
-| DO0 | `G_diModeBit0` | Mode command bit 0 (LSB) |
-| DO1 | `G_diModeBit1` | Mode command bit 1 |
-| DO2 | `G_diModeBit2` | Mode command bit 2 (MSB) |
-| DO3 | `G_diMotionEnable` | Motion enable signal |
-| DO6 | `G_diFaultReset` | Fault reset request |
+| Master DAQ Pin | Signal Name | Function |
+|----------------|-------------|----------|
+| P0.5 (pin 51) | `G_diModeBit0` | Mode command bit 0 (LSB) |
+| P0.1 (pin 17) | `G_diModeBit1` | Mode command bit 1 |
+| P0.6 (pin 16) | `G_diModeBit2` | Mode command bit 2 (MSB) |
+| P0.2 (pin 49) | `G_diMotionEnable` | Motion enable signal |
+| P0.7 (pin 48) | `G_diFaultReset` | Fault reset request |
+
+The master DAQ also drives P0.0 (pin 52, safety control relay enable - brake
+disengage / safe-torque-off) and P0.4 (pin 19, stir bar motor); these are not
+part of the slave protocol. P0.3 (pin 47) is unused. See
+[IOReference.md §7](IOReference.md#7-ni-pci-6251-daq-pin-mapping) for the full
+wiring, including analog.
 
 ### Master Inputs (Slave Digital Outputs)
 
-| NI DAQ Pin | Signal Name | Normal Mode | Fault Mode |
-|------------|-------------|-------------|------------|
-| DI0 | `G_doModeConfBit0` | Mode confirm bit 0 | Fault code bit 0 |
-| DI1 | `G_doModeConfBit1` | Mode confirm bit 1 | Fault code bit 1 |
-| DI2 | `G_doModeConfBit2` | Mode confirm bit 2 | Fault code bit 2 |
-| DI3 | `G_doBrakeDisengage` | Brake status (HIGH = released) | - |
-| DI4 | `G_doPerformanceStatus` | Mode-dependent status | - |
-| DI5 | `G_doFaultActive` | LOW (normal) | HIGH (fault) |
-| DI6 | `G_doInMotion` | Axis moving indicator | - |
-| DI7 | `G_doHomingComplete` | Homing complete flag | - |
+| Master DAQ Pin | Signal Name | Normal Mode | Fault Mode |
+|----------------|-------------|-------------|------------|
+| PFI14/P2.6 (pin 1) | `G_doModeConfBit0` | Mode confirm bit 0 | Fault code bit 0 |
+| PFI12/P2.4 (pin 2) | `G_doModeConfBit1` | Mode confirm bit 1 | Fault code bit 1 |
+| PFI9/P2.1 (pin 3) | `G_doModeConfBit2` | Mode confirm bit 2 | Fault code bit 2 |
+| PFI8/P2.0 (pin 37) | `G_doPerformanceStatus` | Mode-dependent status | - |
+| PFI7/P1.7 (pin 38) | `G_doFaultActive` | LOW (normal) | HIGH (fault) |
+| PFI6/P1.6 (pin 5) | `G_doHomingComplete` | Homing complete pulse (ST_HOME_COMPLETE only) | - |
+| PFI15/P2.7 (pin 39) | `G_doInMotion` | Axis moving indicator | - |
+
+**Note**: The slave sinks these lines, so the DAQ reads logic 0 when the
+slave signal is asserted - the master must invert them in software. The
+slave's `G_doBrakeDisengage` output drives the brake circuit directly and is
+**not wired to the master**; the master has no brake status input. DO0-DO2
+read as mode confirmation only while the handshake manager is active
+(ST_IDLE, ST_BRAKE_HOLD, ST_HOLD_POSITION, ST_RECOVERY) - during all other
+(operating/homing) states they read 000 unless a fault is active. Do not
+treat 000 during operation as loss of mode.
 
 ---
 
@@ -69,7 +83,7 @@ This document provides step-by-step guidance for implementing the Simulink Deskt
 | 100 | 4 | Torque Control | Analog input = torque command |
 | 101 | 5 | Go Home | Move to home position |
 | 110 | 6 | Home to Limit | Homing via limit switch |
-| 111 | 7 | Home to EOT | Homing via end-of-travel stall |
+| 111 | 7 | Reserved | Not implemented - confirmed but ignored; do not command |
 
 ---
 
@@ -117,14 +131,14 @@ Master                                          Slave
 ```
 IDLE:
     IF mode_request != current_mode THEN
-        SET G_diMotionEnable = TRUE
-        SET mode_bits = mode_request
+        SET mode_bits = mode_request   // G_diMotionEnable stays LOW
         START handshake_timer
         GOTO WAIT_CONFIRM
     END_IF
 
 WAIT_CONFIRM:
     IF confirm_bits == mode_bits THEN
+        SET G_diMotionEnable = TRUE    // only now, after confirmation
         STOP handshake_timer
         current_mode = mode_request
         GOTO MODE_ACTIVE
@@ -159,8 +173,8 @@ When changing between operational modes (e.g., Position to Velocity):
 1. **Drop G_diMotionEnable LOW** - signals mode change request
 2. **Wait for G_doInMotion = FALSE** - slave performs controlled halt (from Position mode the command is first ramped to rest at `G_cfgPosGateAccelMax`, up to 0.6 s at defaults, before the halt)
 3. **Set new mode bits** - while G_diMotionEnable still LOW
-4. **Raise G_diMotionEnable HIGH** - initiates handshake for new mode
-5. **Wait for confirmation** - slave confirms new mode
+4. **Wait for confirmation** - slave confirms new mode on DO0-DO2 while G_diMotionEnable is still LOW
+5. **Raise G_diMotionEnable HIGH** - only after confirmation, completing the handshake for the new mode
 
 **WARNING**: Do NOT change mode bits while G_diMotionEnable is HIGH. This will cause handshake timeout fault.
 
@@ -170,7 +184,7 @@ When changing between operational modes (e.g., Position to Velocity):
 
 ### Detecting Faults
 
-Monitor `G_doFaultActive` (DI5) continuously:
+Monitor `G_doFaultActive` (slave DO4) continuously:
 - **LOW**: Normal operation
 - **HIGH**: Fault condition active
 
@@ -189,7 +203,7 @@ When `G_doFaultActive == HIGH`, read DO0-DO2 as fault code:
 | 001 | Handshake | Timeout or mismatch | Retry handshake |
 | 010 | Drive | Servo amplifier fault | Check drive, reset |
 | 011 | Position | Software limit exceeded | Command safe position; if still out, jog in via ST_RECOVERY |
-| 100 | Homing Required | Homing not completed | Command Mode 110 or 111 |
+| 100 | Homing Required | Homing not completed | Command Mode 110 (or Mode 101, which auto-redirects) |
 | 101 | Piston Exit | Safety guard triggered | Reduce force, check pressure |
 | 110 | Limit Switch | Unexpected limit activation | Check mechanics; if still on switch, jog off via ST_RECOVERY |
 | 111 | Encoder | Position data invalid | Homing required |
@@ -215,7 +229,7 @@ Master                                          Slave
   |---------------------------------------------->|
   |     (e.g., set DI0=0, DI1=0, DI2=1)           |
   |                                               |
-  |  5. Assert G_diFaultReset = HIGH (rising edge)  |
+  |  5. Hold G_diFaultReset HIGH (level, not edge)  |
   |---------------------------------------------->|
   |                                               |
   |              [Slave validates mirror]         |
@@ -242,7 +256,7 @@ FAULT_DETECTED:
     GOTO ASSERT_RESET
 
 ASSERT_RESET:
-    SET G_diFaultReset = TRUE (rising edge)
+    SET G_diFaultReset = TRUE (level - hold while conditions remain true)
     START reset_timer
     GOTO WAIT_CLEAR
 
@@ -392,25 +406,26 @@ not elapsed time.
 ```
 1. Power on MP2600iec
    - Slave initializes
-   - Slave forces G_flagEOTHomeRequired = TRUE and G_flagAbsHomeRequired = TRUE
-   - Slave enters ST_IDLE (both homing modes are mandatory each boot)
+   - Slave forces G_flagHomingRequired = TRUE
+   - Slave enters ST_IDLE (homing is mandatory every boot)
 
 2. Initialize Simulink model
    - Set all outputs LOW initially
    - mode_bits = 000 (Idle)
    - G_diMotionEnable = FALSE
    - G_diFaultReset = FALSE
+   - Clear the master's own latched `homed_ok` flag
 
 3. Verify communication
    - Read G_doFaultActive (should be LOW)
    - Read confirmation bits (should match 000)
 
-4. Perform homing if required
-   a. If G_doHomingComplete = FALSE or first power-up:
-      - Command Mode 110 (Home to Limit)
-      - Wait for G_doHomingComplete = TRUE
-      - Command Mode 111 (Home to EOT)
-      - Wait for G_doHomingComplete = TRUE
+4. Perform homing (every power-up)
+   a. Command Mode 110 (Home to Limit)
+   b. Wait for G_doHomingComplete = TRUE, then latch `homed_ok = TRUE` in
+      the master - G_doHomingComplete drops LOW again as soon as
+      G_diMotionEnable is released, so it is not a persistent status flag
+      and cannot be polled later to confirm homing already happened
 
 5. Enter operational mode
    - Command desired mode (010, 011, or 100)
@@ -423,12 +438,10 @@ not elapsed time.
 Before commanding operational modes (001-100), verify homing status:
 
 ```
-IF first_power_cycle OR encoder_was_invalid THEN
-    // Must complete both homing sequences
+IF NOT homed_ok THEN   // homed_ok: master-latched, cleared each power-up
     command_mode(110)  // Home to Limit
     WAIT G_doHomingComplete
-    command_mode(111)  // Home to EOT
-    WAIT G_doHomingComplete
+    homed_ok := TRUE
 END_IF
 ```
 
@@ -441,10 +454,10 @@ END_IF
 ### Scenario 1: Normal Position Control
 
 ```
-1. Master: Set mode_bits = 010, G_diMotionEnable = TRUE
-2. Slave: Enables drive, releases brake
-3. Slave: Sets confirm_bits = 010
-4. Master: Handshake complete
+1. Master: Set mode_bits = 010 (G_diMotionEnable stays LOW)
+2. Slave: Sets confirm_bits = 010
+3. Master: Verifies confirm_bits == mode_bits, raises G_diMotionEnable = TRUE
+4. Slave: Handshake complete; enables drive, releases brake, enters ST_POSITION_CTRL
 5. Master: Output position reference on AO
 6. Slave: Follows position, outputs feedback
 7. Master: Read position from AI
@@ -456,10 +469,10 @@ END_IF
 1. Master: Set G_diMotionEnable = FALSE
 2. Slave: Executes MC_Stop, enters ST_HOLD_POSITION
 3. Master: Wait for G_doInMotion = FALSE
-4. Master: Set mode_bits = 011 (Velocity)
-5. Master: Set G_diMotionEnable = TRUE
-6. Slave: Confirms mode_bits = 011
-7. Master: Handshake complete, begin velocity control
+4. Master: Set mode_bits = 011 (Velocity), G_diMotionEnable still LOW
+5. Slave: Confirms mode_bits = 011
+6. Master: Verifies confirmation, raises G_diMotionEnable = TRUE
+7. Slave: Handshake complete, begin velocity control
 ```
 
 ### Scenario 3: Fault Recovery
@@ -471,10 +484,11 @@ END_IF
 4. Master: Reads fault_code = 011
 5. Master: Sets G_diMotionEnable = FALSE
 6. Master: Mirrors code: mode_bits = 011
-7. Master: Pulses G_diFaultReset HIGH
-8. Slave: Validates mirror, clears fault
+7. Master: Holds G_diFaultReset HIGH (level-based, not a pulse)
+8. Slave: Validates mirror, clears fault, enters ST_BRAKE_HOLD (drive stays on)
 9. Slave: Sets G_doFaultActive = LOW
-10. Master: Returns to IDLE state
+10. Master: Select a mode - e.g. mode_bits = 000 to shut down gracefully to
+    IDLE, or resume operation from Brake Hold
 ```
 
 ### Scenario 4: Limit Recovery (switch/soft-limit still active at reset)
@@ -485,15 +499,16 @@ returning to idle/brake-hold. Jog off the limit, then resume normally:
 
 ```
 1. [Limit fault active] Slave: G_doFaultActive = HIGH, fault_code = 110 (or 011)
-2. Master: G_diMotionEnable = FALSE; mirror code to mode_bits; pulse G_diFaultReset
+2. Master: G_diMotionEnable = FALSE; mirror code to mode_bits; hold G_diFaultReset HIGH (level-based)
 3. Slave: clears fault; limit still active -> enters ST_RECOVERY (drive stays on)
           (if it had timed out to ST_FAULT_IDLE, the drive re-enables first)
-4. Master: set mode_bits = 010 (Position) or 011 (Velocity); raise G_diMotionEnable
-5. Master: drive analog reference AWAY from the limit
+4. Master: set mode_bits = 010 (Position) or 011 (Velocity), G_diMotionEnable still LOW
+5. Master: wait for confirm_bits to match, then raise G_diMotionEnable
+6. Master: drive analog reference AWAY from the limit
           - toward-limit commands are clamped to zero (no re-fault); reverse to proceed
-6. [Switch clears AND position inside soft limits]
-7. Master: drop G_diMotionEnable -> slave goes to ST_HOLD_POSITION (normal branch)
-8. Master: select any mode and continue (re-home if position is uncertain)
+7. [Switch clears AND position inside soft limits]
+8. Master: drop G_diMotionEnable -> slave goes to ST_HOLD_POSITION (normal branch)
+9. Master: select any mode and continue (re-home if position is uncertain)
 ```
 
 To abandon recovery without retracting, select Mode 001 (Brake Hold, drive stays on)
@@ -510,7 +525,7 @@ still active. See the [Fault Code Reference](FaultCodeReference.md#limit-recover
 
 **Possible Causes**:
 - Drive not ready (check drive status)
-- Homing requirements not met (check G_doHomingComplete)
+- Homing requirements not met (check the master's latched homed status; `G_doHomingComplete` itself pulses HIGH only while in ST_HOME_COMPLETE)
 - I/O wiring issue
 
 **Resolution**:
@@ -560,7 +575,7 @@ still active. See the [Fault Code Reference](FaultCodeReference.md#limit-recover
 | Torque | 100 | 4 |
 | Go Home | 101 | 5 |
 | Home Limit | 110 | 6 |
-| Home EOT | 111 | 7 |
+| Reserved | 111 | 7 |
 
 ### Fault Codes
 | Fault | Binary | Decimal |
