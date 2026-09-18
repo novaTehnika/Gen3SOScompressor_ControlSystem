@@ -825,16 +825,14 @@ END_IF;
 
    Y_DirectControl -> MC_Stop hand-off: in VelocityTLMode/TorqueVLMode the
    SERVOPACK itself is switched to velocity/torque control. It is switched
-   back to position control only when MC_Stop *aborts an active*
-   Y_DirectControl (Yaskawa AN.MPIEC.30 §4.1.3, Fig. 11: Enable held TRUE
-   while MC_Stop executes). Dropping Enable in the same scan MC_Stop starts
-   lets Y_DirectControl release the axis first; MC_Stop then finds nothing to
-   abort, reports Done at once, and the servo stays in velocity/torque
-   control. Symptoms: Y_DirectControl PositionMode -> ErrorID 4370,
-   MC_MoveAbsolute -> drive alarm, Jog -> limit fault, until a cold start.
-   So each direct-control state records its mode in eKeepDirectMode and sets
-   bKeepDirectControl; the stopping states keep Y_DirectControl enabled with
-   a zero command until its Active output drops (aborted) or MC_Stop is Done. *)
+   back to position control only when MC_Stop aborts an *active*
+   Y_DirectControl (Yaskawa AN.MPIEC.30 §4.1.3: Enable held TRUE while
+   MC_Stop executes). If Enable drops before MC_Stop takes the axis, no
+   abort occurs and the servo stays in velocity/torque control, and later
+   position-mode blocks are refused. So each direct-control state records
+   its mode in eKeepDirectMode and sets bKeepDirectControl; the stopping
+   states keep Y_DirectControl enabled with a zero command until MC_Stop is
+   Busy and Y_DirectControl.Active drops (Done/Error as fallbacks). *)
 IF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
     G_cmdDirectControl.Enable := TRUE;
     G_cmdDirectControl.ControlMode := Y_ControlMode#PositionMode;
