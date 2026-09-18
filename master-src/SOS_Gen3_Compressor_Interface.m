@@ -1,4 +1,4 @@
-classdef SOS_Gen3_Compressor_Interface_exported < matlab.apps.AppBase
+classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
     % Properties that correspond to app components
     properties (Access = public)
@@ -26,6 +26,7 @@ classdef SOS_Gen3_Compressor_Interface_exported < matlab.apps.AppBase
         MixerButton                     matlab.ui.control.StateButton
         JogDownButton                   matlab.ui.control.StateButton
         JogUpButton                     matlab.ui.control.StateButton
+        JogSpeedSpinner                 matlab.ui.control.Spinner
         PositionGoButton                matlab.ui.control.Button
         TargetPositionSpinner           matlab.ui.control.Spinner
         TargetPositionmmSpinnerLabel    matlab.ui.control.Label
@@ -89,59 +90,164 @@ classdef SOS_Gen3_Compressor_Interface_exported < matlab.apps.AppBase
         Simulation simulink.Simulation
     end
 
-    
+
     properties (Access = private)
         modelName
-        statusCode
         updateTimer
-        appRequestedModePath
-        stateDiagramPath
-        targetPositionPath
-        targetVelocityPath
-        jogDirectionPath
-        targetPressurePath
-        mixerPath
-        ESTOPPath
-        homingComplete
+        commandSeq = 0      % mirrors the CommandSeq block; a change marks a new command
+        lastStatusCode = 0
+        resetDialogOpen = false
     end
-    
+
+    properties (Access = private, Constant)
+        % Operations understood by masterStateMachine (RequestedMode block)
+        OP_STOP     = 0
+        OP_HOME     = 1
+        OP_POSITION = 2
+        OP_JOG      = 3
+        OP_PRESSURE = 4
+        OP_RESET    = 5
+
+        faultNames = ["Handshake", "Drive", "Position limit", ...
+            "Homing required", "Piston exit guard", "Limit switch", "Encoder"]
+    end
+
     methods (Access = private)
-        
-        function pollModel(app)
-            %disp("Polling model")
-            rto = get_param(app.stateDiagramPath,"RuntimeObject");
-            if size(rto,1) == 0
-                app.statusCode = 0;
-                %disp(app.statusCode)
-            else  
-                app.statusCode = rto.OutputPort(6).Data;
-                %disp(app.statusCode)
-            end
 
-            updateStatusbar(app);
+        function tf = isRunning(app)
+            tf = app.Simulation.Status == "running";
         end
 
-        function updateStatusbar(app)
-            if app.statusCode == 0
-                app.StatusLabel.Text = "Idle";
-            elseif app.statusCode == 1
-                app.StatusLabel.Text = "Homing";
-            end
+        function p = blockPath(app, name)
+            p = append(app.modelName, "/", name);
         end
-        
-        function salineTabEnableChecks(app)
-            cbStatus1 = app.SalineCheckBox1.Value;
-            cbStatus2 = app.SalineCheckBox1.Value;
-            cbStatus3 = app.SalineCheckBox1.Value;
-            cbStatus4 = app.SalineCheckBox1.Value;
-            cbStatus5 = app.SalineCheckBox1.Value;
 
-            if cbStatus1 && cbStatus2 && cbStatus3 && cbStatus4 &&...
-                    cbStatus5
-                app.SalineButton1.Enable = true;
+        % Write a value to one of the model's Constant blocks
+        function setBlock(app, name, value)
+            set_param(blockPath(app, name), "Value", num2str(double(value)));
+        end
+
+        % Read the output of one of the model's named Gain blocks
+        function value = readBlock(app, name)
+            rto = get_param(blockPath(app, name), "RuntimeObject");
+            if isempty(rto)
+                value = 0;
             else
-                app.SalineButton1.Enable = false;
+                value = rto.OutputPort(1).Data;
             end
+        end
+
+        % Request an operation. RequestedMode is written before CommandSeq
+        % so the model sees the new operation when the counter changes.
+        function sendCommand(app, op)
+            if ~isRunning(app)
+                app.StatusLabel.Text = "Not connected";
+                return
+            end
+            setBlock(app, "RequestedMode", op);
+            app.commandSeq = app.commandSeq + 1;
+            setBlock(app, "CommandSeq", app.commandSeq);
+        end
+
+        function pollModel(app)
+            if ~isvalid(app) || ~isRunning(app)
+                return
+            end
+
+            statusCode = readBlock(app, "StatusCode");
+            app.PositionmmGauge.Value = clampTo(app, readBlock(app, "Position"), ...
+                app.PositionmmGauge.Limits);
+            app.VelocitymmsGauge.Value = clampTo(app, abs(readBlock(app, "Velocity")), ...
+                app.VelocitymmsGauge.Limits);
+            app.PressureatmGauge.Value = clampTo(app, readBlock(app, "Pressure"), ...
+                app.PressureatmGauge.Limits);
+
+            faulted = statusCode > 10 && statusCode < 20;
+            if faulted
+                app.FaultActiveLamp.Color = [1 0 0];
+            else
+                app.FaultActiveLamp.Color = [0.6 0.6 0.6];
+            end
+            if app.MixerButton.Value && ~app.ESTOP.Value
+                app.MixerOnLamp.Color = [0 1 0];
+            else
+                app.MixerOnLamp.Color = [0.6 0.6 0.6];
+            end
+
+            app.StatusLabel.Text = statusText(app, statusCode);
+
+            % Ask the operator before resetting a fault. The dialog opens
+            % when a fault is first latched and again after a failed reset.
+            if faulted && ~app.resetDialogOpen && ...
+                    ~(app.lastStatusCode > 10 && app.lastStatusCode < 20)
+                askFaultReset(app, statusCode - 10);
+            end
+            app.lastStatusCode = statusCode;
+        end
+
+        % Non-blocking, so polling continues while the dialog is open
+        function askFaultReset(app, faultCode)
+            app.resetDialogOpen = true;
+            message = sprintf("Slave fault %d: %s.\n\nCorrect the cause, then reset.", ...
+                faultCode, app.faultNames(faultCode));
+            uiconfirm(app.UIFigure, message, "Fault", ...
+                "Options", ["Reset fault", "Leave faulted"], ...
+                "DefaultOption", 2, "CancelOption", 2, "Icon", "error", ...
+                "CloseFcn", @(~, event) faultDialogClosed(app, event));
+        end
+
+        function faultDialogClosed(app, event)
+            app.resetDialogOpen = false;
+            if event.SelectedOption == "Reset fault"
+                sendCommand(app, app.OP_RESET);
+            end
+        end
+
+        function v = clampTo(~, v, limits)
+            v = min(max(v, limits(1)), limits(2));
+        end
+
+        function text = statusText(app, statusCode)
+            switch statusCode
+                case 0,  text = "Idle";
+                case 1,  text = "Homing";
+                case 2,  text = "Moving to position";
+                case 3,  text = "At position";
+                case 4,  text = "Jogging";
+                case 5,  text = "Pressure control";
+                case 6,  text = "Stopping";
+                case 7,  text = "Starting";
+                case 9,  text = "Resetting fault";
+                case 20, text = "E-STOP";
+                case 30, text = "Slave did not confirm the mode";
+                case 31, text = "Homing required";
+                case 32, text = "Fault reset failed";
+                case 33, text = "Slave did not report stopped";
+                otherwise
+                    if statusCode >= 10 && statusCode < 20
+                        code = statusCode - 10;
+                        if code >= 1
+                            text = append("FAULT: ", app.faultNames(code));
+                        else
+                            text = "FAULT";
+                        end
+                    else
+                        text = append("Status ", num2str(statusCode));
+                    end
+            end
+        end
+
+        function salineTabEnableChecks(app)
+            allChecked = app.SalineCheckBox1.Value && app.SalineCheckBox2.Value && ...
+                app.SalineCheckBox3.Value && app.SalineCheckBox4.Value && ...
+                app.SalineCheckBox5.Value;
+            app.SalineButton1.Enable = allChecked;
+        end
+
+        function startJog(app, direction)
+            setBlock(app, "TargetVelocity", app.JogSpeedSpinner.Value);
+            setBlock(app, "JogDirection", direction);
+            sendCommand(app, app.OP_JOG);
         end
     end
 
@@ -151,14 +257,11 @@ classdef SOS_Gen3_Compressor_Interface_exported < matlab.apps.AppBase
 
         % Code that executes after component creation
         function startupFcn(app)
-            clc
-
             app.modelName = string(app.Simulation.ModelName);
-            app.statusCode = 0;
 
             app.updateTimer = timer( ...
                 ExecutionMode="fixedSpacing", ...
-                Period=1, ...
+                Period=0.2, ...
                 BusyMode="drop", ...
                 TimerFcn=@(~,~) pollModel(app));
             start(app.updateTimer);
@@ -168,36 +271,26 @@ classdef SOS_Gen3_Compressor_Interface_exported < matlab.apps.AppBase
         function ConnectButtonPushed(app, event)
             app.StatusLabel.Text = "Connecting to Simulink...";
             drawnow;
-            
+
             try
-                if app.Simulation.Status == "running"
+                if isRunning(app)
                     app.StatusLabel.Text = "Model is already running";
                 else
                     start(app.Simulation);
-                    if app.Simulation.Status == "running"
-                        app.appRequestedModePath = append(app.modelName,...
-                            "/RequestedMode");
-                        app.stateDiagramPath = append(app.modelName,...
-                            "/StateDiagram");
-                        app.targetPositionPath = append(app.modelName,...
-                            "/TargetPosition");
-                        app.targetVelocityPath = append(app.modelName,...
-                            "/TargetVelocity");
-                        app.jogDirectionPath = append(app.modelName,...
-                            "/JogDirection");
-                        app.targetPressurePath = append(app.modelName,...
-                            "/TargetPressure");
-                        app.mixerPath = append(app.modelName, "/Mixer");
-                        app.ESTOPPath = append(app.modelName, "/ESTOP");
-                        set_param(app.appRequestedModePath, "Value", "0");
+                    if isRunning(app)
+                        app.commandSeq = 0;
+                        setBlock(app, "RequestedMode", app.OP_STOP);
+                        setBlock(app, "CommandSeq", app.commandSeq);
+                        setBlock(app, "ESTOP", app.ESTOP.Value);
+                        setBlock(app, "Mixer", app.MixerButton.Value);
                         app.StatusLabel.Text = "Connected to Simulink";
                     else
                         app.StatusLabel.Text = append(...
-                            "Simulink Status: ",app.Simulation.Status);
+                            "Simulink Status: ", string(app.Simulation.Status));
                     end
                 end
             catch ME
-                app.StatusLabel.Text = "Model unable to start";
+                app.StatusLabel.Text = append("Model unable to start: ", ME.message);
             end
         end
 
@@ -213,12 +306,13 @@ classdef SOS_Gen3_Compressor_Interface_exported < matlab.apps.AppBase
             app.PressureGoButton.Enable = value;
             app.JogDownButton.Enable = value;
             app.JogUpButton.Enable = value;
+            app.JogSpeedSpinner.Enable = value;
             app.MixerButton.Enable = value;
         end
 
         % Button pushed function: HomeButton
         function HomeButtonPushed(app, event)
-            set_param(app.appRequestedModePath, "Value", "1");
+            sendCommand(app, app.OP_HOME);
         end
 
         % Close request function: UIFigure
@@ -227,7 +321,7 @@ classdef SOS_Gen3_Compressor_Interface_exported < matlab.apps.AppBase
                 stop(app.updateTimer);
                 delete(app.updateTimer);
             end
-            
+
             delete(app)
         end
 
@@ -235,70 +329,71 @@ classdef SOS_Gen3_Compressor_Interface_exported < matlab.apps.AppBase
         function StartProcedureButtonPushed(app, event)
             % Disable the parameter fields
             app.ParameterField1.Enable = false;
-            app.ParameterField1Label.enable = false;
+            app.ParameterField1Label.Enable = false;
             app.ParameterField2.Enable = false;
-            app.ParameterField2Label.enable = false;
-            app.ParameterField2.Enable = false;
-            app.ParameterField2Label.enable = false;
+            app.ParameterField3Label_2.Enable = false;
+            app.ParameterField3.Enable = false;
+            app.ParameterField3Label.Enable = false;
 
             % Enable the checkboxes in the saline fill tab
-            app.SalineCheckBox1.enable = true;
-            app.SalineCheckBox2.enable = true;
-            app.SalineCheckBox3.enable = true;
-            app.SalineCheckBox4.enable = true;
-            app.SalineCheckBox5.enable = true;
+            app.SalineCheckBox1.Enable = true;
+            app.SalineCheckBox2.Enable = true;
+            app.SalineCheckBox3.Enable = true;
+            app.SalineCheckBox4.Enable = true;
+            app.SalineCheckBox5.Enable = true;
         end
 
         % Button pushed function: PositionGoButton
         function PositionGoButtonPushed(app, event)
-            set_param(app.targetPositionPath, "Value",...
-                num2str(app.TargetPositionSpinner.Value));
-            set_param(app.appRequestedModePath, "Value", "2");
+            setBlock(app, "TargetPosition", app.TargetPositionSpinner.Value);
+            sendCommand(app, app.OP_POSITION);
         end
 
         % Button pushed function: PressureGoButton
         function PressureGoButtonPushed(app, event)
-            set_param(app.targetPressurePath, "Value",...
-                num2str(app.TargetPressureSpinner.Value));
-            set_param(app.appRequestedModePath, "Value", "4");
+            setBlock(app, "TargetPressure", app.TargetPressureSpinner.Value);
+            sendCommand(app, app.OP_PRESSURE);
         end
 
         % Value changed function: JogDownButton
         function JogDownButtonPushed(app, event)
-            value = app.JogDownButton.Value;
-            if value == true
-                set_param(app.targetVelocityPath, "Value",...
-                    num2str(app.appRequestedModePath));
-                set_param(app.jogDirectionPath, "Value", "-1");
-                set_param(app.appRequestedModePath, "Value", "3");
+            if app.JogDownButton.Value
+                app.JogUpButton.Value = false;
+                startJog(app, -1);
             else
-                set_param(app.appRequestedModePath, "Value", "0");
+                sendCommand(app, app.OP_STOP);
             end
         end
 
         % Value changed function: JogUpButton
         function JogUpButtonPushed(app, event)
-            value = app.JogUpButton.Value;
-            if value == true
-                set_param(app.targetVelocityPath, "Value",...
-                    num2str(app.appRequestedModePath));
-                set_param(app.jogDirectionPath, "Value", "1");
-                set_param(app.appRequestedModePath, "Value", "3");
+            if app.JogUpButton.Value
+                app.JogDownButton.Value = false;
+                startJog(app, 1);
             else
-                set_param(app.appRequestedModePath, "Value", "0");
+                sendCommand(app, app.OP_STOP);
             end
         end
 
         % Value changed function: MixerButton
         function MixerButtonPushed(app, event)
-            value = app.MixerButton.Value;
-            set_param(app.mixerPath, "Value", num2str(double(value)));
+            if isRunning(app)
+                setBlock(app, "Mixer", app.MixerButton.Value);
+            end
         end
 
         % Value changed function: ESTOP
         function ESTOPPushed(app, event)
-            value = app.ESTOP.Value;
-            set_param(app.ESTOPPath, "Value", num2str(double(value)));
+            if isRunning(app)
+                setBlock(app, "ESTOP", app.ESTOP.Value);
+                if app.ESTOP.Value
+                    setBlock(app, "RequestedMode", app.OP_STOP);
+                end
+            end
+            if app.ESTOP.Value
+                app.JogUpButton.Value = false;
+                app.JogDownButton.Value = false;
+            end
         end
     end
 
@@ -628,7 +723,7 @@ classdef SOS_Gen3_Compressor_Interface_exported < matlab.apps.AppBase
             % Create TargetPositionSpinner
             app.TargetPositionSpinner = uispinner(app.ControlsPanel);
             app.TargetPositionSpinner.Step = 5;
-            app.TargetPositionSpinner.Limits = [180 365];
+            app.TargetPositionSpinner.Limits = [180 360];
             app.TargetPositionSpinner.RoundFractionalValues = 'on';
             app.TargetPositionSpinner.Enable = 'off';
             app.TargetPositionSpinner.Position = [539 40 100 22];
@@ -654,6 +749,16 @@ classdef SOS_Gen3_Compressor_Interface_exported < matlab.apps.AppBase
             app.JogDownButton.Enable = 'off';
             app.JogDownButton.Text = 'Jog Down';
             app.JogDownButton.Position = [768 9 100 23];
+
+            % Create JogSpeedSpinner
+            app.JogSpeedSpinner = uispinner(app.ControlsPanel);
+            app.JogSpeedSpinner.Step = 0.1;
+            app.JogSpeedSpinner.Limits = [0.1 3];
+            app.JogSpeedSpinner.ValueDisplayFormat = '%.1f mm/s';
+            app.JogSpeedSpinner.Tooltip = {'Jog speed'};
+            app.JogSpeedSpinner.Enable = 'off';
+            app.JogSpeedSpinner.Position = [879 9 100 22];
+            app.JogSpeedSpinner.Value = 1;
 
             % Create MixerButton
             app.MixerButton = uibutton(app.ControlsPanel, 'state');
@@ -771,10 +876,10 @@ classdef SOS_Gen3_Compressor_Interface_exported < matlab.apps.AppBase
     methods (Access = public)
 
         % Construct app
-        function app = SOS_Gen3_Compressor_Interface_exported
+        function app = SOS_Gen3_Compressor_Interface
 
             % Associate the Simulink Model
-            app.Simulation = simulation('SOS_Gen3_Compressor_Master');
+            app.Simulation = simulation('SOS_Gen3_Master_Shell');
 
             % Create UIFigure and components
             createComponents(app)

@@ -74,20 +74,13 @@ FAULT_HOMING_REQ = 4;
 FAULT_ENCODER    = 7;
 
 if isempty(s) || in.reset ~= 0
-    s.state        = ST_INIT;
-    s.t            = 0;     % time in current state
-    s.tDwell       = 0;     % per-state condition timer
-    s.homed        = 0;
-    s.activeOp     = OP_STOP;
-    s.pendingOp    = OP_STOP;
-    s.lastSeq      = in.cmdSeq;
-    s.note         = STATUS_IDLE;   % sticky status shown while idle
-    s.modeCode     = 0;
-    s.motionEnable = 0;
-    s.faultReset   = 0;
-    s.refVoltage   = 0;
-    s.statusCode   = STATUS_IDLE;
-    s.faultCode    = 0;
+    % t is the time in the current state, tDwell a per-state condition
+    % timer and note a status that stays on display while idle.
+    s = struct('state', ST_INIT, 't', 0, 'tDwell', 0, 'homed', 0, ...
+        'activeOp', OP_STOP, 'pendingOp', OP_STOP, 'lastSeq', in.cmdSeq, ...
+        'note', STATUS_IDLE, 'modeCode', 0, 'motionEnable', 0, ...
+        'faultReset', 0, 'refVoltage', 0, 'statusCode', STATUS_IDLE, ...
+        'faultCode', 0);
 end
 
 newCmd = in.cmdSeq ~= s.lastSeq;

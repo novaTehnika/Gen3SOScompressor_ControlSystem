@@ -1,6 +1,8 @@
 function cfg = masterConfig()
 %MASTERCONFIG Constants for the master state machine and signal scaling.
 
+cfg.dt = 0.003;             % model step (s)
+
 % Analog position map shared by reference (AO) and feedback (AI):
 % two linear segments joined at (posMapVtr, posMapXtr).
 cfg.posMapVmin = -10;       % V
@@ -17,6 +19,15 @@ cfg.velPerVolt = 10;        % mm/s per V
 cfg.pressureOffsetV = 4;        % V
 cfg.pressureGain    = 2.3095;   % MPa per V
 cfg.atmPerMPa       = 9.869;
+
+% Input filtering.
+cfg.posMedianLength      = 5;
+cfg.pressureMedianLength = 7;
+cfg.velFilterTau         = 0.1;     % s, displayed velocity
+
+% Pressure loop: velocity command per unit pressure error.
+cfg.pressureKp = 0.5066;    % mm/s per atm
+cfg.pressureKi = 0;         % mm/s per atm*s
 
 % Master soft limits, inside the slave's configured travel.
 cfg.posMin = 5;             % mm
@@ -35,7 +46,7 @@ cfg.tInit          = 0.1;   % outputs held low after start
 cfg.tConfirmStable = 0.02;  % confirm bits must match this long
 cfg.tHandshake     = 0.5;   % give up waiting for confirmation
 cfg.tEnableMin     = 0.05;  % minimum dwell after raising MotionEnable
-cfg.tEnableMax     = 0.3;   % proceed without BrakeDisengage after this
+cfg.tEnableMax     = 1.0;   % proceed without BrakeDisengage after this (slave reset + power-on + brake release)
 cfg.tStopMin       = 0.1;   % ignore InMotion this long after dropping MotionEnable
 cfg.tStopMax       = 3.0;   % give up waiting for InMotion low
 cfg.tModeClear     = 0.15;  % mode 000 held before a new request (slave debounce + stable time)
