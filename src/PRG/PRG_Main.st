@@ -94,6 +94,10 @@
        (* Position command gate (ST_POSITION_CTRL / ST_RECOVERY_POSITION)
        rPosTarget          : LREAL            (* Soft-limit-clamped position target from the master, input to fbPosGate
        bPosGateActive      : BOOL             (* Set by a position state body this scan; gates fbPosGate.Enable
+       (* Hold-position ownership restore (zero-distance MC_MoveAbsolute after MC_Stop)
+       bHoldRestoreExecute : BOOL             (* MC_MoveAbsolute.Execute during ST_HOLD_POSITION
+       bHoldRestored       : BOOL             (* Restore move finished; mode transitions may proceed
+       rHoldRestorePos     : LREAL            (* Position latched for the restore move
    ============================================================================ *)
 
 (* ============================================================================
@@ -453,11 +457,36 @@ ELSIF G_sysCurrentState = E_SystemState#ST_HOLD_POSITION THEN
 
         IF bEnterState THEN
             G_sysHalted := FALSE;
+            bHoldRestoreExecute := FALSE;
+            bHoldRestored := FALSE;
         END_IF;
 
         IF NOT G_sysHalted THEN
             IF G_staStop.Done THEN
                 G_sysHalted := TRUE;
+            END_IF;
+
+        ELSIF NOT bHoldRestored THEN
+            (* ------------------------------------------------------------
+               Position-mode ownership restore. After Y_DirectControl in
+               VelocityTLMode/TorqueVLMode, MC_Stop halts the axis but does
+               not hand it back to a position-mode owner; a subsequent
+               Y_DirectControl PositionMode enable fails with ErrorID 4370.
+               Any position-mode motion block clears it (MC_MoveAbsolute in
+               ST_GO_HOME was shown to), so issue a zero-distance
+               MC_MoveAbsolute to the current position once MC_Stop has fully
+               released the axis. Done always, regardless of previous mode -
+               after position mode it is a harmless no-op.
+               ------------------------------------------------------------ *)
+            IF NOT bHoldRestoreExecute THEN
+                IF NOT G_staStop.Busy THEN
+                    rHoldRestorePos := G_sysActualPosition;
+                    bHoldRestoreExecute := TRUE;
+                END_IF;
+            ELSIF G_staMoveAbsolute.Done OR G_staMoveAbsolute.Error OR
+                  G_staMoveAbsolute.CommandAborted THEN
+                bHoldRestoreExecute := FALSE;
+                bHoldRestored := TRUE;
             END_IF;
         END_IF;
 
@@ -467,7 +496,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_HOLD_POSITION THEN
             (* Master wants IDLE - no handshake required, shut down cleanly *)
             G_sysCurrentState := E_SystemState#ST_BRAKE_ENGAGE;
 
-        ELSIF fbHandshake.HandshakeComplete THEN
+        ELSIF bHoldRestored AND fbHandshake.HandshakeComplete THEN
             eTargetMode := G_sysRequestedMode;
             fbIsOperational(Mode := eTargetMode);
 
@@ -849,6 +878,10 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_VELOCITY THEN
 
 ELSIF G_sysCurrentState = E_SystemState#ST_HOLD_POSITION THEN
     G_cmdStop.Execute := NOT G_sysHalted;
+    (* Zero-distance restore move; see ST_HOLD_POSITION body *)
+    G_cmdMoveAbsolute.Execute := bHoldRestoreExecute;
+    G_cmdMoveAbsolute.Position := rHoldRestorePos;
+    G_cmdMoveAbsolute.Velocity := G_cfgGoHomeVelocity;
 
 ELSIF G_sysCurrentState = E_SystemState#ST_DRIVE_RESET THEN
     G_cmdReset.Execute := TRUE;
