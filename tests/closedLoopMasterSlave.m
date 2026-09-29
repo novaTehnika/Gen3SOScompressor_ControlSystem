@@ -74,6 +74,20 @@ h = runFor(h, 3);
 assert(h.faultSeen == 0);
 fprintf('ok  jog -> pressure\n');
 
+% Go Home when already homed: arrives, releases, and the next mode is accepted.
+h = command(h, 1);
+h = runUntil(h, 30, @(h) h.out.state == 1 && h.out.statusCode == 0);
+assert(abs(h.sl.ax.x - h.sl.G.G_cfgGoHomePosition) < 0.1, 'Go Home did not arrive');
+h = runFor(h, 2);
+assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE, 'slave did not leave Go Home');
+h.in.targetPosition = 20;
+h = command(h, 2);
+h = runUntil(h, 30, @(h) h.out.statusCode == 3);
+assert(h.out.statusCode == 3, 'position move after Go Home did not reach target');
+h.in.op = 0;
+h = runFor(h, 3);
+fprintf('ok  go home when homed, then position move\n');
+
 % Drive fault during a position move: latched, mirrored, no automatic reset.
 h.in.targetPosition = 60;
 h = command(h, 2);
