@@ -31,6 +31,19 @@ continuously while their operation is active. `ESTOP` and `Mixer` act at once.
 The app reads `StatusCode`, `FaultCode`, `Homed`, `State`, `Position`,
 `Velocity` and `Pressure`. Status codes are listed in `masterStateMachine.m`.
 
+## Operator app buttons
+
+Home, the two Go buttons and Jog Up/Down start their operation and, while it
+runs, stop it again (the model's `RequestedMode = 0`). The app follows the
+operation through `StatusCode`: the button turns amber while the mode is being
+entered and green once its running status appears, and returns to normal when
+that status goes (stopped, finished, faulted, E-STOP or rejected). While
+position or pressure control runs, changing the target turns its button back
+to Go, which sends the new target without leaving the mode; the other jog
+button reverses a running jog. STOP turns dark red while E-STOP is requested
+but not yet reported by the model, and yellow while the model reports
+E-STOP (`StatusCode` 20); pressing it then releases E-STOP.
+
 ## Testing without MATLAB
 
 `tests/run_all.sh` (repository root) needs `python3` and `octave-cli`. It

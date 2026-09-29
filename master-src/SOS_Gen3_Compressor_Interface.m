@@ -97,6 +97,15 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         commandSeq = 0      % mirrors the CommandSeq block; a change marks a new command
         lastStatusCode = 0
         resetDialogOpen = false
+        estopActive = false     % master reports STATUS_ESTOP
+
+        % Operation started from a mode button. It stays active until the
+        % model reports it ended, so its button can stop it.
+        activeOp = 0            % OP_STOP when none
+        activeJogDir = 0
+        activeTarget = NaN      % position or pressure sent with activeOp
+        opConfirmed = false     % the model has reported activeOp running
+        opSentAt = uint64(0)    % tic of the last request
     end
 
     properties (Access = private, Constant)
@@ -107,6 +116,21 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         OP_JOG      = 3
         OP_PRESSURE = 4
         OP_RESET    = 5
+
+        STATUS_STARTING = 7
+        STATUS_STOPPING = 6
+        STATUS_ESTOP    = 20
+
+        % Time the model gets to act on a request before a status that
+        % does not show it running ends it
+        CONFIRM_WAIT = 0.5
+
+        COLOR_IDLE     = [0.96 0.96 0.96]
+        COLOR_STARTING = [1 0.8 0.3]
+        COLOR_ACTIVE   = [0.4 0.8 0.4]
+        COLOR_STOP     = [1 0 0]
+        COLOR_STOP_REQ = [0.55 0 0]
+        COLOR_ESTOP    = [1 0.85 0]
 
         faultNames = ["Handshake", "Drive", "Position limit", ...
             "Homing required", "Piston exit guard", "Limit switch", "Encoder"]
@@ -139,8 +163,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         % Request an operation. RequestedMode is written before CommandSeq
         % so the model sees the new operation when the counter changes.
-        function sendCommand(app, op)
-            if ~isRunning(app)
+        function sent = sendCommand(app, op)
+            sent = isRunning(app);
+            if ~sent
                 app.StatusLabel.Text = "Not connected";
                 return
             end
@@ -149,12 +174,139 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             setBlock(app, "CommandSeq", app.commandSeq);
         end
 
+        % Start a motion operation from its mode button
+        function sent = requestOp(app, op)
+            sent = sendCommand(app, op);
+            if sent
+                if op ~= app.activeOp
+                    app.opConfirmed = false;
+                end
+                app.activeOp = op;
+                app.opSentAt = tic;
+            end
+        end
+
+        % Stop the active operation from its mode button
+        function stopOp(app)
+            sendCommand(app, app.OP_STOP);
+            clearOp(app);
+            updateButtons(app);
+        end
+
+        function clearOp(app)
+            app.activeOp = app.OP_STOP;
+            app.activeJogDir = 0;
+            app.activeTarget = NaN;
+            app.opConfirmed = false;
+        end
+
+        % Status codes that show op running
+        function codes = runningStatus(app, op)
+            switch op
+                case app.OP_HOME,     codes = 1;
+                case app.OP_POSITION, codes = [2 3];
+                case app.OP_JOG,      codes = 4;
+                case app.OP_PRESSURE, codes = 5;
+                otherwise,            codes = [];
+            end
+        end
+
+        % Follow the active operation through the model's status. It is
+        % confirmed once its running status appears and ends when that
+        % status goes. Before confirmation, starting and stopping (a
+        % switch from another operation) are waited out and any other
+        % status ends it once the model has had time to act.
+        function trackOp(app, statusCode)
+            if app.activeOp == app.OP_STOP
+                return
+            end
+            if any(statusCode == runningStatus(app, app.activeOp))
+                app.opConfirmed = true;
+            elseif app.opConfirmed
+                clearOp(app);
+            elseif statusCode ~= app.STATUS_STARTING && ...
+                    statusCode ~= app.STATUS_STOPPING && ...
+                    toc(app.opSentAt) >= app.CONFIRM_WAIT
+                clearOp(app);
+            end
+        end
+
+        % Mode button look: background shows the operation's state (idle,
+        % starting, running), text shows what pressing it does.
+        function setModeButton(app, button, isActive, idleText, activeText)
+            if ~isActive
+                button.BackgroundColor = app.COLOR_IDLE;
+                button.Text = idleText;
+            else
+                if app.opConfirmed
+                    button.BackgroundColor = app.COLOR_ACTIVE;
+                else
+                    button.BackgroundColor = app.COLOR_STARTING;
+                end
+                button.Text = activeText;
+            end
+        end
+
+        function updateButtons(app)
+            op = app.activeOp;
+            setModeButton(app, app.HomeButton, op == app.OP_HOME, ...
+                "Home", "Stop Homing");
+
+            % A changed target makes Go retarget the running operation
+            % instead of stopping it.
+            text = "Stop";
+            if app.TargetPositionSpinner.Value ~= app.activeTarget
+                text = "Go";
+            end
+            setModeButton(app, app.PositionGoButton, op == app.OP_POSITION, ...
+                "Go", text);
+
+            text = "Stop";
+            if app.TargetPressureSpinner.Value ~= app.activeTarget
+                text = "Go";
+            end
+            setModeButton(app, app.PressureGoButton, op == app.OP_PRESSURE, ...
+                "Go", text);
+
+            jogUp = op == app.OP_JOG && app.activeJogDir > 0;
+            jogDown = op == app.OP_JOG && app.activeJogDir < 0;
+            setModeButton(app, app.JogUpButton, jogUp, "Jog Up", "Stop Jog");
+            setModeButton(app, app.JogDownButton, jogDown, "Jog Down", "Stop Jog");
+            app.JogUpButton.Value = jogUp;
+            app.JogDownButton.Value = jogDown;
+
+            % STOP shows the master's E-STOP state, and a request the
+            % master has not yet acted on (or cannot, while disconnected).
+            if app.estopActive
+                app.ESTOP.BackgroundColor = app.COLOR_ESTOP;
+                app.ESTOP.FontColor = app.COLOR_STOP;
+                app.ESTOP.Text = ["E-STOP"; "Release"];
+            elseif app.ESTOP.Value
+                app.ESTOP.BackgroundColor = app.COLOR_STOP_REQ;
+                app.ESTOP.FontColor = [1 1 1];
+                app.ESTOP.Text = ["STOP"; "requested"];
+            else
+                app.ESTOP.BackgroundColor = app.COLOR_STOP;
+                app.ESTOP.FontColor = [1 1 1];
+                app.ESTOP.Text = "STOP";
+            end
+        end
+
         function pollModel(app)
-            if ~isvalid(app) || ~isRunning(app)
+            if ~isvalid(app)
+                return
+            end
+            if ~isRunning(app)
+                app.estopActive = false;
+                clearOp(app);
+                updateButtons(app);
                 return
             end
 
             statusCode = readBlock(app, "StatusCode");
+            app.estopActive = statusCode == app.STATUS_ESTOP;
+            trackOp(app, statusCode);
+            updateButtons(app);
             app.PositionmmGauge.Value = clampTo(app, readBlock(app, "Position"), ...
                 app.PositionmmGauge.Limits);
             app.VelocitymmsGauge.Value = clampTo(app, abs(readBlock(app, "Velocity")), ...
@@ -218,7 +370,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 case 6,  text = "Stopping";
                 case 7,  text = "Starting";
                 case 9,  text = "Resetting fault";
-                case 20, text = "E-STOP";
+                case app.STATUS_ESTOP, text = "E-STOP";
                 case 30, text = "Slave did not confirm the mode";
                 case 31, text = "Homing required";
                 case 32, text = "Fault reset failed";
@@ -244,10 +396,19 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.SalineButton1.Enable = allChecked;
         end
 
-        function startJog(app, direction)
+        % Jog in direction, or stop if already jogging that way. The other
+        % direction reverses a running jog without leaving the mode.
+        function toggleJog(app, direction)
+            if app.activeOp == app.OP_JOG && app.activeJogDir == direction
+                stopOp(app);
+                return
+            end
             setBlock(app, "TargetVelocity", app.JogSpeedSpinner.Value);
             setBlock(app, "JogDirection", direction);
-            sendCommand(app, app.OP_JOG);
+            if requestOp(app, app.OP_JOG)
+                app.activeJogDir = direction;
+            end
+            updateButtons(app);
         end
     end
 
@@ -312,7 +473,12 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         % Button pushed function: HomeButton
         function HomeButtonPushed(app, event)
-            sendCommand(app, app.OP_HOME);
+            if app.activeOp == app.OP_HOME
+                stopOp(app);
+            else
+                requestOp(app, app.OP_HOME);
+                updateButtons(app);
+            end
         end
 
         % Close request function: UIFigure
@@ -345,34 +511,45 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         % Button pushed function: PositionGoButton
         function PositionGoButtonPushed(app, event)
-            setBlock(app, "TargetPosition", app.TargetPositionSpinner.Value);
-            sendCommand(app, app.OP_POSITION);
+            target = app.TargetPositionSpinner.Value;
+            if app.activeOp == app.OP_POSITION && target == app.activeTarget
+                stopOp(app);
+                return
+            end
+            setBlock(app, "TargetPosition", target);
+            if requestOp(app, app.OP_POSITION)
+                app.activeTarget = target;
+            end
+            updateButtons(app);
         end
 
         % Button pushed function: PressureGoButton
         function PressureGoButtonPushed(app, event)
-            setBlock(app, "TargetPressure", app.TargetPressureSpinner.Value);
-            sendCommand(app, app.OP_PRESSURE);
+            target = app.TargetPressureSpinner.Value;
+            if app.activeOp == app.OP_PRESSURE && target == app.activeTarget
+                stopOp(app);
+                return
+            end
+            setBlock(app, "TargetPressure", target);
+            if requestOp(app, app.OP_PRESSURE)
+                app.activeTarget = target;
+            end
+            updateButtons(app);
+        end
+
+        % Value changed function: TargetPositionSpinner, TargetPressureSpinner
+        function TargetSpinnerChanged(app, event)
+            updateButtons(app);
         end
 
         % Value changed function: JogDownButton
         function JogDownButtonPushed(app, event)
-            if app.JogDownButton.Value
-                app.JogUpButton.Value = false;
-                startJog(app, -1);
-            else
-                sendCommand(app, app.OP_STOP);
-            end
+            toggleJog(app, -1);
         end
 
         % Value changed function: JogUpButton
         function JogUpButtonPushed(app, event)
-            if app.JogUpButton.Value
-                app.JogDownButton.Value = false;
-                startJog(app, 1);
-            else
-                sendCommand(app, app.OP_STOP);
-            end
+            toggleJog(app, 1);
         end
 
         % Value changed function: MixerButton
@@ -391,9 +568,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 end
             end
             if app.ESTOP.Value
-                app.JogUpButton.Value = false;
-                app.JogDownButton.Value = false;
+                clearOp(app);
             end
+            updateButtons(app);
         end
     end
 
@@ -722,6 +899,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
             % Create TargetPositionSpinner
             app.TargetPositionSpinner = uispinner(app.ControlsPanel);
+            app.TargetPositionSpinner.ValueChangedFcn = createCallbackFcn(app, @TargetSpinnerChanged, true);
             app.TargetPositionSpinner.Step = 5;
             app.TargetPositionSpinner.Limits = [180 360];
             app.TargetPositionSpinner.RoundFractionalValues = 'on';
@@ -776,6 +954,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
             % Create TargetPressureSpinner
             app.TargetPressureSpinner = uispinner(app.ControlsPanel);
+            app.TargetPressureSpinner.ValueChangedFcn = createCallbackFcn(app, @TargetSpinnerChanged, true);
             app.TargetPressureSpinner.Limits = [1 100];
             app.TargetPressureSpinner.Enable = 'off';
             app.TargetPressureSpinner.Position = [539 13 100 22];
