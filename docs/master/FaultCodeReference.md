@@ -7,7 +7,7 @@
 
 ## 1. Overview
 
-When `G_doFaultActive` (DO5) is HIGH, the slave is in fault state and DO0-DO2 contain the fault code instead of mode confirmation. The master must handle fault conditions by:
+When `G_doFaultActive` (DO4) is HIGH, the slave is in fault state and DO0-DO2 contain the fault code instead of mode confirmation. The master must handle fault conditions by:
 
 1. Reading the fault code
 2. Mirroring the code on DI0-DI2
@@ -94,7 +94,7 @@ When `G_doFaultActive` (DO5) is HIGH, the slave is in fault state and DO0-DO2 co
 2. Check drive status (if accessible)
 3. Set G_diMotionEnable = FALSE
 4. Mirror code: DI0=0, DI1=1, DI2=0
-5. Pulse G_diFaultReset
+5. Hold G_diFaultReset HIGH (level-based, not a pulse)
 6. If persists: may require power cycle
 ```
 
@@ -125,7 +125,7 @@ When `G_doFaultActive` (DO5) is HIGH, the slave is in fault state and DO0-DO2 co
 2. Note current position from AO0
 3. Set G_diMotionEnable = FALSE
 4. Mirror code: DI0=1, DI1=1, DI2=0
-5. Pulse G_diFaultReset
+5. Hold G_diFaultReset HIGH (level-based, not a pulse)
 6. After clear:
    - If position is back inside the soft limits -> ST_BRAKE_HOLD (normal)
    - If still beyond a soft limit -> slave enters ST_RECOVERY; jog back
@@ -141,32 +141,25 @@ When `G_doFaultActive` (DO5) is HIGH, the slave is in fault state and DO0-DO2 co
 **Description**: Operational mode attempted without homing complete.
 
 **Triggered When**:
-- Mode 001-100 commanded when `G_flagAbsHomeRequired = TRUE`
-- Mode 001-100 commanded when `G_flagEOTHomeRequired = TRUE`
-- Both flags are enforced for safety
+- An operational mode (001-100) is commanded while `G_flagHomingRequired = TRUE`
+- `G_flagHomingRequired` is a single flag, set at every boot and cleared only
+  when Mode 110 (Home to Limit) homing completes
 
 **Symptoms**:
 - Cannot enter operational modes
-- `G_doHomingComplete` is LOW
+- Homing has not yet completed this power cycle
 
 **Master Recovery**:
 ```
 1. Read fault code (100)
 2. Set G_diMotionEnable = FALSE
 3. Mirror code: DI0=0, DI1=0, DI2=1
-4. Pulse G_diFaultReset
-5. After clear: command homing modes
-
-   If G_flagAbsHomeRequired:
-   - Command Mode 110 (Home to Limit)
-
-   If G_flagEOTHomeRequired (every power-up):
-   - Command Mode 111 (Home to EOT)
-
-   Or command Mode 101 (Go Home) which auto-redirects
+4. Hold G_diFaultReset HIGH (level-based, not a pulse)
+5. After clear: command Mode 110 (Home to Limit), or command Mode 101
+   (Go Home), which redirects into the Mode 110 sequence automatically
 ```
 
-**Note**: This fault will recur if operational mode commanded again without completing homing.
+**Note**: This fault will recur if an operational mode is commanded again before Mode 110 homing completes.
 
 ---
 
@@ -189,7 +182,7 @@ When `G_doFaultActive` (DO5) is HIGH, the slave is in fault state and DO0-DO2 co
 2. CRITICAL: Check if cylinder is pressurized
 3. Set G_diMotionEnable = FALSE
 4. Mirror code: DI0=1, DI1=0, DI2=1
-5. Pulse G_diFaultReset
+5. Hold G_diFaultReset HIGH (level-based, not a pulse)
 6. After clear: command position away from exit
 ```
 
@@ -212,7 +205,7 @@ When `G_doFaultActive` (DO5) is HIGH, the slave is in fault state and DO0-DO2 co
 - Could indicate position error, mechanical issue, or runaway
 
 **Symptoms**:
-- One of the limit switches (DI4 or DI5) went LOW unexpectedly
+- One of the limit switches (DI6 or DI7) went LOW unexpectedly
 - Position may not match expected location
 
 **Master Recovery**:
@@ -283,7 +276,7 @@ and piston-exit faults remain active**.
 
 As of 2026-04, the dedicated encoder-validity path was removed from `FB_SafetyMonitor`. Encoder alarms (A.810 battery backup loss, A.CC0 multi-turn error, A.830 low battery) are detected by the Sigma-7 servo amplifier and surface as `FAULT_DRIVE` (010) through `G_sysDriveFault`.
 
-Any fault-reset exit (drive fault or otherwise) unconditionally sets both `G_flagAbsHomeRequired` and `G_flagEOTHomeRequired` TRUE, so the operator must re-home before resuming operational modes.
+A fault reset does not by itself require re-homing. `G_flagHomingRequired` is set once at power-up and cleared only when Mode 110 (Home to Limit) homing completes; it is unaffected by fault resets, so homing that completed before the fault remains valid afterward.
 
 The enum value is retained in `E_FaultCode` for wire-protocol stability but is not currently asserted.
 
@@ -311,10 +304,9 @@ PREPARE_RESET:
     WAIT 20ms  // Ensure stable
 
 EXECUTE_RESET:
-    // Assert reset (rising edge)
-    SET G_diFaultReset = FALSE  // Ensure low first
-    WAIT 10ms
-    SET G_diFaultReset = TRUE   // Rising edge
+    // Assert reset (level-based: valid the whole time FaultReset is HIGH
+    // and the other conditions hold - not an edge check)
+    SET G_diFaultReset = TRUE
 
     // Wait for acknowledgment
     START timeout_timer (1000ms)
@@ -362,8 +354,8 @@ mode_bits      XXXX|--- fault_code ---------|0000
 G_diFaultReset   ____/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\____
                    ^                   ^
                    |                   |
-                   Rising              Release
-                   edge                after clear
+                   Asserted            Release
+                   (level, held)       after clear
 ```
 
 ---
@@ -390,7 +382,7 @@ After reset, determine appropriate next action:
 001 (Handshake) -> Retry previous mode command
 010 (Drive)     -> May need power cycle, then re-home
 011 (Position)  -> If still out of limits, jog back in via ST_RECOVERY
-100 (Homing)    -> Command Mode 110 and/or 111
+100 (Homing)    -> Command Mode 110
 101 (Piston)    -> Check pressure, move away from exit
 110 (Limit)     -> Investigate; if still on switch, jog off via ST_RECOVERY
 111 (Encoder)   -> Must complete Mode 110 homing
@@ -417,7 +409,9 @@ After reset, determine appropriate next action:
 
 ### Homing Requirement Faults
 - Always complete homing after power cycle
-- Check `G_doHomingComplete` before operational modes
+- Latch `G_doHomingComplete` when it pulses HIGH (it drops again once
+  `G_diMotionEnable` is released - it is not a persistent status you can
+  poll later) and check that latch before operational modes
 - Use Mode 101 (Go Home) for automatic handling
 
 ### Piston Exit Faults
@@ -457,7 +451,7 @@ After reset, determine appropriate next action:
 1. [ ] G_diMotionEnable = FALSE
 2. [ ] Mode bits = fault code (mirror)
 3. [ ] Wait 20ms for stable
-4. [ ] Rising edge on G_diFaultReset
+4. [ ] Hold G_diFaultReset HIGH (level-based, not a pulse)
 5. [ ] Wait for G_doFaultActive = FALSE
 6. [ ] Release G_diFaultReset
 7. [ ] Set mode bits = 000

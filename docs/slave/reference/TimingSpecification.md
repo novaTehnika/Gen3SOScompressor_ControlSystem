@@ -154,11 +154,11 @@ acceleration limit `A` (`G_cfgPosGateAccelMax`). For a setpoint step of size `d`
 | Trapezoidal | `d > V^2/A` | `d/V + V/A` |
 | Triangular | `d <= V^2/A` | `2*SQRT(d/A)` |
 
-**Worked example at defaults** (`V` = 3 mm/s, `A` = 5 mm/s², so `V^2/A` = 1.8 mm):
+**Worked example at defaults** (`V` = 5 mm/s, `A` = 5 mm/s², so `V^2/A` = 5 mm):
 
 | Step Size | Profile | Move Time |
 |-----------|---------|-----------|
-| 50 mm | Trapezoidal | ≈ 17.3 s |
+| 50 mm | Trapezoidal | ≈ 11.0 s |
 | 1 mm | Triangular | ≈ 0.89 s |
 
 `A` (`G_cfgPosGateAccelMax`) is a commissioning parameter, started conservatively at 5 mm/s²
@@ -171,7 +171,7 @@ and expected to be raised once bench testing confirms available torque headroom 
 
 When `G_diMotionEnable` drops in position mode, the command is ramped to rest under
 `G_cfgPosGateAccelMax` before the axis is handed to `MC_Stop`, so `G_doInMotion` stays
-TRUE for up to `V/A` after the drop (0.6 s at `V` = 3 mm/s, `A` = 5 mm/s²) plus the
+TRUE for up to `V/A` after the drop (1.0 s at `V` = 5 mm/s, `A` = 5 mm/s²) plus the
 `MC_Stop` settling time.
 
 ### Velocity Mode

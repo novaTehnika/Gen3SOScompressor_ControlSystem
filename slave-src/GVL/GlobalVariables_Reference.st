@@ -136,8 +136,8 @@
         VELOCITY LIMITS (mm/s)
         ======================================================================== *)
 
-     G_cfgVelLimitMax          : LREAL := 7.0         (* Maximum velocity limit *)
-     G_cfgVelLimitNormal       : LREAL := 3.0         (* Normal operating velocity *)
+     G_cfgVelLimitMax          : LREAL := 5.0         (* Maximum velocity limit *)
+     G_cfgVelLimitNormal       : LREAL := 5.0         (* Normal operating velocity *)
 
 
      (* ========================================================================
@@ -164,7 +164,7 @@
                                                           configuration (2 ms is the MP2600iec lower bound). *)
      G_cfgPosGateAccelMax      : LREAL := 5.0         (* Command accel limit (mm/s^2). Conservative start - raise on the
                                                           bench. A master ramp at v is followed with lag v^2/(2A):
-                                                          0.9 mm at 3 mm/s with A=5, 0.09 mm with A=50. *)
+                                                          2.5 mm at 5 mm/s with A=5, 0.25 mm with A=50. *)
      G_cfgPosGateMaxDeviation  : LREAL := 2.0         (* Tether window (mm). Command never leads actual by more than this
                                                           (stall / torque limit). Must be well below drive Pn520
                                                           (excessive deviation) and well above normal following error
@@ -190,8 +190,8 @@
         ======================================================================== *)
 
      (* Velocity reference scaling (Mode 011) *)
-     G_cfgAnalogVelMin         : LREAL := -100.0      (* Velocity at -10V (mm/s) *)
-     G_cfgAnalogVelMax         : LREAL := 100.0       (* Velocity at +10V (mm/s) *)
+     G_cfgAnalogVelMin         : LREAL := -7.0        (* Velocity at -10V (mm/s) *)
+     G_cfgAnalogVelMax         : LREAL := 7.0         (* Velocity at +10V (mm/s) *)
 
      (* Torque reference scaling (Mode 100) *)
      G_cfgAnalogTorqueMin      : LREAL := -100.0      (* Torque at -10V (%) *)

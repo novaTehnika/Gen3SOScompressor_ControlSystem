@@ -405,15 +405,15 @@ ELSIF G_sysCurrentState = E_SystemState#ST_GO_HOME THEN
         IF fbGoHome.RedirectToHoming THEN
             G_sysCurrentState := E_SystemState#ST_HOME_LIMIT;
 
-        ELSIF fbGoHome.Done THEN
-            G_doInMotion := FALSE;
-
         ELSIF fbGoHome.Error THEN
             G_sysActiveFault := E_FaultCode#FAULT_DRIVE;
             G_sysCurrentState := E_SystemState#ST_FAULT;
 
         ELSIF fTrigMotionEnable.Q THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
+
+        ELSIF fbGoHome.Done THEN
+            G_doInMotion := FALSE;
         END_IF;
 
 

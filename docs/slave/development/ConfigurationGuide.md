@@ -45,8 +45,8 @@ These define the safe operating envelope of the machine.
 | `G_cfgPosSoftLimitMax` | 305.0 | mm | Software-enforced maximum extension position. A `FAULT_POSITION` occurs if exceeded. Should be set within the `G_cfgUsableStroke`. |
 | `G_cfgPosSoftLimitMin` | 0.0 | mm | Software-enforced minimum retraction position (home position). A `FAULT_POSITION` occurs if exceeded. |
 | `G_cfgPosExitGuardMargin`| 5.0 | mm | Safety margin for the piston exit guard. The guard becomes active when the position is `G_cfgPosSoftLimitMin + G_cfgPosExitGuardMargin`. |
-| `G_cfgVelLimitMax` | 200.0 | mm/s | Absolute maximum velocity allowed in any mode. |
-| `G_cfgVelLimitNormal` | 100.0 | mm/s | The velocity limit used during standard Position Control mode. |
+| `G_cfgVelLimitMax` | 5.0 | mm/s | Absolute maximum velocity allowed in any mode. |
+| `G_cfgVelLimitNormal` | 5.0 | mm/s | The velocity limit used during standard Position Control mode. |
 | `G_cfgInMotionVelThreshold`| 0.1 | mm/s | The velocity above which the `G_doInMotion` output is considered active. **Tuning:** Increase if motor vibration at rest causes the flag to flicker. |
 
 ### Position Command Gate
@@ -123,8 +123,8 @@ These parameters define how analog voltages are mapped to physical units. For mo
 
 | Parameter | Default Value | Units | Description |
 |---|---|---|---|
-| `G_cfgAnalogVelMin` | -100.0 | mm/s | Velocity corresponding to a -10V command. |
-| `G_cfgAnalogVelMax` | 100.0 | mm/s | Velocity corresponding to a +10V command. |
+| `G_cfgAnalogVelMin` | -7.0 | mm/s | Velocity corresponding to a -10V command. |
+| `G_cfgAnalogVelMax` | 7.0 | mm/s | Velocity corresponding to a +10V command. |
 | `G_cfgAnalogTorqueMin`| -100.0 | % | Torque corresponding to a -10V command. |
 | `G_cfgAnalogTorqueMax`| 100.0 | % | Torque corresponding to a +10V command. |
 | `G_cfgPosMapStage1PosMin` | 0.0 | mm | Start position for the high-resolution mapping region. |
