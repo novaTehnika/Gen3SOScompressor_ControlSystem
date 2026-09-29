@@ -178,7 +178,7 @@
 
      G_cfgTorqueLimitMax       : LREAL := 110.0       (* Maximum torque limit *)
      G_cfgTorqueLimitNormal    : LREAL := 100.0       (* Normal operating torque *)
-     G_cfgTorqueStallThreshold : LREAL := 20.0        (* Torque threshold for piston exit guard *)
+     G_cfgTorqueStallThreshold : LREAL := 60.0        (* Torque threshold for piston exit guard *)
 
 
      (* ========================================================================
@@ -205,10 +205,10 @@
 
      (* Stage transition point *)
      G_cfgPosMapTransitionPos  : LREAL := 200.0       (* Position at stage boundary (mm) *)
-     G_cfgPosMapTransitionVolt : LREAL := 5.0         (* Voltage at stage boundary (V) *)
+     G_cfgPosMapTransitionVolt : LREAL := 0.0         (* Voltage at stage boundary (V) *)
 
      (* Stage 2: Out-of-cylinder region (lower resolution) *)
-     G_cfgPosMapStage2PosMax   : LREAL := 305.0       (* Stage 2 position end (mm) *)
+     G_cfgPosMapStage2PosMax   : LREAL := 365.0       (* Stage 2 position end (mm) *)
      G_cfgPosMapStage2VoltMax  : LREAL := 10.0        (* Stage 2 voltage end (V) *)
 
 
@@ -220,7 +220,7 @@
      G_cfgHoldPositionTimeout  : TIME := T#2M         (* Hold-position inactivity watchdog: if no handshake completes within this window after motion halts, gracefully shut down to idle (no fault) *)
      G_cfgBrakeEngageDelay     : TIME := T#500MS      (* Wait after brake engage command *)
      G_cfgBrakeDisengageDelay  : TIME := T#500MS      (* Wait after brake disengage command *)
-     G_cfgHomingTimeout        : TIME := T#30S        (* Overall homing sequence timeout *)
+     G_cfgHomingTimeout        : TIME := T#90S        (* Overall homing sequence timeout *)
      G_cfgDriveReadyTimeout    : TIME := T#5S         (* Timeout waiting for drive ready *)
      G_cfgFaultIdleTimeout     : TIME := T#30S        (* Timeout in fault before going to idle *)
 
@@ -238,7 +238,7 @@
 
      (* Analog input filter parameters *)
      G_cfgAnalogFilterTimeConst: TIME := T#50MS       (* Low-pass filter time constant *)
-     G_cfgAnalogMedianSize     : INT := 3             (* Median filter size (3 or 5) *)
+     G_cfgAnalogMedianSize     : INT := 5             (* Median filter size (3 or 5) *)
 
 
      (* ========================================================================
@@ -260,7 +260,7 @@
                                                           Switch lands at -G_cfgHomeLimRetractDist in the homed frame. *)
      G_cfgHomeLimSetPosition     : LREAL := 0.0       (* Position value at the retract endpoint (becomes coord-frame zero) *)
      G_cfgHomeLimAccel           : LREAL := 5.0       (* Acceleration for all homing moves (mm/s²) *)
-     G_cfgHomeLimDecel           : LREAL := 5.0       (* Deceleration for all homing moves (mm/s²) *)
+     G_cfgHomeLimDecel           : LREAL := 50.0       (* Deceleration for all homing moves (mm/s²) *)
 
      (* Mode 101 - Go Home *)
      G_cfgGoHomePosition       : LREAL := 0.0         (* Target position for Go Home *)

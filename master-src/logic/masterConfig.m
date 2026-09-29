@@ -6,7 +6,7 @@ cfg.dt = 0.003;             % model step (s)
 % Analog position map shared by reference (AO) and feedback (AI):
 % two linear segments joined at (posMapVtr, posMapXtr).
 cfg.posMapVmin = -10;       % V
-cfg.posMapVtr  = 5;         % V
+cfg.posMapVtr  = 0;         % V
 cfg.posMapVmax = 10;        % V
 cfg.posMapXmin = 0;         % mm
 cfg.posMapXtr  = 200;       % mm
