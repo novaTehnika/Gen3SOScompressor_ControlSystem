@@ -37,7 +37,8 @@ STD_FBS = {'TON', 'R_TRIG', 'F_TRIG'}
 EXTERNAL_ENUMS = {
     'MC_Direction': ['Positive_Direction', 'Shortest_Way', 'Negative_Direction',
                      'Current_Direction'],
-    'Y_ControlMode': ['PositionMode', 'VelocityTLMode', 'TorqueVLMode'],
+    'Y_ControlMode': ['NoControlMode', 'PositionMode', 'VelocityTLMode', 'TorqueVLMode',
+                      'PositionTrqFFMode', 'VelocityTrqFFMode'],
 }
 FUNCTIONS = {'ABS': 'abs', 'SQRT': 'sqrt', 'MIN': 'min', 'MAX': 'max',
              'LIMIT': 'ST_LIMIT'}
