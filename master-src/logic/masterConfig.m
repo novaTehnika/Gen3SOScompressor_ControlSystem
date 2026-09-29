@@ -21,8 +21,9 @@ cfg.deadVolume   = 10;              % mL, volume left at the end of travel
 % Velocity reference scaling (slave Velocity mode).
 cfg.velPerVolt = 0.7;       % mm/s per V; must equal G_cfgAnalogVelMax / 10
 
-% Pressure transducer: P = (V - offset) * gain.
-cfg.pressureOffsetV = 4;        % V
+% Pressure transducer: P = (V - offset) * gain, gauge pressure. The offset
+% is the voltage read at atmospheric pressure.
+cfg.pressureOffsetV = 3.956;    % V
 cfg.pressureGain    = 2.3095;   % MPa per V
 cfg.atmPerMPa       = 9.869;
 
