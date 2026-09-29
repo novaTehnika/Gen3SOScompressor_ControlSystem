@@ -31,8 +31,8 @@ h = runUntil(h, 0.5, []);
 assert(h.m.statusCode == 0 && h.m.doSlave(1) == 1);
 
 h = command(h, 1);
-h = runUntil(h, 60, @(h) h.m.homed == 1 && h.m.state == 1);
-assert(h.m.homed == 1 && ~h.sl.G.G_flagHomingRequired, 'homing did not complete');
+h = runUntil(h, 60, @(h) h.sl.G.G_flagHomingComplete && h.m.state == 1);
+assert(h.sl.G.G_flagHomingComplete && h.m.state == 1, 'homing did not complete');
 fprintf('ok  homing through DAQ wiring\n');
 
 h.app.targetPosition = 25;
@@ -98,7 +98,7 @@ for n = 1:round(T * 1000)
                   y.faultActive, y.homingComplete, y.inMotion];
         a = h.app;
         [m.doSlave, m.doMixer, m.refVoltage, m.position, m.velocity, m.pressure, ...
-            m.statusCode, m.faultCode, m.homed, m.state] = masterStep(di, ...
+            m.statusCode, m.faultCode, m.state] = masterStep(di, ...
             y.positionVolt, h.pressureVolt, a.op, a.cmdSeq, a.targetPosition, ...
             a.targetVelocity, a.jogDirection, a.targetPressure, a.estop, a.mixer);
         h.m = m;

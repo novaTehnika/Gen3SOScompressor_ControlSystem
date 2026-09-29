@@ -19,30 +19,15 @@ E = h.sl.E;
 h = runFor(h, 0.5);
 assert(h.out.state == 1 && h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE);
 
-% Position refused before homing; slave never sees a request.
-h = command(h, 2);
-h = runFor(h, 0.5);
-assert(h.out.statusCode == 31 && h.out.motionEnable == 0);
-assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE);
-fprintf('ok  position refused before homing\n');
-
-% Homing: Go Home redirects to the limit-switch sequence and re-frames.
-h = command(h, 1);
-h = runUntil(h, 60, @(h) h.out.homed == 1 && h.out.state == 1);
-assert(h.out.homed == 1 && h.out.state == 1, 'homing did not complete');
-assert(~h.sl.G.G_flagHomingRequired);
-assert(abs(h.sl.ax.x) < 0.05 && abs(h.sl.ax.offset) < 0.05);
-assert(h.faultSeen == 0);
-fprintf('ok  homing (%.1f s)\n', h.t);
-
-% Position move: lands inside tolerance, no overshoot, velocity limited.
-h.in.targetPosition = 30;
+% Position move from power-up: lands inside tolerance, no overshoot,
+% velocity limited. No homing is needed first.
+h.in.targetPosition = 70;
 h.vMax = 0;  h.xMax = -inf;
 h = command(h, 2);
 h = runUntil(h, 30, @(h) h.out.statusCode == 3);
 assert(h.out.statusCode == 3, 'position move did not reach target');
-assert(abs(h.sl.ax.x - 30) <= h.mcfg.posTolerance);
-assert(h.xMax <= 30.05 && h.vMax <= h.sl.G.G_cfgVelLimitNormal + 0.01);
+assert(abs(h.sl.ax.x - 70) <= h.mcfg.posTolerance);
+assert(h.xMax <= 70.05 && h.vMax <= h.sl.G.G_cfgVelLimitNormal + 0.01);
 fprintf('ok  position move (peak %.2f mm/s, max %.3f mm)\n', h.vMax, h.xMax);
 
 % Position -> jog: the slave changes mode from hold, without a brake cycle.
@@ -76,8 +61,23 @@ h = runFor(h, 3);
 assert(h.faultSeen == 0);
 fprintf('ok  jog -> pressure\n');
 
-% Go Home when already homed: arrives, releases, and the next mode is accepted.
+% Homing re-establishes the zero after the frame has been lost.
+h.sl.ax.offset = 12.3;
+t0 = h.t;
 h = command(h, 1);
+h = runUntil(h, 60, @(h) h.sl.G.G_flagHomingComplete && h.out.state == 1);
+assert(h.sl.G.G_flagHomingComplete && h.out.state == 1, 'homing did not complete');
+assert(abs(h.sl.ax.x) < 0.05 && abs(h.sl.ax.offset) < 0.05);
+assert(h.faultSeen == 0);
+h = runFor(h, 2);
+assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE, 'slave did not leave homing');
+fprintf('ok  homing (%.1f s)\n', h.t - t0);
+
+% Go Home: arrives, releases, and the next mode is accepted.
+h.in.targetPosition = 50;
+h = command(h, 2);
+h = runUntil(h, 30, @(h) h.out.statusCode == 3);
+h = command(h, 6);
 h = runUntil(h, 30, @(h) h.out.state == 1 && h.out.statusCode == 0);
 assert(abs(h.sl.ax.x - h.sl.G.G_cfgGoHomePosition) < 0.1, 'Go Home did not arrive');
 h = runFor(h, 2);
@@ -88,7 +88,7 @@ h = runUntil(h, 30, @(h) h.out.statusCode == 3);
 assert(h.out.statusCode == 3, 'position move after Go Home did not reach target');
 h.in.op = 0;
 h = runFor(h, 3);
-fprintf('ok  go home when homed, then position move\n');
+fprintf('ok  go home, then position move\n');
 
 % Drive fault during a position move: latched, mirrored, no automatic reset.
 h.in.targetPosition = 60;

@@ -1,5 +1,5 @@
 function [doSlave, doMixer, refVoltage, position, velocity, pressure, ...
-          statusCode, faultCode, homed, state] = masterStep( ...
+          statusCode, faultCode, state] = masterStep( ...
           diSlave, positionVolt, pressureVolt, op, cmdSeq, targetPosition, ...
           targetVelocity, jogDirection, targetPressure, estop, mixer)
 %MASTERSTEP Entry point for the Simulink shell's MATLAB Function block:
@@ -22,7 +22,7 @@ function [doSlave, doMixer, refVoltage, position, velocity, pressure, ...
 %   doMixer       stir bar motor (P0.4)
 %   refVoltage    AO reference to the slave (V)
 %   position (mm), velocity (mm/s), pressure (atm), statusCode, faultCode,
-%   homed, state  for the app
+%   state         for the app
 
 persistent posBuf presBuf k xPrev vFilt integ pressureActive started
 
@@ -82,6 +82,5 @@ refVoltage = min(max(out.refVoltage, -10), 10);
 
 statusCode = out.statusCode;
 faultCode  = out.faultCode;
-homed      = out.homed;
 state      = out.state;
 end

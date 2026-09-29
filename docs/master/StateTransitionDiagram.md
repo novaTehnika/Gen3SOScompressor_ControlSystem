@@ -14,37 +14,26 @@
 +------------------------------------------------------------------+
 |                    INITIALIZATION PHASE                           |
 |  +----------+                                                     |
-|  | ST_INIT  | --> First scan sets G_flagHomingRequired TRUE and    |
-|  |          |     transitions directly to ST_IDLE                 |
+|  | ST_INIT  | --> First scan transitions directly to ST_IDLE     |
+|  |          |                                                     |
 |  +----------+                                                     |
 +------------------------|-----------------------------------------+
                          |
                          v
                     +----------+
                     | ST_IDLE  |
-                    +----------+                          |
-                           |                              |
-            (Mode != 000 + G_diMotionEnable)                |
-                           |                              |
-            +--------------+--------------+               |
-            |                             |               |
-     (Homing Modes              (Operational Modes        |
-      101,110)                   001,010,011,100)         |
-      [Mode 111 is reserved -                              |
-       no handler, no action]                              |
-            |                             |               |
-            |              Check homing requirements      |
-            |                     /     \                 |
-            |                  (MET)   (NOT MET)          |
-            |                    |         |              |
-            |                    |         v              |
-            |                    |   +-----------+        |
-            |                    |   | ST_FAULT  |--------+
-            |                    |   | (HOMING   |
-            |                    |   |  _REQ)    |
-            |                    |   +-----------+
-            |                    |
-            +----------+---------+
+                    +----------+
+                           |
+            (Mode != 000 + G_diMotionEnable)
+                           |
+            +--------------+--------------+
+            |                             |
+     (Homing Modes              (Operational Modes
+      101,110)                   001,010,011,100)
+      [Mode 111 is reserved -
+       no handler, no action]
+            |                             |
+            +----------+------------------+
                        |
                        v
               +----------------+
@@ -170,8 +159,8 @@
         |
         v
 +---------------+
-| ST_HOME       |  PRG_Main clears G_flagHomingRequired here;
-| _COMPLETE     |  wait for mode change
+| ST_HOME       |  PRG_Main sets G_flagHomingComplete and
+| _COMPLETE     |  G_doHomingComplete; wait for mode change
 +---------------+
 ```
 
@@ -188,25 +177,19 @@ raises no fault. The master must not command it.
 | ST_GO_HOME    |  Entry point from mode command
 +-------+-------+
         |
-        | Check G_flagHomingRequired
-        |
-   +----+----+
-   |         |
-  TRUE     FALSE
-   |         |
-   v         v
-+-------+  +-------------------+
-|Redirect|  | MC_MoveAbsolute  |
-|to      |  | to HomePosition  |
-|Mode 110|  +--------+---------+
-+-------+           |
-   |                | (At position)
-   v                v
-+-----------+  +---------------+
-|ST_HOME    |  | Hold position |
-|_LIMIT     |  | until mode    |
-|(sub-seq)  |  | change        |
-+-----------+  +---------------+
+        v
++-------------------+
+| MC_MoveAbsolute   |
+| to HomePosition   |
++--------+----------+
+         |
+         | (At position)
+         v
++---------------+
+| Hold position |
+| until mode    |
+| change        |
++---------------+
 ```
 
 ---
@@ -290,10 +273,10 @@ the master-side procedure.
 
 | To Mode | Condition | Path |
 |---------|-----------|------|
-| 001 (Brake Hold) | Homing met OR homing modes | DRIVE_ENABLE → BRAKE_RELEASE → BRAKE_HOLD |
-| 010 (Position) | Homing met | DRIVE_ENABLE → BRAKE_RELEASE → POSITION_CTRL |
-| 011 (Velocity) | Homing met | DRIVE_ENABLE → BRAKE_RELEASE → VELOCITY_CTRL |
-| 100 (Torque) | Homing met | DRIVE_ENABLE → BRAKE_RELEASE → TORQUE_CTRL |
+| 001 (Brake Hold) | Always allowed | DRIVE_ENABLE → BRAKE_RELEASE → BRAKE_HOLD |
+| 010 (Position) | Always allowed | DRIVE_ENABLE → BRAKE_RELEASE → POSITION_CTRL |
+| 011 (Velocity) | Always allowed | DRIVE_ENABLE → BRAKE_RELEASE → VELOCITY_CTRL |
+| 100 (Torque) | Always allowed | DRIVE_ENABLE → BRAKE_RELEASE → TORQUE_CTRL |
 | 101 (Go Home) | Always allowed | DRIVE_ENABLE → BRAKE_RELEASE → GO_HOME |
 | 110 (Home Limit) | Always allowed | DRIVE_ENABLE → BRAKE_RELEASE → HOME_LIMIT |
 | 111 (Reserved) | Never - no state handler | Handshake confirmed, no state change, no fault |
@@ -448,7 +431,6 @@ Mode Confirm    000_/‾‾‾\_____000________________________|__000___
 ### At ST_IDLE
 - Check: `G_diMotionEnable` rising edge?
 - Check: Mode bits != 000?
-- Check: If operational mode, are homing requirements met?
 
 ### At Operational State
 - Check: `G_diMotionEnable` falling edge → ST_HOLD_POSITION

@@ -24,7 +24,7 @@ When `G_doFaultActive` (DO4) is HIGH, the slave is in fault state and DO0-DO2 co
 | 001 | 1 | FAULT_HANDSHAKE | Medium | Yes |
 | 010 | 2 | FAULT_DRIVE | High | Sometimes |
 | 011 | 3 | FAULT_POSITION | Medium | Yes |
-| 100 | 4 | FAULT_HOMING_REQ | Low | Yes (with homing) |
+| 100 | 4 | FAULT_RESERVED_100 | - | **Reserved (never raised)** |
 | 101 | 5 | FAULT_PISTON_EXIT | High | Conditional |
 | 110 | 6 | FAULT_LIMIT_SWITCH | High | Manual jog-off via ST_RECOVERY (investigate cause) |
 | 111 | 7 | FAULT_ENCODER | High | **Reserved (not emitted by current firmware — encoder alarms surface as FAULT_DRIVE)** |
@@ -136,30 +136,12 @@ When `G_doFaultActive` (DO4) is HIGH, the slave is in fault state and DO0-DO2 co
 
 ---
 
-### FAULT_HOMING_REQ (100)
+### FAULT_RESERVED_100 (100) — RESERVED
 
-**Description**: Operational mode attempted without homing complete.
-
-**Triggered When**:
-- An operational mode (001-100) is commanded while `G_flagHomingRequired = TRUE`
-- `G_flagHomingRequired` is a single flag, set at every boot and cleared only
-  when Mode 110 (Home to Limit) homing completes
-
-**Symptoms**:
-- Cannot enter operational modes
-- Homing has not yet completed this power cycle
-
-**Master Recovery**:
-```
-1. Read fault code (100)
-2. Set G_diMotionEnable = FALSE
-3. Mirror code: DI0=0, DI1=0, DI2=1
-4. Hold G_diFaultReset HIGH (level-based, not a pulse)
-5. After clear: command Mode 110 (Home to Limit), or command Mode 101
-   (Go Home), which redirects into the Mode 110 sequence automatically
-```
-
-**Note**: This fault will recur if an operational mode is commanded again before Mode 110 homing completes.
+**Status**: Reserved, never raised. The value is kept in `E_FaultCode` for
+wire-protocol stability. Operational modes are entered directly from boot:
+the absolute encoder and the controller's stored `MC_SetPosition` offset keep
+the coordinate frame across power cycles.
 
 ---
 
@@ -276,7 +258,7 @@ and piston-exit faults remain active**.
 
 As of 2026-04, the dedicated encoder-validity path was removed from `FB_SafetyMonitor`. Encoder alarms (A.810 battery backup loss, A.CC0 multi-turn error, A.830 low battery) are detected by the Sigma-7 servo amplifier and surface as `FAULT_DRIVE` (010) through `G_sysDriveFault`.
 
-A fault reset does not by itself require re-homing. `G_flagHomingRequired` is set once at power-up and cleared only when Mode 110 (Home to Limit) homing completes; it is unaffected by fault resets, so homing that completed before the fault remains valid afterward.
+A fault reset does not require re-homing: the coordinate frame is held by the absolute encoder and by the `MC_SetPosition` offset the controller stores in battery-backed memory. Re-home with Mode 110 (Home to Limit) only when that frame is lost: after an encoder alarm (reported as `FAULT_DRIVE`), or after a controller SRAM battery failure or controller replacement, which lose the stored offset.
 
 The enum value is retained in `E_FaultCode` for wire-protocol stability but is not currently asserted.
 
@@ -373,19 +355,19 @@ FAULT DETECTED (G_doFaultActive = HIGH)
    001    010    011    100    101    110    111
     |      |      |      |      |      |      |
     v      v      v      v      v      v      v
- Retry   Check  Move   Home   Check  STOP   Home
- mode    drive  from   first  press  Invest required
+ Retry   Check  Move   (res.) Check  STOP   (res.)
+ mode    drive  from          press  Invest
          status limit         ure    igate
 
 After reset, determine appropriate next action:
 
 001 (Handshake) -> Retry previous mode command
-010 (Drive)     -> May need power cycle, then re-home
+010 (Drive)     -> May need power cycle; re-home (Mode 110) after an encoder alarm
 011 (Position)  -> If still out of limits, jog back in via ST_RECOVERY
-100 (Homing)    -> Command Mode 110
+100 (Reserved)  -> Not raised
 101 (Piston)    -> Check pressure, move away from exit
 110 (Limit)     -> Investigate; if still on switch, jog off via ST_RECOVERY
-111 (Encoder)   -> Must complete Mode 110 homing
+111 (Encoder)   -> Reserved; encoder alarms arrive as 010
 ```
 
 ---
@@ -407,13 +389,6 @@ After reset, determine appropriate next action:
 - Use appropriate acceleration/deceleration
 - Monitor position feedback during motion
 
-### Homing Requirement Faults
-- Always complete homing after power cycle
-- Latch `G_doHomingComplete` when it pulses HIGH (it drops again once
-  `G_diMotionEnable` is released - it is not a persistent status you can
-  poll later) and check that latch before operational modes
-- Use Mode 101 (Go Home) for automatic handling
-
 ### Piston Exit Faults
 - Avoid commanding toward exit boundary under load
 - Monitor cylinder pressure
@@ -428,6 +403,8 @@ After reset, determine appropriate next action:
 - Monitor encoder battery status
 - Replace battery proactively
 - Ensure proper cable routing (no noise sources)
+- Re-home (Mode 110) after an encoder alarm, an encoder battery loss, or a
+  controller SRAM battery failure or controller replacement
 
 ---
 
@@ -441,10 +418,10 @@ After reset, determine appropriate next action:
 | 1 | 001 | Handshake | Retry mode |
 | 2 | 010 | Drive | Check drive |
 | 3 | 011 | Position | Jog back in (ST_RECOVERY) |
-| 4 | 100 | Homing Req | Home axis |
+| 4 | 100 | Reserved | - |
 | 5 | 101 | Piston Exit | Check pressure |
 | 6 | 110 | Limit Switch | Investigate; jog off (ST_RECOVERY) |
-| 7 | 111 | Encoder | Home axis |
+| 7 | 111 | Encoder | Reserved (see Drive) |
 
 ### Reset Checklist
 

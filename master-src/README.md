@@ -22,13 +22,13 @@ SOS_Gen3_Compressor_Interface      % then press "Connect to Compressor"
 
 ## App to model interface
 
-The app writes `RequestedMode` (0 stop, 1 home, 2 position, 3 jog, 4 pressure,
-5 reset fault) and then increments `CommandSeq`; the model acts on an operation
+The app writes `RequestedMode` (0 stop, 1 home to the limit switch, 2 position,
+3 jog, 4 pressure, 5 reset fault, 6 go home) and then increments `CommandSeq`; the model acts on an operation
 only when `CommandSeq` changes, except that `RequestedMode = 0` always stops.
 `TargetPosition`, `TargetVelocity`, `JogDirection` and `TargetPressure` are read
 continuously while their operation is active. `ESTOP` and `Mixer` act at once.
 
-The app reads `StatusCode`, `FaultCode`, `Homed`, `State`, `Position`,
+The app reads `StatusCode`, `FaultCode`, `State`, `Position`,
 `Velocity` and `Pressure`. Status codes are listed in `masterStateMachine.m`.
 
 ## Testing without MATLAB

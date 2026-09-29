@@ -25,7 +25,7 @@ This document provides step-by-step guidance for implementing the Simulink Deskt
 1. **Master commands, slave executes**: The master requests modes via DI0-DI2, slave confirms via DO0-DO2
 2. **Handshake protocol**: All mode transitions require confirmed handshake within timeout
 3. **Fault code mirroring**: During fault reset, master must echo fault code back to slave
-4. **Slave enforces safety**: Homing requirements and position limits are enforced by slave
+4. **Slave enforces safety**: Position limits are enforced by slave
 
 ---
 
@@ -81,8 +81,8 @@ treat 000 during operation as loss of mode.
 | 010 | 2 | Position Control | Analog input = position command |
 | 011 | 3 | Velocity Control | Analog input = velocity command |
 | 100 | 4 | Torque Control | Analog input = torque command |
-| 101 | 5 | Go Home | Move to home position |
-| 110 | 6 | Home to Limit | Homing via limit switch |
+| 101 | 5 | Go Home | Move to home position (G_cfgGoHomePosition) |
+| 110 | 6 | Home to Limit | Homing via limit switch; re-establishes the zero |
 | 111 | 7 | Reserved | Not implemented - confirmed but ignored; do not command |
 
 ---
@@ -203,10 +203,10 @@ When `G_doFaultActive == HIGH`, read DO0-DO2 as fault code:
 | 001 | Handshake | Timeout or mismatch | Retry handshake |
 | 010 | Drive | Servo amplifier fault | Check drive, reset |
 | 011 | Position | Software limit exceeded | Command safe position; if still out, jog in via ST_RECOVERY |
-| 100 | Homing Required | Homing not completed | Command Mode 110 (or Mode 101, which auto-redirects) |
+| 100 | Reserved | Never raised | N/A |
 | 101 | Piston Exit | Safety guard triggered | Reduce force, check pressure |
 | 110 | Limit Switch | Unexpected limit activation | Check mechanics; if still on switch, jog off via ST_RECOVERY |
-| 111 | Encoder | Position data invalid | Homing required |
+| 111 | Encoder | Reserved - encoder alarms arrive as Drive (010) | Re-home (Mode 110) after an encoder alarm |
 
 ### Fault Reset Handshake
 
@@ -220,7 +220,7 @@ Master                                          Slave
   |                                               |
   |  2. Read fault code from DO0-DO2              |
   |<----------------------------------------------|
-  |     (e.g., fault_code = 100 = Homing Req)     |
+  |     (e.g., fault_code = 011 = Position)       |
   |                                               |
   |  3. Set G_diMotionEnable = LOW                  |
   |---------------------------------------------->|
@@ -406,46 +406,24 @@ not elapsed time.
 ```
 1. Power on MP2600iec
    - Slave initializes
-   - Slave forces G_flagHomingRequired = TRUE
-   - Slave enters ST_IDLE (homing is mandatory every boot)
+   - Slave enters ST_IDLE; the absolute encoder and the controller's
+     stored offset keep the coordinate frame, so no homing is needed
 
 2. Initialize Simulink model
    - Set all outputs LOW initially
    - mode_bits = 000 (Idle)
    - G_diMotionEnable = FALSE
    - G_diFaultReset = FALSE
-   - Clear the master's own latched `homed_ok` flag
 
 3. Verify communication
    - Read G_doFaultActive (should be LOW)
    - Read confirmation bits (should match 000)
 
-4. Perform homing (every power-up)
-   a. Command Mode 110 (Home to Limit)
-   b. Wait for G_doHomingComplete = TRUE, then latch `homed_ok = TRUE` in
-      the master - G_doHomingComplete drops LOW again as soon as
-      G_diMotionEnable is released, so it is not a persistent status flag
-      and cannot be polled later to confirm homing already happened
-
-5. Enter operational mode
+4. Enter operational mode
    - Command desired mode (010, 011, or 100)
    - Wait for handshake confirmation
    - Begin motion control
 ```
-
-### Homing Requirement Check
-
-Before commanding operational modes (001-100), verify homing status:
-
-```
-IF NOT homed_ok THEN   // homed_ok: master-latched, cleared each power-up
-    command_mode(110)  // Home to Limit
-    WAIT G_doHomingComplete
-    homed_ok := TRUE
-END_IF
-```
-
-**WARNING**: Attempting operational modes without homing will trigger FAULT_HOMING_REQ (100).
 
 ---
 
@@ -525,7 +503,6 @@ still active. See the [Fault Code Reference](FaultCodeReference.md#limit-recover
 
 **Possible Causes**:
 - Drive not ready (check drive status)
-- Homing requirements not met (check the master's latched homed status; `G_doHomingComplete` itself pulses HIGH only while in ST_HOME_COMPLETE)
 - I/O wiring issue
 
 **Resolution**:
@@ -554,12 +531,13 @@ still active. See the [Fault Code Reference](FaultCodeReference.md#limit-recover
 **Possible Causes**:
 - Two-stage mapping not applied
 - Analog calibration offset
-- Homing not completed
+- Coordinate frame lost (encoder alarm, controller battery failure or
+  controller replacement)
 
 **Resolution**:
 1. Apply correct two-stage inverse mapping
 2. Verify analog I/O calibration
-3. Ensure homing completed successfully
+3. Re-home with Mode 110 if the frame was lost
 
 ---
 
@@ -584,7 +562,7 @@ still active. See the [Fault Code Reference](FaultCodeReference.md#limit-recover
 | Handshake | 001 | 1 |
 | Drive | 010 | 2 |
 | Position | 011 | 3 |
-| Homing Req | 100 | 4 |
+| Reserved | 100 | 4 |
 | Piston Exit | 101 | 5 |
 | Limit Switch | 110 | 6 |
 | Encoder | 111 | 7 |

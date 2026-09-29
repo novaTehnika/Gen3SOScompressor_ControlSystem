@@ -125,7 +125,7 @@ The core logic resides in a state machine within `PRG_Main.st`. Understanding th
 
 ### Key State Groups
 
-- **Initialization (`ST_INIT`)**: The default enum initializer. On the first scan the state machine forces both `G_flagAbsHomeRequired` and `G_flagEOTHomeRequired` TRUE and transitions directly to `ST_IDLE`.
+- **Initialization (`ST_INIT`)**: The default enum initializer. On the first scan the state machine transitions directly to `ST_IDLE`; no homing is required before operational modes, since the absolute encoder and the controller's stored offset retain the coordinate frame.
 - **Idle (`ST_IDLE`)**: The default safe state. The drive is disabled, and the brake is engaged. It waits here for a valid handshake from the master.
 - **Activation (`ST_DRIVE_ENABLE`, `ST_BRAKE_RELEASE`)**: A transitional sequence to power on the drive and release the brake before entering an operational mode.
 - **Operational States (`ST_POSITION_CTRL`, `ST_VELOCITY_CTRL`, etc.)**: The active motion or control states. Each state writes setpoints into `G_cmdDirectControl` (read by the LD POU's `Y_DirectControl` instance each scan) and checks for a `G_diMotionEnable` drop to exit. The position states (`ST_POSITION_CTRL`, `ST_RECOVERY_POSITION`) feed their target through `fbPosGate` (`FB_PositionCommandGate`), and on a `G_diMotionEnable` drop they first ramp the command to rest under `G_cfgPosGateAccelMax` (`bPosStopping`) before leaving the state.

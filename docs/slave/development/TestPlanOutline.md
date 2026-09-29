@@ -99,8 +99,8 @@ This plan does **not** cover the testing of the Simulink master controller softw
         2.  Verify the fast and slow approach, and confirm that a stall is detected at the hard stop.
         3.  Verify the `G_posEOTOffset` is calculated correctly.
     -   **Mode 101 (Go Home):**
-        1.  After completing Mode 110 (so `G_flagAbsHomeRequired = FALSE`), command Mode 101 and verify it moves directly to the home position.
-        2.  After a power cycle or fault reset (so `G_flagAbsHomeRequired = TRUE`), command Mode 101 and verify it redirects into Mode 110.
+        1.  Command Mode 101 and verify it moves directly to the home position (`G_cfgGoHomePosition`).
+        2.  After a controller and drive power cycle, without homing, command Mode 101 and Mode 010 and verify both are accepted and the position is unchanged.
 -   **Acceptance Criteria:** All sequences complete successfully, `G_doHomingComplete` is set HIGH, and the final position is correct and repeatable.
 
 ### 3.5 Fault Injection Testing
@@ -110,7 +110,7 @@ This plan does **not** cover the testing of the Simulink master controller softw
         -   `FAULT_HANDSHAKE`: See 3.2.
         -   `FAULT_DRIVE`: Use drive software to force a fault, or disconnect a motor phase.
         -   `FAULT_POSITION`: Command the axis to move beyond its soft limits.
-        -   `FAULT_HOMING_REQ`: Attempt an operational mode before homing.
+        -   `FAULT_RESERVED_100`: Reserved, never raised — verify an operational mode commanded straight after boot is accepted.
         -   `FAULT_PISTON_EXIT`: Physically push the actuator back while in torque mode near the exit boundary.
         -   `FAULT_LIMIT_SWITCH`: Manually trigger a limit switch during a normal move.
         -   `FAULT_ENCODER`: Reserved / not emitted by firmware — encoder alarms surface as `FAULT_DRIVE` via the servopack. Trigger by disconnecting the encoder battery or simulating an A.810 alarm; expect `FAULT_DRIVE`.
