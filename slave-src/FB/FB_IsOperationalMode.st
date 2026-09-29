@@ -5,9 +5,8 @@
    Controller: Yaskawa MP2600iec
 
    Description:
-   Checks if the given operating mode is an operational mode that requires
-   homing to have been completed before entry. Operational modes are those
-   that perform motion control using absolute position references.
+   Checks if the given operating mode is an operational mode (Brake Hold,
+   Position, Velocity or Torque), as opposed to Idle or a homing mode.
 
    NOTE: Implemented as an FB (not an FN) to work around a MotionWorks IEC
    native-code-gen defect that rejects user-enum parameters on FUNCTIONs

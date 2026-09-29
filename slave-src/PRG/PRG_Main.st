@@ -19,7 +19,7 @@
    Every user-defined FB is called exactly once at the end of this file.
 
    State Machine Groups:
-   - Idle: ST_IDLE (first scan goes directly here; homing flag forced TRUE)
+   - Idle: ST_IDLE (first scan goes directly here)
    - Transition (Activation): ST_DRIVE_RESET, ST_DRIVE_ENABLE, ST_BRAKE_RELEASE
    - Operational: ST_BRAKE_HOLD, ST_POSITION_CTRL, ST_VELOCITY_CTRL,
                   ST_TORQUE_CTRL, ST_GO_HOME, ST_HOME_LIMIT, ST_HOME_COMPLETE
@@ -113,8 +113,6 @@ IF bFirstScan THEN
     G_sysCurrentState := E_SystemState#ST_IDLE;
     G_sysPreviousState := E_SystemState#ST_IDLE;
 
-    G_flagHomingRequired := TRUE;
-
     G_doBrakeDisengage := FALSE;
     G_doPerformanceStatus := FALSE;
     G_doHomingComplete := FALSE;
@@ -205,19 +203,8 @@ IF G_sysCurrentState = E_SystemState#ST_IDLE THEN
             fbIsOperational(Mode := eTargetMode);
             fbIsHoming(Mode := eTargetMode);
 
-            IF fbIsOperational.Result THEN
-                IF G_flagHomingRequired THEN
-                    G_sysActiveFault := E_FaultCode#FAULT_HOMING_REQ;
-                    G_sysCurrentState := E_SystemState#ST_FAULT;
-                ELSE
-                    G_sysCurrentState := E_SystemState#ST_DRIVE_RESET;
-                END_IF;
-
-            ELSIF fbIsHoming.Result THEN
+            IF fbIsOperational.Result OR fbIsHoming.Result THEN
                 G_sysCurrentState := E_SystemState#ST_DRIVE_RESET;
-
-            ELSE
-                ;
             END_IF;
         END_IF;
 
@@ -298,22 +285,16 @@ ELSIF G_sysCurrentState = E_SystemState#ST_BRAKE_HOLD THEN
 
         IF fbHandshake.HandshakeComplete THEN
             eTargetMode := G_sysRequestedMode;
-            fbIsOperational(Mode := eTargetMode);
 
-            IF fbIsOperational.Result AND G_flagHomingRequired THEN
-                G_sysActiveFault := E_FaultCode#FAULT_HOMING_REQ;
-                G_sysCurrentState := E_SystemState#ST_FAULT;
-            ELSE
-                IF eTargetMode = E_OperatingMode#MODE_IDLE THEN
-                    G_sysCurrentState := E_SystemState#ST_DRIVE_DISABLE;
+            IF eTargetMode = E_OperatingMode#MODE_IDLE THEN
+                G_sysCurrentState := E_SystemState#ST_DRIVE_DISABLE;
 
-                ELSIF eTargetMode = E_OperatingMode#MODE_BRAKE_HOLD THEN
-                    ;
+            ELSIF eTargetMode = E_OperatingMode#MODE_BRAKE_HOLD THEN
+                ;
 
-                ELSIF eTargetMode = E_OperatingMode#MODE_POSITION OR eTargetMode = E_OperatingMode#MODE_VELOCITY OR eTargetMode = E_OperatingMode#MODE_TORQUE OR
-                      eTargetMode = E_OperatingMode#MODE_GO_HOME OR eTargetMode = E_OperatingMode#MODE_HOME_LIMIT THEN
-                    G_sysCurrentState := E_SystemState#ST_BRAKE_RELEASE;
-                END_IF;
+            ELSIF eTargetMode = E_OperatingMode#MODE_POSITION OR eTargetMode = E_OperatingMode#MODE_VELOCITY OR eTargetMode = E_OperatingMode#MODE_TORQUE OR
+                  eTargetMode = E_OperatingMode#MODE_GO_HOME OR eTargetMode = E_OperatingMode#MODE_HOME_LIMIT THEN
+                G_sysCurrentState := E_SystemState#ST_BRAKE_RELEASE;
             END_IF;
         END_IF;
 
@@ -402,10 +383,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_GO_HOME THEN
 
         G_doInMotion := fbGoHome.InMotion;
 
-        IF fbGoHome.RedirectToHoming THEN
-            G_sysCurrentState := E_SystemState#ST_HOME_LIMIT;
-
-        ELSIF fbGoHome.Error THEN
+        IF fbGoHome.Error THEN
             G_sysActiveFault := E_FaultCode#FAULT_DRIVE;
             G_sysCurrentState := E_SystemState#ST_FAULT;
 
@@ -427,7 +405,6 @@ ELSIF G_sysCurrentState = E_SystemState#ST_HOME_LIMIT THEN
         G_doInMotion := fbHomeLimit.InMotion;
 
         IF fbHomeLimit.Done THEN
-            G_flagHomingRequired := FALSE;
             G_flagHomingComplete := TRUE;
             G_sysCurrentState := E_SystemState#ST_HOME_COMPLETE;
 
@@ -489,27 +466,21 @@ ELSIF G_sysCurrentState = E_SystemState#ST_HOLD_POSITION THEN
 
         ELSIF G_sysHalted AND NOT bKeepDirectControl AND fbHandshake.HandshakeComplete THEN
             eTargetMode := G_sysRequestedMode;
-            fbIsOperational(Mode := eTargetMode);
 
-            IF fbIsOperational.Result AND G_flagHomingRequired THEN
-                G_sysActiveFault := E_FaultCode#FAULT_HOMING_REQ;
-                G_sysCurrentState := E_SystemState#ST_FAULT;
-            ELSE
-                IF eTargetMode = E_OperatingMode#MODE_BRAKE_HOLD THEN
-                    G_sysCurrentState := E_SystemState#ST_BRAKE_HOLD;
-                ELSIF eTargetMode = E_OperatingMode#MODE_POSITION THEN
-                    G_sysCurrentState := E_SystemState#ST_POSITION_CTRL;
-                ELSIF eTargetMode = E_OperatingMode#MODE_VELOCITY THEN
-                    G_sysCurrentState := E_SystemState#ST_VELOCITY_CTRL;
-                ELSIF eTargetMode = E_OperatingMode#MODE_TORQUE THEN
-                    G_sysCurrentState := E_SystemState#ST_TORQUE_CTRL;
-                ELSIF eTargetMode = E_OperatingMode#MODE_GO_HOME THEN
-                    G_sysCurrentState := E_SystemState#ST_GO_HOME;
-                ELSIF eTargetMode = E_OperatingMode#MODE_HOME_LIMIT THEN
-                    G_sysCurrentState := E_SystemState#ST_HOME_LIMIT;
-                END_IF;
-                (* MODE_IDLE handled by direct path above *)
+            IF eTargetMode = E_OperatingMode#MODE_BRAKE_HOLD THEN
+                G_sysCurrentState := E_SystemState#ST_BRAKE_HOLD;
+            ELSIF eTargetMode = E_OperatingMode#MODE_POSITION THEN
+                G_sysCurrentState := E_SystemState#ST_POSITION_CTRL;
+            ELSIF eTargetMode = E_OperatingMode#MODE_VELOCITY THEN
+                G_sysCurrentState := E_SystemState#ST_VELOCITY_CTRL;
+            ELSIF eTargetMode = E_OperatingMode#MODE_TORQUE THEN
+                G_sysCurrentState := E_SystemState#ST_TORQUE_CTRL;
+            ELSIF eTargetMode = E_OperatingMode#MODE_GO_HOME THEN
+                G_sysCurrentState := E_SystemState#ST_GO_HOME;
+            ELSIF eTargetMode = E_OperatingMode#MODE_HOME_LIMIT THEN
+                G_sysCurrentState := E_SystemState#ST_HOME_LIMIT;
             END_IF;
+            (* MODE_IDLE handled by direct path above *)
 
         ELSIF tHoldPositionTimer.Q THEN
             (* Master inactivity watchdog - graceful shutdown to idle, no fault *)
@@ -590,9 +561,8 @@ ELSIF G_sysCurrentState = E_SystemState#ST_FAULT_IDLE THEN
            Entered after ST_FAULT timeout (slow recovery path).
            Awaits fault reset handshake to return to normal ST_IDLE.
 
-           Drive power-down does not invalidate position — the controller
-           and encoder retain position data. Only a cold start resets
-           G_flagHomingRequired (handled in first-scan init above).
+           Drive power-down does not invalidate position — the absolute
+           encoder and the controller's stored offset retain it.
            ---------------------------------------------------------------- *)
         IF bEnterState THEN
             G_doBrakeDisengage := FALSE;
@@ -1031,7 +1001,6 @@ fbFaultReset(
 fbGoHome(
     Enable := (G_sysCurrentState = E_SystemState#ST_GO_HOME),
     Execute := (G_sysCurrentState = E_SystemState#ST_GO_HOME),
-    AbsHomeRequired := G_flagHomingRequired,
     HomePosition := G_cfgGoHomePosition,
     HomeVelocity := G_cfgGoHomeVelocity,
     Acceleration := G_cfgGoHomeAccel,
@@ -1081,7 +1050,6 @@ fbSafetyMonitor(
     ActualPosition := G_sysActualPosition,
     SoftLimitMin := G_cfgPosSoftLimitMin,
     SoftLimitMax := G_cfgPosSoftLimitMax,
-    HomingRequired := G_flagHomingRequired,
     DriveFault := G_sysDriveFault,
     CurrentState := G_sysCurrentState,
     ExitGuardTriggered := fbPistonExitGuard.FaultTriggered

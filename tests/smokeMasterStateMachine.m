@@ -21,23 +21,24 @@ h.maxRef = 0;
 h = runFor(h, 0.5);
 assert(h.out.state == 1 && h.out.motionEnable == 0 && h.out.modeCode == 0);
 
-% Position refused before homing.
+% Position move from power-up, no homing needed.
+h.in.targetPosition = 30;
 h = command(h, 2);
-h = runFor(h, 0.5);
-assert(h.out.statusCode == 31 && h.out.motionEnable == 0);
-fprintf('ok  position refused before homing\n');
+h = runFor(h, 10);
+assert(h.out.statusCode == 3);
+assert(abs(h.sl.pos - 30) <= h.cfg.posTolerance);
+fprintf('ok  position move without homing\n');
 
-% Homing.
+% Homing, requested from position control.
 h = command(h, 1);
 h = runFor(h, 0.3);
-assert(h.out.statusCode == 1 || h.out.statusCode == 7);
+assert(h.out.statusCode == 1 || h.out.statusCode == 6 || h.out.statusCode == 7);
 h = runFor(h, 6);
-assert(h.out.homed == 1 && h.out.state == 1 && h.out.modeCode == 0);
-assert(h.sl.faultCode == 0);
+assert(h.out.state == 1 && h.out.modeCode == 0);
+assert(h.sl.pos == 0 && h.sl.faultCode == 0);
 fprintf('ok  homing\n');
 
 % Position move.
-h.in.targetPosition = 30;
 h = command(h, 2);
 h = runFor(h, 15);
 assert(h.out.statusCode == 3);
@@ -45,12 +46,13 @@ assert(abs(h.sl.pos - 30) <= h.cfg.posTolerance);
 fprintf('ok  position move\n');
 
 % Position -> jog without passing through idle.
+brake0 = h.sl.brakeCycles;
 h.in.jogVelocity = 2;
 h = command(h, 3);
 p0 = h.sl.pos;
 h = runFor(h, 2);
 assert(h.out.statusCode == 4 && h.sl.pos > p0 + 1);
-assert(h.sl.brakeCycles == 2);     % homing + position entry only
+assert(h.sl.brakeCycles == brake0);
 h.in.op = 0;                        % button release: stop needs no cmdSeq
 h = runFor(h, 1);
 assert(h.out.state == 1 && h.out.motionEnable == 0 && h.out.refVoltage == 0);
@@ -85,16 +87,14 @@ h = runFor(h, 1);
 assert(h.out.motionEnable == 0);   % the interrupted move does not resume
 fprintf('ok  fault latch and operator reset\n');
 
-% Homing-required fault voids the master's homed flag.
-h.sl = slaveFault(h.sl, 4);
-h = runFor(h, 0.5);
-assert(h.out.homed == 0 && h.out.statusCode == 14);
-h = command(h, 5);
-h = runFor(h, 1);
-h = command(h, 1);
-h = runFor(h, 6);
-assert(h.out.homed == 1);
-fprintf('ok  homing-required fault\n');
+% Go Home: moves to the home position and ends when the axis is at rest.
+h = command(h, 6);
+h = runFor(h, 0.3);
+assert(h.out.statusCode == 7 || h.out.statusCode == 8);
+h = runFor(h, 40);
+assert(abs(h.sl.pos - 10) < 0.1 && h.sl.mode == 5);
+assert(h.out.state == 1 && h.out.statusCode == 0 && h.out.motionEnable == 0);
+fprintf('ok  go home\n');
 
 % E-stop during jog; release does not restart motion.
 h.in.jogVelocity = 2;
@@ -162,8 +162,7 @@ function sl = slaveInit()
 sl.state = 0;  sl.t = 0;
 sl.hs = 0;     sl.tHs = 0;   sl.hsMode = 0;  sl.hsConf = 0;
 sl.mode = 0;
-sl.pos = 250;  sl.moving = 0;
-sl.homingRequired = 1;
+sl.pos = 40;   sl.moving = 0;
 sl.faultCode = 0;
 sl.brake = 0;  sl.brakeCycles = 0;
 sl.rawMode = 0;    sl.tRawMode = 0;  sl.reqMode = 0;  sl.tReqMode = 0;
@@ -189,9 +188,6 @@ end
 
 function sl = slaveFault(sl, code)
 sl.state = 6;  sl.t = 0;  sl.faultCode = code;  sl.moving = 0;
-if code == 4
-    sl.homingRequired = 1;
-end
 end
 
 
@@ -268,7 +264,7 @@ if sl.state == 0                                    % idle
 elseif sl.state == 1                                % drive enable + brake release
     if sl.t >= 0.2
         sl.brake = 1;  sl.brakeCycles = sl.brakeCycles + 1;
-        next = enterMode(sl);
+        next = 3;
     end
 
 elseif sl.state == 2                                % brake engage
@@ -283,15 +279,12 @@ elseif sl.state == 3                                % operating
         v = toward(sl.pos, V2x(u.refVoltage, cfg), 3, dt);
     elseif sl.mode == 3
         v = min(max(u.refVoltage * cfg.velPerVolt, -5), 5);
-    elseif sl.mode == 5
-        if sl.homingRequired ~= 0
-            v = -60;                                % stand-in for the homing sequence
-            if sl.pos <= 0
-                sl.homingRequired = 0;
-                next = 4;
-            end
-        else
-            v = toward(sl.pos, 10, 3, dt);
+    elseif sl.mode == 5                             % go home
+        v = toward(sl.pos, 10, 3, dt);
+    elseif sl.mode == 6                             % stand-in for the homing sequence
+        v = -60;
+        if sl.pos <= 0
+            next = 4;
         end
     end
     sl.pos = max(sl.pos + v * dt, 0);
@@ -316,7 +309,7 @@ elseif sl.state == 5                                % hold position
         next = 2;
     elseif halted && hsComplete
         sl.mode = sl.hsMode;
-        next = enterMode(sl);
+        next = 3;
     end
 
 else                                                % fault
@@ -327,20 +320,8 @@ else                                                % fault
     end
 end
 
-if next == 6 && sl.state ~= 6 && sl.faultCode == 0
-    sl.faultCode = 4;                               % operational mode while homing required
-end
 if next ~= sl.state
     sl.state = next;  sl.t = 0;
-end
-end
-
-
-function next = enterMode(sl)
-if sl.mode >= 1 && sl.mode <= 4 && sl.homingRequired ~= 0
-    next = 6;
-else
-    next = 3;
 end
 end
 

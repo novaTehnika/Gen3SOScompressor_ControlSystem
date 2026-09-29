@@ -7,20 +7,17 @@
 
 ## 1. Overview
 
-The system requires two types of homing to establish accurate position reference:
+Homing is not required at boot. The absolute encoder keeps the motor position
+across power cycles, and the zero set by Mode 110 is an `MC_SetPosition`
+offset that the controller stores in battery-backed memory (flash on
+Sigma-7Siec) for absolute-encoder axes. Operational modes are accepted
+directly after power-up, and soft limits are enforced from boot.
 
-| Mode | Name | Purpose | When Required |
-|------|------|---------|---------------|
-| 110 | Home to Limit | Establish absolute position using limit switch | Encoder battery failure or position data corruption |
-| 111 | Home to EOT | Calibrate end-of-travel position | Every power cycle |
-| 101 | Go Home | Move to home position OR redirect to Mode 110 | User convenience |
-
-### Homing Requirement Flags
-
-| Flag | Set When | Cleared By |
-|------|----------|------------|
-| `G_flagAbsHomeRequired` | Every power cycle and every fault reset | Completing Mode 110 |
-| `G_flagEOTHomeRequired` | Every power cycle and every fault reset | Completing Mode 111 |
+| Mode | Name | Purpose | When Used |
+|------|------|---------|-----------|
+| 110 | Home to Limit | Establish the coordinate-frame zero using the negative overtravel switch | On demand from the master: after an encoder alarm or encoder reset (reported as `FAULT_DRIVE`), or after a controller SRAM battery failure or controller replacement, which lose the stored offset |
+| 101 | Go Home | Move to the home position (`G_cfgGoHomePosition`) | User convenience |
+| 111 | Reserved | No state handler; the slave stays in its current state | Not used |
 
 ---
 
@@ -94,9 +91,9 @@ Step 9: RETRACT AWAIT              Step 10: COMPLETE
 | Action: CmdMoveAbsolute.Execute  |  |   (PRG_Main, not FB)            |
 |   := FALSE (one-scan latch)      |  | G_sysActualPosition ≈ 0.0       |
 | Exit: StaMoveAbsolute.Done       |  | G_doHomingComplete = TRUE       |
-| FB sets Done = TRUE              |  | G_flagHomingRequired = FALSE    |
-| PRG_Main clears                  |  | Exit: New mode commanded        |
-|   G_flagHomingRequired           |  +---------------------------------+
+| FB sets Done = TRUE              |  | G_flagHomingComplete = TRUE     |
+| PRG_Main sets                    |  | Exit: New mode commanded        |
+|   G_flagHomingComplete           |  +---------------------------------+
 +----------------------------------+
 ```
 
@@ -138,7 +135,7 @@ MASTER:
    - G_doInMotion = TRUE during approach/backoff
    - G_doInMotion = FALSE during detect/setref
 5. Wait for G_doHomingComplete = TRUE
-6. Homing success - can now command other modes
+6. Homing complete - the new zero is stored
 ```
 
 ---
@@ -215,7 +212,6 @@ Step 4: SET REFERENCE (offset only)
 | Note: No MC_SetPosition call —           |
 |       encoder zero from Mode 110 kept.   |
 | PRG_Main writes offset to G_posEOTOffset |
-| and clears G_flagEOTHomeRequired         |
 +------------------------------------------+
         |
         v
@@ -287,72 +283,22 @@ MASTER:
 ## 4. Mode 101: Go Home
 
 ### Purpose
-Move to the home position (at the home limit switch location). Provides convenience for returning to known position, with automatic handling of homing requirements.
+Move to the home position (`G_cfgGoHomePosition`). Provides convenience for returning to a known position.
 
-### Behavior Decision Tree
+### Behavior
 
-```
-GO HOME REQUESTED
-        |
-        v
-+-------------------+
-| Check             |
-| G_flagAbsHomeRequired|
-+--------+----------+
-         |
-    +----+----+
-    |         |
-   TRUE     FALSE
-    |         |
-    v         v
-+-------+  +------------------+
-|Redirect|  | Execute         |
-|to      |  | MC_MoveAbsolute |
-|Mode 110|  | to HomePosition |
-+-------+  +------------------+
-    |              |
-    v              v
- Run Mode 110   Hold at home
- sequence       until mode change
-```
-
-### When Redirect Occurs
-
-If `G_flagAbsHomeRequired = TRUE`:
-1. FB_GoHome sets `RedirectToHoming = TRUE`
-2. PRG_Main transitions to ST_HOME_LIMIT (Mode 110)
-3. Mode 110 sequence executes
-4. After completion, system is at home position
-5. `G_flagAbsHomeRequired` is cleared
-
-### Normal Go Home Execution
-
-If `G_flagAbsHomeRequired = FALSE`:
 1. Execute MC_MoveAbsolute to `G_cfgGoHomePosition` (default: 0.0 mm)
-2. Velocity: `G_cfgGoHomeVelocity` (default: 50 mm/s)
+2. Velocity: `G_cfgGoHomeVelocity`
 3. Hold at position until mode change
-
-### Important Notes
-
-- EOT homing (`G_flagEOTHomeRequired`) does NOT block Go Home
-- Go Home can execute even if EOT homing not done
-- Only the abs-home flag (`G_flagAbsHomeRequired`) causes redirect
-- After Go Home, position is at home switch location
 
 ### Master Coordination
 
 ```
 MASTER:
 1. Command mode 101 (DI0=1, DI1=0, DI2=1)
-2. Set G_diMotionEnable = HIGH
-3. Wait for confirmation
-4. IF confirmation changes to 110:
-   - Redirect occurred, Mode 110 running
-   - Wait for that sequence to complete
-   ELSE:
-   - Direct move to home executing
-   - Wait for G_doInMotion = FALSE
-5. Axis is now at home position
+2. Wait for confirmation, then set G_diMotionEnable = HIGH
+3. Wait for G_doInMotion = FALSE
+4. Axis is now at home position
 ```
 
 ---
@@ -400,40 +346,33 @@ Notes:
 
 ---
 
-## 6. Typical Startup Homing Sequence
+## 6. Startup and Re-Homing
 
-### Every Power Cycle (And After Every Fault Reset)
-
-Both homing flags are unconditionally forced TRUE on boot and whenever the fault-reset handshake exits `ST_FAULT_IDLE`. There is no "retained position" fast path.
+### Power-Up
 
 ```
-POWER ON (or ST_FAULT_IDLE -> ST_IDLE)
+POWER ON
     |
     v
-G_flagAbsHomeRequired = TRUE
-G_flagEOTHomeRequired = TRUE
+ST_IDLE - coordinate frame retained, no homing needed
+    |
+    v
+Ready for operational modes
+```
+
+### Re-establishing the Zero
+
+```
+Frame lost (encoder alarm / controller battery failure / controller replaced)
     |
     v
 MASTER: Command Mode 110 (Home to Limit)
     |
     v
-Limit homing executes
+Limit homing executes; MC_SetPosition stores the new offset
     |
     v
-G_flagAbsHomeRequired = FALSE
-    |
-    v
-MASTER: Command Mode 111 (Home to EOT)
-    |
-    v
-EOT homing executes
-    |
-    v
-G_flagEOTHomeRequired = FALSE
-G_doHomingComplete = TRUE
-    |
-    v
-Ready for operational modes
+G_doHomingComplete = TRUE (until G_diMotionEnable drops)
 ```
 
 ---
@@ -477,14 +416,14 @@ Ready for operational modes
 **Symptom**: Position accuracy degrades over time
 
 **Possible Causes**:
-- EOT homing not performed (every power cycle)
+- Coordinate frame lost (encoder alarm, controller battery failure or
+  controller replacement)
 - Mechanical wear changing EOT position
 - Thermal expansion effects
 
 **Resolution**:
-1. Always complete Mode 111 after power cycle
-2. Periodically re-run EOT homing during long operations
-3. Consider temperature compensation if significant
+1. Re-home with Mode 110
+2. Consider temperature compensation if significant
 
 ---
 
@@ -494,19 +433,11 @@ Ready for operational modes
 
 | Mode | Binary | Action |
 |------|--------|--------|
-| 101 | 101 | Go Home (or redirect to 110) |
-| 110 | 110 | Home to Limit Switch |
-| 111 | 111 | Home to End-of-Travel |
+| 101 | 101 | Go Home |
+| 110 | 110 | Home to Limit Switch (re-establishes the zero) |
+| 111 | 111 | Reserved |
 
-### Flag Clearance
+### When to Home
 
-| Flag | Cleared By |
-|------|------------|
-| G_flagAbsHomeRequired | Mode 110 complete |
-| G_flagEOTHomeRequired | Mode 111 complete |
-
-### Required Sequence
-
-1. If encoder invalid: Mode 110 first
-2. Every power cycle: Mode 111
-3. Then operational modes available
+1. Power-up: no homing needed
+2. After an encoder alarm, controller battery failure or controller replacement: Mode 110

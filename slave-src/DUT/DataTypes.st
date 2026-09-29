@@ -30,7 +30,7 @@ TYPE
    (* IMPORTANT: Member order defines implicit integer values (0-7).
       These values map to 3-bit mode encoding on DI0-DI2 and DO0-DO2. Do not reorder.
       MODE_RESERVED_111 is a placeholder for the legacy EOT-homing slot; commanding
-      bits 111 has no state handler and will raise FAULT_HOMING_REQ. *)
+      bits 111 has no state handler and leaves the slave in its current state. *)
    E_OperatingMode :
    (
       MODE_IDLE,               (* implicit 0 - 000: Idle - Drive OFF, brake engaged *)
@@ -63,7 +63,7 @@ TYPE
       FAULT_HANDSHAKE,         (* implicit 1 - 001: Handshake timeout or mismatch *)
       FAULT_DRIVE,             (* implicit 2 - 010: Drive fault (from servo amplifier) *)
       FAULT_POSITION,          (* implicit 3 - 011: Position limit exceeded *)
-      FAULT_HOMING_REQ,        (* implicit 4 - 100: Homing requirement not met *)
+      FAULT_RESERVED_100,      (* implicit 4 - 100: Reserved (never raised) *)
       FAULT_PISTON_EXIT,       (* implicit 5 - 101: Piston exit prevention triggered *)
       FAULT_LIMIT_SWITCH,      (* implicit 6 - 110: Limit switch fault *)
       FAULT_ENCODER            (* implicit 7 - 111: Encoder / absolute position fault *)

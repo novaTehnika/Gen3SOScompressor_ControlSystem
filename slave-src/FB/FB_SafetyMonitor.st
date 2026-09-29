@@ -33,7 +33,6 @@
        ActualPosition      : LREAL            (* Current axis position (mm)
        SoftLimitMin        : LREAL            (* Minimum allowed position (mm)
        SoftLimitMax        : LREAL            (* Maximum allowed position (mm)
-       HomingRequired      : BOOL             (* TRUE while coordinate frame is not yet established
        DriveFault          : BOOL             (* Drive has reported a fault
        CurrentState        : E_SystemState    (* Current state machine state
        ExitGuardTriggered  : BOOL             (* Piston exit guard triggered fault
@@ -144,22 +143,19 @@ END_IF;
    POSITION LIMIT MONITORING
    Position beyond software limits.
 
+   Active from boot: the absolute encoder and the controller's stored offset
+   keep the coordinate frame across power cycles.
+
    Suppressed when EITHER:
-   - HomingRequired is TRUE (the post-homing coordinate frame is not yet
-     established, so soft limits are not meaningful). This covers boot
-     with a stale absolute-encoder reading and the activation transition
-     states leading into the first homing.
-   - CurrentState = ST_HOME_LIMIT (the homing sequence is running, even
-     if voluntarily re-commanded after a successful homing). The sequence
-     legitimately drives the axis below SoftLimitMin to find the switch,
-     and the coordinate frame is being re-established mid-flight.
+   - CurrentState = ST_HOME_LIMIT (the homing sequence is running). The
+     sequence legitimately drives the axis below SoftLimitMin to find the
+     switch, and the coordinate frame is being re-established mid-flight.
    - In a recovery state (bInRecoveryState): the axis starts outside the
      soft-limit box and is being jogged back inside; faulting on the very
      position we are recovering from would defeat the recovery.
    -------------------------------------------------------------------------- *)
 
-IF (NOT HomingRequired) AND
-   (CurrentState <> E_SystemState#ST_HOME_LIMIT) AND
+IF (CurrentState <> E_SystemState#ST_HOME_LIMIT) AND
    (NOT bInRecoveryState) AND
    ((ActualPosition < SoftLimitMin) OR (ActualPosition > SoftLimitMax)) THEN
     FaultPosition := TRUE;

@@ -30,8 +30,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         PositionGoButton                matlab.ui.control.Button
         TargetPositionSpinner           matlab.ui.control.Spinner
         TargetPositionmmSpinnerLabel    matlab.ui.control.Label
+        GoHomeButton                    matlab.ui.control.Button
         HomeButton                      matlab.ui.control.Button
-        ManualControlButton             matlab.ui.control.StateButton
+        ManualControlButton            matlab.ui.control.StateButton
         StartProcedureButton            matlab.ui.control.Button
         ConnectToCompressorButton       matlab.ui.control.Button
         TabGroup                        matlab.ui.container.TabGroup
@@ -107,9 +108,10 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         OP_JOG      = 3
         OP_PRESSURE = 4
         OP_RESET    = 5
+        OP_GO_HOME  = 6
 
         faultNames = ["Handshake", "Drive", "Position limit", ...
-            "Homing required", "Piston exit guard", "Limit switch", "Encoder"]
+            "Reserved", "Piston exit guard", "Limit switch", "Encoder"]
     end
 
     methods (Access = private)
@@ -217,10 +219,10 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 case 5,  text = "Pressure control";
                 case 6,  text = "Stopping";
                 case 7,  text = "Starting";
+                case 8,  text = "Going home";
                 case 9,  text = "Resetting fault";
                 case 20, text = "E-STOP";
                 case 30, text = "Slave did not confirm the mode";
-                case 31, text = "Homing required";
                 case 32, text = "Fault reset failed";
                 case 33, text = "Slave did not report stopped";
                 otherwise
@@ -298,6 +300,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         function ManualControlButtonPressed(app, event)
             value = app.ManualControlButton.Value;
             app.HomeButton.Enable = value;
+            app.GoHomeButton.Enable = value;
             app.TargetPositionSpinner.Enable = value;
             app.TargetPositionmmSpinnerLabel.Enable = value;
             app.PositionGoButton.Enable = value;
@@ -313,6 +316,11 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % Button pushed function: HomeButton
         function HomeButtonPushed(app, event)
             sendCommand(app, app.OP_HOME);
+        end
+
+        % Button pushed function: GoHomeButton
+        function GoHomeButtonPushed(app, event)
+            sendCommand(app, app.OP_GO_HOME);
         end
 
         % Close request function: UIFigure
@@ -704,14 +712,23 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.ManualControlButton = uibutton(app.ControlsPanel, 'state');
             app.ManualControlButton.ValueChangedFcn = createCallbackFcn(app, @ManualControlButtonPressed, true);
             app.ManualControlButton.Text = 'Manual Control';
-            app.ManualControlButton.Position = [295 40 100 23];
+            app.ManualControlButton.Position = [264 40 130 23];
 
             % Create HomeButton
             app.HomeButton = uibutton(app.ControlsPanel, 'push');
             app.HomeButton.ButtonPushedFcn = createCallbackFcn(app, @HomeButtonPushed, true);
             app.HomeButton.Enable = 'off';
-            app.HomeButton.Position = [295 12 100 23];
+            app.HomeButton.Tooltip = {'Home to the negative overtravel switch and reset the zero'};
+            app.HomeButton.Position = [264 12 62 23];
             app.HomeButton.Text = 'Home';
+
+            % Create GoHomeButton
+            app.GoHomeButton = uibutton(app.ControlsPanel, 'push');
+            app.GoHomeButton.ButtonPushedFcn = createCallbackFcn(app, @GoHomeButtonPushed, true);
+            app.GoHomeButton.Enable = 'off';
+            app.GoHomeButton.Tooltip = {'Move to the home position'};
+            app.GoHomeButton.Position = [332 12 62 23];
+            app.GoHomeButton.Text = 'Go Home';
 
             % Create TargetPositionmmSpinnerLabel
             app.TargetPositionmmSpinnerLabel = uilabel(app.ControlsPanel);
@@ -794,7 +811,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.ESTOP.Text = 'STOP';
             app.ESTOP.BackgroundColor = [1 0 0];
             app.ESTOP.FontColor = [1 1 1];
-            app.ESTOP.Position = [174 13 100 49];
+            app.ESTOP.Position = [164 13 90 49];
 
             % Create StatusLabel
             app.StatusLabel = uilabel(app.UIFigure);

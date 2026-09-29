@@ -186,8 +186,8 @@ The brake is controlled via DO3 through a relay:
 
 ### 7.2 Absolute Encoder Setup
 The SGM7J-04A6A6C has a 24-bit absolute encoder:
-- Battery backup maintains position across power cycles; position is trusted across drive power cycles since the controller and encoder retain position data
-- `G_flagHomingRequired` is forced TRUE on cold start (controller boot) only; it is cleared only by a successful Mode 110 homing sequence
+- Battery backup maintains position across power cycles. The zero set by Mode 110 is an `MC_SetPosition` offset that the controller stores in battery-backed memory (flash on Sigma-7Siec) for absolute-encoder axes (Pn002.2), so the coordinate frame survives controller and drive power cycles and no homing is needed at boot
+- Re-home with Mode 110 when the frame is lost: after an encoder alarm or encoder reset, or after a controller SRAM battery failure or controller replacement (which lose the stored offset)
 - Encoder alarms (A.810/A.CC0/A.830) surface as `FAULT_DRIVE` from the servo amplifier
 
 ---
@@ -226,8 +226,9 @@ The SGM7J-04A6A6C has a 24-bit absolute encoder:
 ### 8.5 Homing Verification
 1. [ ] Execute Mode 110 (Home to Negative Overtravel Switch)
 2. [ ] Verify ram drives negative, stops at negative overtravel, backs off, and `MC_SetPosition` sets position to `G_cfgHomeLimSetPosition`
-3. [ ] Verify `G_flagHomingRequired` is cleared and `G_doHomingComplete` goes TRUE
-4. [ ] Command bits `111` (Mode 7) — verify the system enters `ST_FAULT` (no state handler exists for the reserved slot)
+3. [ ] Verify `G_doHomingComplete` goes TRUE
+4. [ ] Power-cycle the controller and drive — verify the reported position is unchanged and Position mode is accepted without homing
+5. [ ] Command bits `111` (Mode 7) — verify the slave stays in its current state (no state handler exists for the reserved slot)
 
 ---
 
@@ -241,7 +242,7 @@ The SGM7J-04A6A6C has a 24-bit absolute encoder:
 ### 9.2 Encoder Alarm (A.CC0)
 - Battery may be low or disconnected
 - Use `Y_ResetAbsoluteEncoder` to clear
-- Homing required after reset
+- Re-home (Mode 110) after reset
 
 ### 9.3 Overtravel Switch Not Detecting
 - Check wiring (24V, signal, 0V)

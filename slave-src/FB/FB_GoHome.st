@@ -6,12 +6,9 @@
 
    Description:
    Handles Mode 101 (Go Home) which moves the axis to the home position.
-   Checks that homing has been performed before executing; if not, requests
-   that PRG_Main redirect to Mode 110.
 
    Behavior:
-   - If HomingRequired is TRUE: Set RedirectToHoming, PRG_Main switches to 110
-   - If requirements met: Command MC_MoveAbsolute via CmdMoveAbsolute output
+   - Command MC_MoveAbsolute via CmdMoveAbsolute output
    - After reaching position: Hold there until mode change
 
    Integration:
@@ -24,7 +21,6 @@
      VAR_INPUT:
        Enable              : BOOL                  (* Enable the function block
        Execute             : BOOL                  (* Start go home sequence
-       AbsHomeRequired     : BOOL                  (* Homing required (blocks Go Home, bind G_flagHomingRequired)
        HomePosition        : LREAL                 (* Target home position (mm)
        HomeVelocity        : LREAL                 (* Movement velocity (mm/s)
        Acceleration        : LREAL                 (* Move acceleration (mm/s²)
@@ -36,8 +32,6 @@
        Active              : BOOL             (* Sequence is running
        Done                : BOOL             (* At home position
        AtPosition          : BOOL             (* Currently at home position
-       HomingRequired      : BOOL             (* Homing must be done first
-       RedirectToHoming    : BOOL             (* Caller should switch to homing mode
        InMotion            : BOOL             (* Currently moving
        Error               : BOOL             (* Error occurred
        CmdMoveAbsolute     : ST_CmdMoveAbsolute  (* Command output for MC_MoveAbsolute
@@ -48,8 +42,6 @@
        rPosTolerance       : LREAL := 0.1     (* mm
      VAR CONSTANT:
        GOH_IDLE            : INT := 0
-       GOH_CHECK_REQ       : INT := 1
-       GOH_REDIRECT        : INT := 2
        GOH_MOVING          : INT := 3
        GOH_AT_POSITION     : INT := 4
        GOH_ABORTING        : INT := 5
@@ -64,8 +56,6 @@ IF NOT Enable THEN
     Active := FALSE;
     Done := FALSE;
     AtPosition := FALSE;
-    HomingRequired := FALSE;
-    RedirectToHoming := FALSE;
     InMotion := FALSE;
     Error := FALSE;
     eState := GOH_IDLE;
@@ -78,7 +68,7 @@ END_IF;
 rTrigExecute(CLK := Execute);
 
 (* Handle abort in any state *)
-IF Abort AND (eState <> GOH_IDLE) AND (eState <> GOH_ERROR) AND (eState <> GOH_REDIRECT) THEN
+IF Abort AND (eState <> GOH_IDLE) AND (eState <> GOH_ERROR) THEN
     CmdMoveAbsolute.Execute := FALSE;
     eState := GOH_ABORTING;
 END_IF;
@@ -93,8 +83,6 @@ IF eState = GOH_IDLE THEN
         Active := FALSE;
         Done := FALSE;
         AtPosition := FALSE;
-        HomingRequired := FALSE;
-        RedirectToHoming := FALSE;
         InMotion := FALSE;
         Error := FALSE;
 
@@ -103,32 +91,8 @@ IF eState = GOH_IDLE THEN
 
         IF rTrigExecute.Q OR Execute THEN
             Active := TRUE;
-            eState := GOH_CHECK_REQ;
-        END_IF;
-
-
-ELSIF eState = GOH_CHECK_REQ THEN
-
-    (* GOH_CHECK_REQ - Check homing requirements *)
-
-        IF AbsHomeRequired THEN
-            HomingRequired := TRUE;
-            RedirectToHoming := TRUE;
-            eState := GOH_REDIRECT;
-
-        ELSE
-            HomingRequired := FALSE;
-            RedirectToHoming := FALSE;
             eState := GOH_MOVING;
         END_IF;
-
-
-ELSIF eState = GOH_REDIRECT THEN
-
-    (* GOH_REDIRECT - Waiting for PRG_Main to handle redirect *)
-        Active := TRUE;
-        HomingRequired := TRUE;
-        RedirectToHoming := TRUE;
 
 
 ELSIF eState = GOH_MOVING THEN

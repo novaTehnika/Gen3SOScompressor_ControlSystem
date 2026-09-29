@@ -16,7 +16,7 @@
    001 = Handshake timeout/mismatch
    010 = Drive fault
    011 = Position limit exceeded
-   100 = Homing requirement not met
+   100 = Reserved (never raised)
    101 = Piston exit prevention triggered
    110 = Limit switch fault
    111 = Encoder/absolute position fault

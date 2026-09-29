@@ -28,7 +28,6 @@ function out = masterStateMachine(in, cfg, dt)
 %     refVoltage        analog reference (V)
 %     statusCode        STATUS_* below
 %     faultCode         last fault code read from the slave
-%     homed             1 once homing has completed and no fault has voided it
 %     state             ST_* below
 %
 %   Mode bits only change while motionEnable is low. A mode is commanded
@@ -53,6 +52,7 @@ OP_POSITION = 2;
 OP_JOG      = 3;
 OP_PRESSURE = 4;
 OP_RESET    = 5;
+OP_GO_HOME  = 6;
 
 STATUS_IDLE            = 0;
 STATUS_HOMING          = 1;
@@ -62,21 +62,18 @@ STATUS_JOG             = 4;
 STATUS_PRESSURE        = 5;
 STATUS_STOPPING        = 6;
 STATUS_STARTING        = 7;
+STATUS_GOING_HOME      = 8;
 STATUS_RESETTING       = 9;
 STATUS_FAULT_BASE      = 10;    % + fault code
 STATUS_ESTOP           = 20;
 STATUS_NO_CONFIRM      = 30;
-STATUS_HOMING_REQUIRED = 31;
 STATUS_RESET_FAILED    = 32;
 STATUS_STOP_TIMEOUT    = 33;
-
-FAULT_HOMING_REQ = 4;
-FAULT_ENCODER    = 7;
 
 if isempty(s) || in.reset ~= 0
     % t is the time in the current state, tDwell a per-state condition
     % timer and note a status that stays on display while idle.
-    s = struct('state', ST_INIT, 't', 0, 'tDwell', 0, 'homed', 0, ...
+    s = struct('state', ST_INIT, 't', 0, 'tDwell', 0, ...
         'activeOp', OP_STOP, 'pendingOp', OP_STOP, 'lastSeq', in.cmdSeq, ...
         'note', STATUS_IDLE, 'modeCode', 0, 'motionEnable', 0, ...
         'faultReset', 0, 'refVoltage', 0, 'statusCode', STATUS_IDLE, ...
@@ -86,13 +83,8 @@ end
 newCmd = in.cmdSeq ~= s.lastSeq;
 s.lastSeq = in.cmdSeq;
 
-isMotionOp = in.op == OP_HOME || in.op == OP_POSITION || ...
-             in.op == OP_JOG || in.op == OP_PRESSURE;
-opAllowed = in.op == OP_HOME || s.homed ~= 0;
-
-if in.homingComplete ~= 0
-    s.homed = 1;
-end
+isMotionOp = in.op == OP_HOME || in.op == OP_GO_HOME || ...
+             in.op == OP_POSITION || in.op == OP_JOG || in.op == OP_PRESSURE;
 
 % Overrides from any state.
 if in.estop ~= 0
@@ -131,11 +123,7 @@ switch s.state
             s.note = STATUS_IDLE;
             s.pendingOp = OP_STOP;
             if isMotionOp
-                if opAllowed
-                    s.pendingOp = in.op;
-                else
-                    s.note = STATUS_HOMING_REQUIRED;
-                end
+                s.pendingOp = in.op;
             end
         end
         if in.op == OP_STOP
@@ -193,15 +181,19 @@ switch s.state
         if s.activeOp == OP_HOME
             s.refVoltage = 0;
             s.statusCode = STATUS_HOMING;
+            done = in.homingComplete ~= 0;
+
+        elseif s.activeOp == OP_GO_HOME
+            s.refVoltage = 0;
+            s.statusCode = STATUS_GOING_HOME;
+            % The slave has no arrival output for Go Home; the axis coming
+            % to rest ends it.
             if in.inMotion == 0
                 s.tDwell = s.tDwell + dt;
             else
                 s.tDwell = 0;
             end
-            % Go Home on an axis that is already homed ends without a
-            % homingComplete pulse; the axis coming to rest ends it.
-            done = in.homingComplete ~= 0 || ...
-                   (s.homed ~= 0 && s.tDwell >= cfg.tGoHomeDone);
+            done = s.tDwell >= cfg.tGoHomeDone;
 
         elseif s.activeOp == OP_POSITION
             target = min(max(in.targetPosition, cfg.posMin), cfg.posMax);
@@ -233,12 +225,8 @@ switch s.state
             s.pendingOp = OP_STOP;
             next = ST_STOP;
         elseif newCmd && isMotionOp && in.op ~= s.activeOp
-            if opAllowed
-                s.pendingOp = in.op;
-                next = ST_STOP;
-            else
-                s.note = STATUS_HOMING_REQUIRED;
-            end
+            s.pendingOp = in.op;
+            next = ST_STOP;
         end
 
     case ST_STOP
@@ -249,7 +237,7 @@ switch s.state
         s.statusCode = STATUS_STOPPING;
         if in.op == OP_STOP
             s.pendingOp = OP_STOP;
-        elseif newCmd && isMotionOp && opAllowed
+        elseif newCmd && isMotionOp
             s.pendingOp = in.op;
         end
         % With motionEnable low and a mode still commanded, the slave
@@ -294,9 +282,6 @@ switch s.state
             end
             s.faultCode = in.confCode;
             s.modeCode = in.confCode;
-            if s.faultCode == FAULT_HOMING_REQ || s.faultCode == FAULT_ENCODER
-                s.homed = 0;
-            end
         end
         s.statusCode = STATUS_FAULT_BASE + s.faultCode;
         if in.faultActive == 0
@@ -357,14 +342,15 @@ out.faultReset   = s.faultReset;
 out.refVoltage   = s.refVoltage;
 out.statusCode   = s.statusCode;
 out.faultCode    = s.faultCode;
-out.homed        = s.homed;
 out.state        = s.state;
 end
 
 
 function mode = slaveModeFor(op)
 % Slave mode code commanded for each app operation.
-if op == 1          % OP_HOME: Go Home, which homes first when required
+if op == 1          % OP_HOME: Home to Negative Overtravel (re-establishes zero)
+    mode = 6;
+elseif op == 6      % OP_GO_HOME: move to the home position
     mode = 5;
 elseif op == 2      % OP_POSITION
     mode = 2;
