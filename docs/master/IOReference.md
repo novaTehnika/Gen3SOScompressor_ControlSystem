@@ -38,7 +38,7 @@ mode_command = DI2 * 4 + DI1 * 2 + DI0
 | 1 | 0 | 0 | 4 | Torque Control |
 | 1 | 0 | 1 | 5 | Go Home |
 | 1 | 1 | 0 | 6 | Home to Limit |
-| 1 | 1 | 1 | 7 | Reserved (raises FAULT_HOMING_REQ) |
+| 1 | 1 | 1 | 7 | Reserved (no handler; slave stays in its current state) |
 
 #### DI3: Motion Enable
 
@@ -120,7 +120,7 @@ fault_code = DO2 * 4 + DO1 * 2 + DO0
 | 0 | 0 | 1 | 1 | Handshake Timeout |
 | 0 | 1 | 0 | 2 | Drive Fault |
 | 0 | 1 | 1 | 3 | Position Limit |
-| 1 | 0 | 0 | 4 | Homing Required |
+| 1 | 0 | 0 | 4 | Reserved (never raised) |
 | 1 | 0 | 1 | 5 | Piston Exit Guard |
 | 1 | 1 | 0 | 6 | Limit Switch Fault |
 | 1 | 1 | 1 | 7 | Encoder Fault |
@@ -155,8 +155,8 @@ Mode-dependent status indicator:
 
 **Not a persistent "homed" flag**: this signal drops LOW again as soon as
 `G_diMotionEnable` is released (the slave leaves ST_HOME_COMPLETE for
-ST_HOLD_POSITION). The master must latch the HIGH pulse if it needs to
-remember that homing succeeded.
+ST_HOLD_POSITION). The master uses the HIGH pulse to end its Home
+operation.
 
 #### DO6: In Motion
 

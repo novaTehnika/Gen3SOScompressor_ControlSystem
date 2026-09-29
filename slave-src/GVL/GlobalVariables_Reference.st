@@ -345,9 +345,6 @@
         HOMING FLAGS
         ======================================================================== *)
 
-     (* Single homing-required flag. Forced TRUE on boot and after fault reset;
-        cleared when fbHomeLimit.Done (Mode 110). *)
-     G_flagHomingRequired      : BOOL := TRUE     (* Homing required before operational modes *)
      G_flagHomingInProgress    : BOOL := FALSE    (* TRUE while homing sequence active *)
      G_flagHomingComplete      : BOOL := FALSE    (* TRUE after successful homing *)
 

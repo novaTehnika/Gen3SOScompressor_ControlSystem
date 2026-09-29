@@ -50,7 +50,7 @@ cfg.tEnableMax     = 1.0;   % proceed without BrakeDisengage after this (slave r
 cfg.tStopMin       = 0.1;   % ignore InMotion this long after dropping MotionEnable
 cfg.tStopMax       = 3.0;   % give up waiting for InMotion low
 cfg.tModeClear     = 0.15;  % mode 000 held before a new request (slave debounce + stable time)
-cfg.tGoHomeDone    = 1.0;   % InMotion low this long ends Go Home when already homed
+cfg.tGoHomeDone    = 1.0;   % InMotion low this long ends Go Home
 
 % Fault handling times (s).
 cfg.tFaultSettle  = 0.02;   % after FaultActive before reading the code
