@@ -9,14 +9,14 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         FaultActiveLampLabel            matlab.ui.control.Label
         MixerOnLamp                     matlab.ui.control.Lamp
         MixerOnLampLabel                matlab.ui.control.Label
-        FlowRatemLsGauge                matlab.ui.control.Gauge
-        FlowRatemLsGaugeLabel           matlab.ui.control.Label
-        PositionmmGauge                 matlab.ui.control.Gauge
-        PositionmmGaugeLabel            matlab.ui.control.Label
-        VelocitymmsGauge                matlab.ui.control.Gauge
-        VelocitymmsGaugeLabel           matlab.ui.control.Label
-        PressureatmGauge                matlab.ui.control.Gauge
-        PressureatmGaugeLabel           matlab.ui.control.Label
+        FlowPanel                       matlab.ui.container.Panel
+        FlowValue                       matlab.ui.control.Label
+        PositionPanel                   matlab.ui.container.Panel
+        PositionValue                   matlab.ui.control.Label
+        PressurePanel                   matlab.ui.container.Panel
+        PressureValue                   matlab.ui.control.Label
+        VolumePanel                     matlab.ui.container.Panel
+        VolumeValue                     matlab.ui.control.Label
         StatusLabel                     matlab.ui.control.Label
         ControlsPanel                   matlab.ui.container.Panel
         ESTOP                           matlab.ui.control.StateButton
@@ -95,6 +95,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
     properties (Access = private)
         modelName
         updateTimer
+        cfg                 % masterConfig: geometry and limits
         commandSeq = 0      % mirrors the CommandSeq block; a change marks a new command
         lastStatusCode = 0
         resetDialogOpen = false
@@ -312,12 +313,13 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.estopActive = statusCode == app.STATUS_ESTOP;
             trackOp(app, statusCode);
             updateButtons(app);
-            app.PositionmmGauge.Value = clampTo(app, readBlock(app, "Position"), ...
-                app.PositionmmGauge.Limits);
-            app.VelocitymmsGauge.Value = clampTo(app, abs(readBlock(app, "Velocity")), ...
-                app.VelocitymmsGauge.Limits);
-            app.PressureatmGauge.Value = clampTo(app, readBlock(app, "Pressure"), ...
-                app.PressureatmGauge.Limits);
+            position = readBlock(app, "Position");
+            app.VolumeValue.Text = sprintf("%.1f", x2mL(position, app.cfg));
+            app.PressureValue.Text = sprintf("%.2f", readBlock(app, "Pressure"));
+            app.PositionValue.Text = sprintf("%.2f", app.cfg.posEOT - position);
+            % Positive while the piston moves toward the end of travel
+            app.FlowValue.Text = sprintf("%.2f", ...
+                mLPerMm(app.cfg) * readBlock(app, "Velocity"));
 
             faulted = statusCode > 10 && statusCode < 20;
             if faulted
@@ -358,10 +360,6 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             if event.SelectedOption == "Reset fault"
                 sendCommand(app, app.OP_RESET);
             end
-        end
-
-        function v = clampTo(~, v, limits)
-            v = min(max(v, limits(1)), limits(2));
         end
 
         function text = statusText(app, statusCode)
@@ -424,6 +422,14 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % Code that executes after component creation
         function startupFcn(app)
             app.modelName = string(app.Simulation.ModelName);
+
+            % Manual targets are distances from the end of travel, within
+            % the master's soft limits and not past the end of travel. The
+            % initial target is the retracted end, away from compression.
+            app.cfg = masterConfig();
+            app.TargetPositionSpinner.Limits = ...
+                [max(app.cfg.posEOT - app.cfg.posMax, 0), app.cfg.posEOT - app.cfg.posMin];
+            app.TargetPositionSpinner.Value = app.TargetPositionSpinner.Limits(2);
 
             app.updateTimer = timer( ...
                 ExecutionMode="fixedSpacing", ...
@@ -532,7 +538,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 stopOp(app);
                 return
             end
-            setBlock(app, "TargetPosition", target);
+            setBlock(app, "TargetPosition", app.cfg.posEOT - target);
             if requestOp(app, app.OP_POSITION)
                 app.activeTarget = target;
             end
@@ -592,6 +598,20 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
     % Component initialization
     methods (Access = private)
+
+        % A titled panel holding one large numeric value
+        function [panel, value] = createReadout(app, title, position, fontSize)
+            panel = uipanel(app.UIFigure);
+            panel.Title = title;
+            panel.FontWeight = 'bold';
+            panel.Position = position;
+            value = uilabel(panel);
+            value.HorizontalAlignment = 'center';
+            value.FontSize = fontSize;
+            value.FontWeight = 'bold';
+            value.Position = [5 10 position(3) - 10 position(4) - 45];
+            value.Text = '--';
+        end
 
         % Create UIFigure and components
         function createComponents(app)
@@ -919,18 +939,16 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.TargetPositionmmSpinnerLabel = uilabel(app.ControlsPanel);
             app.TargetPositionmmSpinnerLabel.HorizontalAlignment = 'right';
             app.TargetPositionmmSpinnerLabel.Enable = 'off';
-            app.TargetPositionmmSpinnerLabel.Position = [408 40 116 22];
-            app.TargetPositionmmSpinnerLabel.Text = 'Target Position (mm)';
+            app.TargetPositionmmSpinnerLabel.Position = [396 40 128 22];
+            app.TargetPositionmmSpinnerLabel.Text = 'Target from EOT (mm)';
 
             % Create TargetPositionSpinner
             app.TargetPositionSpinner = uispinner(app.ControlsPanel);
             app.TargetPositionSpinner.ValueChangedFcn = createCallbackFcn(app, @TargetSpinnerChanged, true);
             app.TargetPositionSpinner.Step = 5;
-            app.TargetPositionSpinner.Limits = [180 360];
             app.TargetPositionSpinner.RoundFractionalValues = 'on';
             app.TargetPositionSpinner.Enable = 'off';
             app.TargetPositionSpinner.Position = [539 40 100 22];
-            app.TargetPositionSpinner.Value = 180;
 
             % Create PositionGoButton
             app.PositionGoButton = uibutton(app.ControlsPanel, 'push');
@@ -1005,50 +1023,15 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.StatusLabel.Position = [5 1 439 22];
             app.StatusLabel.Text = 'Idle';
 
-            % Create PressureatmGaugeLabel
-            app.PressureatmGaugeLabel = uilabel(app.UIFigure);
-            app.PressureatmGaugeLabel.HorizontalAlignment = 'center';
-            app.PressureatmGaugeLabel.Position = [54 273 84 22];
-            app.PressureatmGaugeLabel.Text = 'Pressure (atm)';
-
-            % Create PressureatmGauge
-            app.PressureatmGauge = uigauge(app.UIFigure, 'circular');
-            app.PressureatmGauge.Limits = [0 120];
-            app.PressureatmGauge.Position = [35 310 120 120];
-
-            % Create VelocitymmsGaugeLabel
-            app.VelocitymmsGaugeLabel = uilabel(app.UIFigure);
-            app.VelocitymmsGaugeLabel.HorizontalAlignment = 'center';
-            app.VelocitymmsGaugeLabel.Position = [53 116 87 22];
-            app.VelocitymmsGaugeLabel.Text = 'Velocity (mm/s)';
-
-            % Create VelocitymmsGauge
-            app.VelocitymmsGauge = uigauge(app.UIFigure, 'circular');
-            app.VelocitymmsGauge.Limits = [0 5];
-            app.VelocitymmsGauge.Position = [36 153 120 120];
-
-            % Create PositionmmGaugeLabel
-            app.PositionmmGaugeLabel = uilabel(app.UIFigure);
-            app.PositionmmGaugeLabel.HorizontalAlignment = 'center';
-            app.PositionmmGaugeLabel.Position = [228 276 79 22];
-            app.PositionmmGaugeLabel.Text = 'Position (mm)';
-
-            % Create PositionmmGauge
-            app.PositionmmGauge = uigauge(app.UIFigure, 'circular');
-            app.PositionmmGauge.Limits = [0 365];
-            app.PositionmmGauge.MajorTicks = [0 80 160 240 320 365];
-            app.PositionmmGauge.Position = [207 313 120 120];
-
-            % Create FlowRatemLsGaugeLabel
-            app.FlowRatemLsGaugeLabel = uilabel(app.UIFigure);
-            app.FlowRatemLsGaugeLabel.HorizontalAlignment = 'center';
-            app.FlowRatemLsGaugeLabel.Position = [221 116 96 22];
-            app.FlowRatemLsGaugeLabel.Text = 'Flow Rate (mL/s)';
-
-            % Create FlowRatemLsGauge
-            app.FlowRatemLsGauge = uigauge(app.UIFigure, 'circular');
-            app.FlowRatemLsGauge.Limits = [0 30];
-            app.FlowRatemLsGauge.Position = [208 153 120 120];
+            % Create readouts
+            [app.VolumePanel, app.VolumeValue] = createReadout(app, ...
+                'Volume (mL)', [15 275 170 140], 40);
+            [app.PressurePanel, app.PressureValue] = createReadout(app, ...
+                'Pressure (atm)', [200 275 170 140], 40);
+            [app.PositionPanel, app.PositionValue] = createReadout(app, ...
+                'Position from EOT (mm)', [15 125 170 140], 28);
+            [app.FlowPanel, app.FlowValue] = createReadout(app, ...
+                'Flow (mL/s)', [200 125 170 140], 28);
 
             % Create MixerOnLampLabel
             app.MixerOnLampLabel = uilabel(app.UIFigure);

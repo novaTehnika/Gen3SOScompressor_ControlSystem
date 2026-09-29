@@ -12,6 +12,12 @@ cfg.posMapXmin = 0;         % mm
 cfg.posMapXtr  = 200;       % mm
 cfg.posMapXmax = 365;       % mm
 
+% Cylinder geometry. Displayed positions are distances from the end of
+% travel (posEOT) and volume is swept volume from there plus deadVolume.
+cfg.posEOT       = 305;             % mm, position at the end of travel (compression end)
+cfg.boreDiameter = 2.602 * 25.4;    % mm (2.602 in)
+cfg.deadVolume   = 10;              % mL, volume left at the end of travel
+
 % Velocity reference scaling (slave Velocity mode).
 cfg.velPerVolt = 0.7;       % mm/s per V; must equal G_cfgAnalogVelMax / 10
 

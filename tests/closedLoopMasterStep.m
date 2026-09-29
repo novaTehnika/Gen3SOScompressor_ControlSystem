@@ -77,6 +77,12 @@ h = runUntil(h, 0.5, []);
 assert(h.m.doSlave(1) == 1 && h.m.state == 1);
 fprintf('ok  e-stop\n');
 
+% Displayed volume: dead volume at the end of travel, bore area per mm.
+assert(abs(x2mL(cfg.posEOT, cfg) - cfg.deadVolume) < 1e-9);
+assert(abs(x2mL(cfg.posEOT - 100, cfg) - cfg.deadVolume ...
+           - 100 * pi / 4 * (2.602 * 25.4)^2 / 1000) < 1e-6);
+fprintf('ok  volume scaling (%.3f mL/mm)\n', mLPerMm(cfg));
+
 fprintf('all passed\n');
 end
 

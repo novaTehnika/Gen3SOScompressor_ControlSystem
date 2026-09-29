@@ -31,6 +31,14 @@ continuously while their operation is active. `ESTOP` and `Mixer` act at once.
 The app reads `StatusCode`, `FaultCode`, `State`, `Position`,
 `Velocity` and `Pressure`. Status codes are listed in `masterStateMachine.m`.
 
+## Operator app readouts
+
+The app shows volume (mL), pressure (atm), position (mm from the end of travel)
+and flow (mL/s, positive toward the end of travel). Position targets in manual
+control are also mm from the end of travel. `masterConfig` holds the end of
+travel (`posEOT`), bore and dead volume; `x2mL` and `mLPerMm` convert position
+and velocity.
+
 ## Operator app buttons
 
 Home, Go Home, the two Go buttons and Jog Up/Down start their operation and,
