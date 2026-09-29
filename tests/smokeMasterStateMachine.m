@@ -282,7 +282,7 @@ elseif sl.state == 3                                % operating
     if sl.mode == 2
         v = toward(sl.pos, V2x(u.refVoltage, cfg), 3, dt);
     elseif sl.mode == 3
-        v = min(max(u.refVoltage * 10, -7), 7);
+        v = min(max(u.refVoltage * cfg.velPerVolt, -5), 5);
     elseif sl.mode == 5
         if sl.homingRequired ~= 0
             v = -60;                                % stand-in for the homing sequence

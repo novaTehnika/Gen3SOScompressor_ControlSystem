@@ -224,23 +224,25 @@ END_IF
 
 **Linear mapping**:
 ```
-velocity_mm_s = voltage * 10
+velocity_mm_s = voltage * 0.7
 ```
 
 | Voltage | Velocity |
 |---------|----------|
-| -10V | -100 mm/s (retract) |
+| -10V | -7 mm/s (retract) |
 | 0V | 0 mm/s (stopped) |
-| +10V | +100 mm/s (extend) |
+| +10V | +7 mm/s (extend) |
+
+The slave clamps the command to ±`G_cfgVelLimitMax` (5.0 mm/s).
 
 **Formula (voltage to velocity)**:
 ```
-velocity = voltage * 10
+velocity = voltage * 0.7
 ```
 
 **Formula (velocity to voltage)**:
 ```
-voltage = velocity / 10
+voltage = velocity / 0.7
 ```
 
 #### Torque Control (Mode 100)

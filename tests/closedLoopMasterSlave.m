@@ -52,6 +52,8 @@ h = command(h, 3);
 x0 = h.sl.ax.x;
 h = runFor(h, 4);
 assert(h.out.statusCode == 4 && h.sl.ax.x > x0 + 2);
+assert(abs(h.sl.ax.v - h.in.jogVelocity) < 0.05, 'jog speed %.3f mm/s, requested %.3f', ...
+    h.sl.ax.v, h.in.jogVelocity);
 assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_VELOCITY_CTRL);
 assert(h.brakeEngagements == brake0);
 h.in.op = 0;
@@ -156,6 +158,8 @@ h.mcfg = masterConfig();
 h.mcfg.posMapXtr  = h.sl.G.G_cfgPosMapTransitionPos;
 h.mcfg.posMapXmax = h.sl.G.G_cfgPosMapStage2PosMax;
 h.mcfg.posMax     = h.sl.G.G_cfgPosSoftLimitMax - 5;
+assert(abs(h.mcfg.velPerVolt - h.sl.G.G_cfgAnalogVelMax / 10) < 1e-9, ...
+    'masterConfig.velPerVolt does not match G_cfgAnalogVelMax');
 
 h.in = struct('reset', 1, 'confCode', 0, 'faultActive', 0, 'inMotion', 0, ...
     'homingComplete', 0, 'brakeDisengage', 0, 'position', 0, 'estop', 0, ...

@@ -80,13 +80,13 @@ Stage 2 sensitivity = 105 mm / 5 V  = 21.0 mm/V   (lower resolution — out-of-c
 
 ### Velocity Mode (011)
 
-**Physical Range**: -100 to +100 mm/s
+**Physical Range**: -7 to +7 mm/s (commands clamped to ±`G_cfgVelLimitMax`, 5.0 mm/s)
 **Voltage Range**: -10V to +10V
 **Mapping**: Linear, zero-centered
 
 ```
             Velocity (mm/s)
-         -100       0       +100
+          -7        0        +7
             |-------|-------|
             |       |       |
          -10V      0V     +10V
@@ -97,29 +97,29 @@ Stage 2 sensitivity = 105 mm / 5 V  = 21.0 mm/V   (lower resolution — out-of-c
 
 **Voltage to Velocity (Slave Receives)**:
 ```
-velocity_mm_s = voltage * 10
+velocity_mm_s = voltage * 0.7
 ```
 
 **Velocity to Voltage (Master Sends)**:
 ```
-voltage = velocity_mm_s / 10
+voltage = velocity_mm_s / 0.7
 ```
 
 #### Example Values
 
 | Voltage | Velocity |
 |---------|----------|
-| -10.00V | -100.0 mm/s (full retract) |
-| -5.00V | -50.0 mm/s |
+| -10.00V | -7.0 mm/s (full retract; clamped to -5.0) |
+| -5.00V | -3.5 mm/s |
 | 0.00V | 0.0 mm/s (stopped) |
-| +5.00V | +50.0 mm/s |
-| +10.00V | +100.0 mm/s (full extend) |
+| +5.00V | +3.5 mm/s |
+| +10.00V | +7.0 mm/s (full extend; clamped to +5.0) |
 
 #### Sensitivity
 
 ```
-Sensitivity = 200 mm/s / 20V = 10 mm/s/V
-Resolution = 10 mm/s / 65536 = 0.00015 mm/s/LSB (16-bit)
+Sensitivity = 14 mm/s / 20V = 0.7 mm/s/V
+Resolution = 14 mm/s / 65536 = 0.00021 mm/s/LSB (16-bit)
 ```
 
 **Direction Convention**:
@@ -317,7 +317,7 @@ end
 
 | Mode | Range | Sensitivity | 16-bit Resolution |
 |------|-------|-------------|-------------------|
-| Velocity | ±100 mm/s | 100 mV/(mm/s) | 0.003 mm/s/LSB |
+| Velocity | ±7 mm/s | 1429 mV/(mm/s) | 0.00021 mm/s/LSB |
 
 ### Torque Command Resolution
 

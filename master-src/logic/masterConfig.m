@@ -13,7 +13,7 @@ cfg.posMapXtr  = 200;       % mm
 cfg.posMapXmax = 365;       % mm
 
 % Velocity reference scaling (slave Velocity mode).
-cfg.velPerVolt = 10;        % mm/s per V
+cfg.velPerVolt = 0.7;       % mm/s per V; must equal G_cfgAnalogVelMax / 10
 
 % Pressure transducer: P = (V - offset) * gain.
 cfg.pressureOffsetV = 4;        % V
@@ -26,7 +26,7 @@ cfg.pressureMedianLength = 7;
 cfg.velFilterTau         = 0.1;     % s, displayed velocity
 
 % Pressure loop: velocity command per unit pressure error.
-cfg.pressureKp = 0.5066;    % mm/s per atm
+cfg.pressureKp = 0.02533;   % mm/s per atm (0.25 mm/s per MPa)
 cfg.pressureKi = 0;         % mm/s per atm*s
 
 % Master soft limits, inside the slave's configured travel.
@@ -34,8 +34,8 @@ cfg.posMin = 5;             % mm
 cfg.posMax = 360;           % mm
 
 % Velocity command limits.
-cfg.jogVelMax      = 3;     % mm/s
-cfg.pressureVelMax = 3;     % mm/s
+cfg.jogVelMax      = 5;     % mm/s
+cfg.pressureVelMax = 5;     % mm/s
 
 % Position arrival judged from feedback.
 cfg.posTolerance = 0.5;     % mm

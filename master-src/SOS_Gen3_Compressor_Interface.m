@@ -753,7 +753,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             % Create JogSpeedSpinner
             app.JogSpeedSpinner = uispinner(app.ControlsPanel);
             app.JogSpeedSpinner.Step = 0.1;
-            app.JogSpeedSpinner.Limits = [0.1 3];
+            app.JogSpeedSpinner.Limits = [0.1 5];
             app.JogSpeedSpinner.ValueDisplayFormat = '%.1f mm/s';
             app.JogSpeedSpinner.Tooltip = {'Jog speed'};
             app.JogSpeedSpinner.Enable = 'off';

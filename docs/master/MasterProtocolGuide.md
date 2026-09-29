@@ -171,7 +171,7 @@ HANDSHAKE_TIMEOUT:
 When changing between operational modes (e.g., Position to Velocity):
 
 1. **Drop G_diMotionEnable LOW** - signals mode change request
-2. **Wait for G_doInMotion = FALSE** - slave performs controlled halt (from Position mode the command is first ramped to rest at `G_cfgPosGateAccelMax`, up to 0.6 s at defaults, before the halt)
+2. **Wait for G_doInMotion = FALSE** - slave performs controlled halt (from Position mode the command is first ramped to rest at `G_cfgPosGateAccelMax`, up to 1.0 s at defaults, before the halt)
 3. **Set new mode bits** - while G_diMotionEnable still LOW
 4. **Wait for confirmation** - slave confirms new mode on DO0-DO2 while G_diMotionEnable is still LOW
 5. **Raise G_diMotionEnable HIGH** - only after confirmation, completing the handshake for the new mode
@@ -293,7 +293,7 @@ FAULT_PERSISTENT:
 | Mode | Scaling | Formula |
 |------|---------|---------|
 | Position (two-stage) | 0–200 mm ↔ -10V..+5V, 200–305 mm ↔ +5V..+10V | Stage 1: `V = pos*0.075 - 10`; Stage 2: `V = (pos-200)*0.0476 + 5` |
-| Velocity | -10V..+10V = -100..+100 mm/s | `voltage = velocity / 10` |
+| Velocity | -10V..+10V = -7..+7 mm/s (clamped to ±5 mm/s) | `voltage = velocity / 0.7` |
 | Torque | -10V..+10V = -100%..+100% | `voltage = torque_percent / 10` |
 
 **Note**: Position command uses the same two-stage mapping as position feedback — sending the voltage that corresponds to a given position in feedback will command that same position. See [AnalogScalingReference](../slave/reference/AnalogScalingReference.md) for the full formulas and derivation.
@@ -334,7 +334,7 @@ first.
 
 **Setpoint behavior**: Position setpoints (steps in the reference) are executed as
 trapezoidal-velocity moves at the slave's configured limits — velocity `G_cfgVelLimitNormal`
-(3mm/s default) and acceleration `G_cfgPosGateAccelMax` — landing on the setpoint without
+(5 mm/s default) and acceleration `G_cfgPosGateAccelMax` — landing on the setpoint without
 overshoot. If the master instead ramps the reference itself, the slave's command follows with
 a small lag of approximately `v^2 / (2*A)`, where `v` is the reference's rate of change and
 `A` is `G_cfgPosGateAccelMax`.
