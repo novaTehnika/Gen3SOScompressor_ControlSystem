@@ -1,2 +1,6 @@
 # Generated from slave-src by tools/st2m.py
 slave-sim/generated/
+*.asv
+slprj/
+master-src/shell/SOS_Gen3_Master_Shell.slx
+*.autosave
