@@ -26,7 +26,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         MixerButton                     matlab.ui.control.StateButton
         JogDownButton                   matlab.ui.control.StateButton
         JogUpButton                     matlab.ui.control.StateButton
-        JogSpeedSpinner                 matlab.ui.control.Spinner
+        JogSpeedDropDown                matlab.ui.control.DropDown
         PositionGoButton                matlab.ui.control.Button
         TargetPositionSpinner           matlab.ui.control.Spinner
         TargetPositionmmSpinnerLabel    matlab.ui.control.Label
@@ -406,7 +406,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 stopOp(app);
                 return
             end
-            setBlock(app, "TargetVelocity", app.JogSpeedSpinner.Value);
+            setBlock(app, "TargetVelocity", app.JogSpeedDropDown.Value);
             setBlock(app, "JogDirection", direction);
             if requestOp(app, app.OP_JOG)
                 app.activeJogDir = direction;
@@ -430,6 +430,13 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.TargetPositionSpinner.Limits = ...
                 [max(app.cfg.posEOT - app.cfg.posMax, 0), app.cfg.posEOT - app.cfg.posMin];
             app.TargetPositionSpinner.Value = app.TargetPositionSpinner.Limits(2);
+
+            % Preset jog speeds up to the master's limit, starting at the limit
+            speeds = unique([0.1 0.25 0.5 1 2 app.cfg.jogVelMax]);
+            speeds = speeds(speeds <= app.cfg.jogVelMax);
+            app.JogSpeedDropDown.Items = compose("%g mm/s", speeds);
+            app.JogSpeedDropDown.ItemsData = speeds;
+            app.JogSpeedDropDown.Value = app.cfg.jogVelMax;
 
             app.updateTimer = timer( ...
                 ExecutionMode="fixedSpacing", ...
@@ -479,7 +486,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.PressureGoButton.Enable = value;
             app.JogDownButton.Enable = value;
             app.JogUpButton.Enable = value;
-            app.JogSpeedSpinner.Enable = value;
+            app.JogSpeedDropDown.Enable = value;
             app.MixerButton.Enable = value;
         end
 
@@ -562,6 +569,15 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % Value changed function: TargetPositionSpinner, TargetPressureSpinner
         function TargetSpinnerChanged(app, event)
             updateButtons(app);
+        end
+
+        % Value changed function: JogSpeedDropDown
+        % The model reads TargetVelocity continuously, so a running jog
+        % takes the new speed at once.
+        function JogSpeedChanged(app, event)
+            if app.activeOp == app.OP_JOG && isRunning(app)
+                setBlock(app, "TargetVelocity", app.JogSpeedDropDown.Value);
+            end
         end
 
         % Value changed function: JogDownButton
@@ -971,15 +987,12 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.JogDownButton.Text = 'Jog Down';
             app.JogDownButton.Position = [768 9 100 23];
 
-            % Create JogSpeedSpinner
-            app.JogSpeedSpinner = uispinner(app.ControlsPanel);
-            app.JogSpeedSpinner.Step = 0.1;
-            app.JogSpeedSpinner.Limits = [0.1 5];
-            app.JogSpeedSpinner.ValueDisplayFormat = '%.1f mm/s';
-            app.JogSpeedSpinner.Tooltip = {'Jog speed'};
-            app.JogSpeedSpinner.Enable = 'off';
-            app.JogSpeedSpinner.Position = [879 9 100 22];
-            app.JogSpeedSpinner.Value = 1;
+            % Create JogSpeedDropDown
+            app.JogSpeedDropDown = uidropdown(app.ControlsPanel);
+            app.JogSpeedDropDown.ValueChangedFcn = createCallbackFcn(app, @JogSpeedChanged, true);
+            app.JogSpeedDropDown.Tooltip = {'Jog speed'};
+            app.JogSpeedDropDown.Enable = 'off';
+            app.JogSpeedDropDown.Position = [879 9 100 22];
 
             % Create MixerButton
             app.MixerButton = uibutton(app.ControlsPanel, 'state');

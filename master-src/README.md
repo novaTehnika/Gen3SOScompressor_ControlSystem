@@ -49,7 +49,8 @@ being entered and green once its running status appears, and returns to normal
 when that status goes (stopped, finished, faulted, E-STOP or not confirmed by
 the slave). While position or pressure control runs, changing the target turns
 its button back to Go, which sends the new target without leaving the mode; the
-other jog button reverses a running jog. STOP turns dark red while E-STOP is
+other jog button reverses a running jog. Jog speed is picked from preset speeds up to
+`jogVelMax` (the default), and a change applies to a running jog. STOP turns dark red while E-STOP is
 requested but not yet reported by the model, and yellow while the model reports
 E-STOP (`StatusCode` 20); pressing it then releases E-STOP.
 
