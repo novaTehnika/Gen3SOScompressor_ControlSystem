@@ -33,10 +33,11 @@ The app reads `StatusCode`, `FaultCode`, `State`, `Position`,
 
 ## Operator app readouts
 
-The app shows volume (mL), pressure (atm), position (mm from the end of travel)
+The app shows volume (mL), absolute pressure (atm), position (mm from the end of travel)
 and flow (mL/s, positive toward the end of travel). Position targets in manual
 control are also mm from the end of travel. `masterConfig` holds the end of
-travel (`posEOT`), bore and dead volume; `x2mL` and `mLPerMm` convert position
+travel (`posEOT`), bore and dead volume, and the pressure transducer's 4-20 mA range
+and shunt resistance; `x2mL` and `mLPerMm` convert position
 and velocity.
 
 ## Operator app buttons
