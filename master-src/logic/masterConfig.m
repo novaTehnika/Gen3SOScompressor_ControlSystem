@@ -12,13 +12,24 @@ cfg.posMapXmin = 0;         % mm
 cfg.posMapXtr  = 200;       % mm
 cfg.posMapXmax = 365;       % mm
 
+% Cylinder geometry. Displayed positions are distances from the end of
+% travel (posEOT) and volume is swept volume from there plus deadVolume.
+cfg.posEOT       = 365;             % mm, position at the end of travel (compression end)
+cfg.boreDiameter = 2.602 * 25.4;    % mm (2.602 in)
+cfg.deadVolume   = 10;              % mL, volume left at the end of travel
+
 % Velocity reference scaling (slave Velocity mode).
 cfg.velPerVolt = 0.7;       % mm/s per V; must equal G_cfgAnalogVelMax / 10
 
-% Pressure transducer: P = (V - offset) * gain.
-cfg.pressureOffsetV = 4;        % V
-cfg.pressureGain    = 2.3095;   % MPa per V
-cfg.atmPerMPa       = 9.869;
+% Pressure transducer: a 4-20 mA loop read on AI 2 as the voltage across a
+% shunt resistor. 4 mA is pressureRangeMin and 20 mA pressureRangeMax. A
+% gauge transducer reads 0 at atmosphere, so one atmosphere is added to give
+% absolute pressure.
+cfg.pressureShuntOhms = 250;    % ohm
+cfg.pressureRangeMin  = 0;      % psi at 4 mA
+cfg.pressureRangeMax  = 1500;   % psi at 20 mA
+cfg.pressureIsGauge   = true;   % false for an absolute transducer
+cfg.atmPerPsi         = 1 / 14.6959;
 
 % Input filtering.
 cfg.posMedianLength      = 5;
@@ -35,6 +46,7 @@ cfg.posMax = 360;           % mm
 
 % Velocity command limits.
 cfg.jogVelMax      = 5;     % mm/s
+cfg.jogSpeeds      = [0.1 0.25 0.5 1 2 5];  % mm/s, app presets; the largest is the default
 cfg.pressureVelMax = 5;     % mm/s
 
 % Position arrival judged from feedback.

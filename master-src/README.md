@@ -31,6 +31,24 @@ continuously while their operation is active. `ESTOP` and `Mixer` act at once.
 The app reads `StatusCode`, `FaultCode`, `State`, `Position`,
 `Velocity` and `Pressure`. Status codes are listed in `masterStateMachine.m`.
 
+## Connecting and closing
+
+"Connect to Compressor" starts the model; the same button then reads
+"Disconnect". Disconnecting, or closing the app while connected (after a
+confirmation), requests a stop, waits for the master to report the axis
+stopped (at most `tStopMax`) and then stops the model, whose DAQ outputs fall
+to 0 and drop SafetyEnable and MotionEnable. The mode buttons are enabled only
+in manual control, while connected and out of E-STOP.
+
+## Operator app readouts
+
+The app shows volume (mL), absolute pressure (atm), position (mm from the end of travel)
+and flow (mL/s, positive toward the end of travel). Position targets in manual
+control are also mm from the end of travel. `masterConfig` holds the end of
+travel (`posEOT`), bore and dead volume, and the pressure transducer's 4-20 mA range
+and shunt resistance; `x2mL` and `mLPerMm` convert position
+and velocity.
+
 ## Operator app buttons
 
 Home, Go Home, the two Go buttons and Jog Up/Down start their operation and,
@@ -40,7 +58,8 @@ being entered and green once its running status appears, and returns to normal
 when that status goes (stopped, finished, faulted, E-STOP or not confirmed by
 the slave). While position or pressure control runs, changing the target turns
 its button back to Go, which sends the new target without leaving the mode; the
-other jog button reverses a running jog. STOP turns dark red while E-STOP is
+other jog button reverses a running jog. Jog speed is picked from `masterConfig`'s
+`jogSpeeds` (the fastest is the default), and a change applies to a running jog. STOP turns dark red while E-STOP is
 requested but not yet reported by the model, and yellow while the model reports
 E-STOP (`StatusCode` 20); pressing it then releases E-STOP.
 

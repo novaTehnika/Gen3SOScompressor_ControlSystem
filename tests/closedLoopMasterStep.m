@@ -23,7 +23,7 @@ h.app = struct('op', 0, 'cmdSeq', 0, 'targetPosition', 100, 'targetVelocity', 0,
 h.u = struct('modeBit0', 0, 'modeBit1', 0, 'modeBit2', 0, 'motionEnable', 0, ...
     'faultReset', 0, 'refVoltage', 0);
 [h.sl, h.y] = slaveStep(h.sl, h.u);
-h.pressureVolt = 4;
+h.pressureVolt = P2V(1, cfg);      % atmosphere
 h.tick = 0;
 h.m = [];
 
@@ -44,13 +44,13 @@ fprintf('ok  position move, displayed position %.2f mm\n', h.m.position);
 
 % Pressure operation: below target the loop drives into the cylinder.
 h.app.targetPressure = 50;
-h.pressureVolt = 5;                 % about 23 atm
+h.pressureVolt = P2V(20, cfg);
 h = command(h, 4);
 h = runUntil(h, 10, @(h) h.m.statusCode == 5);
 h = runUntil(h, 3, []);
 assert(h.m.statusCode == 5 && h.sl.ax.v > 0.5 && h.m.velocity > 0.5);
 assert(h.sl.ax.v <= cfg.pressureVelMax + 0.01);
-h.pressureVolt = 4 + 50 / (cfg.pressureGain * cfg.atmPerMPa);   % at target
+h.pressureVolt = P2V(50, cfg);     % at target
 h = runUntil(h, 3, []);
 assert(abs(h.sl.ax.v) < 0.05);
 fprintf('ok  pressure operation\n');
@@ -76,6 +76,19 @@ h.app.estop = 0;
 h = runUntil(h, 0.5, []);
 assert(h.m.doSlave(1) == 1 && h.m.state == 1);
 fprintf('ok  e-stop\n');
+
+% Displayed volume: dead volume at the end of travel, bore area per mm.
+assert(abs(x2mL(cfg.posEOT, cfg) - cfg.deadVolume) < 1e-9);
+assert(abs(x2mL(cfg.posEOT - 100, cfg) - cfg.deadVolume ...
+           - 100 * pi / 4 * (2.602 * 25.4)^2 / 1000) < 1e-6);
+% Pressure: 4 mA reads the range minimum plus one atmosphere (gauge),
+% 20 mA the range maximum plus one atmosphere.
+assert(abs(V2P(0.004 * cfg.pressureShuntOhms, cfg) - ...
+           (cfg.pressureRangeMin * cfg.atmPerPsi + cfg.pressureIsGauge)) < 1e-9);
+assert(abs(V2P(0.020 * cfg.pressureShuntOhms, cfg) - ...
+           (cfg.pressureRangeMax * cfg.atmPerPsi + cfg.pressureIsGauge)) < 1e-9);
+fprintf('ok  pressure scaling\n');
+fprintf('ok  volume scaling (%.3f mL/mm)\n', mLPerMm(cfg));
 
 fprintf('all passed\n');
 end
