@@ -431,12 +431,12 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 [max(app.cfg.posEOT - app.cfg.posMax, 0), app.cfg.posEOT - app.cfg.posMin];
             app.TargetPositionSpinner.Value = app.TargetPositionSpinner.Limits(2);
 
-            % Preset jog speeds up to the master's limit, starting at the limit
-            speeds = unique([0.1 0.25 0.5 1 2 app.cfg.jogVelMax]);
-            speeds = speeds(speeds <= app.cfg.jogVelMax);
+            % Preset jog speeds, starting at the fastest. The master clamps
+            % any preset above jogVelMax.
+            speeds = unique(app.cfg.jogSpeeds);
             app.JogSpeedDropDown.Items = compose("%g mm/s", speeds);
             app.JogSpeedDropDown.ItemsData = speeds;
-            app.JogSpeedDropDown.Value = app.cfg.jogVelMax;
+            app.JogSpeedDropDown.Value = speeds(end);
 
             app.updateTimer = timer( ...
                 ExecutionMode="fixedSpacing", ...

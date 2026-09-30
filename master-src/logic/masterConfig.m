@@ -46,6 +46,7 @@ cfg.posMax = 360;           % mm
 
 % Velocity command limits.
 cfg.jogVelMax      = 5;     % mm/s
+cfg.jogSpeeds      = [0.1 0.25 0.5 1 2 5];  % mm/s, app presets; the largest is the default
 cfg.pressureVelMax = 5;     % mm/s
 
 % Position arrival judged from feedback.
