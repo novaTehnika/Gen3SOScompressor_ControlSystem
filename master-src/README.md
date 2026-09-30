@@ -31,6 +31,15 @@ continuously while their operation is active. `ESTOP` and `Mixer` act at once.
 The app reads `StatusCode`, `FaultCode`, `State`, `Position`,
 `Velocity` and `Pressure`. Status codes are listed in `masterStateMachine.m`.
 
+## Connecting and closing
+
+"Connect to Compressor" starts the model; the same button then reads
+"Disconnect". Disconnecting, or closing the app while connected (after a
+confirmation), requests a stop, waits for the master to report the axis
+stopped (at most `tStopMax`) and then stops the model, whose DAQ outputs fall
+to 0 and drop SafetyEnable and MotionEnable. The mode buttons are enabled only
+in manual control, while connected and out of E-STOP.
+
 ## Operator app readouts
 
 The app shows volume (mL), absolute pressure (atm), position (mm from the end of travel)

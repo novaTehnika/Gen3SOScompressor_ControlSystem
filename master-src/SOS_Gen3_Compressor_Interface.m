@@ -3,8 +3,6 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
     % Properties that correspond to app components
     properties (Access = public)
         UIFigure                        matlab.ui.Figure
-        FileMenu                        matlab.ui.container.Menu
-        SimulinkMenu                    matlab.ui.container.Menu
         FaultActiveLamp                 matlab.ui.control.Lamp
         FaultActiveLampLabel            matlab.ui.control.Label
         MixerOnLamp                     matlab.ui.control.Lamp
@@ -142,7 +140,34 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
     methods (Access = private)
 
         function tf = isRunning(app)
-            tf = app.Simulation.Status == "running";
+            tf = ~isempty(app.Simulation) && isvalid(app.Simulation) && ...
+                app.Simulation.Status == "running";
+        end
+
+        % Stop any operation, wait for the master to report the axis
+        % stopped (up to its own stop timeout), then stop the model. The
+        % DAQ outputs fall to their final values, which drop SafetyEnable
+        % and MotionEnable.
+        function disconnect(app)
+            app.StatusLabel.Text = "Stopping...";
+            drawnow;
+            try
+                sendCommand(app, app.OP_STOP);
+                clearOp(app);
+                deadline = tic;
+                while toc(deadline) < app.cfg.tStopMax + 0.5
+                    code = readBlock(app, "StatusCode");
+                    if code < 1 || code > 8   % not moving, starting or stopping
+                        break
+                    end
+                    pause(0.05);
+                end
+                stop(app.Simulation);
+                app.StatusLabel.Text = "Disconnected";
+            catch ME
+                app.StatusLabel.Text = append("Disconnect failed: ", ME.message);
+            end
+            updateButtons(app);
         end
 
         function p = blockPath(app, name)
@@ -252,6 +277,23 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         end
 
         function updateButtons(app)
+            connected = isRunning(app);
+            if connected
+                app.ConnectToCompressorButton.Text = "Disconnect";
+            else
+                app.ConnectToCompressorButton.Text = "Connect to Compressor";
+            end
+
+            % Mode buttons act only in manual control, connected and out of
+            % E-STOP.
+            canMove = app.ManualControlButton.Value && connected && ...
+                ~app.ESTOP.Value && ~app.estopActive;
+            buttons = {app.HomeButton, app.GoHomeButton, app.PositionGoButton, ...
+                app.PressureGoButton, app.JogUpButton, app.JogDownButton};
+            for k = 1:numel(buttons)
+                buttons{k}.Enable = canMove;
+            end
+
             op = app.activeOp;
             setModeButton(app, app.HomeButton, op == app.OP_HOME, ...
                 "Home", "Stop");
@@ -298,10 +340,20 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
         end
 
+        % Timer callback. An error here would stop the timer and freeze the
+        % display, so it is reported on the status line instead.
         function pollModel(app)
             if ~isvalid(app)
                 return
             end
+            try
+                updateFromModel(app);
+            catch ME
+                app.StatusLabel.Text = append("Display update failed: ", ME.message);
+            end
+        end
+
+        function updateFromModel(app)
             if ~isRunning(app)
                 app.estopActive = false;
                 clearOp(app);
@@ -448,6 +500,11 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         % Button pushed function: ConnectToCompressorButton
         function ConnectButtonPushed(app, event)
+            if isRunning(app)
+                disconnect(app);
+                return
+            end
+
             app.StatusLabel.Text = "Connecting to Simulink...";
             drawnow;
 
@@ -471,23 +528,19 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             catch ME
                 app.StatusLabel.Text = append("Model unable to start: ", ME.message);
             end
+            updateButtons(app);
         end
 
         % Value changed function: ManualControlButton
         function ManualControlButtonPressed(app, event)
             value = app.ManualControlButton.Value;
-            app.HomeButton.Enable = value;
-            app.GoHomeButton.Enable = value;
             app.TargetPositionSpinner.Enable = value;
             app.TargetPositionmmSpinnerLabel.Enable = value;
-            app.PositionGoButton.Enable = value;
             app.TargetPressureSpinner.Enable = value;
             app.TargetPressureatmSpinnerLabel.Enable = value;
-            app.PressureGoButton.Enable = value;
-            app.JogDownButton.Enable = value;
-            app.JogUpButton.Enable = value;
             app.JogSpeedDropDown.Enable = value;
             app.MixerButton.Enable = value;
+            updateButtons(app);
         end
 
         % Button pushed function: HomeButton
@@ -512,6 +565,19 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         % Close request function: UIFigure
         function UIFigureCloseRequest(app, event)
+            % The model keeps driving the axis without the app, so it is
+            % stopped before the app closes.
+            if isRunning(app)
+                choice = uiconfirm(app.UIFigure, ...
+                    "The compressor is connected. Stop it and disconnect before closing?", ...
+                    "Close", "Options", ["Stop and close", "Cancel"], ...
+                    "DefaultOption", 1, "CancelOption", 2, "Icon", "warning");
+                if choice ~= "Stop and close"
+                    return
+                end
+                disconnect(app);
+            end
+
             if ~isempty(app.updateTimer) && isvalid(app.updateTimer)
                 stop(app.updateTimer);
                 delete(app.updateTimer);
@@ -635,16 +701,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             % Create UIFigure and hide until all components are created
             app.UIFigure = uifigure('Visible', 'off');
             app.UIFigure.Position = [100 100 1008 432];
-            app.UIFigure.Name = 'MATLAB App';
+            app.UIFigure.Name = 'SOS Gen3 Compressor';
             app.UIFigure.CloseRequestFcn = createCallbackFcn(app, @UIFigureCloseRequest, true);
-
-            % Create FileMenu
-            app.FileMenu = uimenu(app.UIFigure);
-            app.FileMenu.Text = 'File';
-
-            % Create SimulinkMenu
-            app.SimulinkMenu = uimenu(app.UIFigure);
-            app.SimulinkMenu.Text = 'Simulink';
 
             % Create TabGroup
             app.TabGroup = uitabgroup(app.UIFigure);
@@ -1065,7 +1123,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             % Create FaultActiveLamp
             app.FaultActiveLamp = uilamp(app.UIFigure);
             app.FaultActiveLamp.Position = [464 162 20 20];
-            app.FaultActiveLamp.Color = [1 0 0];
+            app.FaultActiveLamp.Color = [0.6 0.6 0.6];
 
             % Show the figure after all components are created
             app.UIFigure.Visible = 'on';
