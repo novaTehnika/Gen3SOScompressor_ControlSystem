@@ -4,3 +4,4 @@ slave-sim/generated/
 slprj/
 master-src/shell/SOS_Gen3_Master_Shell.slx
 *.autosave
+bench/modbus/ModbusBench.slx
