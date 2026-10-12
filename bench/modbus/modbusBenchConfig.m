@@ -13,7 +13,7 @@ cfg.address   = '192.168.1.1';    % controller IP: the address MotionWorks conne
 cfg.port      = 502;
 cfg.serverId  = 1;
 cfg.timeout   = 0.020;            % s, per transaction in the bench model; modbusProbe reports the share of cycles slower than this
-cfg.wordOrder = 'big-endian';     % set from the modbusProbe result
+cfg.wordOrder = 'little-endian';  % low word first, as measured by modbusProbe
 
 % Timing
 cfg.dt        = master.dt;        % model step (s), same as the shell

@@ -18,9 +18,11 @@ word order and timing assumptions are confirmed by the bench test in
 | Server | MP2600iec, built-in Modbus TCP server, port 502 |
 | Client | Simulink shell on the lab PC |
 
-Per master step the client issues one **Write Multiple Registers (FC16)** of
-holding registers 1–6 and one **Read Input Registers (FC04)** of input registers
-1–18.
+Each exchange is one **Write Multiple Registers (FC16)** of holding registers
+1–6 followed at once by one **Read Input Registers (FC04)** of input registers
+1–18, so both land in the same controller service tick. The exchange period is
+up to 50 ms, a multiple of the master step. Fast signals stay on the digital
+lines; see [EthernetCommsReference.md](EthernetCommsReference.md).
 
 ### Addressing
 
@@ -41,16 +43,19 @@ there; published application notes give other bases.
 | Type | Registers | Notes |
 |------|-----------|-------|
 | `UINT` | 1 | Codes, flags (0/1), counters |
-| `REAL` | 2 | IEEE 754 single precision. Word order as measured by `modbusProbe` |
+| `REAL` | 2 | IEEE 754 single precision. Low word first (client word order little-endian, byte order big-endian) |
 
 `REAL` resolves about 2e-5 mm at 300 mm, finer than any quantity carried here.
 `LREAL` values are converted to `REAL` on the slave.
 
 ### Slave configuration
 
-In Hardware Configuration: Modbus slave (server) enabled, **Set all outputs off
-when PLC stops**, and the four server blocks assigned to the 2 ms cyclic task so
-the registers update once per scan, in step with `PRG_Main`.
+In Hardware Configuration: Modbus slave (server) enabled, **Use %M for
+bidirectional Holding Registers** checked, **Set all outputs off when PLC
+stops**, and the four Modbus groups assigned to the cyclic task that runs
+`PRG_Main`, so the registers update once per scan. The controller services the
+connection on a 4 ms tick, so a transaction takes 1 to 8 ms regardless of the
+task interval.
 
 ---
 
@@ -102,8 +107,10 @@ therefore supervise the link.
 | Slave | `G_mbHeartbeat` unchanged for longer than the comm timeout | Latch a communication fault (code 4, currently `FAULT_RESERVED_100`) and halt |
 | Master | `G_mbSlaveCounter` unchanged, or reads failing, for longer than the comm timeout | Treat as a fault and drop the hardwired safety relay (P0.0) |
 
-The comm timeout is set from the bench results. With **Set all outputs off when
-PLC stops**, a stopped slave reads as a counter frozen at 0.
+The comm timeout is a small multiple of the exchange period, long enough to
+ride through one lost exchange (for example 150 ms at a 50 ms period). With
+**Set all outputs off when PLC stops**, a stopped slave reads as a counter
+frozen at 0.
 
 ---
 

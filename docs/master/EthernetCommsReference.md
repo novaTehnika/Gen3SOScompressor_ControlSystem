@@ -134,9 +134,16 @@ Limits and known issues (MotionWorks IEC 2.1.0 release notes, RN.MWIEC.14):
 ### Characteristics
 
 - Each block performs a request/response transaction per step.
-- 32-bit and 64-bit values occupy 2 or 4 registers.
+- 32-bit and 64-bit values occupy 2 or 4 registers. The MP2600iec holds them
+  low word first; the client's word order must be little-endian.
 - The protocol has no freshness indication. A heartbeat register written by the
   master and checked by the slave is required to detect a lost link.
+- Measured on the bench (`bench/modbus`): the controller services the
+  connection on a **4 ms tick**. A transaction is answered in the same tick or
+  the next, 1 to 8 ms after the request. A write and a read sent back to back
+  share a tick. The MATLAB `modbus` object adds about 7 ms (p99 17 ms) of
+  client-side delay per transaction on top of that, so it is a diagnostic
+  tool, not a candidate for the shell.
 
 ---
 
@@ -210,7 +217,8 @@ Limits and known issues (MotionWorks IEC 2.1.0 release notes, RN.MWIEC.14):
 
 | | Modbus TCP | UDP | OPC DA |
 |---|---|---|---|
-| Fit for the 3 ms control step | Depends on server response time | Best | Poor |
+| Fit for the 3 ms control step | No: 4 ms service tick, 1–8 ms per transaction | Possible, unmeasured | Poor |
+| Fit for a 50 ms exchange | Yes | Yes | Marginal |
 | Slave effort | Hardware Configuration + addressed globals | Socket POU, packet packing | Expose variables |
 | Additional software | None | None | MotionWorks IEC OPC Server |
 | Link-loss detection | Heartbeat register | Sequence number | Heartbeat variable |
@@ -220,6 +228,10 @@ Limits and known issues (MotionWorks IEC 2.1.0 release notes, RN.MWIEC.14):
 
 ## 7. Requirements Common to All Options
 
+- **Exchange period up to 50 ms.** The link carries mode requests, set points,
+  status and feedback. Signals that must act within a few milliseconds (halt,
+  safety enable) stay on the digital lines, and the pressure loop runs on the
+  slave, so the master's step rate does not set the link rate.
 - **Slave watchdog**: if the master heartbeat or sequence number does not advance
   within a set time, latch a communication fault and halt. Fault code `100` is
   currently reserved and unused (see [FaultCodeReference.md](FaultCodeReference.md)).
@@ -234,16 +246,20 @@ Limits and known issues (MotionWorks IEC 2.1.0 release notes, RN.MWIEC.14):
 
 ## 8. Open Questions for the Bench
 
-1. **Modbus word order** of the MPiec for 32-bit values. Write a known value and
-   read it back.
-2. **Modbus server response time** on the MP2600iec with the server blocks in the
-   2 ms task. Measure heartbeat round trip and Simulink missed ticks at the 3 ms
-   model step.
-3. **Y_DeviceComm reference**: export from MotionWorks IEC help on the lab PC.
-   Confirm UDP non-blocking send/receive and whether it can run in the 2 ms task.
-4. **Modbus Client blocks in a Connected IO model**: confirm they run alongside the
-   DAQ blocks without excessive missed ticks.
-5. **Shared cable**: compare latency with MotionWorks online and offline.
+Answered by the bench: word order is low word first; the controller services
+Modbus on a 4 ms tick, 1 to 8 ms per transaction (`bench/modbus/README.md`).
+
+1. **Client floor**: exchange time with hand-built frames (`modbusRawProbe`)
+   and with the Simulink Modbus Client blocks, and whether the controller
+   answers a write and a read sent in one TCP segment.
+2. **Service tick origin**: whether the 4 ms tick follows the task the Modbus
+   groups are assigned to, or is fixed in the controller's network stack.
+3. **Modbus Client blocks in a Connected IO model**: confirm they run alongside
+   the DAQ blocks without missed ticks at the 3 ms step, and what they do when
+   a reply times out.
+4. **Shared cable**: compare latency with MotionWorks online and offline.
+5. **Y_DeviceComm reference**: export from MotionWorks IEC help on the lab PC,
+   only if UDP is still wanted for a faster path.
 6. **OPC Server licence**: confirm whether it is installed, if OPC is wanted for
    diagnostics.
 

@@ -1,8 +1,8 @@
 # Modbus TCP Bench Test
 
 Measures whether Modbus TCP between the lab PC and the MP2600iec is fast and
-reliable enough to replace the discrete and analog master ↔ slave signals at
-the master's 3 ms step. Background and sources are in
+reliable enough to carry the master ↔ slave protocol at a 50 ms exchange
+period, and how fast it can go. Background and sources are in
 [EthernetCommsReference.md](../../docs/master/EthernetCommsReference.md). The
 proposed protocol registers are in
 [ModbusRegisterMap.md](../../docs/master/ModbusRegisterMap.md); the bench uses
@@ -13,6 +13,9 @@ the same heartbeat registers (HR1, IR1–2) and a separate probe area (101+).
 | `slave/PRG_ModbusBench.st` | Slave program: heartbeat echo, scan counter, probe patterns |
 | `modbusBenchConfig.m` | Controller IP, timeout, register numbers, step |
 | `modbusProbe.m` | MATLAB-only check of address mapping and word order, plus timed round trips |
+| `modbusRawProbe.m` | Timed heartbeat exchange with hand-built frames over `tcpclient`: client floor and pipelined requests |
+| `modbusCaptureTiming.py` | Splits a Wireshark capture into controller time and client time (needs `tshark`) |
+| `captures/` | Wireshark captures from bench runs (gitignored) |
 | `buildModbusBench.m` | Generates `ModbusBench.slx` (gitignored) |
 | `modbusBenchStep.m` | Called each model step: writes the heartbeat, reads echo and counter |
 | `modbusBenchReport.m` | Summarises a model run |
@@ -61,6 +64,31 @@ transaction time rather than as failures, prints the first error message if
 any transaction fails, and reports the share of cycles slower than
 `cfg.timeout`.
 
+### Controller time and client time
+
+The probe's figures include the MATLAB client's own overhead. To separate
+the two, capture the run in Wireshark on the lab PC (filter `tcp.port == 502`),
+save it under `captures/`, and run:
+
+```sh
+python3 modbusCaptureTiming.py captures/cap_run01.pcapng
+```
+
+It reports, per transaction, request to TCP ACK and request to response
+(the controller) and response to next request (the client). The ACK delay
+histogram shows the controller's service tick: a spread evenly over 0 to
+T ms means requests wait for a T ms cycle.
+
+`modbusRawProbe` times the same heartbeat exchange with hand-built frames
+over `tcpclient`, in three variants: sequential (as `modbusProbe`), both
+requests as two `write` calls, and both requests in one `write` call. The
+last two show whether the controller answers a write and a read in the same
+service tick, which is what the protocol exchange needs.
+
+```matlab
+r = modbusRawProbe;
+```
+
 ## 3. Simulink run
 
 ```matlab
@@ -89,14 +117,19 @@ restart.
 
 ## 5. Pass criteria
 
+The protocol exchange is one write and one read, sent back to back, at a
+period of up to 50 ms. Fast signals stay on the digital lines, and the
+pressure loop runs on the slave, so the master step rate does not apply to
+the link.
+
 | Result | Criteria (cases A–C) | Consequence |
 |--------|----------------------|-------------|
-| Full rate | No failures in 60 s; transaction p99 < 3 ms; no missed ticks; echo lag ≤ 1 step in ≥ 99.9 % of steps | Modbus at the 3 ms step |
-| Reduced rate | Transaction p99 < 10 ms; no failures | Modbus at a slower rate than the model step; the pressure loop delay must be assessed |
+| Pass | No failures in 60 s; exchange p99 < 25 ms; no missed ticks | Modbus at a 50 ms exchange period with margin for one retry |
+| Marginal | Exchange p99 < 50 ms; no failures | Modbus at 50 ms with no retry margin; comm timeout must allow a lost exchange |
 | Fail | Otherwise | Use UDP |
 
-The protocol in ModbusRegisterMap.md needs one write and one read per step,
-the same as the bench, with slightly larger payloads.
+The exchange p99 is measured with the client that will be used in the shell,
+not with the `modbus` object (see section 7).
 
 ## 6. Optional: Modbus Client blocks
 
@@ -108,9 +141,30 @@ timeout as `cfg.timeout`, word order as found in step 2.
 
 ## 7. Results
 
-| Case | Failures | Txn median / p99 / max (ms) | Missed ticks | Echo lag ≤ 1 (%) | Notes |
-|------|----------|-----------------------------|--------------|------------------|-------|
-| A | | | | | |
-| B | | | | | |
-| C | | | | | |
-| D | | | | | |
+`modbusProbe` (MATLAB R2025b, `modbus` object, sequential write then read),
+%M bidirectional option on, Modbus groups and `PRG_ModbusBench` on the same
+task:
+
+| Case | Failures | Write + read median / p99 / max (ms) | Echo same cycle (%) | Notes |
+|------|----------|--------------------------------------|---------------------|-------|
+| A | 0 / 2000 | 20.0 / 33.9 / 39.9 | 100 | Word order low word first. Slave counter period 4 ms. An earlier run gave the same median with max 67.7 ms. |
+| B | | | | |
+| C | | | | |
+| D | | | | |
+
+Capture of case A (`captures/cap_run01.pcapng`, 4003 transactions, no
+retransmissions):
+
+| Measure | median | p99 | max (ms) |
+|---------|--------|-----|----------|
+| Controller, request → TCP ACK | 2.2 | 4.0 | 4.1 |
+| Controller, request → response | 3.5 | 7.3 | 7.9 |
+| Client (`modbus` object), response → next request | 6.9 | 17.2 | 61.3 |
+
+The ACK delay is spread evenly over 0.5 to 4 ms: the controller services the
+connection on a 4 ms tick. The response comes in the same tick 81 % of the
+time and one tick later otherwise, so a transaction costs one or two ticks.
+The `modbus` object adds more delay than the controller and is not a
+candidate for the shell.
+
+Simulink bench model and `modbusRawProbe`: not yet run.
