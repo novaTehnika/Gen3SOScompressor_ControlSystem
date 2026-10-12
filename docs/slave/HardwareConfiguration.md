@@ -14,7 +14,7 @@ This document provides step-by-step instructions for configuring the hardware in
 | Servo Motor | SGM7J-04A6A6C | 400W with brake and absolute encoder |
 | Actuator | Tolomatic RSA64 | Linear electromechanical actuator |
 | Overtravel Switches | Tolomatic #8100-9092 | Solid State, Normally Closed, PNP (×2: negative & positive overtravel) |
-| Master Interface | NI PCI 6251 + SCB-68a | DAQ for analog/digital I/O |
+| Master Interface | NI PCI 6221 + SCB-68a | DAQ for analog/digital I/O |
 
 ---
 

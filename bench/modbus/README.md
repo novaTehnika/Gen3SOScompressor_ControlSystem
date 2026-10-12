@@ -240,7 +240,7 @@ period late. The difference is what the blocking exchange does to the rest
 of the model. At 25 ms the stall is at most two ticks; at 5 ms the model is
 behind on a third of its steps.
 
-The DAQ blocks copied from `SimulinkMaster.slx` have **Maximum missed ticks
+The DAQ blocks (`master-src/shell/addDaq.m`) have **Maximum missed ticks
 set to 1e6**, so the model never stops for lag and drops DAQ samples while
 it is behind. The Missed Ticks port is the only indication. The shell
 inherits the same setting.

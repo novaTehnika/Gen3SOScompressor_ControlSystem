@@ -1,19 +1,18 @@
 function buildModbusBench()
-%BUILDMODBUSBENCH Generate ModbusBench.slx: the shell's DAQ input blocks for
-%   Simulink Desktop Real-Time pacing and load, and one MATLAB Function block
+%BUILDMODBUSBENCH Generate ModbusBench.slx: the shell's DAQ input blocks (via
+%   master-src/shell/addDaq.m) for Simulink Desktop Real-Time pacing and
+%   load, and one MATLAB Function block
 %   that calls modbusBenchStep each step. Results are logged to benchLog as
 %   [seq echo slaveCounter txnMs stepMs ok], one row per step.
 %
 %   The DAQ blocks are inputs only; no DAQ output is driven.
 
 mdl = 'ModbusBench';
-src = 'SimulinkMaster';
 here = fileparts(mfilename('fullpath'));
-addpath(here);
+addpath(here, fullfile(here, '..', '..', 'master-src', 'shell'));
 cfg = modbusBenchConfig();
 Ts = num2str(cfg.dt);
 
-load_system(fullfile(here, '..', '..', 'master-src', [src '.slx']));
 if bdIsLoaded(mdl)
     close_system(mdl, 0);
 end
@@ -24,9 +23,9 @@ set_param(mdl, 'SolverType', 'Fixed-step', 'Solver', 'FixedStepDiscrete', ...
     'StopFcn', 'clear modbusBenchStep');
 
 % --- DAQ inputs, as in the shell (channel numbers from buildShell.m) -------
-copyDaq(src, 'Digital Input3', mdl, 'DI Slave',    '[47 45 42 41 40 39 48]', Ts);
-copyDaq(src, 'Analog Input',   mdl, 'AI Position', '1', Ts);
-copyDaq(src, 'Analog Input2',  mdl, 'AI Pressure', '3', Ts);
+addDaq(mdl, 'DI Slave',    'Digital Input', '[47 45 42 41 40 39 48]', Ts);
+addDaq(mdl, 'AI Position', 'Analog Input',  '1', Ts);
+addDaq(mdl, 'AI Pressure', 'Analog Input',  '3', Ts);
 daq = {'DI Slave', 'AI Position', 'AI Pressure'};
 for k = 1:numel(daq)
     add_block('simulink/Sinks/Terminator', [mdl '/' daq{k} ' Term']);
@@ -60,12 +59,5 @@ add_line(mdl, 'Mux/1', 'Log/1');
 
 Simulink.BlockDiagram.arrangeSystem(mdl);
 save_system(mdl, fullfile(here, [mdl '.slx']));
-close_system(src, 0);
 fprintf('Built %s\n', fullfile(here, [mdl '.slx']));
-end
-
-
-function copyDaq(src, srcName, mdl, name, channels, Ts)
-add_block([src '/' srcName], [mdl '/' name]);
-set_param([mdl '/' name], 'Channels', channels, 'SampleTime', Ts);
 end
