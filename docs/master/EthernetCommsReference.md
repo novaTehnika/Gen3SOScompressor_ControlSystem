@@ -139,11 +139,14 @@ Limits and known issues (MotionWorks IEC 2.1.0 release notes, RN.MWIEC.14):
 - The protocol has no freshness indication. A heartbeat register written by the
   master and checked by the slave is required to detect a lost link.
 - Measured on the bench (`bench/modbus`): the controller services the
-  connection on a **4 ms tick**. A transaction is answered in the same tick or
-  the next, 1 to 8 ms after the request. A write and a read sent back to back
-  share a tick. The MATLAB `modbus` object adds about 7 ms (p99 17 ms) of
-  client-side delay per transaction on top of that, so it is a diagnostic
-  tool, not a candidate for the shell.
+  connection on a **4 ms tick** and answers **one request per tick**. A
+  transaction is answered 1 to 8 ms after the request; a write and a read
+  sent back to back are answered in consecutive ticks, 6 to 12 ms for the
+  pair. A read in the tick after a write still returns the pre-write value.
+- Any MATLAB code that blocks on a socket read (`modbus` object or
+  `tcpclient`) adds about 7 ms (p99 17 ms) per blocking call on the lab PC.
+  Sending both requests before waiting pays this once per exchange. In
+  Connected IO mode such a call stalls the model for its duration.
 
 ---
 
@@ -249,18 +252,18 @@ Limits and known issues (MotionWorks IEC 2.1.0 release notes, RN.MWIEC.14):
 Answered by the bench: word order is low word first; the controller services
 Modbus on a 4 ms tick, 1 to 8 ms per transaction (`bench/modbus/README.md`).
 
-1. **Client floor**: exchange time with hand-built frames (`modbusRawProbe`)
-   and with the Simulink Modbus Client blocks, and whether the controller
-   answers a write and a read sent in one TCP segment.
+1. **Exchange inside the model**: whether the Simulink Modbus Client blocks at
+   a 50 ms sample time stall the 3 ms model (missed ticks), and what they do
+   when a reply times out. If they block, the choices are a slower master
+   step (the pressure loop on the slave removes the need for 3 ms), SLDRT
+   Packet Input/Output with the TCP driver (non-blocking, hand-built frames),
+   or a client outside the model.
 2. **Service tick origin**: whether the 4 ms tick follows the task the Modbus
    groups are assigned to, or is fixed in the controller's network stack.
-3. **Modbus Client blocks in a Connected IO model**: confirm they run alongside
-   the DAQ blocks without missed ticks at the 3 ms step, and what they do when
-   a reply times out.
-4. **Shared cable**: compare latency with MotionWorks online and offline.
-5. **Y_DeviceComm reference**: export from MotionWorks IEC help on the lab PC,
+3. **Shared cable**: compare latency with MotionWorks online and offline.
+4. **Y_DeviceComm reference**: export from MotionWorks IEC help on the lab PC,
    only if UDP is still wanted for a faster path.
-6. **OPC Server licence**: confirm whether it is installed, if OPC is wanted for
+5. **OPC Server licence**: confirm whether it is installed, if OPC is wanted for
    diagnostics.
 
 ---

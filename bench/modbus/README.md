@@ -164,7 +164,31 @@ retransmissions):
 The ACK delay is spread evenly over 0.5 to 4 ms: the controller services the
 connection on a 4 ms tick. The response comes in the same tick 81 % of the
 time and one tick later otherwise, so a transaction costs one or two ticks.
-The `modbus` object adds more delay than the controller and is not a
-candidate for the shell.
 
-Simulink bench model and `modbusRawProbe`: not yet run.
+`modbusRawProbe` (case A, 1000 cycles per variant, no failures) and its
+capture (`captures/cap_run02.pcapng`):
+
+| Variant | Exchange, MATLAB median / p99 / max (ms) | Controller, first request → last response, median / p99 / max (ms) | Echo same cycle (%) |
+|---------|------------------------------------------|--------------------------------------------------------------------|---------------------|
+| sequential | 19.8 / 34.1 / 50.5 | 13.5 / 24.1 / 27.0 | 100 |
+| two writes | 9.8 / 25.0 / 29.9 | 8.4 / 11.7 / 11.8 | 89 |
+| one write | 9.8 / 19.8 / 20.4 | 5.9 / 7.8 / 7.9 | 16 |
+
+Findings:
+
+- The controller answers **one request per tick** on a connection. With both
+  frames in one segment the write is answered in the first tick and the read
+  always in the next, so a write-plus-read exchange costs two ticks, 6 to
+  12 ms, whatever the client does.
+- The client-side delay of about 7 ms (p99 17 ms) after each blocking socket
+  read is the same with `tcpclient` as with the `modbus` object. It is
+  MATLAB's blocking read, not the Modbus layer. Sending both requests before
+  waiting pays it once per exchange instead of twice.
+- A read answered in the tick after the write returns the value from before
+  the write reached the program: the written value shows up two ticks later.
+  The slave's reply to a command therefore appears in the following exchange.
+- Against the 50 ms target the exchange passes with retry margin. What is not
+  yet known is how the exchange behaves inside the Simulink model, where a
+  blocking call of 10 to 25 ms stalls the 3 ms step.
+
+Simulink bench model and Modbus Client blocks: not yet run.
