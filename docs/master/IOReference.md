@@ -419,11 +419,11 @@ float voltage_to_position(float voltage) {
 
 ---
 
-## 7. NI PCI 6251 DAQ Pin Mapping
+## 7. NI PCI 6221 DAQ Pin Mapping
 
 ### Configuration
 
-| MP2600iec | Signal | Direction | NI 6251 |
+| MP2600iec | Signal | Direction | NI 6221 |
 |-----------|--------|-----------|---------|
 | DI0 | G_diModeBit0 | NI→MP | P0.5 (pin 51) |
 | DI1 | G_diModeBit1 | NI→MP | P0.1 (pin 17) |

@@ -1,15 +1,15 @@
 # Master
 
 The master runs on the lab PC under Simulink Desktop Real-Time and talks to the
-MP2600iec slave through the NI PCI-6251 DAQ.
+MP2600iec slave through the NI PCI-6221 DAQ.
 
 | Path | Contents |
 |------|----------|
 | `logic/` | All master logic, as plain `.m` functions that run under MATLAB and GNU Octave. `masterStep.m` is the entry point called once per model step; `masterStateMachine.m` sequences the handshake, motion and fault handling; `masterConfig.m` holds every constant. |
 | `shell/buildShell.m` | Generates `shell/SOS_Gen3_Master_Shell.slx`: DAQ blocks, one MATLAB Function block calling `masterStep`, the Constant blocks the app writes and the Gain blocks it reads. The model holds no logic and is rebuilt from this script, not edited by hand. |
+| `shell/addDaq.m` | Creates one Simulink Desktop Real-Time DAQ block. Holds the board setup (PCI-6221, driver options, missed-tick limit) and the digital channel numbering. |
 | `SOS_Gen3_Compressor_Interface.m` | Operator app (programmatic App Designer export). Starts the shell model, writes operator requests to its Constant blocks and polls its outputs. |
-| `SimulinkMaster.slx` | Bench model with manual mode control. `buildShell.m` copies its DAQ blocks to keep the board setup. |
-| `legacy/`, `SOS_Gen3_Compressor_Master.slx` | Earlier Stateflow-based app model and its `.mlapp`, kept for reference. |
+| `legacy/`, `SOS_Gen3_Compressor_Master.slx` | Earlier Stateflow-based app model and its `.mlapp`, and the hand-built `SimulinkMaster.slx` bench model with manual mode control, kept for reference. |
 
 ## Running on the lab PC
 

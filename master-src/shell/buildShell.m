@@ -8,20 +8,14 @@ function buildShell()
 %
 %       run('master-src/shell/buildShell.m')     or     buildShell
 %
-%   The DAQ blocks are copied from SimulinkMaster.slx so they keep its board
-%   setup (National Instruments PCI-6221); only channels and sample time
-%   are set here.
-%
-%   Simulink Desktop Real-Time digital channel numbers on the PCI-6221:
-%   P0.n = n + 1, P1.n = n + 33, P2.n = n + 41.
+%   The DAQ blocks are created by addDaq.m, which holds the board setup
+%   (National Instruments PCI-6221) and the digital channel numbering.
 
 mdl = 'SOS_Gen3_Master_Shell';
-src = 'SimulinkMaster';
 here = fileparts(mfilename('fullpath'));
 cfg = getConfig(here);
 Ts = num2str(cfg.dt);
 
-load_system(fullfile(here, '..', [src '.slx']));
 if bdIsLoaded(mdl)
     close_system(mdl, 0);
 end
@@ -33,14 +27,14 @@ set_param(mdl, 'SolverType', 'Fixed-step', 'Solver', 'FixedStepDiscrete', ...
 % --- DAQ blocks ---------------------------------------------------------
 % [conf0 conf1 conf2 performanceStatus faultActive homingComplete inMotion]
 %  P2.6  P2.4  P2.1  P2.0              P1.7        P1.6           P2.7
-copyDaq(src, 'Digital Input3', mdl, 'DI Slave',     '[47 45 42 41 40 39 48]', Ts);
+addDaq(mdl, 'DI Slave',     'Digital Input',  '[47 45 42 41 40 39 48]', Ts);
 % [safetyEnable modeBit1 motionEnable modeBit0 modeBit2 faultReset]
 %  P0.0         P0.1     P0.2         P0.5     P0.6     P0.7
-copyDaq(src, 'Digital Output3', mdl, 'DO Slave',    '[1 2 3 6 7 8]', Ts);
-copyDaq(src, 'Digital Output',  mdl, 'DO Mixer',    '5', Ts);            % P0.4
-copyDaq(src, 'Analog Input',    mdl, 'AI Position', '1', Ts);            % AI 0
-copyDaq(src, 'Analog Input2',   mdl, 'AI Pressure', '3', Ts);            % AI 2
-copyDaq(src, 'Analog Output',   mdl, 'AO Reference', '1', Ts);           % AO 0
+addDaq(mdl, 'DO Slave',     'Digital Output', '[1 2 3 6 7 8]', Ts);
+addDaq(mdl, 'DO Mixer',     'Digital Output', '5', Ts);                 % P0.4
+addDaq(mdl, 'AI Position',  'Analog Input',   '1', Ts);                 % AI 0
+addDaq(mdl, 'AI Pressure',  'Analog Input',   '3', Ts);                 % AI 2
+addDaq(mdl, 'AO Reference', 'Analog Output',  '1', Ts);                 % AO 0
 set_param([mdl '/DO Slave'], 'InitialValue', '0', 'FinalValue', '0');
 set_param([mdl '/DO Mixer'], 'InitialValue', '0', 'FinalValue', '0');
 set_param([mdl '/AO Reference'], 'InitialValue', '0', 'FinalValue', '0');
@@ -93,18 +87,11 @@ end
 
 Simulink.BlockDiagram.arrangeSystem(mdl);
 save_system(mdl, fullfile(here, [mdl '.slx']));
-close_system(src, 0);
 fprintf('Built %s\n', fullfile(here, [mdl '.slx']));
 end
 
 
-function copyDaq(src, srcName, mdl, name, channels, Ts)
-add_block([src '/' srcName], [mdl '/' name]);
-set_param([mdl '/' name], 'Channels', channels, 'SampleTime', Ts);
-end
-
-
 function cfg = getConfig(here)
-addpath(fullfile(here, '..', 'logic'));
+addpath(here, fullfile(here, '..', 'logic'));
 cfg = masterConfig();
 end

@@ -35,7 +35,7 @@ This plan does **not** cover the testing of the Simulink master controller softw
 -   Yaskawa MP2600iec Controller
 -   Yaskawa Sigma-7 Servo Drive, Motor, and Brake
 -   Tolomatic RSA64 Linear Actuator
--   NI PCI 6251 DAQ with SCB-68a breakout board
+-   NI PCI 6221 DAQ with SCB-68a breakout board
 -   Test PC with Simulink Desktop Real-Time
 -   Power supplies (24VDC)
 -   Digital Multimeter, Oscilloscope

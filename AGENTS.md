@@ -7,7 +7,7 @@ This file provides guidance to AI coding agents working with code in this reposi
 Control software for a single-axis servo compressor (Gen3 SOS, a pre-clinical research device). Two controllers talk over discrete wires, not a bus:
 
 - **Slave** (`slave-src/`): IEC 61131-3 Structured Text for a Yaskawa MP2600iec driving a Sigma-7 servo, edited in MotionWorks IEC Express. It owns the axis state machine, homing, safety and fault latching.
-- **Master** (`master-src/`): MATLAB running under Simulink Desktop Real-Time on a lab PC. It talks to the slave through an NI PCI-6251 DAQ and drives it via the operator app.
+- **Master** (`master-src/`): MATLAB running under Simulink Desktop Real-Time on a lab PC. It talks to the slave through an NI PCI-6221 DAQ and drives it via the operator app.
 
 The contract between them is a 3-bit mode code + MotionEnable + FaultReset (master → slave), a 3-bit confirmation/fault code + status bits (slave → master), one analog reference (AO) and one analog position feedback (AI). Mode entry is a handshake: the slave echoes the mode on its confirmation bits before the master raises MotionEnable. `docs/master/MasterProtocolGuide.md` is the authoritative spec. Fault codes are in `docs/master/FaultCodeReference.md` and pin mapping in `docs/master/IOReference.md`.
 
@@ -50,7 +50,7 @@ The slave ST is the single source of truth. `tools/st2m.py` translates it into O
 ### Master structure
 
 - `master-src/logic/` holds all master logic as plain `.m` functions that run in both MATLAB and Octave. `masterStep.m` is the per-step entry point called from the Simulink MATLAB Function block. It keeps persistent filter state, applies the DAQ polarity (slave outputs sink the DAQ lines, so a raw 0 means asserted) and calls `masterStateMachine.m`, which sequences the handshake, motion and fault reset. `masterConfig.m` holds every constant, including bench limits and scaling.
-- `master-src/shell/buildShell.m` generates `SOS_Gen3_Master_Shell.slx` (gitignored). The model holds no logic and is never hand-edited. It copies DAQ blocks from `SimulinkMaster.slx` to keep the board setup.
+- `master-src/shell/buildShell.m` generates `SOS_Gen3_Master_Shell.slx` (gitignored). The model holds no logic and is never hand-edited. `master-src/shell/addDaq.m` creates the DAQ blocks and is the one place the board (DAQ model, driver options) is named.
 - `SOS_Gen3_Compressor_Interface.m` is the operator app. It writes `RequestedMode` and then increments `CommandSeq` in the shell's Constant blocks. The model acts only on a `CommandSeq` change, except that mode 0 (stop) always acts.
 - `master-src/legacy/` and `SOS_Gen3_Compressor_Master.slx` hold an earlier unfinished Stateflow attempt, kept for reference only.
 

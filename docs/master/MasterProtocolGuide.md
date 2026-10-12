@@ -7,14 +7,14 @@
 
 ## 1. Overview
 
-This document provides step-by-step guidance for implementing the Simulink Desktop Real-Time (DTRT) master controller that interfaces with the MP2600iec servo slave via digital and analog I/O signals through the NI PCI 6251 DAQ.
+This document provides step-by-step guidance for implementing the Simulink Desktop Real-Time (DTRT) master controller that interfaces with the MP2600iec servo slave via digital and analog I/O signals through the NI PCI 6221 DAQ.
 
 ### Architecture Summary
 
 ```
 +-------------------+        Digital/Analog I/O        +-------------------+
 |                   |  =============================>  |                   |
-|  Simulink DTRT    |        NI PCI 6251 DAQ           |  MP2600iec Slave  |
+|  Simulink DTRT    |        NI PCI 6221 DAQ           |  MP2600iec Slave  |
 |  Master           |  <=============================  |                   |
 |                   |        (8 DI, 8 DO, AI, AO)      |                   |
 +-------------------+                                  +-------------------+
@@ -44,7 +44,7 @@ This document provides step-by-step guidance for implementing the Simulink Deskt
 The master DAQ also drives P0.0 (pin 52, safety control relay enable - brake
 disengage / safe-torque-off) and P0.4 (pin 19, stir bar motor); these are not
 part of the slave protocol. P0.3 (pin 47) is unused. See
-[IOReference.md §7](IOReference.md#7-ni-pci-6251-daq-pin-mapping) for the full
+[IOReference.md §7](IOReference.md#7-ni-pci-6221-daq-pin-mapping) for the full
 wiring, including analog.
 
 ### Master Inputs (Slave Digital Outputs)
