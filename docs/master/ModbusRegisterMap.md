@@ -1,17 +1,15 @@
 # Modbus Register Map
 
-## Master ↔ Slave over Modbus TCP (proposed)
+## Master ↔ Slave over Modbus TCP
 
 ---
 
 ## 1. Overview
 
-**Status: proposed, not implemented.** The current interface is the discrete
-and analog wiring in [MasterProtocolGuide.md](MasterProtocolGuide.md). This map
-carries the same protocol over Modbus TCP: the same mode codes, handshake and
-fault-mirror reset, with the reference and feedback in engineering units. The
-word order and timing assumptions are confirmed by the bench test in
-`bench/modbus`.
+This map carries the protocol in [MasterProtocolGuide.md](MasterProtocolGuide.md)
+over Modbus TCP: the same mode codes, handshake and fault-mirror reset, with
+the reference and feedback in engineering units. Word order and timing were
+measured by the bench test in `bench/modbus`.
 
 | Role | Device |
 |------|--------|
@@ -64,10 +62,10 @@ task interval.
 | HR | Address | Type | Global | Content |
 |----|---------|------|--------|---------|
 | 1 | `%IW28672` | UINT | `G_mbHeartbeat` | Master step counter, incremented every step, wraps 65535 → 0 |
-| 2 | `%IW28674` | UINT | `G_mbModeCode` | Mode code 0–7, same meaning as DI0–DI2, including the fault code mirror during reset |
+| 2 | `%IW28674` | UINT | `G_mbModeCode` | Mode code 0–7 (same meaning as DI0–DI2). During fault reset the master mirrors the **full** fault code here. The mode decoder reads the low three bits, so a mirrored code of 8 or above looks like mode 0 to it, which is what mirroring code 0 looks like today; the slave ignores the decoded mode on the fault-acknowledge path |
 | 3 | `%IW28676` | UINT | `G_mbMotionEnable` | 1 = MotionEnable |
 | 4 | `%IW28678` | UINT | `G_mbFaultReset` | 1 = FaultReset (level) |
-| 5–6 | `%ID28680` | REAL | `G_mbReference` | Position mode: mm. Velocity mode: mm/s. Torque mode: % of rated |
+| 5–6 | `%ID28680` | REAL | `G_mbReference` | Position mode: mm. Velocity mode: mm/s. Torque mode: % of rated. Pressure mode (code 7, planned): MPa gauge |
 | 7–20 | | | | Reserved |
 | 101–110 | | | | Bench probe area (`bench/modbus`) |
 
@@ -79,19 +77,18 @@ task interval.
 |----|---------|------|--------|---------|
 | 1 | `%QW73792` | UINT | `G_mbHeartbeatEcho` | Last `G_mbHeartbeat` received |
 | 2 | `%QW73794` | UINT | `G_mbSlaveCounter` | Incremented every scan, wraps 65535 → 0 |
-| 3 | `%QW73796` | UINT | `G_mbConfCode` | Same value as DO0–DO2: mode confirmation, or fault code while a fault is active |
-| 4 | `%QW73798` | UINT | `G_mbFaultCode` | `G_sysActiveFault` as 0–7, 0 when no fault |
+| 3 | `%QW73796` | UINT | `G_mbConfCode` | Same value as DO0–DO2: mode confirmation, or the low three bits of the fault code while a fault is active |
+| 4 | `%QW73798` | UINT | `G_mbFaultCode` | `G_sysActiveFault` as its full integer value, 0 when no fault. May exceed 7 |
 | 5 | `%QW73800` | UINT | `G_mbFaultActive` | 1 = fault active (DO4) |
 | 6 | `%QW73802` | UINT | `G_mbInMotion` | 1 = axis moving (DO6) |
 | 7 | `%QW73804` | UINT | `G_mbPerformanceStatus` | DO3 |
 | 8 | `%QW73806` | UINT | `G_mbHomingComplete` | DO5 |
-| 9 | `%QW73808` | UINT | `G_mbState` | `G_sysCurrentState` as its enumeration value |
-| 10 | `%QW73810` | UINT | | Reserved |
+| 9–10 | `%QW73808` | UINT | | Reserved |
 | 11–12 | `%QD73812` | REAL | `G_mbActualPosition` | `G_sysActualPosition` (mm) |
 | 13–14 | `%QD73816` | REAL | `G_mbActualVelocity` | `G_sysActualVelocity` (mm/s) |
 | 15–16 | `%QD73820` | REAL | `G_mbActualTorque` | `G_sysActualTorque` (% of rated) |
 | 17–18 | `%QD73824` | REAL | `G_mbCommandedPosition` | `G_sysCommandedPosition` (mm) |
-| 19–20 | | | | Reserved |
+| 19–20 | `%QD73828` | REAL | `G_mbActualPressure` | Reserved for the slave-side pressure loop: actual pressure, MPa gauge |
 | 101–110 | | | | Bench probe area (`bench/modbus`) |
 
 ---
@@ -104,30 +101,35 @@ therefore supervise the link.
 
 | Side | Condition | Action |
 |------|-----------|--------|
-| Slave | `G_mbHeartbeat` unchanged for longer than the comm timeout | Latch a communication fault (code 4, currently `FAULT_RESERVED_100`) and halt |
-| Master | `G_mbSlaveCounter` unchanged, or reads failing, for longer than the comm timeout | Treat as a fault and drop the hardwired safety relay (P0.0) |
+| Slave | `G_mbHeartbeat` unchanged for `G_cfgCommTimeout` (150 ms); armed by the first change seen | `FAULT_COMM` (code 4) through `FB_SafetyMonitor`, so the fault latches, mirrors and resets like any other |
+| Master | `G_mbSlaveCounter` unchanged for `cfg.commTimeout` (150 ms) | E-stop path: MotionEnable low, safety relay (P0.0) off, status `LINK_LOST`. Latched until the counter advances and the operator sends Stop |
 
-The comm timeout is a small multiple of the exchange period, long enough to
-ride through one lost exchange (for example 150 ms at a 50 ms period). With
-**Set all outputs off when PLC stops**, a stopped slave reads as a counter
-frozen at 0.
+Both timeouts ride through one lost exchange at the 50 ms period. A dropped
+TCP connection stops the Simulink model, which sets the DAQ outputs to their
+final values. With **Set all outputs off when PLC stops**, a stopped slave
+reads as a counter frozen at 0.
 
 ---
 
 ## 5. Integration Notes
 
-- `PRG_Input` maps the holding-register globals onto the existing `G_di*`
-  globals (mode bits from `G_mbModeCode`), so the handshake and fault-reset
-  function blocks are unchanged. `PRG_Output` fills the input registers from the
-  `G_do*` and `G_sys*` globals.
-- `G_mbReference` replaces `G_aiReference`, and the actual-position registers
-  replace `G_aoPositionOutput`. The two-stage voltage scaling in
-  `FB_AnalogProcessor` / `FB_PositionOutput` and in the master's `x2V`/`V2x` is
-  no longer used on this path.
-- The ST constructs for bit extraction and `LREAL` → `REAL` conversion must be
-  supported by `tools/st2m.py`, or added to it.
-- The variable declarations follow the `Variables (define in MWiec GUI)`
-  convention so st2m picks them up.
-- Hardwired signals stay as they are: safety relay, brake, overtravel switches,
-  pressure transducer and stir bar motor
+- `PRG_Input` maps `G_mbModeCode` (low three bits), `G_mbMotionEnable` and
+  `G_mbFaultReset` onto the `G_di*` globals, so the debounce, mode decoder,
+  handshake and fault-reset FBs are unchanged. `G_mbReference` is copied to
+  `G_sysReference`, which `PRG_Main` uses where the analog processor's scaled
+  outputs were used. The full value of `G_mbModeCode` is decoded by
+  `FB_IntToFaultCode` for the fault acknowledgement.
+- `PRG_Output` fills the input registers from the `G_do*` and `G_sys*`
+  globals. `G_mbSlaveCounter` comes from `G_sysScanCounter` and
+  `G_mbFaultCode` from `G_sysActiveFaultCode`, both maintained by `PRG_Main`.
+- The analog reference and position-output path (`FB_AnalogProcessor`,
+  `FB_PositionOutput`, the two-stage voltage map constants) is removed. The
+  analog input `G_aiReference` and its filter remain declared for the
+  pressure transducer, which takes the controller's only analog input.
+- On the master, `masterStep` takes the 18-register read vector and returns
+  the 6-register write vector; `modbusMap.m` holds the indices and
+  `modbusPack.m` / `modbusUnpack.m` the REAL packing (low word first). The
+  Simulink blocks handle plain `uint16`.
+- Hardwired signals stay as they are: safety relay, brake, overtravel
+  switches, pressure transducer and stir bar motor
   (see [EthernetCommsReference.md](EthernetCommsReference.md)).

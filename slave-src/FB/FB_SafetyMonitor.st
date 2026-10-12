@@ -11,15 +11,17 @@
 
    Monitored Conditions:
    - Drive faults (from servo amplifier; encoder alarms surface here via the drive)
+   - Master link loss (heartbeat stale, from FB_CommWatchdog)
    - Overtravel faults (unexpected switch triggers; positive switch never expected)
    - Position limit violations (beyond soft limits)
    - Piston exit guard faults (from FB_PistonExitGuard)
 
    Fault Priority (highest to lowest):
    1. Drive fault (FAULT_DRIVE)
-   2. Limit switch fault (FAULT_LIMIT_SWITCH)
-   3. Position limit fault (FAULT_POSITION)
-   4. Piston exit fault (FAULT_PISTON_EXIT)
+   2. Link loss (FAULT_COMM)
+   3. Limit switch fault (FAULT_LIMIT_SWITCH)
+   4. Position limit fault (FAULT_POSITION)
+   5. Piston exit fault (FAULT_PISTON_EXIT)
 
    Integration:
    - Called every scan after state machine, before output update
@@ -36,12 +38,14 @@
        DriveFault          : BOOL             (* Drive has reported a fault
        CurrentState        : E_SystemState    (* Current state machine state
        ExitGuardTriggered  : BOOL             (* Piston exit guard triggered fault
+       CommLost            : BOOL             (* Master heartbeat stale
      VAR_OUTPUT:
        FaultDetected       : BOOL             (* A fault condition exists
        FaultCode           : E_FaultCode      (* Fault code to report
        FaultLimitSwitch    : BOOL             (* Limit switch fault detected
        FaultPosition       : BOOL             (* Position limit exceeded
        FaultDrive          : BOOL             (* Drive fault detected
+       FaultComm           : BOOL             (* Link loss detected
        FaultPistonExit     : BOOL             (* Piston exit guard fault
      VAR:
        bLatchedFault       : BOOL
@@ -63,6 +67,7 @@ IF NOT Enable THEN
     FaultLimitSwitch := FALSE;
     FaultPosition := FALSE;
     FaultDrive := FALSE;
+    FaultComm := FALSE;
     FaultPistonExit := FALSE;
     bLatchedFault := FALSE;
     eLatchedFaultCode := E_FaultCode#FAULT_NONE;
@@ -102,6 +107,13 @@ bInRecoveryState := (CurrentState = E_SystemState#ST_RECOVERY) OR
    -------------------------------------------------------------------------- *)
 
 FaultDrive := DriveFault;
+
+(* --------------------------------------------------------------------------
+   LINK LOSS MONITORING
+   The master heartbeat has stopped; its commands can no longer be trusted
+   -------------------------------------------------------------------------- *)
+
+FaultComm := CommLost;
 
 (* --------------------------------------------------------------------------
    OVERTRAVEL FAULT MONITORING
@@ -177,10 +189,14 @@ FaultPistonExit := ExitGuardTriggered;
    value, not a stale value from the previous scan's latch override below.
    -------------------------------------------------------------------------- *)
 
-(* Priority order: Drive > LimitSwitch > Position > PistonExit *)
+(* Priority order: Drive > Comm > LimitSwitch > Position > PistonExit *)
 IF FaultDrive THEN
     FaultDetected := TRUE;
     FaultCode := E_FaultCode#FAULT_DRIVE;
+
+ELSIF FaultComm THEN
+    FaultDetected := TRUE;
+    FaultCode := E_FaultCode#FAULT_COMM;
 
 ELSIF FaultLimitSwitch THEN
     FaultDetected := TRUE;

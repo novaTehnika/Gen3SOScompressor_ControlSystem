@@ -4,12 +4,12 @@ This file provides guidance to AI coding agents working with code in this reposi
 
 ## What this is
 
-Control software for a single-axis servo compressor (Gen3 SOS, a pre-clinical research device). Two controllers talk over discrete wires, not a bus:
+Control software for a single-axis servo compressor (Gen3 SOS, a pre-clinical research device). Two controllers talk over Modbus TCP plus one hardwired safety line:
 
 - **Slave** (`slave-src/`): IEC 61131-3 Structured Text for a Yaskawa MP2600iec driving a Sigma-7 servo, edited in MotionWorks IEC Express. It owns the axis state machine, homing, safety and fault latching.
 - **Master** (`master-src/`): MATLAB running under Simulink Desktop Real-Time on a lab PC. It talks to the slave through an NI PCI-6221 DAQ and drives it via the operator app.
 
-The contract between them is a 3-bit mode code + MotionEnable + FaultReset (master → slave), a 3-bit confirmation/fault code + status bits (slave → master), one analog reference (AO) and one analog position feedback (AI). Mode entry is a handshake: the slave echoes the mode on its confirmation bits before the master raises MotionEnable. `docs/master/MasterProtocolGuide.md` is the authoritative spec. Fault codes are in `docs/master/FaultCodeReference.md` and pin mapping in `docs/master/IOReference.md`.
+The contract between them is a mode code + MotionEnable + FaultReset + reference in engineering units (master → slave, holding registers HR1–6, with a heartbeat) and a confirmation code, fault code, status bits and position/velocity/torque feedback (slave → master, input registers IR1–18, with a scan counter). The master writes and reads every 50 ms; the slave services Modbus on a 4 ms tick. Mode entry is a handshake: the slave echoes the mode in its confirmation register before the master raises MotionEnable. Each side watches the other's counter and faults after 150 ms. The safety relay stays on DAQ line P0.0. `docs/master/MasterProtocolGuide.md` is the authoritative spec, `docs/master/ModbusRegisterMap.md` the register layout. Fault codes are in `docs/master/FaultCodeReference.md` and pin mapping in `docs/master/IOReference.md`.
 
 ## Commands
 
@@ -44,12 +44,12 @@ The slave ST is the single source of truth. `tools/st2m.py` translates it into O
 
 - `PRG_Main.st` holds the central state machine (idle → drive reset/enable → brake release → operational modes → hold/deactivate, plus fault and recovery states). It calls every user FB exactly once at the end of the file.
 - All built-in motion FBs (`MC_Power`, `MC_Stop`, `MC_MoveAbsolute`, `Y_DirectControl`, `MC_SetPosition`, Jog, …) and `G_sysAxis` live in a **Ladder Diagram POU that is not in this repo**. ST never calls them directly. It writes `G_cmd*` structs and reads `G_sta*` structs (types in `DataTypes.st`). Custom FBs that drive motion emit `Cmd*` outputs and take `Sta*` inputs, and `PRG_Main` wires them to the globals.
-- In the simulator, `slave-sim/axisModel.m` stands in for that LD POU plus the drive and mechanics. `slaveStep.m` runs one scan: `PRG_Input` → `PRG_Main` → `PRG_Output` → `axisModel`, so PRG_Main sees motion status one scan late. `slaveSimConfig.m` holds only the physical axis parameters. The slave's own config comes from the ST. Test hooks (`sl.hook.driveFault`, `blocked`, `torque`) inject faults.
+- In the simulator, `slave-sim/axisModel.m` stands in for that LD POU plus the drive and mechanics. `slaveStep.m` takes the holding registers and returns the input registers in engineering units and runs one scan: `PRG_Input` → `PRG_Main` → `PRG_Output` → `axisModel`, so PRG_Main sees motion status one scan late. `slaveSimConfig.m` holds only the physical axis parameters. The slave's own config comes from the ST. Test hooks (`sl.hook.driveFault`, `blocked`, `torque`) inject faults.
 - Naming: Hungarian-style local prefixes (`b`, `n`, `r`, `t`, `e`, `st`, `fb`, `rTrig`/`fTrig`) and global prefixes `G_cfg*`, `G_sys*`, `G_pos*`, `G_di*`/`G_do*`, `G_ai*`/`G_ao*`. See `docs/slave/development/SlaveDeveloperGuide.md`.
 
 ### Master structure
 
-- `master-src/logic/` holds all master logic as plain `.m` functions that run in both MATLAB and Octave. `masterStep.m` is the per-step entry point called from the Simulink MATLAB Function block. It keeps persistent filter state, applies the DAQ polarity (slave outputs sink the DAQ lines, so a raw 0 means asserted) and calls `masterStateMachine.m`, which sequences the handshake, motion and fault reset. `masterConfig.m` holds every constant, including bench limits and scaling.
+- `master-src/logic/` holds all master logic as plain `.m` functions that run in both MATLAB and Octave. `masterStep.m` is the per-step entry point called from the Simulink MATLAB Function block. It takes the 18-register read vector and returns the 6-register write vector (`modbusMap.m` for indices, `modbusPack.m`/`modbusUnpack.m` for REAL values, low word first), keeps persistent filter and link-watchdog state and calls `masterStateMachine.m`, which sequences the handshake, motion and fault reset. `masterConfig.m` holds every constant, including the 25 ms step and the 50 ms exchange.
 - `master-src/shell/buildShell.m` generates `SOS_Gen3_Master_Shell.slx` (gitignored). The model holds no logic and is never hand-edited. `master-src/shell/addDaq.m` creates the DAQ blocks and is the one place the board (DAQ model, driver options) is named.
 - `SOS_Gen3_Compressor_Interface.m` is the operator app. It writes `RequestedMode` and then increments `CommandSeq` in the shell's Constant blocks. The model acts only on a `CommandSeq` change, except that mode 0 (stop) always acts.
 - `master-src/legacy/` and `SOS_Gen3_Compressor_Master.slx` hold an earlier unfinished Stateflow attempt, kept for reference only.
@@ -57,8 +57,8 @@ The slave ST is the single source of truth. `tools/st2m.py` translates it into O
 ### Tests
 
 - `smokeMasterStateMachine`: master state machine against a protocol-level stand-in slave (not the ST sim).
-- `closedLoopMasterSlave`: `masterStateMachine` against the generated slave. The master steps every 3 ms and the slave every 2 ms on a 1 ms tick.
-- `closedLoopMasterStep`: `masterStep` through the real DAQ wiring and polarity, with the slave's position map set to match `masterConfig`.
+- `closedLoopMasterSlave`: `masterStateMachine` against the generated slave in engineering units. The master steps every 25 ms, the exchange runs every 50 ms and the slave every 2 ms on a 1 ms tick.
+- `closedLoopModbusStep`: `masterStep` through the packed register vectors, including link loss on either side.
 
 ## Conventions
 

@@ -82,19 +82,42 @@
         Range: -10V to +10V (LREAL, volts)
         ======================================================================== *)
 
-     G_aiReference         AT %IW0   : LREAL  (* Mode-dependent reference signal *)
-                                             (* Position mode: position reference *)
-                                             (* Velocity mode: velocity reference *)
-                                             (* Torque mode: torque reference *)
+     G_aiReference         AT %IW0   : LREAL  (* Not used by the protocol; the *)
+                                             (* pressure channel takes this input *)
 
 
      (* ========================================================================
-        ANALOG OUTPUTS (1 Available)
-        Range: -10V to +10V (LREAL, volts)
+        MODBUS HOLDING REGISTERS (master -> slave), group FC#06,16
+        Register k is at byte offset 28672 + 2*(k-1). Declared under the
+        group that Hardware Configuration creates. See
+        docs/master/ModbusRegisterMap.md.
         ======================================================================== *)
 
-     G_aoPositionOutput    AT %QW0   : LREAL  (* Position output signal to master *)
-                                             (* Uses two-stage scaling for resolution *)
+     G_mbHeartbeat         AT %IW28672 : UINT  (* HR1: master step counter *)
+     G_mbModeCode          AT %IW28674 : UINT  (* HR2: mode code 0-7, or the full fault code mirrored during reset *)
+     G_mbMotionEnable      AT %IW28676 : UINT  (* HR3: 1 = MotionEnable *)
+     G_mbFaultReset        AT %IW28678 : UINT  (* HR4: 1 = FaultReset *)
+     G_mbReference         AT %ID28680 : REAL  (* HR5-6: reference, mm / mm/s / % by mode *)
+
+
+     (* ========================================================================
+        MODBUS INPUT REGISTERS (slave -> master), group FC#04
+        Register k is at byte offset 73792 + 2*(k-1).
+        ======================================================================== *)
+
+     G_mbHeartbeatEcho     AT %QW73792 : UINT  (* IR1: last G_mbHeartbeat received *)
+     G_mbSlaveCounter      AT %QW73794 : UINT  (* IR2: scan counter *)
+     G_mbConfCode          AT %QW73796 : UINT  (* IR3: DO0-2 value: mode confirmation or 3-bit fault code *)
+     G_mbFaultCode         AT %QW73798 : UINT  (* IR4: G_sysActiveFault, full value *)
+     G_mbFaultActive       AT %QW73800 : UINT  (* IR5: DO4 *)
+     G_mbInMotion          AT %QW73802 : UINT  (* IR6: DO6 *)
+     G_mbPerformanceStatus AT %QW73804 : UINT  (* IR7: DO3 *)
+     G_mbHomingComplete    AT %QW73806 : UINT  (* IR8: DO5 *)
+     G_mbActualPosition    AT %QD73812 : REAL  (* IR11-12: mm *)
+     G_mbActualVelocity    AT %QD73816 : REAL  (* IR13-14: mm/s *)
+     G_mbActualTorque      AT %QD73820 : REAL  (* IR15-16: % of rated *)
+     G_mbCommandedPosition AT %QD73824 : REAL  (* IR17-18: mm *)
+
    END_VAR
 
 
@@ -182,41 +205,11 @@
 
 
      (* ========================================================================
-        ANALOG I/O SCALING
-        Raw INT range: -32768 to +32767 = -10V to +10V
-
-        Two-stage position mapping provides higher resolution in the
-        in-cylinder region where precision matters most.
-        ======================================================================== *)
-
-     (* Velocity reference scaling (Mode 011) *)
-     G_cfgAnalogVelMin         : LREAL := -7.0        (* Velocity at -10V (mm/s) *)
-     G_cfgAnalogVelMax         : LREAL := 7.0         (* Velocity at +10V (mm/s) *)
-
-     (* Torque reference scaling (Mode 100) *)
-     G_cfgAnalogTorqueMin      : LREAL := -100.0      (* Torque at -10V (%) *)
-     G_cfgAnalogTorqueMax      : LREAL := 100.0       (* Torque at +10V (%) *)
-
-     (* Two-stage position mapping (used for both input and output) *)
-     (* Stage 1: In-cylinder region (higher resolution) *)
-     G_cfgPosMapStage1PosMin   : LREAL := 0.0         (* Stage 1 position start (mm) *)
-     G_cfgPosMapStage1VoltMin  : LREAL := -10.0       (* Stage 1 voltage start (V) *)
-     G_cfgPosMapStage1VoltMax  : LREAL := 5.0         (* Stage 1 voltage end (V) *)
-
-     (* Stage transition point *)
-     G_cfgPosMapTransitionPos  : LREAL := 200.0       (* Position at stage boundary (mm) *)
-     G_cfgPosMapTransitionVolt : LREAL := 0.0         (* Voltage at stage boundary (V) *)
-
-     (* Stage 2: Out-of-cylinder region (lower resolution) *)
-     G_cfgPosMapStage2PosMax   : LREAL := 365.0       (* Stage 2 position end (mm) *)
-     G_cfgPosMapStage2VoltMax  : LREAL := 10.0        (* Stage 2 voltage end (V) *)
-
-
-     (* ========================================================================
         TIMING PARAMETERS
         ======================================================================== *)
 
-     G_cfgHandshakeTimeout     : TIME := T#5MS        (* Internal handshake timeout (master must raise motion enable within this window after handshake start) *)
+     G_cfgHandshakeTimeout     : TIME := T#500MS      (* Handshake timeout: the master must raise motion enable within this window after confirmation; it needs at least two Modbus exchanges *)
+     G_cfgCommTimeout          : TIME := T#150MS      (* Master heartbeat unchanged this long raises FAULT_COMM *)
      G_cfgHoldPositionTimeout  : TIME := T#2M         (* Hold-position inactivity watchdog: if no handshake completes within this window after motion halts, gracefully shut down to idle (no fault) *)
      G_cfgBrakeEngageDelay     : TIME := T#500MS      (* Wait after brake engage command *)
      G_cfgBrakeDisengageDelay  : TIME := T#500MS      (* Wait after brake disengage command *)
@@ -230,13 +223,13 @@
         ======================================================================== *)
 
      (* Digital input debounce times *)
-     G_cfgDebounceTimeMode         : TIME := T#50MS   (* Mode bits (DI0-2) debounce *)
-     G_cfgDebounceTimeMotion       : TIME := T#20MS   (* Motion enable (DI3) debounce *)
-     G_cfgDebounceTimeFault        : TIME := T#20MS   (* Fault reset (DI6) debounce *)
+     G_cfgDebounceTimeMode         : TIME := T#50MS   (* Mode code (G_mbModeCode) debounce *)
+     G_cfgDebounceTimeMotion       : TIME := T#20MS   (* Motion enable (G_mbMotionEnable) debounce *)
+     G_cfgDebounceTimeFault        : TIME := T#20MS   (* Fault reset (G_mbFaultReset) debounce *)
      G_cfgDebounceTimeOvertravelNeg: TIME := T#10MS   (* Negative overtravel / home reference (short for homing precision) *)
      G_cfgDebounceTimeOvertravelPos: TIME := T#10MS   (* Positive overtravel standard debounce *)
 
-     (* Analog input filter parameters *)
+     (* Analog input filter parameters (pressure channel) *)
      G_cfgAnalogFilterTimeConst: TIME := T#50MS       (* Low-pass filter time constant *)
      G_cfgAnalogMedianSize     : INT := 5             (* Median filter size (3 or 5) *)
 
@@ -337,6 +330,9 @@
      G_sysCurrentState         : E_SystemState := ST_INIT     (* Current state *)
      G_sysPreviousState        : E_SystemState := ST_INIT     (* Previous state *)
      G_sysRequestedMode        : E_OperatingMode := MODE_IDLE (* Mode from master *)
+     G_sysReference            : LREAL := 0.0     (* Reference from master: mm, mm/s or % by mode *)
+     G_sysScanCounter          : UINT := UINT#0   (* Incremented every scan, published in G_mbSlaveCounter *)
+     G_sysActiveFaultCode      : UINT := UINT#0   (* G_sysActiveFault as an integer, published in G_mbFaultCode *)
      G_sysConfirmedMode        : E_OperatingMode := MODE_IDLE (* Mode confirmed to master *)
      G_sysActiveFault          : E_FaultCode := FAULT_NONE    (* Active fault code *)
 

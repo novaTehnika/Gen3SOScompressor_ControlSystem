@@ -6,9 +6,12 @@
 
 ## 1. Scope
 
-This document collects the vendor documentation relevant to replacing the
-discrete and analog master ↔ slave signals (DAQ DI/DO, AO reference, AI0
-position feedback) with an Ethernet link between the lab PC and the MP2600iec.
+This document collects the vendor documentation and bench measurements behind
+the Ethernet link between the lab PC and the MP2600iec. Modbus TCP is the
+chosen transport; the protocol over it is in
+[ModbusRegisterMap.md](ModbusRegisterMap.md). It replaces the discrete and
+analog master ↔ slave signals (DAQ DI/DO, AO reference, AI0 position
+feedback).
 It covers the transport options available with the installed software, how each
 is configured, and the open questions that must be answered on the bench. It is
 not a protocol specification. The current protocol is defined in

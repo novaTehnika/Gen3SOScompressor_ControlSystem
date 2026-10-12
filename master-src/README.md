@@ -1,7 +1,14 @@
 # Master
 
 The master runs on the lab PC under Simulink Desktop Real-Time and talks to the
-MP2600iec slave through the NI PCI-6221 DAQ.
+MP2600iec slave over Modbus TCP (`docs/master/ModbusRegisterMap.md`), with the
+safety relay, the stir bar motor and the pressure transducer on the NI
+PCI-6221 DAQ.
+
+**The shell builder has not yet been updated for the Modbus transport.**
+`masterStep` now takes the Modbus read vector and returns the write vector;
+`shell/buildShell.m` still wires the previous DAQ-only signature and does not
+build a working model until the Modbus Client blocks are added to it.
 
 | Path | Contents |
 |------|----------|
@@ -29,7 +36,10 @@ only when `CommandSeq` changes, except that `RequestedMode = 0` always stops.
 continuously while their operation is active. `ESTOP` and `Mixer` act at once.
 
 The app reads `StatusCode`, `FaultCode`, `State`, `Position`,
-`Velocity` and `Pressure`. Status codes are listed in `masterStateMachine.m`.
+`Velocity`, `Pressure` and `LinkOk`. Status codes are listed in
+`masterStateMachine.m`; a fault shows as status 10 with the code in
+`FaultCode`, and a lost slave link as status 34 until the operator presses
+Stop.
 
 ## Operator app buttons
 

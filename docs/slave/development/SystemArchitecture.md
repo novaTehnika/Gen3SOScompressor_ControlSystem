@@ -80,7 +80,7 @@ The application spans two POUs: `PRG_Main` (Structured Text) contains the state 
 -   **Control Blocks (`Y_DirectControl`, `MC_*`):** PLCopen (`MC_`) and Yaskawa-specific (`Y_`) function blocks. These live in the LD POU and are driven from ST through the `G_cmd*` / `G_sta*` globals.
 -   **Homing FBs (`FB_HomeLimit`, `FB_HomeEOT`, `FB_GoHome`):** Emit built-in FB commands via `Cmd*` `VAR_OUTPUT` structs and receive built-in FB status via `Sta*` `VAR_INPUT` structs. `PRG_Main` bridges these to the matching globals.
 -   **Safety Monitor:** A watchdog (`FB_SafetyMonitor`) that runs every cycle to check for fault conditions.
--   **Output Processors:** Function blocks (`FB_OutputMux`, `FB_PositionOutput`) that format system data into the correct signals for the physical outputs.
+-   **Output Processors:** `FB_OutputMux` formats the mode confirmation / fault code for the discrete outputs; `PRG_Output` publishes the same data and the feedback in the Modbus input registers.
 
 ---
 
@@ -90,15 +90,14 @@ This section describes the path of data during two primary scenarios.
 
 ### Scenario 1: Position Command Input
 
-This flow describes how a voltage from the master controller becomes motion.
+This flow describes how a position reference from the master controller becomes motion.
 
-1.  **Analog Input:** The master's analog voltage arrives at `G_aiReference`, typed as `LREAL` volts (`AT %IW0 : LREAL`).
-2.  **Filtering:** `FB_AnalogInputFilter` applies a median filter to reject outliers and a low-pass filter to smooth the signal. The output is `nFilteredAnalog`.
-3.  **Scaling:** `FB_AnalogProcessor` takes `nFilteredAnalog` and, based on the `CurrentMode` being `MODE_POSITION`, scales it using the two-stage mapping parameters into a physical position setpoint in millimeters.
-4.  **State Machine Execution:** The `ST_POSITION_CTRL` state (and, during fault recovery, `ST_RECOVERY_POSITION`) is active and clamps the scaled setpoint to the active software limits (`stCurrentLimits.PosMin`, `stCurrentLimits.PosMax`), storing the result in a local `rPosTarget`.
-5.  **Command Gate:** `fbPosGate` (`FB_PositionCommandGate`) shapes `rPosTarget` into a per-scan command: it limits command velocity to `stCurrentLimits.VelMax` and acceleration to `G_cfgPosGateAccelMax`, seeds from `G_sysActualPosition` on state entry, and tethers the command to within `G_cfgPosGateMaxDeviation` of actual position so it cannot run away from the real axis if motion stalls. This stage runs in both `ST_POSITION_CTRL` and `ST_RECOVERY_POSITION`; velocity mode and torque mode are unchanged.
-6.  **Route Active FB Command Outputs:** `fbPosGate.CommandedPosition` becomes `G_sysCommandedPosition` and is written into `G_cmdDirectControl.Position`, enabling direct control.
-7.  **Drive Command:** The LD POU's `Y_DirectControl` instance reads `G_cmdDirectControl` each scan, commands the Yaskawa drive, and the motor moves.
+1.  **Modbus Input:** The master writes the reference in millimeters to the holding register `G_mbReference` (`AT %ID28680 : REAL`), together with the mode code, MotionEnable, FaultReset and its heartbeat.
+2.  **Mapping:** `PRG_Input` copies it to `G_sysReference` (`LREAL`) and decodes the mode code register into the `G_diModeBit*` globals, which go through the digital debounce filters and `FB_ModeDecoder` as before.
+3.  **State Machine Execution:** The `ST_POSITION_CTRL` state (and, during fault recovery, `ST_RECOVERY_POSITION`) is active and clamps `G_sysReference` to the active software limits (`stCurrentLimits.PosMin`, `stCurrentLimits.PosMax`), storing the result in a local `rPosTarget`.
+4.  **Command Gate:** `fbPosGate` (`FB_PositionCommandGate`) shapes `rPosTarget` into a per-scan command: it limits command velocity to `stCurrentLimits.VelMax` and acceleration to `G_cfgPosGateAccelMax`, seeds from `G_sysActualPosition` on state entry, and tethers the command to within `G_cfgPosGateMaxDeviation` of actual position so it cannot run away from the real axis if motion stalls. This stage runs in both `ST_POSITION_CTRL` and `ST_RECOVERY_POSITION`; velocity mode and torque mode are unchanged.
+5.  **Route Active FB Command Outputs:** `fbPosGate.CommandedPosition` becomes `G_sysCommandedPosition` and is written into `G_cmdDirectControl.Position`, enabling direct control.
+6.  **Drive Command:** The LD POU's `Y_DirectControl` instance reads `G_cmdDirectControl` each scan, commands the Yaskawa drive, and the motor moves.
 
 ### Scenario 2: Position Feedback Output
 
@@ -106,9 +105,7 @@ This flow describes how the motor's physical position is reported back to the ma
 
 1.  **Encoder Reading:** The Yaskawa drive continuously tracks the motor's absolute encoder position.
 2.  **PLCopen Feedback:** `MC_ReadActualPosition` in the LD POU retrieves the current axis position each scan and publishes it through the globals; `PRG_Main` stores it in `G_sysActualPosition`.
-3.  **Offset Application:** `FB_PositionOutput` takes `G_sysActualPosition` and adds `G_posEOTOffset` (calculated during EOT homing). This translates the position from the slave's coordinate system (where 0 is the home limit switch) to the master's coordinate system (where the EOT corresponds to `G_cfgHomeEOTSetPosition`, typically 300 mm).
-4.  **Analog Scaling:** `FB_PositionOutput` applies the two-stage position-to-voltage mapping, producing an `LREAL` voltage value.
-5.  **Analog Output:** The voltage is written to `G_aoPositionOutput` (`AT %QW0 : LREAL`). MotionWorksIEC converts this to the physical -10V to +10V signal for the master controller to read.
+3.  **Modbus Output:** `PRG_Output` writes `G_sysActualPosition`, `G_sysActualVelocity`, `G_sysActualTorque` and `G_sysCommandedPosition` as `REAL` values to the input registers (`G_mbActualPosition` at `%QD73812` and following), alongside the heartbeat echo, scan counter, confirmation code, fault code and status bits. The master reads them every 50 ms.
 
 ---
 
@@ -122,7 +119,6 @@ The main program orchestrates a number of critical function blocks.
 | `fbModeDecoder`| `FB_ModeDecoder` | **Command Interpretation:** Converts the master's 3-bit command into a meaningful `E_OperatingMode` enum. |
 | `fbHandshake`| `FB_HandshakeManager`| **Mode Synchronization:** Manages the mode entry handshake protocol with the master (confirmation, timeout, verification). |
 | `fbFaultReset`| `FB_FaultResetHandler`| **Fault Reset Validation:** Validates fault reset conditions — FaultReset HIGH, MotionEnable LOW, bits stable, and master fault code acknowledgement matches active fault. |
-| `fbAnalogProc`| `FB_AnalogProcessor`| **Command Scaling:** Translates the filtered analog input voltage into a physical setpoint (position, velocity, or torque). |
 | `fbPosGate` | `FB_PositionCommandGate` | **Command Shaping:** In `ST_POSITION_CTRL` and `ST_RECOVERY_POSITION`, limits the position command's velocity (`stCurrentLimits.VelMax`) and acceleration (`G_cfgPosGateAccelMax`), seeds from `G_sysActualPosition` on state entry, and tethers the command to within `G_cfgPosGateMaxDeviation` of actual position. Velocity and torque modes are unchanged. |
 | `fbReadActual*`| `MC_ReadActual*` | **Feedback:** The primary source of feedback from the drive, providing real-time position, velocity, and torque. |
 | `fbPower` | `MC_Power` | **Drive Control:** Enables and disables power to the servo drive. |
@@ -131,4 +127,5 @@ The main program orchestrates a number of critical function blocks.
 | `fbHome*` | `FB_HomeLimit`, `FB_HomeEOT` | **Homing Logic:** Encapsulates the complex, multi-step homing sequences. |
 | `fbSafetyMonitor`| `FB_SafetyMonitor` | **System Watchdog:** The central authority for detecting unsafe conditions and triggering a fault. |
 | `fbOutputMux` | `FB_OutputMux` | **Output Routing:** Switches the meaning of the 3-bit digital outputs between "Mode Confirmation" and "Fault Code". |
-| `fbPosOutput` | `FB_PositionOutput` | **Feedback Scaling:** Translates the internal axis position into the correct analog voltage for the master, applying the EOT offset and two-stage mapping. |
+| `fbCommWatchdog` | `FB_CommWatchdog` | **Link Supervision:** Raises `FAULT_COMM` through the safety monitor when the master heartbeat register stops changing. |
+| `fbIntToFaultCode` | `FB_IntToFaultCode` | **Fault Acknowledgement:** Decodes the full fault code the master mirrors in the mode register for `FB_FaultResetHandler`. |

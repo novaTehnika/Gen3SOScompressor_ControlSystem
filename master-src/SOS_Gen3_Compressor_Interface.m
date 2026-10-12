@@ -119,9 +119,11 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         OP_RESET    = 5
         OP_GO_HOME  = 6
 
-        STATUS_STARTING = 7
-        STATUS_STOPPING = 6
-        STATUS_ESTOP    = 20
+        STATUS_STARTING  = 7
+        STATUS_STOPPING  = 6
+        STATUS_FAULT     = 10     % FaultCode block holds the code
+        STATUS_ESTOP     = 20
+        STATUS_LINK_LOST = 34
 
         % Time the model gets to act on a request before a status that
         % does not show it running ends it
@@ -135,7 +137,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         COLOR_ESTOP    = [1 0.85 0]
 
         faultNames = ["Handshake", "Drive", "Position limit", ...
-            "Reserved", "Piston exit guard", "Limit switch", "Encoder"]
+            "Master link lost", "Piston exit guard", "Limit switch", "Encoder"]
     end
 
     methods (Access = private)
@@ -319,7 +321,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.PressureatmGauge.Value = clampTo(app, readBlock(app, "Pressure"), ...
                 app.PressureatmGauge.Limits);
 
-            faulted = statusCode > 10 && statusCode < 20;
+            faulted = statusCode == app.STATUS_FAULT;
             if faulted
                 app.FaultActiveLamp.Color = [1 0 0];
             else
@@ -336,8 +338,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             % Ask the operator before resetting a fault. The dialog opens
             % when a fault is first latched and again after a failed reset.
             if faulted && ~app.resetDialogOpen && ...
-                    ~(app.lastStatusCode > 10 && app.lastStatusCode < 20)
-                askFaultReset(app, statusCode - 10);
+                    app.lastStatusCode ~= app.STATUS_FAULT
+                askFaultReset(app, readBlock(app, "FaultCode"));
             end
             app.lastStatusCode = statusCode;
         end
@@ -346,7 +348,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         function askFaultReset(app, faultCode)
             app.resetDialogOpen = true;
             message = sprintf("Slave fault %d: %s.\n\nCorrect the cause, then reset.", ...
-                faultCode, app.faultNames(faultCode));
+                faultCode, faultName(app, faultCode));
             uiconfirm(app.UIFigure, message, "Fault", ...
                 "Options", ["Reset fault", "Leave faulted"], ...
                 "DefaultOption", 2, "CancelOption", 2, "Icon", "error", ...
@@ -376,21 +378,24 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 case 7,  text = "Starting";
                 case 8,  text = "Going home";
                 case 9,  text = "Resetting fault";
+                case app.STATUS_FAULT
+                    text = append("FAULT: ", faultName(app, readBlock(app, "FaultCode")));
                 case app.STATUS_ESTOP, text = "E-STOP";
                 case 30, text = "Slave did not confirm the mode";
                 case 32, text = "Fault reset failed";
                 case 33, text = "Slave did not report stopped";
+                case app.STATUS_LINK_LOST
+                    text = "Slave link lost: press Stop once it is back";
                 otherwise
-                    if statusCode >= 10 && statusCode < 20
-                        code = statusCode - 10;
-                        if code >= 1
-                            text = append("FAULT: ", app.faultNames(code));
-                        else
-                            text = "FAULT";
-                        end
-                    else
-                        text = append("Status ", num2str(statusCode));
-                    end
+                    text = append("Status ", num2str(statusCode));
+            end
+        end
+
+        function name = faultName(app, faultCode)
+            if faultCode >= 1 && faultCode <= numel(app.faultNames)
+                name = app.faultNames(faultCode);
+            else
+                name = sprintf("code %d", faultCode);
             end
         end
 

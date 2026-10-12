@@ -44,8 +44,6 @@
        fbHandshake         : FB_HandshakeManager
        fbFaultReset        : FB_FaultResetHandler
        fbOutputMux         : FB_OutputMux
-       fbAnalogProc        : FB_AnalogProcessor
-       fbPosOutput         : FB_PositionOutput
        fbSafetyMonitor     : FB_SafetyMonitor
        fbPistonExitGuard   : FB_PistonExitGuard
        fbGoHome            : FB_GoHome
@@ -54,7 +52,9 @@
        (* Enum-helper FBs (replacing FN_* with user-enum signatures — MWIEC bug)
        fbIsOperational     : FB_IsOperationalMode
        fbIsHoming          : FB_IsHomingMode
-       fbBitsToFaultCode   : FB_BitsToFaultCode
+       fbIntToFaultCode    : FB_IntToFaultCode
+       fbFaultToInt        : FB_FaultToInt
+       fbCommWatchdog      : FB_CommWatchdog
        (* Timers — each has exactly one call site (see end of body)
        tStateTimer         : TON
        tBrakeTimer         : TON
@@ -321,7 +321,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
             rPosTarget := fbPosGate.CommandedPosition;
         ELSE
             (* Raw target only; fbPosGate shapes it into G_sysCommandedPosition *)
-            rPosTarget := fbAnalogProc.ScaledPosition;
+            rPosTarget := G_sysReference;
             rPosTarget := LIMIT(stCurrentLimits.PosMin,
                                 rPosTarget,
                                 stCurrentLimits.PosMax);
@@ -343,7 +343,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_VELOCITY_CTRL THEN
             stCurrentLimits.TorqueMax := G_cfgTorqueLimitNormal;
         END_IF;
 
-        G_sysCommandedVelocity := fbAnalogProc.ScaledVelocity;
+        G_sysCommandedVelocity := G_sysReference;
         G_sysCommandedVelocity := LIMIT(-stCurrentLimits.VelMax,
                                       G_sysCommandedVelocity,
                                       stCurrentLimits.VelMax);
@@ -363,7 +363,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_TORQUE_CTRL THEN
             stCurrentLimits.VelMax := G_cfgVelLimitMax;
         END_IF;
 
-        G_sysCommandedTorque := fbAnalogProc.ScaledTorque;
+        G_sysCommandedTorque := G_sysReference;
         G_sysCommandedTorque := LIMIT(-stCurrentLimits.TorqueMax,
                                     G_sysCommandedTorque,
                                     stCurrentLimits.TorqueMax);
@@ -653,7 +653,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
             rPosTarget := fbPosGate.CommandedPosition;
         ELSE
             (* Raw target only; fbPosGate shapes it into G_sysCommandedPosition *)
-            rPosTarget := fbAnalogProc.ScaledPosition;
+            rPosTarget := G_sysReference;
             rPosTarget := LIMIT(stCurrentLimits.PosMin,
                                 rPosTarget,
                                 stCurrentLimits.PosMax);
@@ -690,7 +690,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_VELOCITY THEN
             stCurrentLimits.TorqueMax := G_cfgTorqueLimitNormal;
         END_IF;
 
-        G_sysCommandedVelocity := fbAnalogProc.ScaledVelocity;
+        G_sysCommandedVelocity := G_sysReference;
         G_sysCommandedVelocity := LIMIT(-stCurrentLimits.VelMax,
                                       G_sysCommandedVelocity,
                                       stCurrentLimits.VelMax);
@@ -941,25 +941,6 @@ fbModeDecoder(
     ModeBit2 := bFilteredModeBit2
 );
 
-(* Analog processor *)
-fbAnalogProc(
-    Enable := TRUE,
-    RawAnalogInput := nFilteredAnalog,
-    CurrentMode := G_sysRequestedMode,
-    Stage1PosMin := G_cfgPosMapStage1PosMin,
-    Stage1PosMax := G_cfgPosMapTransitionPos,
-    Stage1VoltMin := G_cfgPosMapStage1VoltMin,
-    Stage1VoltMax := G_cfgPosMapTransitionVolt,
-    Stage2PosMin := G_cfgPosMapTransitionPos,
-    Stage2PosMax := G_cfgPosMapStage2PosMax,
-    Stage2VoltMin := G_cfgPosMapTransitionVolt,
-    Stage2VoltMax := G_cfgPosMapStage2VoltMax,
-    VelMin := G_cfgAnalogVelMin,
-    VelMax := G_cfgAnalogVelMax,
-    TorqueMin := G_cfgAnalogTorqueMin,
-    TorqueMax := G_cfgAnalogTorqueMax
-);
-
 (* Handshake manager *)
 fbHandshake(
     Enable := (G_sysCurrentState = E_SystemState#ST_IDLE) OR
@@ -984,7 +965,8 @@ ELSE
     eFaultResetActiveCode := E_FaultCode#FAULT_NONE;
 END_IF;
 
-fbBitsToFaultCode(Bit0 := bFilteredModeBit0, Bit1 := bFilteredModeBit1, Bit2 := bFilteredModeBit2);
+(* Fault acknowledgement: the master mirrors the full fault code in the mode register *)
+fbIntToFaultCode(Value := G_mbModeCode);
 
 fbFaultReset(
     Enable := (G_sysCurrentState = E_SystemState#ST_FAULT) OR
@@ -994,7 +976,7 @@ fbFaultReset(
     InFaultState := bFaultResetInFaultState,
     BitsStable := fbModeDecoder.ModeStable,
     ActiveFaultCode := eFaultResetActiveCode,
-    MasterFaultCode := fbBitsToFaultCode.Fault
+    MasterFaultCode := fbIntToFaultCode.Fault
 );
 
 (* Go Home handler *)
@@ -1043,6 +1025,9 @@ fbPistonExitGuard(
     TorqueThreshold := G_cfgTorqueStallThreshold
 );
 
+(* Master link supervision *)
+fbCommWatchdog(Heartbeat := G_mbHeartbeat, Timeout := G_cfgCommTimeout);
+
 fbSafetyMonitor(
     Enable := TRUE,
     OvertravelNegActive := G_sysOvertravelNegActive,
@@ -1052,7 +1037,8 @@ fbSafetyMonitor(
     SoftLimitMax := G_cfgPosSoftLimitMax,
     DriveFault := G_sysDriveFault,
     CurrentState := G_sysCurrentState,
-    ExitGuardTriggered := fbPistonExitGuard.FaultTriggered
+    ExitGuardTriggered := fbPistonExitGuard.FaultTriggered,
+    CommLost := fbCommWatchdog.Lost
 );
 
 (* Output multiplexer *)
@@ -1062,20 +1048,6 @@ fbOutputMux(
                    (G_sysCurrentState = E_SystemState#ST_FAULT_IDLE),
     FaultCode := G_sysActiveFault,
     ConfirmedMode := fbHandshake.ConfirmedMode
-);
-
-(* Position output *)
-fbPosOutput(
-    Enable := TRUE,
-    ActualPosition := G_sysActualPosition,
-    Stage1PosMin := G_cfgPosMapStage1PosMin,
-    Stage1PosMax := G_cfgPosMapTransitionPos,
-    Stage1VoltMin := G_cfgPosMapStage1VoltMin,
-    Stage1VoltMax := G_cfgPosMapTransitionVolt,
-    Stage2PosMin := G_cfgPosMapTransitionPos,
-    Stage2PosMax := G_cfgPosMapStage2PosMax,
-    Stage2VoltMin := G_cfgPosMapTransitionVolt,
-    Stage2VoltMax := G_cfgPosMapStage2VoltMax
 );
 
 (* Position command gate - shapes rPosTarget into the Y_DirectControl command.
@@ -1146,6 +1118,13 @@ G_doModeConfBit1 := fbOutputMux.DO1_Output;
 G_doModeConfBit2 := fbOutputMux.DO2_Output;
 G_doFaultActive := fbOutputMux.FaultActiveOutput;
 
-G_aoPositionOutput := fbPosOutput.RawAnalogOutput;
+(* Values published in the Modbus input registers by PRG_Output *)
+fbFaultToInt(Fault := G_sysActiveFault);
+G_sysActiveFaultCode := INT_TO_UINT(fbFaultToInt.Value);
+IF G_sysScanCounter >= UINT#65535 THEN
+    G_sysScanCounter := UINT#0;
+ELSE
+    G_sysScanCounter := G_sysScanCounter + UINT#1;
+END_IF;
 
 G_sysCycleCount := G_sysCycleCount + UDINT#1;
