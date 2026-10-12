@@ -21,8 +21,8 @@ function stats = modbusBenchReport(benchLog, columns, dt)
 %
 %   Sections are printed for the columns present. Without txnMs the log is
 %   taken to come from Modbus blocks sampled slower than the model step, and
-%   the heartbeat and scan sections use one row per exchange (rows where seq
-%   changes).
+%   the heartbeat and scan sections use one row per exchange (rows where the
+%   read values change).
 
 if nargin < 2 || isempty(columns)
     columns = {'seq', 'echo', 'counter', 'txnMs', 'stepMs', 'ok'};
@@ -79,12 +79,20 @@ if has('missed')
     stats.missed = missed;
 end
 
-% One row per exchange when the Modbus blocks run slower than the step.
+% One row per exchange when the Modbus blocks run slower than the step: a
+% row where the read values changed.
 if has('txnMs')
     ex = true(n, 1);
 else
-    ex = [true; diff(seq) ~= 0];
-    fprintf('\n%d exchanges, one per %.1f steps\n', sum(ex), n / sum(ex));
+    ex = false(n, 1);
+    for name = {'echo', 'counter'}
+        if has(name{1})
+            ex = ex | [true; diff(col(name{1})) ~= 0];
+        end
+    end
+    period = n / sum(ex);
+    fprintf('\n%d exchanges, one per %.1f steps (%.1f ms)\n', ...
+        sum(ex), period, period * dtMs);
 end
 stats.exchanges = sum(ex);
 
@@ -107,7 +115,7 @@ sel = ex & ok;
 if has('echo')
     echo = col('echo');
     lag = mod(seq(sel) - echo(sel), 65536);
-    fprintf('\nHeartbeat echo lag (exchanges)\n');
+    fprintf('\nHeartbeat echo lag (steps between the seq written and the seq read back)\n');
     for k = 0:2
         fprintf('  %d: %.2f %%\n', k, 100 * mean(lag == k));
     end
