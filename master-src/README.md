@@ -5,15 +5,11 @@ MP2600iec slave over Modbus TCP (`docs/master/ModbusRegisterMap.md`), with the
 safety relay, the stir bar motor and the pressure transducer on the NI
 PCI-6221 DAQ.
 
-**The shell builder has not yet been updated for the Modbus transport.**
-`masterStep` now takes the Modbus read vector and returns the write vector;
-`shell/buildShell.m` still wires the previous DAQ-only signature and does not
-build a working model until the Modbus Client blocks are added to it.
-
 | Path | Contents |
 |------|----------|
 | `logic/` | All master logic, as plain `.m` functions that run under MATLAB and GNU Octave. `masterStep.m` is the entry point called once per model step; `masterStateMachine.m` sequences the handshake, motion and fault handling; `masterConfig.m` holds every constant. |
-| `shell/buildShell.m` | Generates `shell/SOS_Gen3_Master_Shell.slx`: DAQ blocks, one MATLAB Function block calling `masterStep`, the Constant blocks the app writes and the Gain blocks it reads. The model holds no logic and is rebuilt from this script, not edited by hand. |
+| `shell/buildShell.m` | Generates `shell/SOS_Gen3_Master_Shell.slx`: Modbus Client blocks at the 50 ms exchange, DAQ blocks, one MATLAB Function block calling `masterStep`, the Constant blocks the app writes and the Gain blocks it reads. The model holds no logic and is rebuilt from this script, not edited by hand. |
+| `shell/modbusShellDiscover.m` | Prints the Modbus block and client settings of a hand-configured shell so they can be pasted into `buildShell.m`. |
 | `shell/addDaq.m` | Creates one Simulink Desktop Real-Time DAQ block. Holds the board setup (PCI-6221, driver options, missed-tick limit) and the digital channel numbering. |
 | `SOS_Gen3_Compressor_Interface.m` | Operator app (programmatic App Designer export). Starts the shell model, writes operator requests to its Constant blocks and polls its outputs. |
 | `legacy/`, `SOS_Gen3_Compressor_Master.slx` | Earlier Stateflow-based app model and its `.mlapp`, and the hand-built `SimulinkMaster.slx` bench model with manual mode control, kept for reference. |
@@ -26,6 +22,31 @@ run('shell/buildShell.m')          % once, and after any change to the block int
 addpath logic shell
 SOS_Gen3_Compressor_Interface      % then press "Connect to Compressor"
 ```
+
+### Modbus settings in the shell
+
+The Modbus Client blocks' register tables and the Modbus client are set
+through dialogs that Industrial Communication Toolbox does not expose to
+scripts. `buildShell` fills them from `MODBUS_SETUP` at the top of the script
+once the strings are known. Until then it builds the model and prints what to
+set by hand:
+
+1. Open the model. In **Modbus Write**: one register row, address 1, holding
+   registers, `uint16`, count 6. In **Modbus Read**: one row, address 1, input
+   registers, `uint16`, count 18.
+2. In either block click **Configure clients**. In the Modbus pane add a
+   client named `ModbusClient`: TCP/IP, the controller's IP, port 502, under
+   Transport Settings timeout 0.1 s, byte order big-endian, word order
+   little-endian. Select it in both blocks (Refresh first).
+3. Save the model and run `modbusShellDiscover`. Paste the printed
+   `RegisterTable` strings into `MODBUS_SETUP` in `buildShell.m` so the next
+   build is complete, and send the "Model parameters mentioning Modbus" part
+   back so the client can be scripted too.
+
+Timing: model step 25 ms, Modbus exchange 50 ms. A dropped TCP connection
+stops the model with an error from the Read block; the DAQ outputs go to
+their final values (safety relay off) and the app reports the stopped model.
+Press **Connect** again once the slave is reachable.
 
 ## App to model interface
 
