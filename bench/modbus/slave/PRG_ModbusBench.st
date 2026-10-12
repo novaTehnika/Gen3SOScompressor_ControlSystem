@@ -32,29 +32,29 @@
        G_mbProbeWordOrder  AT %QW74004 : UINT   (* IR107: 1 high word first, 2 low word first, 0 other
        G_mbProbeUintConst  AT %QW74006 : UINT   (* IR108: 16#1234
      VAR:
-       nCounter            : UINT := 0          (* Scan counter
+       nCounter            : UINT := UINT#0     (* Scan counter
    ============================================================================ *)
 
 (* Heartbeat and scan counter *)
 G_mbHeartbeatEcho := G_mbHeartbeat;
 
-IF nCounter >= 65535 THEN
-    nCounter := 0;
+IF nCounter >= UINT#65535 THEN
+    nCounter := UINT#0;
 ELSE
-    nCounter := nCounter + 1;
+    nCounter := nCounter + UINT#1;
 END_IF;
 G_mbSlaveCounter := nCounter;
 
 (* Probe patterns *)
 G_mbProbeDintConst := DINT#16#12345678;
-G_mbProbeRealConst := 1234.5;
+G_mbProbeRealConst := REAL#1234.5;
 G_mbProbeUintConst := UINT#16#1234;
 G_mbProbeDintEcho := G_mbProbeDintIn;
 
 IF G_mbProbeDintIn = DINT#16#12345678 THEN
-    G_mbProbeWordOrder := 1;
+    G_mbProbeWordOrder := UINT#1;
 ELSIF G_mbProbeDintIn = DINT#16#56781234 THEN
-    G_mbProbeWordOrder := 2;
+    G_mbProbeWordOrder := UINT#2;
 ELSE
-    G_mbProbeWordOrder := 0;
+    G_mbProbeWordOrder := UINT#0;
 END_IF;
