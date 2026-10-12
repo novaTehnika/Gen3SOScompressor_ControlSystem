@@ -102,6 +102,11 @@ paced by Simulink Desktop Real-Time. Select **Connected IO** on the Desktop
 Real-Time tab and run it from there, then pass the logged `benchLog` to the
 report.
 
+The generated model calls the `modbus` object from a MATLAB Function block
+every step. The call blocks the model for the whole exchange, so under
+Connected IO this variant mostly measures how a blocking call stalls the
+model. Section 6 replaces it with the toolbox blocks.
+
 ## 4. Test cases
 
 | Case | Conditions |
@@ -131,13 +136,43 @@ the link.
 The exchange p99 is measured with the client that will be used in the shell,
 not with the `modbus` object (see section 7).
 
-## 6. Optional: Modbus Client blocks
+## 6. Modbus Client blocks
 
-To compare with the Industrial Communication Toolbox blocks, replace
-`BenchStep` with a Modbus Client Write (HR1, `uint16`, from the step counter)
-and a Modbus Client Read (IR1, count 2, `uint16`). Configure the client in the
-model's Configuration Parameters, **Modbus** pane: controller IP, port 502,
-timeout as `cfg.timeout`, word order as found in step 2.
+`ModbusBench.slx` is generated and gitignored, so it can be edited by hand
+for this variant. It needs Industrial Communication Toolbox R2024b or later.
+
+1. Run `buildModbusBench` and open the model. Delete `BenchStep` and its
+   lines; keep `Clock`, `Mux`, `Log` and the DAQ blocks.
+2. Set the model step to 5 ms (Configuration Parameters, Fixed-step size):
+   the blocks' 50 ms sample time must be a multiple of it.
+3. From the Library Browser, Industrial Communication Toolbox, Modbus, add
+   one **Modbus Client Write** and one **Modbus Client Read**.
+4. In the Write block click **Configure clients**. In the Modbus pane click
+   **Add**: transport TCP/IP, device address `cfg.address`, port 502. Under
+   **Transport Settings** set the timeout to 0.1 s, byte order big-endian,
+   word order little-endian. Click OK.
+5. Write block: **Refresh**, select the client, Server ID 1. Registers: one
+   row, address 1, holding registers, uint16, count 1. Block sample time
+   0.05.
+6. Read block: same client and Server ID. Registers: one row, address 1,
+   input registers, uint16, count 2 (IR1 echo, IR2 slave counter). Block
+   sample time 0.05.
+7. Step counter for the Write input: a MATLAB Function block fed from
+   `Clock` with `y = mod(round(t / 0.005), 65536)`.
+8. On `AI Position`, tick **Show "Missed Ticks" port**. This is the pass/fail
+   measurement: the port reports how far the model lags the kernel, and the
+   model stops when it exceeds the block's Maximum missed ticks (default 10).
+9. Wire the Mux in this order: step counter, Read block output (1-by-2),
+   Missed Ticks. The Read output is a row vector, so `Log` produces a
+   1-by-4-by-steps array; the report accepts it.
+10. Desktop Real-Time tab: Connected IO, Run in Real Time. Then:
+
+```matlab
+s = modbusBenchReport(out.benchLog, {'seq', 'echo', 'counter', 'missed'}, 0.005);
+```
+
+The blocks have no status output. If echo or counter stay zero after the
+first exchange, check the register types and look in the Diagnostic Viewer.
 
 ## 7. Results
 
