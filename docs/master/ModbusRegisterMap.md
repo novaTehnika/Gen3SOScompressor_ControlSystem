@@ -25,10 +25,16 @@ holding registers 1–6 and one **Read Input Registers (FC04)** of input registe
 ### Addressing
 
 Register numbers are 1-based, as used by MATLAB and the Simulink Modbus blocks.
-Register *k* maps to byte offset `28672 + 2*(k-1)`:
+Register *k* maps to a byte offset inside the group that Hardware
+Configuration creates in the Global Variables worksheet:
 
-- Holding registers (master → slave): `%IW` / `%ID` at that offset
-- Input registers (slave → master): `%QW` / `%QD` at that offset
+- Holding registers (master → slave, group FC#06,16): `%IW` / `%ID` at
+  `28672 + 2*(k-1)`
+- Input registers (slave → master, group FC#04): `%QW` / `%QD` at
+  `73792 + 2*(k-1)`
+
+The group address ranges are shown in the worksheet and must be checked
+there; published application notes give other bases.
 
 ### Data types
 
@@ -66,20 +72,20 @@ the registers update once per scan, in step with `PRG_Main`.
 
 | IR | Address | Type | Global | Content |
 |----|---------|------|--------|---------|
-| 1 | `%QW28672` | UINT | `G_mbHeartbeatEcho` | Last `G_mbHeartbeat` received |
-| 2 | `%QW28674` | UINT | `G_mbSlaveCounter` | Incremented every scan, wraps 65535 → 0 |
-| 3 | `%QW28676` | UINT | `G_mbConfCode` | Same value as DO0–DO2: mode confirmation, or fault code while a fault is active |
-| 4 | `%QW28678` | UINT | `G_mbFaultCode` | `G_sysActiveFault` as 0–7, 0 when no fault |
-| 5 | `%QW28680` | UINT | `G_mbFaultActive` | 1 = fault active (DO4) |
-| 6 | `%QW28682` | UINT | `G_mbInMotion` | 1 = axis moving (DO6) |
-| 7 | `%QW28684` | UINT | `G_mbPerformanceStatus` | DO3 |
-| 8 | `%QW28686` | UINT | `G_mbHomingComplete` | DO5 |
-| 9 | `%QW28688` | UINT | `G_mbState` | `G_sysCurrentState` as its enumeration value |
-| 10 | `%QW28690` | UINT | | Reserved |
-| 11–12 | `%QD28692` | REAL | `G_mbActualPosition` | `G_sysActualPosition` (mm) |
-| 13–14 | `%QD28696` | REAL | `G_mbActualVelocity` | `G_sysActualVelocity` (mm/s) |
-| 15–16 | `%QD28700` | REAL | `G_mbActualTorque` | `G_sysActualTorque` (% of rated) |
-| 17–18 | `%QD28704` | REAL | `G_mbCommandedPosition` | `G_sysCommandedPosition` (mm) |
+| 1 | `%QW73792` | UINT | `G_mbHeartbeatEcho` | Last `G_mbHeartbeat` received |
+| 2 | `%QW73794` | UINT | `G_mbSlaveCounter` | Incremented every scan, wraps 65535 → 0 |
+| 3 | `%QW73796` | UINT | `G_mbConfCode` | Same value as DO0–DO2: mode confirmation, or fault code while a fault is active |
+| 4 | `%QW73798` | UINT | `G_mbFaultCode` | `G_sysActiveFault` as 0–7, 0 when no fault |
+| 5 | `%QW73800` | UINT | `G_mbFaultActive` | 1 = fault active (DO4) |
+| 6 | `%QW73802` | UINT | `G_mbInMotion` | 1 = axis moving (DO6) |
+| 7 | `%QW73804` | UINT | `G_mbPerformanceStatus` | DO3 |
+| 8 | `%QW73806` | UINT | `G_mbHomingComplete` | DO5 |
+| 9 | `%QW73808` | UINT | `G_mbState` | `G_sysCurrentState` as its enumeration value |
+| 10 | `%QW73810` | UINT | | Reserved |
+| 11–12 | `%QD73812` | REAL | `G_mbActualPosition` | `G_sysActualPosition` (mm) |
+| 13–14 | `%QD73816` | REAL | `G_mbActualVelocity` | `G_sysActualVelocity` (mm/s) |
+| 15–16 | `%QD73820` | REAL | `G_mbActualTorque` | `G_sysActualTorque` (% of rated) |
+| 17–18 | `%QD73824` | REAL | `G_mbCommandedPosition` | `G_sysCommandedPosition` (mm) |
 | 19–20 | | | | Reserved |
 | 101–110 | | | | Bench probe area (`bench/modbus`) |
 

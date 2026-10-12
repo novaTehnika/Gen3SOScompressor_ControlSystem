@@ -86,15 +86,25 @@ p. 305, `docs/external/MotionWorks_IEC_Toolbox_Manual.pdf`):
    Global Variables worksheet. Declare variables under them with the required
    data types and addresses.
 
-Address map
-([Exor: MPiec via Modbus TCP](https://www.exorint.com/faq/2017/06/13/how-to-communicate-with-an-yaskawa-mpiec-controller-via-modbus-tcp)):
+Address map, as created by Hardware Configuration on this controller. The
+groups and their address ranges appear in the Global Variables worksheet and
+are the reference; published application notes
+([Exor: MPiec via Modbus TCP](https://www.exorint.com/faq/2017/06/13/how-to-communicate-with-an-yaskawa-mpiec-controller-via-modbus-tcp),
+Yaskawa AN.MPiec.05) give `%QW28672` and `%IX24560` for other firmware.
 
-| Modbus area | Function | Direction | MPiec address | Size |
-|-------------|----------|-----------|---------------|------|
-| Holding registers (4x) | FC16 write | master → slave | `%IW28672` | 1024 registers |
-| Input registers (3x) | FC04 read | slave → master | `%QW28672` | 1024 registers |
-| Coils | FC01/05/15 | master → slave | `%IX24560` | 128 bits |
-| Discrete inputs | FC02 | slave → master | `%QX24560` | 128 bits |
+| Modbus area | Group | Direction | MPiec address | Size |
+|-------------|-------|-----------|---------------|------|
+| Holding registers (4x) | FC#06,16 | master → slave | `%IB28672`–`%IB30719` | 1024 registers |
+| Input registers (3x) | FC#04 | slave → master | `%QB73792`–`%QB93791` | 10000 registers |
+| Coils | FC#05 | master → slave | `%IB73728`–`%IB73791` | 512 bits |
+| Discrete inputs | FC#02 | slave → master | `%QB73728`–`%QB73791` | 512 bits |
+
+Function codes served: 1, 2, 3, 4, 5, 6 and 16 (MotionWorks IEC Hardware
+Configuration manual). FC15 (write multiple coils) and FC23 (read/write in
+one transaction) are not served, so a write and a read are separate
+transactions, and command bits are best carried in holding registers. FC01
+and FC03 return the values last written by the client, not program globals,
+unless the %M bidirectional option is used.
 
 Limits and known issues (MotionWorks IEC 2.1.0 release notes, RN.MWIEC.14):
 

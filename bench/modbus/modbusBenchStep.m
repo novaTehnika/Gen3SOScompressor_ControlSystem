@@ -26,7 +26,7 @@ tStep = tic;
 t0 = tic;
 try
     write(m, 'holdingregs', cfg.hrHeartbeat, seq, cfg.serverId, 'uint16');
-    r = read(m, 'inregs', cfg.irHeartbeatEcho, 2, cfg.serverId, 'uint16');
+    r = read(m, 'inputregs', cfg.irHeartbeatEcho, 2, cfg.serverId, 'uint16');
     echo = r(1);
     slaveCounter = r(2);
     ok = 1;

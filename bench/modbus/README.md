@@ -28,7 +28,9 @@ shell. It drives no DAQ output.
 2. Save and cycle power. Four Modbus groups appear in the Global Variables
    worksheet.
 3. Declare the globals listed in the header of `slave/PRG_ModbusBench.st` in the
-   matching groups (holding registers: `%IW`/`%ID`, input registers: `%QW`/`%QD`).
+   matching groups (holding registers under FC#06,16: `%IW`/`%ID` from
+   `%IB28672`; input registers under FC#04: `%QW`/`%QD` from `%QB73792`).
+   The group address ranges shown in the worksheet are the reference.
 4. Add `PRG_ModbusBench` to the project and assign it to the 2 ms cyclic task.
    It uses only its own globals and can run alongside `PRG_Main`.
 5. Compile, download, start.
@@ -49,12 +51,15 @@ r = modbusProbe;
 Expected output: UINT `16#1234`, DINT words `16#1234 16#5678` in one order,
 REAL words `16#449A 16#5000` in the same order, and the slave decoding the
 master's DINT in that order too. Set `cfg.wordOrder` to the reported order.
-"Unexpected" or "other" means the register-to-address mapping
-(`28672 + 2*(k-1)`) is wrong: check the group address ranges in the Global
-Variables worksheet.
+"Unexpected" or "other", or all-zero reads, mean the declared addresses are
+outside the Modbus groups: check the group address ranges in the Global
+Variables worksheet against the header of `slave/PRG_ModbusBench.st`.
 
 The probe also times 2000 heartbeat round trips from plain MATLAB, without
-Simulink.
+Simulink. It uses a 1 s timeout so that a slow server shows up as a large
+transaction time rather than as failures, prints the first error message if
+any transaction fails, and reports the share of cycles slower than
+`cfg.timeout`.
 
 ## 3. Simulink run
 
