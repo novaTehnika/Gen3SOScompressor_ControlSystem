@@ -150,6 +150,14 @@ Limits and known issues (MotionWorks IEC 2.1.0 release notes, RN.MWIEC.14):
   Modbus Client blocks behave the same way: at a 25 ms model step the stall
   costs at most two ticks, at 5 ms the model falls behind on a third of its
   steps (`bench/modbus/README.md`, section 7).
+- The Modbus Client blocks have no status output and **stop the model with an
+  error when the connection is lost**. Under Connected IO the SLDRT output
+  blocks then write their Final values, which the shell sets to 0, so a lost
+  link drops the safety relay and the mode lines within one step. The
+  operator app must detect the stopped model and report it; the run is
+  restarted from the app. If this proves a nuisance, a MATLAB System block
+  wrapping the same `modbus` object with a try/catch, a status output and a
+  reconnect would turn link loss into a comm fault instead of a stop.
 
 ---
 
@@ -262,14 +270,15 @@ its steps, up to 17 ticks. The shell should step at 25 ms or longer with the
 blocks in it. The DAQ blocks' Maximum missed ticks is 1e6, so lag drops
 samples silently instead of stopping the model.
 
-1. **Timeout behaviour of the Modbus Client blocks**: what they output and
-   whether the model continues when a reply is lost (bench case D).
-2. **Service tick origin**: whether the 4 ms tick follows the task the Modbus
+Bench case D: a lost connection stops the model with an error from the Read
+block. Accepted as the link-loss response for now (see section 3).
+
+1. **Service tick origin**: whether the 4 ms tick follows the task the Modbus
    groups are assigned to, or is fixed in the controller's network stack.
-3. **Shared cable**: compare latency with MotionWorks online and offline.
-4. **Y_DeviceComm reference**: export from MotionWorks IEC help on the lab PC,
+2. **Shared cable**: compare latency with MotionWorks online and offline.
+3. **Y_DeviceComm reference**: export from MotionWorks IEC help on the lab PC,
    only if UDP is still wanted for a faster path.
-5. **OPC Server licence**: confirm whether it is installed, if OPC is wanted for
+4. **OPC Server licence**: confirm whether it is installed, if OPC is wanted for
    diagnostics.
 
 ---

@@ -245,6 +245,21 @@ set to 1e6**, so the model never stops for lag and drops DAQ samples while
 it is behind. The Missed Ticks port is the only indication. The shell
 inherits the same setting.
 
+Case D (cable unplugged for about 3 s during a 25 ms run): the Read block
+raises an error on the first exchange after the connection drops and the
+simulation stops:
+
+```
+MATLAB System block 'ModbusBench/Modbus Client Read/internalModbus' error
+occurred when invoking 'stepImpl' method of 'icomm.system.ModbusRead'.
+Caused by: Invalid operation. Object must be connected to the remote server.
+```
+
+The blocks wrap the same `icomm.interface.modbus` client as the `modbus`
+object. There is no status output, no retry and no reconnect; a lost link
+ends the run.
+
 Conclusion: Modbus Client blocks at a 50 ms sample time in a Connected IO
-model with a step of 25 ms or longer. The generated model and the `modbus`
-object are not a candidate for the shell.
+model with a step of 25 ms or longer. A lost link stops the model, which
+under Connected IO sets the DAQ outputs to their Final values. The generated
+model and the `modbus` object are not a candidate for the shell.
