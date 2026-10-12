@@ -9,10 +9,10 @@ function buildShell()
 %       run('master-src/shell/buildShell.m')     or     buildShell
 %
 %   The DAQ blocks are copied from SimulinkMaster.slx so they keep its board
-%   setup (National Instruments PCI-6251); only channels and sample time
+%   setup (National Instruments PCI-6221); only channels and sample time
 %   are set here.
 %
-%   Simulink Desktop Real-Time digital channel numbers on the PCI-6251:
+%   Simulink Desktop Real-Time digital channel numbers on the PCI-6221:
 %   P0.n = n + 1, P1.n = n + 33, P2.n = n + 41.
 
 mdl = 'SOS_Gen3_Master_Shell';
