@@ -146,7 +146,10 @@ Limits and known issues (MotionWorks IEC 2.1.0 release notes, RN.MWIEC.14):
 - Any MATLAB code that blocks on a socket read (`modbus` object or
   `tcpclient`) adds about 7 ms (p99 17 ms) per blocking call on the lab PC.
   Sending both requests before waiting pays this once per exchange. In
-  Connected IO mode such a call stalls the model for its duration.
+  Connected IO mode such a call stalls the model for its duration, and the
+  Modbus Client blocks behave the same way: at a 25 ms model step the stall
+  costs at most two ticks, at 5 ms the model falls behind on a third of its
+  steps (`bench/modbus/README.md`, section 7).
 
 ---
 
@@ -252,12 +255,15 @@ Limits and known issues (MotionWorks IEC 2.1.0 release notes, RN.MWIEC.14):
 Answered by the bench: word order is low word first; the controller services
 Modbus on a 4 ms tick, 1 to 8 ms per transaction (`bench/modbus/README.md`).
 
-1. **Exchange inside the model**: whether the Simulink Modbus Client blocks at
-   a 50 ms sample time stall the 3 ms model (missed ticks), and what they do
-   when a reply times out. If they block, the choices are a slower master
-   step (the pressure loop on the slave removes the need for 3 ms), SLDRT
-   Packet Input/Output with the TCP driver (non-blocking, hand-built frames),
-   or a client outside the model.
+Answered by the bench model: the Simulink Modbus Client blocks at a 50 ms
+sample time block the model for the exchange. At a 25 ms model step the lag
+is at most two ticks on 0.2 % of steps; at 5 ms the model lags on a third of
+its steps, up to 17 ticks. The shell should step at 25 ms or longer with the
+blocks in it. The DAQ blocks' Maximum missed ticks is 1e6, so lag drops
+samples silently instead of stopping the model.
+
+1. **Timeout behaviour of the Modbus Client blocks**: what they output and
+   whether the model continues when a reply is lost (bench case D).
 2. **Service tick origin**: whether the 4 ms tick follows the task the Modbus
    groups are assigned to, or is fixed in the controller's network stack.
 3. **Shared cable**: compare latency with MotionWorks online and offline.

@@ -226,4 +226,25 @@ Findings:
   yet known is how the exchange behaves inside the Simulink model, where a
   blocking call of 10 to 25 ms stalls the 3 ms step.
 
-Simulink bench model and Modbus Client blocks: not yet run.
+Modbus Client blocks (section 6), case A, 50 ms block sample time,
+`modbusBenchReport(..., {'seq','echo','counter','missed'}, dt)`, 60 s runs:
+
+| Model step | Max lag (ticks) | Steps lagging (%) | Lagging > 5 ticks (%) | Exchanges fresh in the same step (%) | Longest gap between read results (slave scans) |
+|------------|-----------------|-------------------|-----------------------|--------------------------------------|------------------------------------------------|
+| 25 ms | 2 | 0.21 | 0 | 100 | 24 (one late exchange) |
+| 5 ms | 17 | 36.3 | 1.55 | 100 | 26 (one late exchange) |
+
+The exchange behaves the same at both steps: every read returns the seq
+written in the same block step, and one exchange per minute arrives a
+period late. The difference is what the blocking exchange does to the rest
+of the model. At 25 ms the stall is at most two ticks; at 5 ms the model is
+behind on a third of its steps.
+
+The DAQ blocks copied from `SimulinkMaster.slx` have **Maximum missed ticks
+set to 1e6**, so the model never stops for lag and drops DAQ samples while
+it is behind. The Missed Ticks port is the only indication. The shell
+inherits the same setting.
+
+Conclusion: Modbus Client blocks at a 50 ms sample time in a Connected IO
+model with a step of 25 ms or longer. The generated model and the `modbus`
+object are not a candidate for the shell.
