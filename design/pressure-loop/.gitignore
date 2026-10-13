@@ -1,0 +1,4 @@
+# Outputs of studyCompare.m, studyValve.m and the gnuplot scripts
+*.csv
+*.png
+*.log
