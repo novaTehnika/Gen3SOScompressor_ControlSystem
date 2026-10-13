@@ -11,7 +11,7 @@
 
    Monitored Conditions:
    - Drive faults (from servo amplifier; encoder alarms surface here via the drive)
-   - Master link loss (heartbeat stale, from FB_CommWatchdog) outside the quiescent states
+   - Master link loss (heartbeat stale, from FB_CommWatchdog) while motion is commanded
    - Overtravel faults (unexpected switch triggers; positive switch never expected)
    - Position limit violations (beyond soft limits)
    - Piston exit guard faults (from FB_PistonExitGuard)
@@ -54,7 +54,7 @@
        bInHomingState      : BOOL
        bInFaultState       : BOOL
        bInRecoveryState    : BOOL             (* TRUE in ST_RECOVERY / ST_RECOVERY_POSITION / ST_RECOVERY_VELOCITY
-       bQuiescentState     : BOOL             (* TRUE in ST_IDLE / ST_BRAKE_HOLD / ST_HOLD_POSITION
+       bCommandedMotion    : BOOL             (* TRUE in the states that command motion (control, go home, homing, recovery moves)
    ============================================================================ *)
 
 (* ============================================================================
@@ -112,16 +112,25 @@ FaultDrive := DriveFault;
 (* --------------------------------------------------------------------------
    LINK LOSS MONITORING
    The master heartbeat has stopped; its commands can no longer be trusted.
-   Not a fault in the quiescent states (idle, brake hold, hold position):
-   nothing moves there, the master stopping is routine (the app closed), and
-   the hold inactivity watchdog already returns the slave to idle. Any other
-   state is moving, homing or in a start-up transition and must stop.
+   A fault only while motion is commanded: there the frozen registers would
+   keep the axis moving. In every other state nothing moves, the master
+   stopping is routine (the app closed, which also drops the safety relay
+   and the drive), and the hold inactivity watchdog returns the slave to
+   idle on its own.
    -------------------------------------------------------------------------- *)
 
-bQuiescentState := (CurrentState = E_SystemState#ST_IDLE) OR
-                   (CurrentState = E_SystemState#ST_BRAKE_HOLD) OR
-                   (CurrentState = E_SystemState#ST_HOLD_POSITION);
-FaultComm := CommLost AND NOT bQuiescentState;
+bCommandedMotion := (CurrentState = E_SystemState#ST_POSITION_CTRL) OR
+                    (CurrentState = E_SystemState#ST_VELOCITY_CTRL) OR
+                    (CurrentState = E_SystemState#ST_TORQUE_CTRL) OR
+                    (CurrentState = E_SystemState#ST_GO_HOME) OR
+                    (CurrentState = E_SystemState#ST_HOME_LIMIT) OR
+                    (CurrentState = E_SystemState#ST_HOME_LIM_APPROACH) OR
+                    (CurrentState = E_SystemState#ST_HOME_LIM_DETECT) OR
+                    (CurrentState = E_SystemState#ST_HOME_LIM_BACKOFF) OR
+                    (CurrentState = E_SystemState#ST_HOME_LIM_SETREF) OR
+                    (CurrentState = E_SystemState#ST_RECOVERY_POSITION) OR
+                    (CurrentState = E_SystemState#ST_RECOVERY_VELOCITY);
+FaultComm := CommLost AND bCommandedMotion;
 
 (* --------------------------------------------------------------------------
    OVERTRAVEL FAULT MONITORING
