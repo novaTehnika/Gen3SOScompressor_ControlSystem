@@ -27,18 +27,61 @@ if isempty(hits)
 end
 for k = 1:numel(hits)
     v = get_param(mdl, hits{k});
-    if ischar(v) || isstring(v)
-        fprintf('  %s = %s\n', hits{k}, char(string(v)));
-    else
-        fprintf('  %s = <%s>\n', hits{k}, class(v));
-        disp(v);
-    end
+    fprintf('  %s =\n', hits{k});
+    dump(v, '    ');
 end
 
+% The Modbus configuration component holds the transport settings.
 cs = getActiveConfigSet(mdl);
-fprintf('\nConfiguration set components:\n');
-comps = cs.Components;
-for k = 1:numel(comps)
-    fprintf('  %s\n', comps(k).Name);
+fprintf('\nModbus configuration component:\n');
+try
+    c = getComponent(cs, 'Modbus');
+    disp(c);
+    names = properties(c);
+    for k = 1:numel(names)
+        try
+            v = c.(names{k});
+            fprintf('  %s =\n', names{k});
+            dump(v, '    ');
+        catch
+            fprintf('  %s = <unreadable>\n', names{k});
+        end
+    end
+    try
+        fprintf('  get(c):\n');
+        dump(get(c), '    ');
+    catch
+    end
+catch err
+    fprintf('  not readable: %s\n', err.message);
+end
+end
+
+
+function dump(v, indent)
+% Print any value fully, recursing into structs and cells.
+if isstruct(v)
+    for k = 1:numel(v)
+        f = fieldnames(v(k));
+        for j = 1:numel(f)
+            fprintf('%s%s:\n', indent, f{j});
+            dump(v(k).(f{j}), [indent '  ']);
+        end
+    end
+elseif iscell(v)
+    for k = 1:numel(v)
+        fprintf('%s[%d]\n', indent, k);
+        dump(v{k}, [indent '  ']);
+    end
+elseif ischar(v) || isstring(v)
+    fprintf('%s''%s''\n', indent, char(string(v)));
+elseif isnumeric(v) || islogical(v)
+    fprintf('%s%s\n', indent, mat2str(v));
+else
+    fprintf('%s<%s>\n', indent, class(v));
+    try
+        disp(v);
+    catch
+    end
 end
 end
