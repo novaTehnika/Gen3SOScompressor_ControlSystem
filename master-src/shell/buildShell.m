@@ -39,6 +39,10 @@ Tx = num2str(cfg.exchangePeriod);
 if bdIsLoaded(mdl)
     close_system(mdl, 0);
 end
+target = fullfile(here, [mdl '.slx']);
+if exist(target, 'file')
+    delete(target);         % a previous build on the path would shadow the new model
+end
 new_system(mdl);
 set_param(mdl, 'SolverType', 'Fixed-step', 'Solver', 'FixedStepDiscrete', ...
     'FixedStep', Ts, 'StopTime', 'inf', ...
@@ -108,14 +112,23 @@ chart.Script = sprintf([ ...
     '    targetVelocity, jogDirection, targetPressure, estop, mixer);\n']);
 
 % --- Wiring -----------------------------------------------------------------
-add_line(mdl, 'Modbus Read/1', 'RT Read/1');
+% The Modbus blocks have ports only once their register rows exist.
+if hasPort(mdl, 'Modbus Read', 'Outport')
+    add_line(mdl, 'Modbus Read/1', 'RT Read/1');
+else
+    manual{end + 1} = 'connect Modbus Read/1 -> RT Read/1 after adding its register row';
+end
 add_line(mdl, 'RT Read/1',     'MasterStep/1');
 add_line(mdl, 'AI Pressure/1', 'MasterStep/2');
 for k = 1:size(appInputs, 1)
     add_line(mdl, [appInputs{k, 1} '/1'], sprintf('MasterStep/%d', k + 2));
 end
 add_line(mdl, 'MasterStep/1', 'RT Write/1');
-add_line(mdl, 'RT Write/1',   'Modbus Write/1');
+if hasPort(mdl, 'Modbus Write', 'Inport')
+    add_line(mdl, 'RT Write/1', 'Modbus Write/1');
+else
+    manual{end + 1} = 'connect RT Write/1 -> Modbus Write/1 after adding its register row';
+end
 add_line(mdl, 'MasterStep/2', 'DO Safety/1');
 add_line(mdl, 'MasterStep/3', 'DO Mixer/1');
 
@@ -137,6 +150,12 @@ if ~isempty(manual)
     fprintf('\nSet by hand, then run modbusShellDiscover and fill MODBUS_SETUP in buildShell.m:\n');
     fprintf('  - %s\n', manual{:});
 end
+end
+
+
+function tf = hasPort(mdl, name, kind)
+ph = get_param([mdl '/' name], 'PortHandles');
+tf = ~isempty(ph.(kind));
 end
 
 
