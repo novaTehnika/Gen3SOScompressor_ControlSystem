@@ -66,7 +66,7 @@ task interval.
 | 2 | `%MW3.483330` | UINT | `G_mbModeCode` | Mode code 0–7 (same meaning as DI0–DI2). During fault reset the master mirrors the **full** fault code here. The mode decoder reads the low three bits, so a mirrored code of 8 or above looks like mode 0 to it, which is what mirroring code 0 looks like today; the slave ignores the decoded mode on the fault-acknowledge path |
 | 3 | `%MW3.483332` | UINT | `G_mbMotionEnable` | 1 = MotionEnable |
 | 4 | `%MW3.483334` | UINT | `G_mbFaultReset` | 1 = FaultReset (level) |
-| 5–6 | `%MD3.483336` | REAL | `G_mbReference` | Position mode: mm. Velocity mode: mm/s. Torque mode: % of rated. Pressure mode (code 7, planned): MPa gauge |
+| 5–6 | `%MD3.483336` | REAL | `G_mbReference` | Position mode: mm. Velocity mode: mm/s. Torque mode: % of rated. Pressure mode (code 7): target pressure, MPa gauge |
 | 7–20 | | | | Reserved |
 | 101–110 | | | | Bench probe area (`bench/modbus`) |
 
@@ -89,7 +89,7 @@ task interval.
 | 13–14 | `%QD73816` | REAL | `G_mbActualVelocity` | `G_sysActualVelocity` (mm/s) |
 | 15–16 | `%QD73820` | REAL | `G_mbActualTorque` | `G_sysActualTorque` (% of rated) |
 | 17–18 | `%QD73824` | REAL | `G_mbCommandedPosition` | `G_sysCommandedPosition` (mm) |
-| 19–20 | `%QD73828` | REAL | `G_mbActualPressure` | Reserved for the slave-side pressure loop: actual pressure, MPa gauge |
+| 19–20 | `%QD73828` | REAL | `G_mbActualPressure` | `G_sysActualPressure` (MPa gauge): the transducer on the slave's analog input, scaled by `FB_PressureInput`. Valid in every mode; below zero or above range when the loop current is out of range |
 | 101–110 | | | | Bench probe area (`bench/modbus`) |
 
 ---
@@ -126,12 +126,13 @@ reads as a counter frozen at 0.
   `G_mbFaultCode` from `G_sysActiveFaultCode`, both maintained by `PRG_Main`.
 - The analog reference and position-output path (`FB_AnalogProcessor`,
   `FB_PositionOutput`, the two-stage voltage map constants) is removed. The
-  analog input `G_aiReference` and its filter remain declared for the
-  pressure transducer, which takes the controller's only analog input.
+  controller's only analog input, `G_aiPressure`, reads the pressure
+  transducer's loop shunt; `FB_PressureInput` scales it to MPa gauge for
+  IR19-20 and for the slave's pressure loop (mode 7).
 - On the master, `masterStep` takes the 18-register read vector and returns
   the 6-register write vector; `modbusMap.m` holds the indices and
   `modbusPack.m` / `modbusUnpack.m` the REAL packing (low word first). The
   Simulink blocks handle plain `uint16`.
 - Hardwired signals stay as they are: safety relay, brake, overtravel
-  switches, pressure transducer and stir bar motor
+  switches and stir bar motor
   (see [EthernetCommsReference.md](EthernetCommsReference.md)).

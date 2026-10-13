@@ -45,7 +45,7 @@ ELSIF nValue = 5 THEN
 ELSIF nValue = 6 THEN
     Mode := E_OperatingMode#MODE_HOME_LIMIT;
 ELSIF nValue = 7 THEN
-    Mode := E_OperatingMode#MODE_RESERVED_111;
+    Mode := E_OperatingMode#MODE_PRESSURE;
 ELSE
     Mode := E_OperatingMode#MODE_IDLE;
 END_IF;

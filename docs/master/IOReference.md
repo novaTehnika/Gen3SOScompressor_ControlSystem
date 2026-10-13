@@ -447,7 +447,7 @@ float voltage_to_position(float voltage) {
 | DO4 | G_doFaultActive | MP→NI | PFI7/P1.7 (pin 38) |
 | DO5 | G_doHomingComplete | MP→NI | PFI6/P1.6 (pin 5) |
 | DO6 | G_doInMotion | MP→NI | PFI15/P2.7 (pin 39) |
-| AI0 | G_aiReference (`AT %IW0 : LREAL`) | NI→MP | AO 0 (pin 22) |
+| AI0 | G_aiPressure (`AT %IW0 : LREAL`) | transducer shunt → MP | - (pressure transducer loop, not the DAQ) |
 | AO0 | G_aoPositionOutput (`AT %QW0 : LREAL`) | MP→NI | AI 0 (pin 68) |
 | - | Pressure transducer | local to master | AI 2 (pin 65) |
 

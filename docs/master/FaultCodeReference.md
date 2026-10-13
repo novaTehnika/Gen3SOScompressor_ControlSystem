@@ -30,6 +30,7 @@ Codes 0-7 fit the three discrete lines; higher codes are carried by the register
 | 101 | 5 | FAULT_PISTON_EXIT | High | Conditional |
 | 110 | 6 | FAULT_LIMIT_SWITCH | High | Manual jog-off via ST_RECOVERY (investigate cause) |
 | 111 | 7 | FAULT_ENCODER | High | **Reserved (not emitted by current firmware — encoder alarms surface as FAULT_DRIVE)** |
+| - | 8 | FAULT_PRESSURE_SENSOR | High | Yes, once the transducer loop reads in range |
 
 ---
 
@@ -275,6 +276,28 @@ The enum value is retained in `E_FaultCode` for wire-protocol stability but is n
 
 ---
 
+### FAULT_PRESSURE_SENSOR (8)
+
+**Description**: The pressure transducer's loop current is out of range while the slave's pressure loop is closed on it.
+
+**Triggered When**:
+- In `ST_PRESSURE_CTRL` only
+- Loop current below `G_cfgPressureSensorMinMa` (3.6 mA: open loop, unpowered transducer, broken wire) or above `G_cfgPressureSensorMaxMa` (20.5 mA: shorted shunt, transducer over range)
+- For longer than `G_cfgPressureSensorFaultTime` (100 ms) after the median and low-pass filters
+
+**Symptoms**:
+- `G_mbActualPressure` (IR19-20) reads below zero or above the transducer range
+- The axis halts through `MC_Stop`, as for any fault
+
+**Master Action**:
+1. Read IR19-20: a value near -4 MPa means an open loop, far above 16 MPa a short or over-range
+2. Check the transducer supply, the shunt and the analog input wiring
+3. Reset through the normal handshake once IR19-20 reads a plausible pressure
+
+**Notes**: Outside pressure control a bad reading does not fault; it is visible in IR19-20 and the master should refuse to start pressure control on it. The code has no three-bit form: DO0-DO2 show 000 and IR4 carries 8.
+
+---
+
 ## 4. Fault Reset Procedure
 
 ### Complete Reset Sequence
@@ -410,6 +433,11 @@ After reset, determine appropriate next action:
 - Check for mechanical obstruction
 - Regular limit switch testing
 
+### Pressure Sensor Faults
+- Power the transducer from the same supply as the slave so both are present together
+- Keep the shunt and its return to the controller's analog ground short
+- Watch IR19-20 at atmosphere before starting pressure control
+
 ### Encoder Faults
 - Monitor encoder battery status
 - Replace battery proactively
@@ -433,6 +461,7 @@ After reset, determine appropriate next action:
 | 5 | 101 | Piston Exit | Check pressure |
 | 6 | 110 | Limit Switch | Investigate; jog off (ST_RECOVERY) |
 | 7 | 111 | Encoder | Reserved (see Drive) |
+| 8 | - | Pressure Sensor | Check the transducer loop and shunt |
 
 ### Reset Checklist
 
