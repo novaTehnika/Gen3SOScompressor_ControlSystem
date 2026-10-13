@@ -14,18 +14,19 @@ function buildShell()
 %   every cfg.exchangePeriod (50 ms) through Rate Transition blocks. The
 %   DAQ blocks are created by addDaq.m, which holds the board setup.
 %
-%   The Modbus blocks' register tables are set here in the string form the
-%   mask stores (found with modbusShellDiscover). The Modbus client (name,
-%   transport, address) is the model parameter ModbusTableInfo; its timeout
-%   and word order live in the Modbus configuration component and are set
-%   by hand in Configuration Parameters > Modbus until their parameter names
-%   are known (master-src/README.md).
+%   The Modbus blocks' register tables and the Modbus client (Configuration
+%   Parameters > Modbus) are set here in the forms the toolbox stores them,
+%   found with modbusShellDiscover on the lab PC (R2025b).
 
-% --- Modbus settings (formats discovered on the lab PC, R2025b) -------------
+% --- Modbus settings --------------------------------------------------------
 MODBUS_LIBRARY = 'modbuslib';
-MODBUS_SETUP.clientName   = 'ModbusClient';
-MODBUS_SETUP.address      = '192.168.1.1:502';
-MODBUS_SETUP.scriptClient = false;   % true once ModbusTableInfo's labels are confirmed
+MODBUS_SETUP.clientName = 'ModbusClient';
+MODBUS_SETUP.ip         = '192.168.1.1';     % the controller, as MotionWorks connects to it
+MODBUS_SETUP.port       = 502;
+MODBUS_SETUP.timeout    = 0.1;               % s, per transaction
+MODBUS_SETUP.retries    = 1;
+MODBUS_SETUP.byteOrder  = 'big-endian';
+MODBUS_SETUP.wordOrder  = 'little-endian';   % as measured: low word first
 % The Write block writes as many registers as its input is wide, so its row
 % has no count; the Read block's row carries the count.
 MODBUS_SETUP.writeRegisterTable = '{ ''1'', ''Reg_1'', ''1'', ''Holding Register'', ''uint16'' }';
@@ -76,30 +77,32 @@ manual = setRegisterTable(mdl, 'Modbus Write', MODBUS_SETUP.writeRegisterTable, 
 manual = setRegisterTable(mdl, 'Modbus Read', MODBUS_SETUP.readRegisterTable, ...
     sprintf('IR1, input register, uint16, count %d', map.nRead), manual);
 
-% Modbus client: the table behind Configuration Parameters > Modbus.
-if ~MODBUS_SETUP.scriptClient
-    manual{end + 1} = sprintf(['Modbus pane: Add client "%s", TCP/IP, %s; under Transport ' ...
-        'Settings timeout 0.1 s, byte order big-endian, word order little-endian; ' ...
-        'then Refresh and select it in both blocks'], MODBUS_SETUP.clientName, MODBUS_SETUP.address);
-else
+% Modbus client: the model parameter behind Configuration Parameters > Modbus.
+endpoint = sprintf('%s:%d', MODBUS_SETUP.ip, MODBUS_SETUP.port);
+info.ClientInfoArray = struct( ...
+    'Name', MODBUS_SETUP.clientName, 'TransportProtocol', 'tcpip', ...
+    'TransportSettings', struct( ...
+        'DeviceAddress', MODBUS_SETUP.ip, 'Port', MODBUS_SETUP.port, ...
+        'ByteOrder', MODBUS_SETUP.byteOrder, 'WordOrder', MODBUS_SETUP.wordOrder, ...
+        'Timeout', MODBUS_SETUP.timeout, 'NumRetries', MODBUS_SETUP.retries));
+info.ColumnHeaders  = true;
+info.ColumnLabels   = {'Select', 'Client Name', 'Transport', 'Connection Endpoint'};
+info.RowHeaders     = false;
+info.SelectRow      = false;
+info.Size           = [1 4];
+info.Data           = {false, MODBUS_SETUP.clientName, 'TCP/IP', endpoint};
+info.Types          = {'checkbox', 'edit', 'edit', 'edit'};
+info.ColumnEditable = [true false false false];
+info.ColumnIDs      = {'Select', 'ConfigurationName', 'Transport', 'Connection'};
 try
-    info.ClientInfoArray = struct( ...
-        'ColumnHeaders', 1, 'ColumnLabels', {{'', 'Client Name', 'Transport', 'Address'}}, ...
-        'RowHeaders', 0, 'SelectRow', 0, 'Size', [1 4], ...
-        'Data', {{1, MODBUS_SETUP.clientName, 'TCP/IP', MODBUS_SETUP.address}}, ...
-        'Types', {{'checkbox', 'edit', 'edit', 'edit'}}, 'ColumnEditable', [1 0 0 0], ...
-        'ColumnIDs', {{'Select', 'ClientName', 'Transport', 'Address'}});
     set_param(mdl, 'ModbusTableInfo', info);
     set_param([mdl '/Modbus Write'], 'ClientList', MODBUS_SETUP.clientName);
     set_param([mdl '/Modbus Read'],  'ClientList', MODBUS_SETUP.clientName);
-    manual{end + 1} = sprintf(['Modbus pane: check client "%s" exists with %s; under Transport ' ...
-        'Settings set timeout 0.1 s, byte order big-endian, word order little-endian'], ...
-        MODBUS_SETUP.clientName, MODBUS_SETUP.address);
 catch err
-    manual{end + 1} = sprintf(['Modbus pane: Add client "%s", TCP/IP, %s, timeout 0.1 s, ' ...
-        'byte order big-endian, word order little-endian; then select it in both blocks ' ...
-        '(scripted attempt failed: %s)'], MODBUS_SETUP.clientName, MODBUS_SETUP.address, err.message);
-end
+    manual{end + 1} = sprintf(['Modbus pane: Add client "%s", TCP/IP, %s, timeout %g s, ' ...
+        'byte order %s, word order %s; then Refresh and select it in both blocks ' ...
+        '(scripted attempt failed: %s)'], MODBUS_SETUP.clientName, endpoint, ...
+        MODBUS_SETUP.timeout, MODBUS_SETUP.byteOrder, MODBUS_SETUP.wordOrder, err.message);
 end
 
 % Rate transitions between the 25 ms step and the 50 ms exchange.

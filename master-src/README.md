@@ -25,21 +25,15 @@ SOS_Gen3_Compressor_Interface      % then press "Connect to Compressor"
 
 ### Modbus settings in the shell
 
-`buildShell` sets the Modbus blocks' register rows (the Write block writes as
-many registers as its input is wide, so its row has no count; the Read row
-reads 18). The Modbus client is still made by hand on a fresh build:
-
-1. Open the model. In either Modbus block click **Configure clients**. In the
-   Modbus pane add a client named `ModbusClient`: TCP/IP, the controller's
-   IP, port 502; under Transport Settings timeout 0.1 s, byte order
-   big-endian, word order little-endian.
-2. In both blocks click **Refresh** and select the client. Save.
-3. If the builder printed any line to connect, the block had no ports when it
-   was built; connect it as printed.
-
-`modbusShellDiscover` prints the model's Modbus settings. Once the client
-table's column labels and the transport settings' parameter names are known,
-`MODBUS_SETUP` in `buildShell.m` can script the client too.
+`buildShell` sets everything: the Modbus blocks' register rows (the Write
+block writes as many registers as its input is wide, so its row has no
+count; the Read row reads 18) and the Modbus client (`ModbusClient`, TCP/IP,
+controller IP and port, 0.1 s timeout, byte order big-endian, word order
+little-endian) in Configuration Parameters > Modbus. The controller IP and
+the timeout are `MODBUS_SETUP` at the top of the script. After a build,
+open the Modbus pane once to confirm the client is listed; if the builder
+printed a manual step, do as printed. `modbusShellDiscover` prints the
+settings of a built model.
 
 Timing: model step 25 ms, Modbus exchange 50 ms. A dropped TCP connection
 stops the model with an error from the Read block; the DAQ outputs go to
