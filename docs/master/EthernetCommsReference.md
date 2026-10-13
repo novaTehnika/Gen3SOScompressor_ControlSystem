@@ -97,7 +97,7 @@ Yaskawa AN.MPiec.05) give `%QW28672` and `%IX24560` for other firmware.
 
 | Modbus area | Group | Direction | MPiec address | Size |
 |-------------|-------|-----------|---------------|------|
-| Holding registers (4x) | FC#06,16 | master → slave | `%IB28672`–`%IB30719` | 1024 registers |
+| Holding registers (4x) | FC#03,06,16 | master → slave | `%MB3.483328`–`%MB3.503327` with **Use %M for bidirectional Holding Registers** (`%IB28672`–`%IB30719`, 1024 registers, without it) | 10000 registers |
 | Input registers (3x) | FC#04 | slave → master | `%QB73792`–`%QB93791` | 10000 registers |
 | Coils | FC#05 | master → slave | `%IB73728`–`%IB73791` | 512 bits |
 | Discrete inputs | FC#02 | slave → master | `%QB73728`–`%QB73791` | 512 bits |

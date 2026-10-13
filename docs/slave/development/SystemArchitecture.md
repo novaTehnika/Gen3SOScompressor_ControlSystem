@@ -92,7 +92,7 @@ This section describes the path of data during two primary scenarios.
 
 This flow describes how a position reference from the master controller becomes motion.
 
-1.  **Modbus Input:** The master writes the reference in millimeters to the holding register `G_mbReference` (`AT %ID28680 : REAL`), together with the mode code, MotionEnable, FaultReset and its heartbeat.
+1.  **Modbus Input:** The master writes the reference in millimeters to the holding register `G_mbReference` (`AT %MD3.483336 : REAL`), together with the mode code, MotionEnable, FaultReset and its heartbeat.
 2.  **Mapping:** `PRG_Input` copies it to `G_sysReference` (`LREAL`) and decodes the mode code register into the `G_diModeBit*` globals, which go through the digital debounce filters and `FB_ModeDecoder` as before.
 3.  **State Machine Execution:** The `ST_POSITION_CTRL` state (and, during fault recovery, `ST_RECOVERY_POSITION`) is active and clamps `G_sysReference` to the active software limits (`stCurrentLimits.PosMin`, `stCurrentLimits.PosMax`), storing the result in a local `rPosTarget`.
 4.  **Command Gate:** `fbPosGate` (`FB_PositionCommandGate`) shapes `rPosTarget` into a per-scan command: it limits command velocity to `stCurrentLimits.VelMax` and acceleration to `G_cfgPosGateAccelMax`, seeds from `G_sysActualPosition` on state entry, and tethers the command to within `G_cfgPosGateMaxDeviation` of actual position so it cannot run away from the real axis if motion stalls. This stage runs in both `ST_POSITION_CTRL` and `ST_RECOVERY_POSITION`; velocity mode and torque mode are unchanged.

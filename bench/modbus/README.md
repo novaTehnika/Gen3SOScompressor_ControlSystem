@@ -31,9 +31,11 @@ shell. It drives no DAQ output.
 2. Save and cycle power. Four Modbus groups appear in the Global Variables
    worksheet.
 3. Declare the globals listed in the header of `slave/PRG_ModbusBench.st` in the
-   matching groups (holding registers under FC#06,16: `%IW`/`%ID` from
-   `%IB28672`; input registers under FC#04: `%QW`/`%QD` from `%QB73792`).
-   The group address ranges shown in the worksheet are the reference.
+   matching groups (holding registers under FC#03,06,16: `%MW3.`/`%MD3.` from
+   `%MB3.483328` with the %M option; input registers under FC#04: `%QW`/`%QD`
+   from `%QB73792`). The group address ranges shown in the worksheet are the
+   reference; enabling or disabling the %M option moves the holding register
+   group.
 4. Add `PRG_ModbusBench` to the project and assign it to the 2 ms cyclic task.
    It uses only its own globals and can run alongside `PRG_Main`.
 5. Compile, download, start.

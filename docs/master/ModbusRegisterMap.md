@@ -28,8 +28,9 @@ Register numbers are 1-based, as used by MATLAB and the Simulink Modbus blocks.
 Register *k* maps to a byte offset inside the group that Hardware
 Configuration creates in the Global Variables worksheet:
 
-- Holding registers (master → slave, group FC#06,16): `%IW` / `%ID` at
-  `28672 + 2*(k-1)`
+- Holding registers (master → slave, group FC#03,06,16, with **Use %M for
+  bidirectional Holding Registers** enabled): `%MW3.` / `%MD3.` at
+  `483328 + 2*(k-1)`
 - Input registers (slave → master, group FC#04): `%QW` / `%QD` at
   `73792 + 2*(k-1)`
 
@@ -61,11 +62,11 @@ task interval.
 
 | HR | Address | Type | Global | Content |
 |----|---------|------|--------|---------|
-| 1 | `%IW28672` | UINT | `G_mbHeartbeat` | Master step counter, incremented every step, wraps 65535 → 0 |
-| 2 | `%IW28674` | UINT | `G_mbModeCode` | Mode code 0–7 (same meaning as DI0–DI2). During fault reset the master mirrors the **full** fault code here. The mode decoder reads the low three bits, so a mirrored code of 8 or above looks like mode 0 to it, which is what mirroring code 0 looks like today; the slave ignores the decoded mode on the fault-acknowledge path |
-| 3 | `%IW28676` | UINT | `G_mbMotionEnable` | 1 = MotionEnable |
-| 4 | `%IW28678` | UINT | `G_mbFaultReset` | 1 = FaultReset (level) |
-| 5–6 | `%ID28680` | REAL | `G_mbReference` | Position mode: mm. Velocity mode: mm/s. Torque mode: % of rated. Pressure mode (code 7, planned): MPa gauge |
+| 1 | `%MW3.483328` | UINT | `G_mbHeartbeat` | Master step counter, incremented every step, wraps 65535 → 0 |
+| 2 | `%MW3.483330` | UINT | `G_mbModeCode` | Mode code 0–7 (same meaning as DI0–DI2). During fault reset the master mirrors the **full** fault code here. The mode decoder reads the low three bits, so a mirrored code of 8 or above looks like mode 0 to it, which is what mirroring code 0 looks like today; the slave ignores the decoded mode on the fault-acknowledge path |
+| 3 | `%MW3.483332` | UINT | `G_mbMotionEnable` | 1 = MotionEnable |
+| 4 | `%MW3.483334` | UINT | `G_mbFaultReset` | 1 = FaultReset (level) |
+| 5–6 | `%MD3.483336` | REAL | `G_mbReference` | Position mode: mm. Velocity mode: mm/s. Torque mode: % of rated. Pressure mode (code 7, planned): MPa gauge |
 | 7–20 | | | | Reserved |
 | 101–110 | | | | Bench probe area (`bench/modbus`) |
 

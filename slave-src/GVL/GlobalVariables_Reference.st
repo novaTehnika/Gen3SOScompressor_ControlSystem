@@ -87,17 +87,18 @@
 
 
      (* ========================================================================
-        MODBUS HOLDING REGISTERS (master -> slave), group FC#06,16
-        Register k is at byte offset 28672 + 2*(k-1). Declared under the
-        group that Hardware Configuration creates. See
+        MODBUS HOLDING REGISTERS (master -> slave), group FC#03,06,16
+        With "Use %M for bidirectional Holding Registers" the group lives in
+        %M memory: register k is at %MB3.(483328 + 2*(k-1)). Declared under
+        the group that Hardware Configuration creates. See
         docs/master/ModbusRegisterMap.md.
         ======================================================================== *)
 
-     G_mbHeartbeat         AT %IW28672 : UINT  (* HR1: master step counter *)
-     G_mbModeCode          AT %IW28674 : UINT  (* HR2: mode code 0-7, or the full fault code mirrored during reset *)
-     G_mbMotionEnable      AT %IW28676 : UINT  (* HR3: 1 = MotionEnable *)
-     G_mbFaultReset        AT %IW28678 : UINT  (* HR4: 1 = FaultReset *)
-     G_mbReference         AT %ID28680 : REAL  (* HR5-6: reference, mm / mm/s / % by mode *)
+     G_mbHeartbeat         AT %MW3.483328 : UINT  (* HR1: master step counter *)
+     G_mbModeCode          AT %MW3.483330 : UINT  (* HR2: mode code 0-7, or the full fault code mirrored during reset *)
+     G_mbMotionEnable      AT %MW3.483332 : UINT  (* HR3: 1 = MotionEnable *)
+     G_mbFaultReset        AT %MW3.483334 : UINT  (* HR4: 1 = FaultReset *)
+     G_mbReference         AT %MD3.483336 : REAL  (* HR5-6: reference, mm / mm/s / % by mode *)
 
 
      (* ========================================================================
