@@ -125,6 +125,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         STATUS_FAULT     = 10     % FaultCode block holds the code
         STATUS_ESTOP     = 20
         STATUS_LINK_LOST = 34
+        STATUS_LINK_WAIT = 35
 
         % Time the model gets to act on a request before a status that
         % does not show it running ends it
@@ -395,6 +396,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 case 33, text = "Slave did not report stopped";
                 case app.STATUS_LINK_LOST
                     text = "Slave link lost: press Stop once it is back";
+                case app.STATUS_LINK_WAIT
+                    text = "Waiting for the slave link";
                 otherwise
                     text = append("Status ", num2str(statusCode));
             end

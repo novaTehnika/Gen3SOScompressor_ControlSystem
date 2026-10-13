@@ -103,7 +103,8 @@ therefore supervise the link.
 | Side | Condition | Action |
 |------|-----------|--------|
 | Slave | `G_mbHeartbeat` unchanged for `G_cfgCommTimeout` (150 ms); armed by the first change seen | `FAULT_COMM` (code 4) through `FB_SafetyMonitor`, so the fault latches, mirrors and resets like any other |
-| Master | `G_mbSlaveCounter` unchanged for `cfg.commTimeout` (150 ms) | E-stop path: MotionEnable low, safety relay (P0.0) off, status `LINK_LOST`. Latched until the counter advances and the operator sends Stop |
+| Master | `G_mbSlaveCounter` not yet seen to advance | E-stop path and safety relay off, status `LINK_WAIT`; clears by itself once the counter moves |
+| Master | `G_mbSlaveCounter` unchanged for `cfg.commTimeout` (150 ms) after that | E-stop path: MotionEnable low, safety relay (P0.0) off, status `LINK_LOST`. Latched until the counter advances and the operator sends Stop |
 
 Both timeouts ride through one lost exchange at the 50 ms period. A dropped
 TCP connection stops the Simulink model, which sets the DAQ outputs to their

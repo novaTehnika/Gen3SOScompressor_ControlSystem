@@ -35,10 +35,13 @@ open the Modbus pane once to confirm the client is listed; if the builder
 printed a manual step, do as printed. `modbusShellDiscover` prints the
 settings of a built model.
 
-Timing: model step 25 ms, Modbus exchange 50 ms. A dropped TCP connection
-stops the model with an error from the Read block; the DAQ outputs go to
-their final values (safety relay off) and the app reports the stopped model.
-Press **Connect** again once the slave is reachable.
+Timing: model step 25 ms, Modbus exchange 50 ms. When the cable is pulled
+the slave stops itself within 150 ms (`FAULT_COMM`); the model keeps
+retrying the connection and stops with an error from the Read block once
+Windows TCP gives up, about 20 s later, which sets the DAQ outputs to their
+final values (safety relay off) and makes the app report the stopped model.
+Press **Connect** again once the slave is reachable, then Stop to clear the
+link-lost status.
 
 ## App to model interface
 
@@ -51,8 +54,8 @@ continuously while their operation is active. `ESTOP` and `Mixer` act at once.
 The app reads `StatusCode`, `FaultCode`, `State`, `Position`,
 `Velocity`, `Pressure` and `LinkOk`. Status codes are listed in
 `masterStateMachine.m`; a fault shows as status 10 with the code in
-`FaultCode`, and a lost slave link as status 34 until the operator presses
-Stop.
+`FaultCode`, status 35 is shown until the slave's counter has first been
+seen, and a lost slave link as status 34 until the operator presses Stop.
 
 ## Operator app buttons
 

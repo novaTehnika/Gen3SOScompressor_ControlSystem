@@ -23,15 +23,18 @@ function [mbWrite, doSafety, doMixer, position, velocity, pressure, ...
 %   position (mm), velocity (mm/s), pressure (atm), statusCode, faultCode,
 %   state, linkOk  for the app
 %
-%   Link supervision: if the slave scan counter stops advancing for
-%   cfg.commTimeout the link is lost. The E-stop path is forced, the safety
-%   relay drops and statusCode shows STATUS_LINK_LOST. The condition stays
-%   latched until the counter advances again and the operator sends Stop.
+%   Link supervision: until the slave scan counter has been seen to advance
+%   the link is not up (STATUS_LINK_WAIT, safety relay off, E-stop path).
+%   Once up, a counter that stops advancing for cfg.commTimeout means the
+%   link is lost: the E-stop path is forced, the safety relay drops and
+%   statusCode shows STATUS_LINK_LOST. That stays latched until the counter
+%   advances again and the operator sends Stop.
 
-persistent presBuf k heartbeat lastCounter tStale linkLost lastSeq ...
+persistent presBuf k heartbeat lastCounter tStale linkUp linkLost lastSeq ...
            integ pressureActive started
 
 STATUS_LINK_LOST = 34;
+STATUS_LINK_WAIT = 35;
 OP_STOP = 0;
 
 cfg = masterConfig();
@@ -45,6 +48,7 @@ if isempty(started)
     heartbeat = 0;
     lastCounter = r(map.ir.slaveCounter);
     tStale = 0;
+    linkUp = false;
     linkLost = false;
     lastSeq = cmdSeq;
     integ = 0;
@@ -56,7 +60,8 @@ counter = r(map.ir.slaveCounter);
 if counter ~= lastCounter
     tStale = 0;
     lastCounter = counter;
-else
+    linkUp = true;
+elseif linkUp
     tStale = tStale + cfg.dt;
 end
 if tStale >= cfg.commTimeout
@@ -89,7 +94,7 @@ in.homingComplete   = double(r(map.ir.homingComplete) ~= 0);
 in.inMotion         = double(r(map.ir.inMotion) ~= 0);
 in.brakeDisengage   = 0;    % not carried by the link
 in.position         = position;
-in.estop            = double(estop ~= 0 || linkLost);
+in.estop            = double(estop ~= 0 || linkLost || ~linkUp);
 in.op               = op;
 in.cmdSeq           = cmdSeq;
 in.targetPosition   = targetPosition;
@@ -119,8 +124,10 @@ doMixer  = double(mixer ~= 0 && in.estop == 0);
 statusCode = out.statusCode;
 if linkLost
     statusCode = STATUS_LINK_LOST;
+elseif ~linkUp
+    statusCode = STATUS_LINK_WAIT;
 end
 faultCode = out.faultCode;
 state     = out.state;
-linkOk    = double(~linkLost);
+linkOk    = double(linkUp && ~linkLost);
 end

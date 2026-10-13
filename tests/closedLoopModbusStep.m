@@ -33,10 +33,16 @@ h.m = [];
 h.writeLost = false;    % master's registers do not reach the slave
 h.readLost = false;     % slave's registers do not reach the master
 
+% Until the slave's counter is seen the link is not up: safety relay off,
+% waiting status, no latch once it appears.
+h.readLost = true;
+h = runUntil(h, 0.5, []);
+assert(h.m.statusCode == 35 && h.m.doSafety == 0 && h.m.linkOk == 0);
+h.readLost = false;
 h = runUntil(h, 0.5, []);
 assert(h.m.statusCode == 0 && h.m.doSafety == 1 && h.m.linkOk == 1);
 assert(h.y.heartbeatEcho > 0, 'heartbeat not echoed');
-fprintf('ok  start-up, heartbeat echoed\n');
+fprintf('ok  start-up: waits for the slave, then idle; heartbeat echoed\n');
 
 h = command(h, 1);
 h = runUntil(h, 60, @(h) h.sl.G.G_flagHomingComplete && h.m.state == 1);
