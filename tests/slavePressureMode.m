@@ -75,6 +75,30 @@ assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE && h.faultSeen == 0);
 assert(h.y.performanceStatus == 0);
 fprintf('ok  leave pressure mode\n');
 
+% Master heartbeat frozen while the loop is closed: FAULT_COMM, as for
+% any commanded motion, and the axis stops.
+h.sl.ax.x = h.sl.sim.chamberContactPos + 10;
+h = enterMode(h, MODE_PRESSURE, 10);
+h = runFor(h, 1);
+assert(h.sl.ax.v > 0.5);
+h.freezeHeartbeat = true;
+h = runUntil(h, 1, @(h) h.y.faultActive == 1);
+assert(h.y.faultActive == 1 && h.y.faultCode == 4, 'no comm fault');
+h = runUntil(h, 3, @(h) h.sl.ax.v == 0);
+assert(h.sl.ax.v == 0);
+h.freezeHeartbeat = false;
+h.u.motionEnable = 0;
+h.u.modeCode = 4;
+h = runFor(h, 0.2);
+h.u.faultReset = 1;
+h = runUntil(h, 2, @(h) h.y.faultActive == 0);
+assert(h.y.faultActive == 0, 'comm fault did not clear');
+h.u.faultReset = 0;
+h.u.modeCode = 0;
+h = runFor(h, 1);
+assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_BRAKE_HOLD);
+fprintf('ok  link loss in pressure mode -> FAULT_COMM, reset\n');
+
 % Broken loop while the loop is closed: FAULT_PRESSURE_SENSOR, axis stops,
 % and the register reset handshake clears it.
 h.sl.ax.x = h.sl.sim.chamberContactPos + 10;
@@ -117,6 +141,7 @@ h.vMax = 0;
 h.pMax = 0;
 h.pMin = inf;
 h.faultSeen = 0;
+h.freezeHeartbeat = false;
 end
 
 
@@ -145,7 +170,7 @@ function h = runUntil(h, T, done)
 dt = h.sl.G.G_cfgScanTime;
 for k = 1:round(T / dt)
     h.t = h.t + dt;
-    if mod(k, round(0.025 / dt)) == 0
+    if mod(k, round(0.025 / dt)) == 0 && ~h.freezeHeartbeat
         h.u.heartbeat = mod(h.u.heartbeat + 1, 65536);
     end
     [h.sl, h.y] = slaveStep(h.sl, h.u);

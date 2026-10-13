@@ -29,7 +29,7 @@ SOS_Gen3_Compressor_Interface      % then press "Connect to Compressor"
 `buildShell` sets everything: the Modbus blocks' register rows (the Write
 block writes as many registers as its input is wide, so its row has no
 count; the Read row reads 20) and the Modbus client (`ModbusClient`, TCP/IP,
-controller IP and port, 0.1 s timeout, byte order big-endian, word order
+controller IP and port, 0.5 s timeout, byte order big-endian, word order
 little-endian) in Configuration Parameters > Modbus. The controller IP and
 the timeout are `MODBUS_SETUP` at the top of the script. After a build,
 open the Modbus pane once to confirm the client is listed; if the builder
@@ -37,7 +37,7 @@ printed a manual step, do as printed. `modbusShellDiscover` prints the
 settings of a built model.
 
 Timing: model step 25 ms, Modbus exchange 50 ms. When the cable is pulled
-the slave stops itself within 150 ms (`FAULT_COMM`); the model keeps
+the slave stops itself within 300 ms (`FAULT_COMM`); the model keeps
 retrying the connection and stops with an error from the Read block once
 Windows TCP gives up, about 20 s later, which sets the DAQ outputs to their
 final values (safety relay off) and makes the app report the stopped model.

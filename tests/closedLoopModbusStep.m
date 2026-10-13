@@ -85,6 +85,19 @@ assert(h.y.faultActive == 0 && h.m.state == 1);
 fprintf('ok  fault, mirror and reset\n');
 h.sl.ax.x = 25;                     % back out of the chamber
 
+% Link loss seen by the slave while quiescent is not a fault: after the
+% reset it waits in brake hold, the master stopping is routine, and the
+% link resumes without any reset.
+E = h.sl.E.E_SystemState;
+assert(h.sl.G.G_sysCurrentState == E.ST_BRAKE_HOLD);
+h.writeLost = true;
+h = runUntil(h, 0.5, []);
+assert(h.y.faultActive == 0 && h.sl.G.G_sysCurrentState == E.ST_BRAKE_HOLD);
+h.writeLost = false;
+h = runUntil(h, 0.3, []);
+assert(h.y.faultActive == 0 && h.m.statusCode == 0);
+fprintf('ok  slave link loss while quiescent -> no fault\n');
+
 % Link loss seen by the slave: the heartbeat freezes during a jog, the
 % slave raises FAULT_COMM and stops, the master shows the fault.
 h.app.targetVelocity = 2;
