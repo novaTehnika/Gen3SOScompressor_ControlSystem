@@ -6,9 +6,12 @@
 
 ## 1. Scope
 
-This document collects the vendor documentation relevant to replacing the
-discrete and analog master ↔ slave signals (DAQ DI/DO, AO reference, AI0
-position feedback) with an Ethernet link between the lab PC and the MP2600iec.
+This document collects the vendor documentation and bench measurements behind
+the Ethernet link between the lab PC and the MP2600iec. Modbus TCP is the
+chosen transport; the protocol over it is in
+[ModbusRegisterMap.md](ModbusRegisterMap.md). It replaces the discrete and
+analog master ↔ slave signals (DAQ DI/DO, AO reference, AI0 position
+feedback).
 It covers the transport options available with the installed software, how each
 is configured, and the open questions that must be answered on the bench. It is
 not a protocol specification. The current protocol is defined in
@@ -94,7 +97,7 @@ Yaskawa AN.MPiec.05) give `%QW28672` and `%IX24560` for other firmware.
 
 | Modbus area | Group | Direction | MPiec address | Size |
 |-------------|-------|-----------|---------------|------|
-| Holding registers (4x) | FC#06,16 | master → slave | `%IB28672`–`%IB30719` | 1024 registers |
+| Holding registers (4x) | FC#03,06,16 | master → slave | `%MB3.483328`–`%MB3.503327` with **Use %M for bidirectional Holding Registers** (`%IB28672`–`%IB30719`, 1024 registers, without it) | 10000 registers |
 | Input registers (3x) | FC#04 | slave → master | `%QB73792`–`%QB93791` | 10000 registers |
 | Coils | FC#05 | master → slave | `%IB73728`–`%IB73791` | 512 bits |
 | Discrete inputs | FC#02 | slave → master | `%QB73728`–`%QB73791` | 512 bits |

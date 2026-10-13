@@ -1,19 +1,9 @@
 function cfg = masterConfig()
 %MASTERCONFIG Constants for the master state machine and signal scaling.
 
-cfg.dt = 0.003;             % model step (s)
-
-% Analog position map shared by reference (AO) and feedback (AI):
-% two linear segments joined at (posMapVtr, posMapXtr).
-cfg.posMapVmin = -10;       % V
-cfg.posMapVtr  = 0;         % V
-cfg.posMapVmax = 10;        % V
-cfg.posMapXmin = 0;         % mm
-cfg.posMapXtr  = 200;       % mm
-cfg.posMapXmax = 365;       % mm
-
-% Velocity reference scaling (slave Velocity mode).
-cfg.velPerVolt = 0.7;       % mm/s per V; must equal G_cfgAnalogVelMax / 10
+cfg.dt             = 0.025;     % model step (s)
+cfg.exchangePeriod = 0.05;      % Modbus write + read period (s), a multiple of dt
+cfg.commTimeout    = 0.15;      % slave counter unchanged this long = link lost (s)
 
 % Pressure transducer: P = (V - offset) * gain.
 cfg.pressureOffsetV = 4;        % V
@@ -21,9 +11,7 @@ cfg.pressureGain    = 2.3095;   % MPa per V
 cfg.atmPerMPa       = 9.869;
 
 % Input filtering.
-cfg.posMedianLength      = 5;
-cfg.pressureMedianLength = 7;
-cfg.velFilterTau         = 0.1;     % s, displayed velocity
+cfg.pressureMedianLength = 3;
 
 % Pressure loop: velocity command per unit pressure error.
 cfg.pressureKp = 0.02533;   % mm/s per atm (0.25 mm/s per MPa)
@@ -43,13 +31,13 @@ cfg.tArrive      = 0.1;     % s inside tolerance before "at target"
 
 % Handshake and sequencing times (s).
 cfg.tInit          = 0.1;   % outputs held low after start
-cfg.tConfirmStable = 0.02;  % confirm bits must match this long
+cfg.tConfirmStable = 0.02;  % confirm code must match this long
 cfg.tHandshake     = 0.5;   % give up waiting for confirmation
 cfg.tEnableMin     = 0.05;  % minimum dwell after raising MotionEnable
 cfg.tEnableMax     = 1.0;   % proceed without BrakeDisengage after this (slave reset + power-on + brake release)
 cfg.tStopMin       = 0.1;   % ignore InMotion this long after dropping MotionEnable
 cfg.tStopMax       = 3.0;   % give up waiting for InMotion low
-cfg.tModeClear     = 0.15;  % mode 000 held before a new request (slave debounce + stable time)
+cfg.tModeClear     = 0.15;  % mode 0 held before a new request (slave debounce + stable time)
 cfg.tGoHomeDone    = 1.0;   % InMotion low this long ends Go Home
 
 % Fault handling times (s).

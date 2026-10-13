@@ -115,7 +115,7 @@ Functions can only have one output. For multiple outputs, use a function block i
 
 **User-Enum Parameters on Functions:**
 
-MotionWorks IEC Express fails native code generation with `E2001: circular assembly references` when a `FUNCTION` POU has a user-defined enum in its signature — as a `VAR_INPUT` type or as the return type. Always implement such conversions as `FUNCTION_BLOCK`s. Precedent: the six enum-helper FBs (`FB_IsOperationalMode`, `FB_IsHomingMode`, `FB_ModeToInt`, `FB_FaultToInt`, `FB_BitsToMode`, `FB_BitsToFaultCode`) exist as FBs specifically to work around this defect.
+MotionWorks IEC Express fails native code generation with `E2001: circular assembly references` when a `FUNCTION` POU has a user-defined enum in its signature — as a `VAR_INPUT` type or as the return type. Always implement such conversions as `FUNCTION_BLOCK`s. Precedent: the six enum-helper FBs (`FB_IsOperationalMode`, `FB_IsHomingMode`, `FB_ModeToInt`, `FB_FaultToInt`, `FB_BitsToMode`, `FB_IntToFaultCode`) exist as FBs specifically to work around this defect.
 
 ---
 
@@ -180,7 +180,7 @@ Let's say you want to add `FAULT_NEW_CONDITION` with a value of `5` (currently `
 
 1.  **Define Enum:** In `slave-src/DUT/DataTypes.st`, add the new fault to `E_FaultCode`. Note that ordinal position matters for bit encoding.
 
-2.  **Update Conversions:** Update the fault helpers in `slave-src/FB/` to handle the new fault: `FB_FaultToInt.st` (add an `ELSIF` branch for the new enum → int value) and `FB_BitsToFaultCode.st` (add an `ELSIF` branch for the new int → enum value). `FB_FaultToBits` delegates to `FB_FaultToInt` and needs no direct change.
+2.  **Update Conversions:** Update the fault helpers in `slave-src/FB/` to handle the new fault: `FB_FaultToInt.st` (add an `ELSIF` branch for the new enum → int value) and `FB_IntToFaultCode.st` (add an `ELSIF` branch for the new int → enum value). `FB_FaultToBits` delegates to `FB_FaultToInt` and needs no direct change. Codes above 7 are carried by the Modbus registers only; the discrete outputs show the low three bits.
 
 3.  **Update Master Docs:** Add the new fault to the tables in `docs/master/FaultCodeReference.md` and other relevant guides.
 

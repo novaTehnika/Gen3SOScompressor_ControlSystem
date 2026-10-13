@@ -142,16 +142,16 @@ switch is the expected homing target (negative overtravel inside
 ### 5.1 Analog Input
 | Pin | Address | Range | Type | Signal |
 |-----|---------|-------|------|--------|
-| AI0 | %IW0 | -10V to +10V | LREAL | G_aiReference |
+| AI0 | %IW0 | -10V to +10V | LREAL | G_aiReference (not used by the protocol; reserved for the pressure transducer) |
 
-**Scaling**: MotionWorksIEC presents the analog input as an `LREAL` in volts directly (e.g. `-10.0` to `+10.0`). The application code reads and processes the signal as volts; no raw-to-voltage conversion is required in ST.
+**Scaling**: MotionWorksIEC presents the analog input as an `LREAL` in volts directly (e.g. `-10.0` to `+10.0`). The application code reads and processes the signal as volts; no raw-to-voltage conversion is required in ST. The reference now arrives in engineering units through the Modbus holding registers (see `docs/master/ModbusRegisterMap.md`).
 
 ### 5.2 Analog Output
 | Pin | Address | Range | Type | Signal |
 |-----|---------|-------|------|--------|
-| AO0 | %QW0 | -10V to +10V | LREAL | G_aoPositionOutput |
+| AO0 | %QW0 | -10V to +10V | LREAL | unused |
 
-**Scaling**: The analog output is written as an `LREAL` in volts. `FB_PositionOutput` produces the voltage directly from the two-stage position mapping; see [AnalogScalingReference](./reference/AnalogScalingReference.md).
+Position feedback is published in the Modbus input registers; the analog output is not written.
 
 ---
 

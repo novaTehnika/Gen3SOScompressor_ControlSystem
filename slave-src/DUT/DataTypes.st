@@ -47,23 +47,25 @@ TYPE
    (* ============================================================================
       E_FaultCode - Fault Code Enumeration
 
-      When doFaultActive is HIGH, the 3-bit fault code is output on DO0-DO2
-      instead of mode confirmation.
+      The full integer value is published in the Modbus input register
+      G_mbFaultCode and mirrored back by the master in G_mbModeCode during
+      the fault reset handshake. When doFaultActive is HIGH the low three
+      bits are also output on DO0-DO2 instead of mode confirmation.
 
       Encoding:
       - DO0 = bit 0 (LSB), DO1 = bit 1, DO2 = bit 2 (MSB)
       - Fault value = DO2*4 + DO1*2 + DO0
       ============================================================================ *)
 
-   (* IMPORTANT: Member order defines implicit integer values (0-7).
-      These values map to 3-bit fault codes on DO0-DO2. Do not reorder. *)
+   (* IMPORTANT: Member order defines implicit integer values. Do not reorder.
+      Values above 7 are carried by the Modbus registers only. *)
    E_FaultCode :
    (
       FAULT_NONE,              (* implicit 0 - 000: No fault / fault cleared *)
       FAULT_HANDSHAKE,         (* implicit 1 - 001: Handshake timeout or mismatch *)
       FAULT_DRIVE,             (* implicit 2 - 010: Drive fault (from servo amplifier) *)
       FAULT_POSITION,          (* implicit 3 - 011: Position limit exceeded *)
-      FAULT_RESERVED_100,      (* implicit 4 - 100: Reserved (never raised) *)
+      FAULT_COMM,              (* implicit 4 - 100: Master heartbeat stopped (link lost) *)
       FAULT_PISTON_EXIT,       (* implicit 5 - 101: Piston exit prevention triggered *)
       FAULT_LIMIT_SWITCH,      (* implicit 6 - 110: Limit switch fault *)
       FAULT_ENCODER            (* implicit 7 - 111: Encoder / absolute position fault *)

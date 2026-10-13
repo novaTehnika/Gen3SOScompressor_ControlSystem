@@ -8,7 +8,7 @@ function smokeMasterStateMachine()
 %   Run from the repository root:  addpath master-src/logic tests; smokeMasterStateMachine
 
 h.cfg = masterConfig();
-h.dt = 0.003;
+h.dt = h.cfg.dt;
 h.sl = slaveInit();
 h.y = slaveOutputs(h.sl);
 h.in = struct('reset', 1, 'confCode', 0, 'faultActive', 0, 'inMotion', 0, ...
@@ -16,7 +16,6 @@ h.in = struct('reset', 1, 'confCode', 0, 'faultActive', 0, 'inMotion', 0, ...
     'op', 0, 'cmdSeq', 0, 'targetPosition', 300, 'jogVelocity', 0, ...
     'pressureVelocity', 0);
 h.out = [];
-h.maxRef = 0;
 
 h = runFor(h, 0.5);
 assert(h.out.state == 1 && h.out.motionEnable == 0 && h.out.modeCode == 0);
@@ -55,7 +54,7 @@ assert(h.out.statusCode == 4 && h.sl.pos > p0 + 1);
 assert(h.sl.brakeCycles == brake0);
 h.in.op = 0;                        % button release: stop needs no cmdSeq
 h = runFor(h, 1);
-assert(h.out.state == 1 && h.out.motionEnable == 0 && h.out.refVoltage == 0);
+assert(h.out.state == 1 && h.out.motionEnable == 0 && h.out.reference == 0);
 fprintf('ok  position -> jog -> stop\n');
 
 % Jog -> pressure share slave mode 3, so the change goes through idle.
@@ -76,10 +75,10 @@ h = command(h, 2);
 h = runFor(h, 2);
 h.sl = slaveFault(h.sl, 3);
 h = runFor(h, 0.5);
-assert(h.out.statusCode == 13 && h.out.motionEnable == 0);
+assert(h.out.statusCode == 10 && h.out.faultCode == 3 && h.out.motionEnable == 0);
 assert(h.out.modeCode == 3 && h.out.faultReset == 0);
 h = runFor(h, 2);
-assert(h.out.statusCode == 13);
+assert(h.out.statusCode == 10 && h.out.faultCode == 3);
 h = command(h, 5);
 h = runFor(h, 1);
 assert(h.sl.faultCode == 0 && h.out.state == 1 && h.out.faultReset == 0);
@@ -101,8 +100,8 @@ h.in.jogVelocity = 2;
 h = command(h, 3);
 h = runFor(h, 1);
 h.in.estop = 1;
-h = runFor(h, 0.01);
-assert(h.out.motionEnable == 0 && h.out.refVoltage == 0);
+h = runFor(h, 0.05);
+assert(h.out.motionEnable == 0 && h.out.reference == 0);
 h = runFor(h, 1);
 assert(h.out.statusCode == 20);
 h.in.estop = 0;
@@ -122,7 +121,6 @@ h.in.op = 0;
 h = runFor(h, 1);
 fprintf('ok  soft limit\n');
 
-assert(h.maxRef <= 10);
 fprintf('all passed\n');
 end
 
@@ -141,10 +139,9 @@ for k = 1:n
     h.in.inMotion       = h.y.inMotion;
     h.in.homingComplete = h.y.homingComplete;
     h.in.brakeDisengage = h.y.brakeDisengage;
-    h.in.position       = V2x(h.y.positionVolt, h.cfg);
+    h.in.position       = h.y.position;
     h.out = masterStateMachine(h.in, h.cfg, h.dt);
     h.in.reset = 0;
-    h.maxRef = max(h.maxRef, abs(h.out.refVoltage));
     h.sl = slaveStep(h.sl, h.out, h.cfg, h.dt);
     h.y = slaveOutputs(h.sl);
 end
@@ -181,8 +178,7 @@ y.faultActive    = double(sl.state == 6);
 y.inMotion       = double(sl.moving ~= 0);
 y.homingComplete = double(sl.state == 4);
 y.brakeDisengage = sl.brake;
-cfg = masterConfig();
-y.positionVolt   = x2V(sl.pos, cfg);
+y.position       = sl.pos;
 end
 
 
@@ -191,7 +187,7 @@ sl.state = 6;  sl.t = 0;  sl.faultCode = code;  sl.moving = 0;
 end
 
 
-function sl = slaveStep(sl, u, cfg, dt)
+function sl = slaveStep(sl, u, ~, dt)
 % Input debounce: mode bits 50 ms, motion enable 20 ms.
 if u.modeCode ~= sl.rawMode
     sl.rawMode = u.modeCode;  sl.tRawMode = 0;
@@ -276,9 +272,9 @@ elseif sl.state == 2                                % brake engage
 elseif sl.state == 3                                % operating
     v = 0;
     if sl.mode == 2
-        v = toward(sl.pos, V2x(u.refVoltage, cfg), 3, dt);
+        v = toward(sl.pos, u.reference, 3, dt);
     elseif sl.mode == 3
-        v = min(max(u.refVoltage * cfg.velPerVolt, -5), 5);
+        v = min(max(u.reference, -5), 5);
     elseif sl.mode == 5                             % go home
         v = toward(sl.pos, 10, 3, dt);
     elseif sl.mode == 6                             % stand-in for the homing sequence

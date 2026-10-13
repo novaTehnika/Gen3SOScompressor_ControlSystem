@@ -18,7 +18,7 @@ Generated code
     FB_<Name>.m     s = FB_<Name>(s, E, dt)   one per function block
     PRG_Main.m      [s, G] = PRG_Main(s, G, E, dt)
     PRG_Input.m     G = PRG_Input(G, IO)
-    PRG_Output.m    IO = PRG_Output(G, IO)
+    PRG_Output.m    [G, IO] = PRG_Output(G, IO)
 
 Function block inputs, outputs and locals are fields of the instance struct;
 a call assigns the named inputs and then invokes the block, so inputs that a
@@ -536,7 +536,7 @@ def main(src, out):
 
     signatures = {'PRG_Main': '[s, G] = PRG_Main(s, G, E, dt)',
                   'PRG_Input': 'G = PRG_Input(G, IO)',
-                  'PRG_Output': 'IO = PRG_Output(G, IO)'}
+                  'PRG_Output': '[G, IO] = PRG_Output(G, IO)'}
     errors = []
     for name, text in sources.items():
         tr = Translator(name, ctx['pou_decls'][name], ctx)

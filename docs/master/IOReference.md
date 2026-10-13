@@ -5,6 +5,16 @@
 
 ---
 
+> **Transport.** The protocol signals (mode code, MotionEnable, FaultReset,
+> reference, confirmation, fault code, status bits and feedback) travel over
+> Modbus TCP; see [ModbusRegisterMap.md](ModbusRegisterMap.md) and
+> [MasterProtocolGuide.md](MasterProtocolGuide.md). Of the lines below, the
+> master uses only P0.0 (safety relay) and P0.4 (stir bar) and AI 2
+> (pressure transducer). The slave's digital inputs DI0-DI4 are no longer
+> read; its digital outputs are still driven with the values described.
+> Sections 3 and 4 describe the analog path, which is no longer used: the
+> controller's only analog input is reserved for the pressure transducer.
+
 ## 1. Digital Input Signals (Slave Perspective)
 
 These are outputs from the NI DAQ master, inputs to the MP2600iec slave.
