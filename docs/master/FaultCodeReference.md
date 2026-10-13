@@ -141,7 +141,7 @@ Codes 0-7 fit the three discrete lines; higher codes are carried by the register
 ### FAULT_COMM (100)
 
 **Description**: The master heartbeat register `G_mbHeartbeat` has not changed
-for `G_cfgCommTimeout` (150 ms) while the slave is moving, homing or in a
+for `G_cfgCommTimeout` (300 ms) while the slave is moving, homing or in a
 start-up transition. The master's commands can no longer be trusted, so the
 slave stops as for any fault. In the quiescent states (`ST_IDLE`,
 `ST_BRAKE_HOLD`, `ST_HOLD_POSITION`) nothing moves, a stopped master is

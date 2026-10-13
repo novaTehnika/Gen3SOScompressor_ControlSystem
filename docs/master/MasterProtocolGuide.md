@@ -76,8 +76,8 @@ still driven with the same values.
 
 | Side | Condition | Action |
 |------|-----------|--------|
-| Slave | HR1 unchanged for `G_cfgCommTimeout` (150 ms) | `FAULT_COMM` (code 4) through the normal fault path |
-| Master | IR2 unchanged for 150 ms | E-stop path: MotionEnable low, safety relay off, status LINK_LOST. Latched until the counter advances again and the operator sends Stop |
+| Slave | HR1 unchanged for `G_cfgCommTimeout` (300 ms) while moving, homing or starting up | `FAULT_COMM` (code 4) through the normal fault path |
+| Master | IR2 unchanged for 300 ms | E-stop path: MotionEnable low, safety relay off, status LINK_LOST. Latched until the counter advances again and the operator sends Stop |
 
 A dropped TCP connection stops the Simulink model, which sets the DAQ
 outputs to their final values (safety relay off).
@@ -575,7 +575,7 @@ still active. See the [Fault Code Reference](FaultCodeReference.md#limit-recover
 | Parameter | Value |
 |-----------|-------|
 | Modbus exchange period | 50 ms |
-| Link timeout (both sides) | 150 ms |
+| Link timeout (both sides) | 300 ms |
 | Handshake Timeout | 500 ms |
 | Fault Reset Timeout | 1000 ms |
 | Mode Stable Time | 20 ms |
