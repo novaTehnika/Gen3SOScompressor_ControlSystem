@@ -7,72 +7,86 @@
 
 ## 1. Overview
 
-This document provides step-by-step guidance for implementing the Simulink Desktop Real-Time (DTRT) master controller that interfaces with the MP2600iec servo slave via digital and analog I/O signals through the NI PCI 6251 DAQ.
+This document provides step-by-step guidance for implementing the Simulink Desktop Real-Time (DTRT) master controller that interfaces with the MP2600iec servo slave. The protocol signals travel over **Modbus TCP**: the master writes holding registers and reads input registers every 50 ms. The register layout is in [ModbusRegisterMap.md](ModbusRegisterMap.md). Only the safety relay line and the plant I/O stay on the NI PCI 6221 DAQ.
 
 ### Architecture Summary
 
 ```
-+-------------------+        Digital/Analog I/O        +-------------------+
-|                   |  =============================>  |                   |
-|  Simulink DTRT    |        NI PCI 6251 DAQ           |  MP2600iec Slave  |
-|  Master           |  <=============================  |                   |
-|                   |        (8 DI, 8 DO, AI, AO)      |                   |
++-------------------+      Modbus TCP, port 502        +-------------------+
+|                   |  == HR1-6: heartbeat, mode,  ==> |                   |
+|  Simulink DTRT    |     enable, reset, reference     |  MP2600iec Slave  |
+|  Master           |  <= IR1-18: echo, counter, ===== |  (Modbus server)  |
+|                   |     confirm, fault, status, pos  |                   |
 +-------------------+                                  +-------------------+
+         |  P0.0 safety relay (DAQ, hardwired)                  ^
+         +------------------------------------------------------+
 ```
 
 ### Key Principles
 
-1. **Master commands, slave executes**: The master requests modes via DI0-DI2, slave confirms via DO0-DO2
+1. **Master commands, slave executes**: The master requests modes in the mode code register, the slave confirms in the confirmation register
 2. **Handshake protocol**: All mode transitions require confirmed handshake within timeout
 3. **Fault code mirroring**: During fault reset, master must echo fault code back to slave
 4. **Slave enforces safety**: Position limits are enforced by slave
 
 ---
 
-## 2. Digital I/O Interface Summary
+## 2. Signal Summary
 
-### Master Outputs (Slave Digital Inputs)
+### Master to Slave (holding registers, one FC16 write)
 
-| Master DAQ Pin | Signal Name | Function |
-|----------------|-------------|----------|
-| P0.5 (pin 51) | `G_diModeBit0` | Mode command bit 0 (LSB) |
-| P0.1 (pin 17) | `G_diModeBit1` | Mode command bit 1 |
-| P0.6 (pin 16) | `G_diModeBit2` | Mode command bit 2 (MSB) |
-| P0.2 (pin 49) | `G_diMotionEnable` | Motion enable signal |
-| P0.7 (pin 48) | `G_diFaultReset` | Fault reset request |
+| Register | Slave variable | Function |
+|----------|----------------|----------|
+| HR1 | `G_mbHeartbeat` | Master step counter; the slave faults if it stops |
+| HR2 | `G_mbModeCode` | Mode code (0-7), or the full fault code during reset |
+| HR3 | `G_mbMotionEnable` | 1 = MotionEnable |
+| HR4 | `G_mbFaultReset` | 1 = FaultReset (level) |
+| HR5-6 | `G_mbReference` | REAL reference: mm, mm/s or % by mode |
 
-The master DAQ also drives P0.0 (pin 52, safety control relay enable - brake
-disengage / safe-torque-off) and P0.4 (pin 19, stir bar motor); these are not
-part of the slave protocol. P0.3 (pin 47) is unused. See
-[IOReference.md §7](IOReference.md#7-ni-pci-6251-daq-pin-mapping) for the full
-wiring, including analog.
+`PRG_Input` maps HR2-4 onto `G_diModeBit0..2`, `G_diMotionEnable` and
+`G_diFaultReset`, so the handshake below is unchanged from the discrete
+version. The master DAQ still drives P0.0 (safety control relay enable -
+brake disengage / safe-torque-off) and P0.4 (stir bar motor); these are not
+part of the slave protocol. The slave's discrete inputs for mode, enable and
+reset are no longer read. See [IOReference.md](IOReference.md) for the wiring.
 
-### Master Inputs (Slave Digital Outputs)
+### Slave to Master (input registers, one FC04 read)
 
-| Master DAQ Pin | Signal Name | Normal Mode | Fault Mode |
-|----------------|-------------|-------------|------------|
-| PFI14/P2.6 (pin 1) | `G_doModeConfBit0` | Mode confirm bit 0 | Fault code bit 0 |
-| PFI12/P2.4 (pin 2) | `G_doModeConfBit1` | Mode confirm bit 1 | Fault code bit 1 |
-| PFI9/P2.1 (pin 3) | `G_doModeConfBit2` | Mode confirm bit 2 | Fault code bit 2 |
-| PFI8/P2.0 (pin 37) | `G_doPerformanceStatus` | Mode-dependent status | - |
-| PFI7/P1.7 (pin 38) | `G_doFaultActive` | LOW (normal) | HIGH (fault) |
-| PFI6/P1.6 (pin 5) | `G_doHomingComplete` | Homing complete pulse (ST_HOME_COMPLETE only) | - |
-| PFI15/P2.7 (pin 39) | `G_doInMotion` | Axis moving indicator | - |
+| Register | Slave variable | Normal Mode | Fault Mode |
+|----------|----------------|-------------|------------|
+| IR1 | `G_mbHeartbeatEcho` | Last HR1 received | |
+| IR2 | `G_mbSlaveCounter` | Scan counter; the master faults if it stops | |
+| IR3 | `G_mbConfCode` | Mode confirmation (DO0-2 value) | 3-bit fault code |
+| IR4 | `G_mbFaultCode` | 0 | Full fault code |
+| IR5 | `G_mbFaultActive` | 0 | 1 |
+| IR6 | `G_mbInMotion` | Axis moving indicator | |
+| IR7 | `G_mbPerformanceStatus` | Mode-dependent status | |
+| IR8 | `G_mbHomingComplete` | Homing complete (ST_HOME_COMPLETE only) | |
+| IR11-18 | `G_mbActual*`, `G_mbCommandedPosition` | REAL position, velocity, torque, commanded position | |
 
-**Note**: The slave sinks these lines, so the DAQ reads logic 0 when the
-slave signal is asserted - the master must invert them in software. The
-slave's `G_doBrakeDisengage` output drives the brake circuit directly and is
-**not wired to the master**; the master has no brake status input. DO0-DO2
-read as mode confirmation only while the handshake manager is active
-(ST_IDLE, ST_BRAKE_HOLD, ST_HOLD_POSITION, ST_RECOVERY) - during all other
-(operating/homing) states they read 000 unless a fault is active. Do not
-treat 000 during operation as loss of mode.
+**Note**: The slave's `G_doBrakeDisengage` output drives the brake circuit
+directly and is **not carried by the link**; the master has no brake status
+input. IR3 holds a mode confirmation only while the handshake manager is
+active (ST_IDLE, ST_BRAKE_HOLD, ST_HOLD_POSITION, ST_RECOVERY) - during all
+other (operating/homing) states it reads 0 unless a fault is active. Do not
+treat 0 during operation as loss of mode. The discrete outputs DO0-DO7 are
+still driven with the same values.
+
+### Link Supervision
+
+| Side | Condition | Action |
+|------|-----------|--------|
+| Slave | HR1 unchanged for `G_cfgCommTimeout` (150 ms) | `FAULT_COMM` (code 4) through the normal fault path |
+| Master | IR2 unchanged for 150 ms | E-stop path: MotionEnable low, safety relay off, status LINK_LOST. Latched until the counter advances again and the operator sends Stop |
+
+A dropped TCP connection stops the Simulink model, which sets the DAQ
+outputs to their final values (safety relay off).
 
 ---
 
 ## 3. Mode Encoding
 
-### 3-Bit Mode Values
+### Mode Values (HR2, confirmed in IR3)
 
 | Binary | Decimal | Mode Name | Description |
 |--------|---------|-----------|-------------|
@@ -184,18 +198,19 @@ When changing between operational modes (e.g., Position to Velocity):
 
 ### Detecting Faults
 
-Monitor `G_doFaultActive` (slave DO4) continuously:
-- **LOW**: Normal operation
-- **HIGH**: Fault condition active
+Monitor `G_mbFaultActive` (IR5, also DO4) continuously:
+- **0**: Normal operation
+- **1**: Fault condition active
 
-When `G_doFaultActive` goes HIGH:
-- DO0-DO2 now contain fault code (not mode confirmation)
+When it goes to 1:
+- IR4 holds the full fault code, IR3 its low three bits
 - All motion stops
 - Slave is in ST_FAULT state
 
 ### Fault Code Reading
 
-When `G_doFaultActive == HIGH`, read DO0-DO2 as fault code:
+When `G_mbFaultActive == 1`, read IR4 as the fault code. Codes above 7 are
+carried by the register only:
 
 | Binary | Fault | Description | Recovery Action |
 |--------|-------|-------------|-----------------|
@@ -203,7 +218,7 @@ When `G_doFaultActive == HIGH`, read DO0-DO2 as fault code:
 | 001 | Handshake | Timeout or mismatch | Retry handshake |
 | 010 | Drive | Servo amplifier fault | Check drive, reset |
 | 011 | Position | Software limit exceeded | Command safe position; if still out, jog in via ST_RECOVERY |
-| 100 | Reserved | Never raised | N/A |
+| 100 | Comm | Master heartbeat stopped | Restore the link, then reset |
 | 101 | Piston Exit | Safety guard triggered | Reduce force, check pressure |
 | 110 | Limit Switch | Unexpected limit activation | Check mechanics; if still on switch, jog off via ST_RECOVERY |
 | 111 | Encoder | Reserved - encoder alarms arrive as Drive (010) | Re-home (Mode 110) after an encoder alarm |
@@ -215,30 +230,30 @@ When `G_doFaultActive == HIGH`, read DO0-DO2 as fault code:
 ```
 Master                                          Slave
   |                                               |
-  |  1. Observe G_doFaultActive = HIGH              |
+  |  1. Observe G_mbFaultActive = 1 (IR5)         |
   |<----------------------------------------------|
   |                                               |
-  |  2. Read fault code from DO0-DO2              |
+  |  2. Read fault code from IR4                  |
   |<----------------------------------------------|
-  |     (e.g., fault_code = 011 = Position)       |
+  |     (e.g., fault_code = 3 = Position)         |
   |                                               |
-  |  3. Set G_diMotionEnable = LOW                  |
+  |  3. Set G_mbMotionEnable = 0 (HR3)            |
   |---------------------------------------------->|
   |                                               |
-  |  4. MIRROR fault code to DI0-DI2              |
+  |  4. MIRROR the full fault code into HR2       |
   |---------------------------------------------->|
-  |     (e.g., set DI0=0, DI1=0, DI2=1)           |
+  |     (e.g., HR2 = 3)                           |
   |                                               |
-  |  5. Hold G_diFaultReset HIGH (level, not edge)  |
+  |  5. Hold G_mbFaultReset = 1 (level, not edge) |
   |---------------------------------------------->|
   |                                               |
   |              [Slave validates mirror]         |
   |              [If match: clear fault]          |
   |                                               |
-  |  6. G_doFaultActive goes LOW                    |
+  |  6. G_mbFaultActive goes to 0                 |
   |<----------------------------------------------|
   |                                               |
-  |  7. Release G_diFaultReset = LOW                |
+  |  7. Release G_mbFaultReset = 0                |
   |---------------------------------------------->|
   |                                               |
   |  8. Return to normal mode commands            |
@@ -283,38 +298,28 @@ FAULT_PERSISTENT:
 
 ---
 
-## 6. Motion Control via Analog Interface
+## 6. Reference and Feedback
 
-### Analog Output (Master to Slave): Reference Command
+### Reference (Master to Slave): HR5-6
 
-**Signal**: AI0 on slave (`G_aiReference`, `AT %IW0 : LREAL`), driven by the master's AO.
-**Range**: -10V to +10V (presented in ST as an `LREAL` volt value directly — no raw INT scaling).
+**Signal**: `G_mbReference`, a REAL in engineering units, copied to
+`G_sysReference` by `PRG_Input`. Low word first (see ModbusRegisterMap.md).
 
-| Mode | Scaling | Formula |
-|------|---------|---------|
-| Position (two-stage) | 0–200 mm ↔ -10V..+5V, 200–305 mm ↔ +5V..+10V | Stage 1: `V = pos*0.075 - 10`; Stage 2: `V = (pos-200)*0.0476 + 5` |
-| Velocity | -10V..+10V = -7..+7 mm/s (clamped to ±5 mm/s) | `voltage = velocity / 0.7` |
-| Torque | -10V..+10V = -100%..+100% | `voltage = torque_percent / 10` |
+| Mode | Unit | Limits applied by the slave |
+|------|------|-----------------------------|
+| Position | mm | Soft limits, position gate (velocity and acceleration) |
+| Velocity | mm/s | `G_cfgVelLimitNormal` (5 mm/s) |
+| Torque | % of rated | `G_cfgTorqueLimitNormal` |
 
-**Note**: Position command uses the same two-stage mapping as position feedback — sending the voltage that corresponds to a given position in feedback will command that same position. See [AnalogScalingReference](../slave/reference/AnalogScalingReference.md) for the full formulas and derivation.
+The reference is read by the slave at most every 50 ms plus one 4 ms
+service tick. The master sends the next value with the same write that
+carries the mode code and MotionEnable.
 
-### Analog Input (Slave to Master): Position Feedback
+### Feedback (Slave to Master): IR11-18
 
-**Signal**: AO0 on slave (to master's AI)
-**Range**: -10V to +10V
-
-**Two-Stage Position Mapping**:
-- Stage 1: 0mm to 200mm maps to -10V to +5V
-- Stage 2: 200mm to 305mm maps to +5V to +10V
-
-**Inverse Formulas for Master**:
-```
-IF voltage <= 5.0V THEN
-    position = (voltage + 10) / 15 * 200    // 0 to 200mm
-ELSE
-    position = 200 + (voltage - 5) / 5 * 105  // 200 to 305mm
-END_IF
-```
+`G_mbActualPosition` (mm), `G_mbActualVelocity` (mm/s), `G_mbActualTorque`
+(%) and `G_mbCommandedPosition` (mm), as REAL values from the `G_sys*`
+globals, published once per scan and read every 50 ms.
 
 ### Position Mode: Entry Requirement and Command Shaping
 
@@ -390,12 +395,11 @@ not elapsed time.
 
 ### Recommended Sample Rates
 
-| Function | Sample Rate | Rationale |
-|----------|-------------|-----------|
-| Digital I/O | 1 kHz | Handshake response time |
-| Analog Output | 1 kHz | Smooth motion reference |
-| Analog Input | 1 kHz | Position feedback |
-| State Machine | 1 kHz | Responsive mode changes |
+| Function | Period | Rationale |
+|----------|--------|-----------|
+| Modbus exchange (write + read) | 50 ms | The controller answers one request per 4 ms tick and a blocking exchange costs 10-25 ms on the PC |
+| State machine (model step) | 25 ms | A blocking exchange may stall the model by one tick without loss |
+| Safety relay, stir bar, pressure input (DAQ) | 25 ms | Model step |
 
 ---
 
@@ -562,7 +566,7 @@ still active. See the [Fault Code Reference](FaultCodeReference.md#limit-recover
 | Handshake | 001 | 1 |
 | Drive | 010 | 2 |
 | Position | 011 | 3 |
-| Reserved | 100 | 4 |
+| Comm | 100 | 4 |
 | Piston Exit | 101 | 5 |
 | Limit Switch | 110 | 6 |
 | Encoder | 111 | 7 |
@@ -570,6 +574,8 @@ still active. See the [Fault Code Reference](FaultCodeReference.md#limit-recover
 ### Critical Timings
 | Parameter | Value |
 |-----------|-------|
+| Modbus exchange period | 50 ms |
+| Link timeout (both sides) | 150 ms |
 | Handshake Timeout | 500 ms |
 | Fault Reset Timeout | 1000 ms |
 | Mode Stable Time | 20 ms |

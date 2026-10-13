@@ -4,3 +4,7 @@ slave-sim/generated/
 slprj/
 master-src/shell/SOS_Gen3_Master_Shell.slx
 *.autosave
+bench/modbus/ModbusBench.slx
+# Wireshark captures from bench runs
+bench/modbus/captures/
+octave-workspace

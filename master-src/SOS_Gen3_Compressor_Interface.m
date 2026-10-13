@@ -96,8 +96,10 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         cfg                 % masterConfig: geometry and limits
         commandSeq = 0      % mirrors the CommandSeq block; a change marks a new command
         lastStatusCode = 0
+        wasRunning = false      % the model was running at the last poll
         resetDialogOpen = false
         estopActive = false     % master reports STATUS_ESTOP
+        linkReady = false       % master reports the slave link up
 
         % Operation started from a mode button. It stays active until the
         % model reports it ended, so its button can stop it.
@@ -118,9 +120,12 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         OP_RESET    = 5
         OP_GO_HOME  = 6
 
-        STATUS_STARTING = 7
-        STATUS_STOPPING = 6
-        STATUS_ESTOP    = 20
+        STATUS_STARTING  = 7
+        STATUS_STOPPING  = 6
+        STATUS_FAULT     = 10     % FaultCode block holds the code
+        STATUS_ESTOP     = 20
+        STATUS_LINK_LOST = 34
+        STATUS_LINK_WAIT = 35
 
         % Time the model gets to act on a request before a status that
         % does not show it running ends it
@@ -134,7 +139,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         COLOR_ESTOP    = [1 0.85 0]
 
         faultNames = ["Handshake", "Drive", "Position limit", ...
-            "Reserved", "Piston exit guard", "Limit switch", "Encoder"]
+            "Master link lost", "Piston exit guard", "Limit switch", "Encoder"]
     end
 
     methods (Access = private)
@@ -146,8 +151,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         % Stop any operation, wait for the master to report the axis
         % stopped (up to its own stop timeout), then stop the model. The
-        % DAQ outputs fall to their final values, which drop SafetyEnable
-        % and MotionEnable.
+        % DAQ outputs fall to their final values (safety relay off) and the
+        % slave stops itself when the Modbus exchange stops.
         function disconnect(app)
             app.StatusLabel.Text = "Stopping...";
             drawnow;
@@ -163,6 +168,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                     pause(0.05);
                 end
                 stop(app.Simulation);
+                app.wasRunning = false;     % not an unexpected stop
                 app.StatusLabel.Text = "Disconnected";
             catch ME
                 app.StatusLabel.Text = append("Disconnect failed: ", ME.message);
@@ -284,10 +290,10 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 app.ConnectToCompressorButton.Text = "Connect to Compressor";
             end
 
-            % Mode buttons act only in manual control, connected and out of
-            % E-STOP.
+            % Mode buttons act only in manual control, connected with the
+            % slave link up and out of E-STOP.
             canMove = app.ManualControlButton.Value && connected && ...
-                ~app.ESTOP.Value && ~app.estopActive;
+                app.linkReady && ~app.ESTOP.Value && ~app.estopActive;
             buttons = {app.HomeButton, app.GoHomeButton, app.PositionGoButton, ...
                 app.PressureGoButton, app.JogUpButton, app.JogDownButton};
             for k = 1:numel(buttons)
@@ -355,14 +361,25 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         function updateFromModel(app)
             if ~isRunning(app)
+                if app.wasRunning
+                    % A lost Modbus connection stops the model with an error;
+                    % the DAQ outputs are at their final values (safety relay off).
+                    app.StatusLabel.Text = append("Model stopped (", ...
+                        string(app.Simulation.Status), "). Check the slave link, then Connect.");
+                    app.wasRunning = false;
+                end
                 app.estopActive = false;
+                app.linkReady = false;
                 clearOp(app);
                 updateButtons(app);
                 return
             end
+            app.wasRunning = true;
 
             statusCode = readBlock(app, "StatusCode");
             app.estopActive = statusCode == app.STATUS_ESTOP;
+            app.linkReady = statusCode ~= app.STATUS_LINK_LOST && ...
+                statusCode ~= app.STATUS_LINK_WAIT;
             trackOp(app, statusCode);
             updateButtons(app);
             position = readBlock(app, "Position");
@@ -373,7 +390,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.FlowValue.Text = sprintf("%.2f", ...
                 mLPerMm(app.cfg) * readBlock(app, "Velocity"));
 
-            faulted = statusCode > 10 && statusCode < 20;
+            faulted = statusCode == app.STATUS_FAULT;
             if faulted
                 app.FaultActiveLamp.Color = [1 0 0];
             else
@@ -390,8 +407,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             % Ask the operator before resetting a fault. The dialog opens
             % when a fault is first latched and again after a failed reset.
             if faulted && ~app.resetDialogOpen && ...
-                    ~(app.lastStatusCode > 10 && app.lastStatusCode < 20)
-                askFaultReset(app, statusCode - 10);
+                    app.lastStatusCode ~= app.STATUS_FAULT
+                askFaultReset(app, readBlock(app, "FaultCode"));
             end
             app.lastStatusCode = statusCode;
         end
@@ -400,7 +417,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         function askFaultReset(app, faultCode)
             app.resetDialogOpen = true;
             message = sprintf("Slave fault %d: %s.\n\nCorrect the cause, then reset.", ...
-                faultCode, app.faultNames(faultCode));
+                faultCode, faultName(app, faultCode));
             uiconfirm(app.UIFigure, message, "Fault", ...
                 "Options", ["Reset fault", "Leave faulted"], ...
                 "DefaultOption", 2, "CancelOption", 2, "Icon", "error", ...
@@ -426,21 +443,26 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 case 7,  text = "Starting";
                 case 8,  text = "Going home";
                 case 9,  text = "Resetting fault";
+                case app.STATUS_FAULT
+                    text = append("FAULT: ", faultName(app, readBlock(app, "FaultCode")));
                 case app.STATUS_ESTOP, text = "E-STOP";
                 case 30, text = "Slave did not confirm the mode";
                 case 32, text = "Fault reset failed";
                 case 33, text = "Slave did not report stopped";
+                case app.STATUS_LINK_LOST
+                    text = "Slave link lost: press Stop once it is back";
+                case app.STATUS_LINK_WAIT
+                    text = "Waiting for the slave link";
                 otherwise
-                    if statusCode >= 10 && statusCode < 20
-                        code = statusCode - 10;
-                        if code >= 1
-                            text = append("FAULT: ", app.faultNames(code));
-                        else
-                            text = "FAULT";
-                        end
-                    else
-                        text = append("Status ", num2str(statusCode));
-                    end
+                    text = append("Status ", num2str(statusCode));
+            end
+        end
+
+        function name = faultName(app, faultCode)
+            if faultCode >= 1 && faultCode <= numel(app.faultNames)
+                name = app.faultNames(faultCode);
+            else
+                name = sprintf("code %d", faultCode);
             end
         end
 
@@ -665,10 +687,12 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         % Value changed function: ESTOP
         function ESTOPPushed(app, event)
+            % Pressing STOP also sends a Stop command, which is what clears
+            % a lost slave link once the link is back.
             if isRunning(app)
                 setBlock(app, "ESTOP", app.ESTOP.Value);
                 if app.ESTOP.Value
-                    setBlock(app, "RequestedMode", app.OP_STOP);
+                    sendCommand(app, app.OP_STOP);
                 end
             end
             if app.ESTOP.Value

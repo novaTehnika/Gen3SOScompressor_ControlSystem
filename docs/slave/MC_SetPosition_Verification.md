@@ -41,7 +41,7 @@ G_staSetPosition.Done  -> back into FB_HomeLimit.StaSetPosition
 | After Mode 110 only              | At home switch | Master position = encoder position       |
 | After Mode 110 then Mode 111     | At home switch | Master position = encoder position + `G_posEOTOffset` |
 
-`G_posEOTOffset` is applied in `FB_PositionOutput` when generating the analog feedback (AO0) and when translating master position commands in position-control mode.
+Position feedback is published to the master in millimeters through the Modbus input registers (`PRG_Output`), and the position reference arrives the same way; no offset is applied on either path.
 
 ## Where the Logic Lives
 

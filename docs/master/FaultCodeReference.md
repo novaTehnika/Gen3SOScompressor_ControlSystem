@@ -7,12 +7,14 @@
 
 ## 1. Overview
 
-When `G_doFaultActive` (DO4) is HIGH, the slave is in fault state and DO0-DO2 contain the fault code instead of mode confirmation. The master must handle fault conditions by:
+When `G_mbFaultActive` (IR5, also DO4) is 1, the slave is in fault state. `G_mbFaultCode` (IR4) holds the full fault code and `G_mbConfCode` (IR3, DO0-DO2) its low three bits instead of the mode confirmation. The master must handle fault conditions by:
 
-1. Reading the fault code
-2. Mirroring the code on DI0-DI2
-3. Asserting `G_diFaultReset` with `G_diMotionEnable` LOW
+1. Reading the fault code from IR4
+2. Mirroring the full code in `G_mbModeCode` (HR2)
+3. Setting `G_mbFaultReset` with `G_mbMotionEnable` at 0
 4. Waiting for fault to clear
+
+Codes 0-7 fit the three discrete lines; higher codes are carried by the registers only.
 
 ---
 
@@ -24,7 +26,7 @@ When `G_doFaultActive` (DO4) is HIGH, the slave is in fault state and DO0-DO2 co
 | 001 | 1 | FAULT_HANDSHAKE | Medium | Yes |
 | 010 | 2 | FAULT_DRIVE | High | Sometimes |
 | 011 | 3 | FAULT_POSITION | Medium | Yes |
-| 100 | 4 | FAULT_RESERVED_100 | - | **Reserved (never raised)** |
+| 100 | 4 | FAULT_COMM | High | Yes, once the master link is back |
 | 101 | 5 | FAULT_PISTON_EXIT | High | Conditional |
 | 110 | 6 | FAULT_LIMIT_SWITCH | High | Manual jog-off via ST_RECOVERY (investigate cause) |
 | 111 | 7 | FAULT_ENCODER | High | **Reserved (not emitted by current firmware — encoder alarms surface as FAULT_DRIVE)** |
@@ -136,12 +138,21 @@ When `G_doFaultActive` (DO4) is HIGH, the slave is in fault state and DO0-DO2 co
 
 ---
 
-### FAULT_RESERVED_100 (100) — RESERVED
+### FAULT_COMM (100)
 
-**Status**: Reserved, never raised. The value is kept in `E_FaultCode` for
-wire-protocol stability. Operational modes are entered directly from boot:
-the absolute encoder and the controller's stored `MC_SetPosition` offset keep
-the coordinate frame across power cycles.
+**Description**: The master heartbeat register `G_mbHeartbeat` has not changed
+for `G_cfgCommTimeout` (150 ms). The master's commands can no longer be
+trusted, so the slave stops as for any fault.
+
+**Detection**: `FB_CommWatchdog`, fed into `FB_SafetyMonitor` at priority
+just below the drive fault. The watchdog arms on the first heartbeat change
+it sees, so a controller that powers up before the master connects does not
+fault, and it re-arms the same way after this fault is reset.
+
+**Recovery**: Restore the link. The master mirrors code 4 and resets as for
+any fault; the heartbeat is changing again by then, so the watchdog is
+clear. If the master itself lost the link it is latched in its own
+`LINK_LOST` state until the operator presses Stop, then the reset follows.
 
 ---
 
@@ -364,7 +375,7 @@ After reset, determine appropriate next action:
 001 (Handshake) -> Retry previous mode command
 010 (Drive)     -> May need power cycle; re-home (Mode 110) after an encoder alarm
 011 (Position)  -> If still out of limits, jog back in via ST_RECOVERY
-100 (Reserved)  -> Not raised
+100 (Comm)      -> Restore the link, press Stop on the master, reset
 101 (Piston)    -> Check pressure, move away from exit
 110 (Limit)     -> Investigate; if still on switch, jog off via ST_RECOVERY
 111 (Encoder)   -> Reserved; encoder alarms arrive as 010
@@ -418,7 +429,7 @@ After reset, determine appropriate next action:
 | 1 | 001 | Handshake | Retry mode |
 | 2 | 010 | Drive | Check drive |
 | 3 | 011 | Position | Jog back in (ST_RECOVERY) |
-| 4 | 100 | Reserved | - |
+| 4 | 100 | Comm | Restore the link, then reset |
 | 5 | 101 | Piston Exit | Check pressure |
 | 6 | 110 | Limit Switch | Investigate; jog off (ST_RECOVERY) |
 | 7 | 111 | Encoder | Reserved (see Drive) |

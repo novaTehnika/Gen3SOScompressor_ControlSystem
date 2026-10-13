@@ -43,7 +43,7 @@ The controller is planned to be programmed as a slave to a Simulink Desktop Real
 The servo controller slave shall implement basic modes of operation at the command of the master.
 The Simulink Desktop Real Time environment as the master enables faster iteration and a familiar interface for the engineering graduate student/researchers, while enabling a rough but workable interface for operators (via dashboard components or, at a later point an app via Simulink's App Designer).
 
-The master controller is interfacing with the system through a National Instruments (NI) PCI 6251 DAQ, accompanied by a NI SCB-68a breakout board.
+The master controller is interfacing with the system through a National Instruments (NI) PCI 6221 DAQ, accompanied by a NI SCB-68a breakout board.
 
 We have a MotionWorksIEC Express license for programming the servo controller and drive, which has a smaller feature set than MotionWorksIEC Pro but is adequate this application.
 
@@ -55,7 +55,7 @@ The MP2600iec has:
 
 The servo drive connects to the servo encoder directly without needing to use any of the eight digital inputs.
 
-Control of the brake is being handled by a separate E-stop circuit with input from the NI PIC 6251.
+Control of the brake is being handled by a separate E-stop circuit with input from the NI PCI 6221.
 That E-stop circuit controls the brake and the Safety Torque Off (STO) inputs to the drive's IGBT's.
 One of the slave's digital outputs will be wired to an additional relay that provides input to the brake's actuation without affecting the STO.
 (The brake is normally engaged and the circuit provides 24V power to disengage it allow servo motion.)
