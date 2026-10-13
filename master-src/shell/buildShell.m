@@ -27,6 +27,7 @@ function buildShell()
 MODBUS_SETUP.writeRegisterTable = '';   % get_param('.../Modbus Write', 'RegisterTable')
 MODBUS_SETUP.readRegisterTable  = '';   % get_param('.../Modbus Read',  'RegisterTable')
 MODBUS_SETUP.clientName         = 'ModbusClient';
+MODBUS_LIBRARY = '';                    % library path of the Modbus blocks, if the scan fails
 
 mdl = 'SOS_Gen3_Master_Shell';
 here = fileparts(mfilename('fullpath'));
@@ -51,7 +52,12 @@ set_param([mdl '/DO Safety'], 'InitialValue', '0', 'FinalValue', '0');
 set_param([mdl '/DO Mixer'],  'InitialValue', '0', 'FinalValue', '0');
 
 % --- Modbus Client blocks --------------------------------------------------
-lib = modbusLibrary();
+if isempty(MODBUS_LIBRARY)
+    lib = modbusLibrary();
+else
+    load_system(MODBUS_LIBRARY);
+    lib = MODBUS_LIBRARY;
+end
 add_block([lib '/Modbus Client Write'], [mdl '/Modbus Write']);
 add_block([lib '/Modbus Client Read'],  [mdl '/Modbus Read']);
 for name = {'Modbus Write', 'Modbus Read'}
@@ -175,7 +181,8 @@ for k = 1:numel(files)
         name = s.Browser(b).Library;
         try
             load_system(name);
-            hit = find_system(name, 'SearchDepth', 1, 'Name', 'Modbus Client Read');
+            hit = find_system(name, 'LookUnderMasks', 'none', 'FollowLinks', 'off', ...
+                'Name', 'Modbus Client Read');
         catch
             continue;
         end
@@ -186,9 +193,10 @@ for k = 1:numel(files)
         end
     end
 end
-error(['Modbus Client blocks not found. Drag one into a model from the Library ' ...
-       'Browser (Industrial Communication Toolbox > Modbus) and run ' ...
-       'get_param(gcb, ''ReferenceBlock'') to find the library path.']);
+error(['Modbus Client blocks not found. Drag one into a new model from the Library ' ...
+       'Browser (Industrial Communication Toolbox > Modbus), select it and run ' ...
+       'get_param(gcb, ''ReferenceBlock''); then set MODBUS_LIBRARY in buildShell.m ' ...
+       'to the part before ''/Modbus Client Read''.']);
 end
 
 
