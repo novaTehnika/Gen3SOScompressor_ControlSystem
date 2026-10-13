@@ -129,7 +129,7 @@ reads as a counter frozen at 0.
   controller's only analog input, `G_aiPressure`, reads the pressure
   transducer's loop shunt; `FB_PressureInput` scales it to MPa gauge for
   IR19-20 and for the slave's pressure loop (mode 7).
-- On the master, `masterStep` takes the 18-register read vector and returns
+- On the master, `masterStep` takes the 20-register read vector and returns
   the 6-register write vector; `modbusMap.m` holds the indices and
   `modbusPack.m` / `modbusUnpack.m` the REAL packing (low word first). The
   Simulink blocks handle plain `uint16`.

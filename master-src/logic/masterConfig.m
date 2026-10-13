@@ -5,25 +5,16 @@ cfg.dt             = 0.025;     % model step (s)
 cfg.exchangePeriod = 0.05;      % Modbus write + read period (s), a multiple of dt
 cfg.commTimeout    = 0.15;      % slave counter unchanged this long = link lost (s)
 
-% Pressure transducer: P = (V - offset) * gain.
-cfg.pressureOffsetV = 4;        % V
-cfg.pressureGain    = 2.3095;   % MPa per V
-cfg.atmPerMPa       = 9.869;
-
-% Input filtering.
-cfg.pressureMedianLength = 3;
-
-% Pressure loop: velocity command per unit pressure error.
-cfg.pressureKp = 0.02533;   % mm/s per atm (0.25 mm/s per MPa)
-cfg.pressureKi = 0;         % mm/s per atm*s
+% Pressure: the app works in atm gauge, the slave in MPa gauge.
+cfg.atmPerMPa   = 9.869;
+cfg.pressureMax = 15;       % MPa gauge, the slave's G_cfgPressureTargetMax
 
 % Master soft limits, inside the slave's configured travel.
 cfg.posMin = 5;             % mm
 cfg.posMax = 360;           % mm
 
-% Velocity command limits.
-cfg.jogVelMax      = 5;     % mm/s
-cfg.pressureVelMax = 5;     % mm/s
+% Velocity command limit.
+cfg.jogVelMax = 5;          % mm/s
 
 % Position arrival judged from feedback.
 cfg.posTolerance = 0.5;     % mm

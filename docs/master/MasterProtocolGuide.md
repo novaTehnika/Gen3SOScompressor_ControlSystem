@@ -416,7 +416,7 @@ not elapsed time.
 |----------|--------|-----------|
 | Modbus exchange (write + read) | 50 ms | The controller answers one request per 4 ms tick and a blocking exchange costs 10-25 ms on the PC |
 | State machine (model step) | 25 ms | A blocking exchange may stall the model by one tick without loss |
-| Safety relay, stir bar, pressure input (DAQ) | 25 ms | Model step |
+| Safety relay, stir bar (DAQ) | 25 ms | Model step |
 
 ---
 

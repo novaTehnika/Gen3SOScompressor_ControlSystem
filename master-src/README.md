@@ -2,8 +2,9 @@
 
 The master runs on the lab PC under Simulink Desktop Real-Time and talks to the
 MP2600iec slave over Modbus TCP (`docs/master/ModbusRegisterMap.md`), with the
-safety relay, the stir bar motor and the pressure transducer on the NI
-PCI-6221 DAQ.
+safety relay and the stir bar motor on the NI PCI-6221 DAQ. The pressure
+transducer is on the slave, which closes the pressure loop and reports the
+reading over the link.
 
 | Path | Contents |
 |------|----------|
@@ -27,7 +28,7 @@ SOS_Gen3_Compressor_Interface      % then press "Connect to Compressor"
 
 `buildShell` sets everything: the Modbus blocks' register rows (the Write
 block writes as many registers as its input is wide, so its row has no
-count; the Read row reads 18) and the Modbus client (`ModbusClient`, TCP/IP,
+count; the Read row reads 20) and the Modbus client (`ModbusClient`, TCP/IP,
 controller IP and port, 0.1 s timeout, byte order big-endian, word order
 little-endian) in Configuration Parameters > Modbus. The controller IP and
 the timeout are `MODBUS_SETUP` at the top of the script. After a build,
@@ -49,10 +50,13 @@ The app writes `RequestedMode` (0 stop, 1 home to the limit switch, 2 position,
 3 jog, 4 pressure, 5 reset fault, 6 go home) and then increments `CommandSeq`; the model acts on an operation
 only when `CommandSeq` changes, except that `RequestedMode = 0` always stops.
 `TargetPosition`, `TargetVelocity`, `JogDirection` and `TargetPressure` are read
-continuously while their operation is active. `ESTOP` and `Mixer` act at once.
+continuously while their operation is active. `TargetPressure` is in atm gauge;
+the model sends it to the slave in MPa, and the slave closes the loop on its
+own transducer. `ESTOP` and `Mixer` act at once.
 
 The app reads `StatusCode`, `FaultCode`, `State`, `Position`,
-`Velocity`, `Pressure` and `LinkOk`. Status codes are listed in
+`Velocity`, `Pressure` (the slave's transducer reading, atm gauge) and
+`LinkOk`. Status codes are listed in
 `masterStateMachine.m`; a fault shows as status 10 with the code in
 `FaultCode`, status 35 is shown until the slave's counter has first been
 seen, and a lost slave link as status 34 until the operator presses Stop.
