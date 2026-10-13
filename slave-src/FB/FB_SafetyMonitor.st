@@ -11,7 +11,7 @@
 
    Monitored Conditions:
    - Drive faults (from servo amplifier; encoder alarms surface here via the drive)
-   - Master link loss (heartbeat stale, from FB_CommWatchdog)
+   - Master link loss (heartbeat stale, from FB_CommWatchdog) while motion is commanded
    - Overtravel faults (unexpected switch triggers; positive switch never expected)
    - Position limit violations (beyond soft limits)
    - Piston exit guard faults (from FB_PistonExitGuard)
@@ -54,6 +54,7 @@
        bInHomingState      : BOOL
        bInFaultState       : BOOL
        bInRecoveryState    : BOOL             (* TRUE in ST_RECOVERY / ST_RECOVERY_POSITION / ST_RECOVERY_VELOCITY
+       bCommandedMotion    : BOOL             (* TRUE in the states that command motion (control, go home, homing, recovery moves)
    ============================================================================ *)
 
 (* ============================================================================
@@ -110,10 +111,26 @@ FaultDrive := DriveFault;
 
 (* --------------------------------------------------------------------------
    LINK LOSS MONITORING
-   The master heartbeat has stopped; its commands can no longer be trusted
+   The master heartbeat has stopped; its commands can no longer be trusted.
+   A fault only while motion is commanded: there the frozen registers would
+   keep the axis moving. In every other state nothing moves, the master
+   stopping is routine (the app closed, which also drops the safety relay
+   and the drive), and the hold inactivity watchdog returns the slave to
+   idle on its own.
    -------------------------------------------------------------------------- *)
 
-FaultComm := CommLost;
+bCommandedMotion := (CurrentState = E_SystemState#ST_POSITION_CTRL) OR
+                    (CurrentState = E_SystemState#ST_VELOCITY_CTRL) OR
+                    (CurrentState = E_SystemState#ST_TORQUE_CTRL) OR
+                    (CurrentState = E_SystemState#ST_GO_HOME) OR
+                    (CurrentState = E_SystemState#ST_HOME_LIMIT) OR
+                    (CurrentState = E_SystemState#ST_HOME_LIM_APPROACH) OR
+                    (CurrentState = E_SystemState#ST_HOME_LIM_DETECT) OR
+                    (CurrentState = E_SystemState#ST_HOME_LIM_BACKOFF) OR
+                    (CurrentState = E_SystemState#ST_HOME_LIM_SETREF) OR
+                    (CurrentState = E_SystemState#ST_RECOVERY_POSITION) OR
+                    (CurrentState = E_SystemState#ST_RECOVERY_VELOCITY);
+FaultComm := CommLost AND bCommandedMotion;
 
 (* --------------------------------------------------------------------------
    OVERTRAVEL FAULT MONITORING

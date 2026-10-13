@@ -3,7 +3,7 @@ function cfg = masterConfig()
 
 cfg.dt             = 0.025;     % model step (s)
 cfg.exchangePeriod = 0.05;      % Modbus write + read period (s), a multiple of dt
-cfg.commTimeout    = 0.15;      % slave counter unchanged this long = link lost (s)
+cfg.commTimeout    = 0.3;       % slave counter unchanged this long = link lost (s): several exchanges, to ride out a slow one
 
 % Pressure transducer: P = (V - offset) * gain.
 cfg.pressureOffsetV = 4;        % V
