@@ -376,6 +376,32 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             v = min(max(v, limits(1)), limits(2));
         end
 
+        % Operator entry ranges and gauge scales from masterConfig, so the
+        % app and the master logic share one set of limits.
+        function applyConfig(app)
+            here = fileparts(mfilename("fullpath"));
+            if exist("masterConfig", "file") ~= 2
+                addpath(fullfile(here, "logic"));
+            end
+            cfg = masterConfig();
+
+            setSpinnerRange(app, app.TargetPositionSpinner, [cfg.posMin cfg.posMax]);
+            app.PositionmmGauge.Limits = [min(0, cfg.posMin) cfg.posMax];
+            app.PositionmmGauge.MajorTicksMode = "auto";
+
+            setSpinnerRange(app, app.JogSpeedSpinner, ...
+                [app.JogSpeedSpinner.Step cfg.jogVelMax]);
+            app.VelocitymmsGauge.Limits = [0 max(cfg.jogVelMax, cfg.pressureVelMax)];
+        end
+
+        % A spinner rejects a value outside its limits and limits that
+        % exclude its value, so widen, move the value, then narrow.
+        function setSpinnerRange(app, spinner, limits)
+            spinner.Limits = [-Inf Inf];
+            spinner.Value = clampTo(app, spinner.Value, limits);
+            spinner.Limits = limits;
+        end
+
         function text = statusText(app, statusCode)
             switch statusCode
                 case 0,  text = "Idle";
@@ -441,6 +467,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % Code that executes after component creation
         function startupFcn(app)
             app.modelName = string(app.Simulation.ModelName);
+            applyConfig(app);
 
             app.updateTimer = timer( ...
                 ExecutionMode="fixedSpacing", ...
@@ -943,7 +970,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.TargetPositionSpinner = uispinner(app.ControlsPanel);
             app.TargetPositionSpinner.ValueChangedFcn = createCallbackFcn(app, @TargetSpinnerChanged, true);
             app.TargetPositionSpinner.Step = 5;
-            app.TargetPositionSpinner.Limits = [180 360];
+            app.TargetPositionSpinner.Limits = [180 360];   % replaced by applyConfig
             app.TargetPositionSpinner.RoundFractionalValues = 'on';
             app.TargetPositionSpinner.Enable = 'off';
             app.TargetPositionSpinner.Position = [539 40 100 22];
@@ -973,7 +1000,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             % Create JogSpeedSpinner
             app.JogSpeedSpinner = uispinner(app.ControlsPanel);
             app.JogSpeedSpinner.Step = 0.1;
-            app.JogSpeedSpinner.Limits = [0.1 5];
+            app.JogSpeedSpinner.Limits = [0.1 5];   % replaced by applyConfig
             app.JogSpeedSpinner.ValueDisplayFormat = '%.1f mm/s';
             app.JogSpeedSpinner.Tooltip = {'Jog speed'};
             app.JogSpeedSpinner.Enable = 'off';
@@ -1041,7 +1068,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
             % Create VelocitymmsGauge
             app.VelocitymmsGauge = uigauge(app.UIFigure, 'circular');
-            app.VelocitymmsGauge.Limits = [0 5];
+            app.VelocitymmsGauge.Limits = [0 5];   % replaced by applyConfig
             app.VelocitymmsGauge.Position = [36 153 120 120];
 
             % Create PositionmmGaugeLabel
@@ -1052,7 +1079,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
             % Create PositionmmGauge
             app.PositionmmGauge = uigauge(app.UIFigure, 'circular');
-            app.PositionmmGauge.Limits = [0 365];
+            app.PositionmmGauge.Limits = [0 365];   % replaced by applyConfig
             app.PositionmmGauge.MajorTicks = [0 80 160 240 320 365];
             app.PositionmmGauge.Position = [207 313 120 120];
 
