@@ -27,7 +27,7 @@ function buildShell()
 MODBUS_SETUP.writeRegisterTable = '';   % get_param('.../Modbus Write', 'RegisterTable')
 MODBUS_SETUP.readRegisterTable  = '';   % get_param('.../Modbus Read',  'RegisterTable')
 MODBUS_SETUP.clientName         = 'ModbusClient';
-MODBUS_LIBRARY = '';                    % library path of the Modbus blocks, if the scan fails
+MODBUS_LIBRARY = 'modbuslib';           % library of the Modbus Client blocks (R2025b)
 
 mdl = 'SOS_Gen3_Master_Shell';
 here = fileparts(mfilename('fullpath'));
