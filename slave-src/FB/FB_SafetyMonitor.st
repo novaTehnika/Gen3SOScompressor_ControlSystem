@@ -11,7 +11,7 @@
 
    Monitored Conditions:
    - Drive faults (from servo amplifier; encoder alarms surface here via the drive)
-   - Master link loss (heartbeat stale, from FB_CommWatchdog)
+   - Master link loss (heartbeat stale, from FB_CommWatchdog) outside the quiescent states
    - Overtravel faults (unexpected switch triggers; positive switch never expected)
    - Position limit violations (beyond soft limits)
    - Piston exit guard faults (from FB_PistonExitGuard)
@@ -54,6 +54,7 @@
        bInHomingState      : BOOL
        bInFaultState       : BOOL
        bInRecoveryState    : BOOL             (* TRUE in ST_RECOVERY / ST_RECOVERY_POSITION / ST_RECOVERY_VELOCITY
+       bQuiescentState     : BOOL             (* TRUE in ST_IDLE / ST_BRAKE_HOLD / ST_HOLD_POSITION
    ============================================================================ *)
 
 (* ============================================================================
@@ -110,10 +111,17 @@ FaultDrive := DriveFault;
 
 (* --------------------------------------------------------------------------
    LINK LOSS MONITORING
-   The master heartbeat has stopped; its commands can no longer be trusted
+   The master heartbeat has stopped; its commands can no longer be trusted.
+   Not a fault in the quiescent states (idle, brake hold, hold position):
+   nothing moves there, the master stopping is routine (the app closed), and
+   the hold inactivity watchdog already returns the slave to idle. Any other
+   state is moving, homing or in a start-up transition and must stop.
    -------------------------------------------------------------------------- *)
 
-FaultComm := CommLost;
+bQuiescentState := (CurrentState = E_SystemState#ST_IDLE) OR
+                   (CurrentState = E_SystemState#ST_BRAKE_HOLD) OR
+                   (CurrentState = E_SystemState#ST_HOLD_POSITION);
+FaultComm := CommLost AND NOT bQuiescentState;
 
 (* --------------------------------------------------------------------------
    OVERTRAVEL FAULT MONITORING

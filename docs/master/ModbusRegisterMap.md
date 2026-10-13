@@ -102,7 +102,7 @@ therefore supervise the link.
 
 | Side | Condition | Action |
 |------|-----------|--------|
-| Slave | `G_mbHeartbeat` unchanged for `G_cfgCommTimeout` (150 ms); armed by the first change seen | `FAULT_COMM` (code 4) through `FB_SafetyMonitor`, so the fault latches, mirrors and resets like any other |
+| Slave | `G_mbHeartbeat` unchanged for `G_cfgCommTimeout` (150 ms) while moving, homing or starting up; armed by the first change seen | `FAULT_COMM` (code 4) through `FB_SafetyMonitor`, so the fault latches, mirrors and resets like any other. In idle, brake hold and hold position a stopped master is not a fault |
 | Master | `G_mbSlaveCounter` not yet seen to advance | E-stop path and safety relay off, status `LINK_WAIT`; clears by itself once the counter moves |
 | Master | `G_mbSlaveCounter` unchanged for `cfg.commTimeout` (150 ms) after that | E-stop path: MotionEnable low, safety relay (P0.0) off, status `LINK_LOST`. Latched until the counter advances and the operator sends Stop |
 
