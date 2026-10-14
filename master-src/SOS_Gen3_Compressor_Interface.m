@@ -431,6 +431,39 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
         end
 
+        % Operator entry ranges from masterConfig, so the app and the
+        % master logic share one set of limits.
+        function applyConfig(app)
+            here = fileparts(mfilename("fullpath"));
+            if exist("masterConfig", "file") ~= 2
+                addpath(fullfile(here, "logic"));
+            end
+            app.cfg = masterConfig();
+
+            % Manual targets are distances from the end of travel, within
+            % the master's soft limits and not past the end of travel. The
+            % initial target is the retracted end, away from compression.
+            limits = [max(app.cfg.posEOT - app.cfg.posMax, 0), ...
+                app.cfg.posEOT - app.cfg.posMin];
+            setSpinnerRange(app, app.TargetPositionSpinner, limits);
+            app.TargetPositionSpinner.Value = limits(2);
+
+            % Preset jog speeds, starting at the fastest. The master clamps
+            % any preset above jogVelMax.
+            speeds = unique(app.cfg.jogSpeeds);
+            app.JogSpeedDropDown.Items = compose("%g mm/s", speeds);
+            app.JogSpeedDropDown.ItemsData = speeds;
+            app.JogSpeedDropDown.Value = speeds(end);
+        end
+
+        % A spinner rejects a value outside its limits and limits that
+        % exclude its value, so widen, move the value, then narrow.
+        function setSpinnerRange(~, spinner, limits)
+            spinner.Limits = [-Inf Inf];
+            spinner.Value = min(max(spinner.Value, limits(1)), limits(2));
+            spinner.Limits = limits;
+        end
+
         function text = statusText(app, statusCode)
             switch statusCode
                 case 0,  text = "Idle";
@@ -497,20 +530,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         function startupFcn(app)
             app.modelName = string(app.Simulation.ModelName);
 
-            % Manual targets are distances from the end of travel, within
-            % the master's soft limits and not past the end of travel. The
-            % initial target is the retracted end, away from compression.
-            app.cfg = masterConfig();
-            app.TargetPositionSpinner.Limits = ...
-                [max(app.cfg.posEOT - app.cfg.posMax, 0), app.cfg.posEOT - app.cfg.posMin];
-            app.TargetPositionSpinner.Value = app.TargetPositionSpinner.Limits(2);
-
-            % Preset jog speeds, starting at the fastest. The master clamps
-            % any preset above jogVelMax.
-            speeds = unique(app.cfg.jogSpeeds);
-            app.JogSpeedDropDown.Items = compose("%g mm/s", speeds);
-            app.JogSpeedDropDown.ItemsData = speeds;
-            app.JogSpeedDropDown.Value = speeds(end);
+            applyConfig(app);
 
             app.updateTimer = timer( ...
                 ExecutionMode="fixedSpacing", ...
