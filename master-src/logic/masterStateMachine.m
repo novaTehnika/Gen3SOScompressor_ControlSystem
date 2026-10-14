@@ -72,8 +72,9 @@ STATUS_STOP_TIMEOUT    = 33;
 
 if isempty(s) || in.reset ~= 0
     % t is the time in the current state, tDwell a per-state condition
-    % timer and note a status that stays on display while idle.
-    s = struct('state', ST_INIT, 't', 0, 'tDwell', 0, ...
+    % timer, moved whether InMotion has been seen in the current operation
+    % and note a status that stays on display while idle.
+    s = struct('state', ST_INIT, 't', 0, 'tDwell', 0, 'moved', 0, ...
         'activeOp', OP_STOP, 'pendingOp', OP_STOP, 'lastSeq', in.cmdSeq, ...
         'note', STATUS_IDLE, 'modeCode', 0, 'motionEnable', 0, ...
         'faultReset', 0, 'reference', 0, 'statusCode', STATUS_IDLE, ...
@@ -175,6 +176,7 @@ switch s.state
         s.motionEnable = 1;
         if s.t == 0
             s.tDwell = 0;
+            s.moved = 0;
         end
         done = false;
 
@@ -187,13 +189,18 @@ switch s.state
             s.reference = 0;
             s.statusCode = STATUS_GOING_HOME;
             % The slave has no arrival output for Go Home; the axis coming
-            % to rest ends it.
-            if in.inMotion == 0
-                s.tDwell = s.tDwell + dt;
-            else
+            % to rest after it has moved ends it. The slave may still be
+            % starting the move when this state is entered, so rest before
+            % any motion does not count. An axis already at home never
+            % moves, so the operation also ends after tGoHomeStartMax.
+            if in.inMotion ~= 0
+                s.moved = 1;
                 s.tDwell = 0;
+            elseif s.moved ~= 0
+                s.tDwell = s.tDwell + dt;
             end
-            done = s.tDwell >= cfg.tGoHomeDone;
+            done = (s.moved ~= 0 && s.tDwell >= cfg.tGoHomeDone) || ...
+                   (s.moved == 0 && s.t >= cfg.tGoHomeStartMax);
 
         elseif s.activeOp == OP_POSITION
             target = min(max(in.targetPosition, cfg.posMin), cfg.posMax);
