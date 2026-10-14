@@ -57,7 +57,7 @@ mode_command = DI2 * 4 + DI1 * 2 + DI0
 | LOW | Motion disabled | Halt motion, enter HOLD state |
 | HIGH | Motion enabled | Process mode command, enable motion |
 
-**Timing**: Rising edge initiates handshake. Falling edge triggers controlled stop.
+**Timing**: Rising edge initiates handshake. LOW in an operational or homing state triggers a controlled stop on the next scan, including when it went LOW while the slave was still starting the mode (drive reset, enable, brake release).
 
 #### DI4: Fault Reset
 

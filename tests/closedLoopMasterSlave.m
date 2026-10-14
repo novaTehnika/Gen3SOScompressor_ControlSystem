@@ -92,6 +92,24 @@ h.in.op = 0;
 h = runFor(h, 3);
 fprintf('ok  go home, then position move\n');
 
+% Stop while the slave is still starting the mode (drive reset, enable,
+% brake release): the slave must not run the mode with MotionEnable low,
+% and must take the next request.
+h = runUntil(h, 3, @(h) h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE);
+h = command(h, 1);
+h = runUntil(h, 3, @(h) h.sl.G.G_sysCurrentState == E.E_SystemState.ST_BRAKE_RELEASE);
+assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_BRAKE_RELEASE, 'slave did not start the mode');
+x0 = h.sl.ax.x;
+h.in.op = 0;
+h = runFor(h, 3);
+assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE, 'slave did not return to idle');
+assert(abs(h.sl.ax.x - x0) < 0.05, 'slave moved after Stop during start-up');
+h.in.targetPosition = x0 + 10;
+h = command(h, 2);
+h = runUntil(h, 20, @(h) h.out.statusCode == 3);
+assert(h.out.statusCode == 3, 'next mode after Stop during start-up was not accepted');
+fprintf('ok  stop during mode start-up\n');
+
 % Drive fault during a position move: latched, mirrored, no automatic reset.
 h.in.targetPosition = 60;
 h = command(h, 2);

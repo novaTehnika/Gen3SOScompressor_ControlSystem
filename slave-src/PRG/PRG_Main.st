@@ -68,7 +68,6 @@
        bHoldPositionTimerIN : BOOL
        (* Edge triggers
        rTrigMotionEnable   : R_TRIG
-       fTrigMotionEnable   : F_TRIG
        (* Local variables
        bFirstScan          : BOOL := TRUE
        bEnterState         : BOOL
@@ -147,7 +146,6 @@ nFilteredAnalog := fbFilterAnalog.FilteredOutput;
 G_sysRequestedMode := fbModeDecoder.DecodedMode;
 
 rTrigMotionEnable(CLK := bFilteredMotionEnable);
-fTrigMotionEnable(CLK := bFilteredMotionEnable);
 
 G_sysOvertravelNegActive := NOT bFilteredOvertravelNeg;
 G_sysOvertravelPosActive := NOT bFilteredOvertravelPos;
@@ -310,7 +308,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
             bPosStopping := FALSE;
         END_IF;
 
-        IF fTrigMotionEnable.Q THEN
+        IF NOT bFilteredMotionEnable THEN
             bPosStopping := TRUE;
         END_IF;
 
@@ -350,7 +348,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_VELOCITY_CTRL THEN
 
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
-        IF fTrigMotionEnable.Q THEN
+        IF NOT bFilteredMotionEnable THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
         END_IF;
 
@@ -370,7 +368,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_TORQUE_CTRL THEN
 
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
-        IF fTrigMotionEnable.Q THEN
+        IF NOT bFilteredMotionEnable THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
         END_IF;
 
@@ -387,7 +385,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_GO_HOME THEN
             G_sysActiveFault := E_FaultCode#FAULT_DRIVE;
             G_sysCurrentState := E_SystemState#ST_FAULT;
 
-        ELSIF fTrigMotionEnable.Q THEN
+        ELSIF NOT bFilteredMotionEnable THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
 
         ELSIF fbGoHome.Done THEN
@@ -412,7 +410,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_HOME_LIMIT THEN
             G_sysActiveFault := E_FaultCode#FAULT_LIMIT_SWITCH;
             G_sysCurrentState := E_SystemState#ST_FAULT;
 
-        ELSIF fTrigMotionEnable.Q THEN
+        ELSIF NOT bFilteredMotionEnable THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
         END_IF;
 
@@ -432,7 +430,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_HOME_COMPLETE THEN
 
         G_doInMotion := FALSE;
 
-        IF fTrigMotionEnable.Q THEN
+        IF NOT bFilteredMotionEnable THEN
             G_doHomingComplete := FALSE;
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
         END_IF;
@@ -644,7 +642,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
             bPosStopping := FALSE;
         END_IF;
 
-        IF fTrigMotionEnable.Q THEN
+        IF NOT bFilteredMotionEnable THEN
             bPosStopping := TRUE;
         END_IF;
 
@@ -705,7 +703,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_VELOCITY THEN
 
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
-        IF fTrigMotionEnable.Q THEN
+        IF NOT bFilteredMotionEnable THEN
             IF bLimitConditionActive THEN
                 G_sysCurrentState := E_SystemState#ST_RECOVERY;
             ELSE
@@ -987,7 +985,7 @@ fbGoHome(
     HomeVelocity := G_cfgGoHomeVelocity,
     Acceleration := G_cfgGoHomeAccel,
     Deceleration := G_cfgGoHomeDecel,
-    Abort := fTrigMotionEnable.Q,
+    Abort := NOT bFilteredMotionEnable,
     StaMoveAbsolute := G_staMoveAbsolute,
     StaStop := G_staStop
 );
@@ -1006,7 +1004,7 @@ fbHomeLimit(
     Timeout := G_cfgHomingTimeout,
     OvertravelNegActive := G_sysOvertravelNegActive,
     OvertravelPosActive := G_sysOvertravelPosActive,
-    Abort := fTrigMotionEnable.Q,
+    Abort := NOT bFilteredMotionEnable,
     ActualPosition := G_sysActualPosition,
     StaJog := G_staJog,
     StaMoveAbsolute := G_staMoveAbsolute,
