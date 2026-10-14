@@ -12,7 +12,7 @@ reading over the link.
 | `shell/buildShell.m` | Generates `shell/SOS_Gen3_Master_Shell.slx`: Modbus Client blocks at the 50 ms exchange, DAQ blocks, one MATLAB Function block calling `masterStep`, the Constant blocks the app writes and the Gain blocks it reads. The model holds no logic and is rebuilt from this script, not edited by hand. |
 | `shell/modbusShellDiscover.m` | Prints the Modbus block and client settings of a hand-configured shell so they can be pasted into `buildShell.m`. |
 | `shell/addDaq.m` | Creates one Simulink Desktop Real-Time DAQ block. Holds the board setup (PCI-6221, driver options, missed-tick limit) and the digital channel numbering. |
-| `SOS_Gen3_Compressor_Interface.m` | Operator app (programmatic App Designer export). Starts the shell model, writes operator requests to its Constant blocks and polls its outputs. |
+| `SOS_Gen3_Compressor_Interface.m` | Operator app (programmatic App Designer export). Starts the shell model, writes operator requests to its Constant blocks and polls its outputs. Takes its position target range, jog speed presets and cylinder geometry from `masterConfig.m` at startup. |
 | `legacy/`, `SOS_Gen3_Compressor_Master.slx` | Earlier Stateflow-based app model and its `.mlapp`, and the hand-built `SimulinkMaster.slx` bench model with manual mode control, kept for reference. |
 
 ## Running on the lab PC
@@ -50,16 +50,38 @@ The app writes `RequestedMode` (0 stop, 1 home to the limit switch, 2 position,
 3 jog, 4 pressure, 5 reset fault, 6 go home) and then increments `CommandSeq`; the model acts on an operation
 only when `CommandSeq` changes, except that `RequestedMode = 0` always stops.
 `TargetPosition`, `TargetVelocity`, `JogDirection` and `TargetPressure` are read
-continuously while their operation is active. `TargetPressure` is in atm gauge;
-the model sends it to the slave in MPa, and the slave closes the loop on its
+continuously while their operation is active. `TargetPressure` is in atm absolute;
+the model sends it to the slave in MPa gauge, and the slave closes the loop on its
 own transducer. `ESTOP` and `Mixer` act at once.
 
 The app reads `StatusCode`, `FaultCode`, `State`, `Position`,
-`Velocity`, `Pressure` (the slave's transducer reading, atm gauge) and
+`Velocity`, `Pressure` (the slave's gauge transducer reading plus `atmAmbient`, atm absolute) and
 `LinkOk`. Status codes are listed in
 `masterStateMachine.m`; a fault shows as status 10 with the code in
 `FaultCode`, status 35 is shown until the slave's counter has first been
 seen, and a lost slave link as status 34 until the operator presses Stop.
+
+## Connecting and closing
+
+"Connect to Compressor" starts the model; the same button then reads
+"Disconnect". Disconnecting, or closing the app while connected (after a
+confirmation), requests a stop, waits for the master to report the axis
+stopped (at most `tStopMax`) and then stops the model. The DAQ outputs fall to
+0, which drops the safety relay, and MotionEnable is already low, so the slave
+stays stopped once the Modbus exchange ends. Pressing STOP sends a Stop command as well as
+the E-stop, which also clears a lost-link status once the link is back. The
+mode buttons are enabled only in manual control, while connected with the
+slave link up and out of E-STOP.
+
+## Operator app readouts
+
+The app shows volume (mL), absolute pressure (atm), position (mm from the end
+of travel) and flow (mL/s, positive toward the end of travel). Position targets
+in manual control are also mm from the end of travel, and pressure targets are
+atm absolute. `masterConfig` holds the end of travel (`posEOT`), bore and dead
+volume, and the atmosphere added to the slave's gauge pressure (`atmAmbient`);
+`x2mL` and `mLPerMm` convert position and velocity. The transducer's 4-20 mA
+range and shunt resistance are slave settings (`G_cfgPressure*`).
 
 ## Operator app buttons
 
@@ -70,7 +92,8 @@ being entered and green once its running status appears, and returns to normal
 when that status goes (stopped, finished, faulted, E-STOP or not confirmed by
 the slave). While position or pressure control runs, changing the target turns
 its button back to Go, which sends the new target without leaving the mode; the
-other jog button reverses a running jog. STOP turns dark red while E-STOP is
+other jog button reverses a running jog. Jog speed is picked from `masterConfig`'s
+`jogSpeeds` (the fastest is the default), and a change applies to a running jog. STOP turns dark red while E-STOP is
 requested but not yet reported by the model, and yellow while the model reports
 E-STOP (`StatusCode` 20); pressing it then releases E-STOP.
 
