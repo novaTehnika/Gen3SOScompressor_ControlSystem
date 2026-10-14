@@ -70,7 +70,7 @@ Global variables defined in a `GVL` use a prefix to indicate their scope.
 | `sys` | System | `G_sysCurrentState` | A dynamic system status variable. |
 | `pos` | Position | `G_posEOTOffset` | A position-related value, often calculated during homing. |
 | `di` / `do` | I/O | `G_diModeBit0` | A digital input (`di`) or output (`do`). |
-| `ai` / `ao` | I/O | `G_aiReference` | An analog input (`ai`) or output (`ao`). |
+| `ai` / `ao` | I/O | `G_aiPressure` | An analog input (`ai`) or output (`ao`). |
 
 > All global variables are documented in `slave-src/GVL/GlobalVariables_Reference.st` and defined in the MWiec GUI.
 

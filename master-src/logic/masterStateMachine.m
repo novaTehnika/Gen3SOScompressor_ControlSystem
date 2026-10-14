@@ -18,14 +18,14 @@ function out = masterStateMachine(in, cfg, dt)
 %                       command. op = OP_STOP acts without a change.
 %     targetPosition    mm, read continuously during OP_POSITION
 %     jogVelocity       signed mm/s, read continuously during OP_JOG
-%     pressureVelocity  signed mm/s from the pressure controller, read
-%                       continuously during OP_PRESSURE
+%     targetPressure    MPa gauge, read continuously during OP_PRESSURE
 %
 %   out fields
 %     modeCode          mode command, or the mirrored fault code
 %     motionEnable      0/1
 %     faultReset        0/1
-%     reference         mm in position mode, mm/s in velocity modes
+%     reference         mm in position mode, mm/s in jog, MPa gauge in
+%                       pressure mode
 %     statusCode        STATUS_* below
 %     faultCode         last fault code read from the slave
 %     state             ST_* below
@@ -142,7 +142,7 @@ switch s.state
     case ST_REQUEST
         s.modeCode = slaveModeFor(s.activeOp);
         s.motionEnable = 0;
-        s.reference = entryReference(s.activeOp, in.position);
+        s.reference = entryReference(s.activeOp, in, cfg);
         s.statusCode = STATUS_STARTING;
         if s.t == 0
             s.tDwell = 0;
@@ -163,7 +163,7 @@ switch s.state
 
     case ST_ENABLE
         s.motionEnable = 1;
-        s.reference = entryReference(s.activeOp, in.position);
+        s.reference = entryReference(s.activeOp, in, cfg);
         s.statusCode = STATUS_STARTING;
         if in.op == OP_STOP
             next = ST_STOP;
@@ -221,10 +221,8 @@ switch s.state
             s.reference = v;
             s.statusCode = STATUS_JOG;
 
-        else    % OP_PRESSURE
-            v = limitVelocity(in.pressureVelocity, cfg.pressureVelMax, ...
-                              in.position, cfg);
-            s.reference = v;
+        else    % OP_PRESSURE: the slave closes the loop on its transducer
+            s.reference = pressureTarget(in.targetPressure, cfg);
             s.statusCode = STATUS_PRESSURE;
         end
 
@@ -238,7 +236,10 @@ switch s.state
 
     case ST_STOP
         s.motionEnable = 0;
-        if s.activeOp ~= OP_POSITION
+        % Velocity modes stop on a zero reference. Position and pressure
+        % keep theirs: the slave applies the reference at once but
+        % debounces the enable drop, so a zero target would be acted on.
+        if s.activeOp ~= OP_POSITION && s.activeOp ~= OP_PRESSURE
             s.reference = 0;
         end
         s.statusCode = STATUS_STOPPING;
@@ -361,20 +362,31 @@ elseif op == 6      % OP_GO_HOME: move to the home position
     mode = 5;
 elseif op == 2      % OP_POSITION
     mode = 2;
-else                % OP_JOG, OP_PRESSURE: Velocity
+elseif op == 4      % OP_PRESSURE: the slave's pressure loop
+    mode = 7;
+else                % OP_JOG: Velocity
     mode = 3;
 end
 end
 
 
-function r = entryReference(op, position)
+function r = entryReference(op, in, cfg)
 % Reference held while a mode is being entered. Position mode is entered
-% with the reference equal to the actual position; velocity modes with zero.
+% with the reference equal to the actual position, pressure mode with the
+% target, velocity modes with zero.
 if op == 2
-    r = position;
+    r = in.position;
+elseif op == 4
+    r = pressureTarget(in.targetPressure, cfg);
 else
     r = 0;
 end
+end
+
+
+function p = pressureTarget(p, cfg)
+% Clamp the target pressure to what the slave accepts.
+p = min(max(p, 0), cfg.pressureMax);
 end
 
 

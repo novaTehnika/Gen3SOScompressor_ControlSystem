@@ -36,3 +36,4 @@ G_mbActualPosition := LREAL_TO_REAL(G_sysActualPosition);
 G_mbActualVelocity := LREAL_TO_REAL(G_sysActualVelocity);
 G_mbActualTorque := LREAL_TO_REAL(G_sysActualTorque);
 G_mbCommandedPosition := LREAL_TO_REAL(G_sysCommandedPosition);
+G_mbActualPressure := LREAL_TO_REAL(G_sysActualPressure);

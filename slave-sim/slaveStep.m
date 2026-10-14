@@ -6,7 +6,8 @@ function [sl, y] = slaveStep(sl, u)
 %   y  the Modbus input registers in engineering units: heartbeatEcho,
 %      slaveCounter, confCode, faultCode, faultActive, inMotion,
 %      performanceStatus, homingComplete, actualPosition, actualVelocity,
-%      actualTorque, commandedPosition, plus brakeDisengage from DO7
+%      actualTorque, commandedPosition, actualPressure, plus brakeDisengage
+%      from DO7
 %
 %   Scan order: inputs -> PRG_Input -> PRG_Main -> PRG_Output -> axisModel.
 %   The axis model stands in for the LD POU that owns the motion function
@@ -24,7 +25,13 @@ sl.G.G_mbFaultReset   = u.faultReset;
 sl.G.G_mbReference    = u.reference;
 sl.IO.MO1_DI_06 = sl.ax.x > sl.sim.switchNegPos;
 sl.IO.MO1_DI_07 = sl.ax.x < sl.sim.switchPosPos;
-sl.IO.MO1_AI_01 = 0;
+if isnan(sl.hook.pressureVolt)
+    % Transducer: chamber pressure as loop current across the shunt.
+    mA = sl.sim.sensorZeroMa + sl.sim.sensorSpanMa * sl.ax.P / sl.sim.sensorRangeMPa;
+    sl.IO.MO1_AI_01 = mA * sl.sim.sensorShuntOhm / 1000;
+else
+    sl.IO.MO1_AI_01 = sl.hook.pressureVolt;
+end
 
 sl.G = PRG_Input(sl.G, sl.IO);
 [sl.s, sl.G] = PRG_Main(sl.s, sl.G, sl.E, dt);
@@ -45,5 +52,6 @@ y.actualPosition    = sl.G.G_mbActualPosition;
 y.actualVelocity    = sl.G.G_mbActualVelocity;
 y.actualTorque      = sl.G.G_mbActualTorque;
 y.commandedPosition = sl.G.G_mbCommandedPosition;
+y.actualPressure    = sl.G.G_mbActualPressure;
 y.brakeDisengage    = double(sl.IO.MO1_DO_07);
 end

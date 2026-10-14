@@ -142,7 +142,7 @@ switch is the expected homing target (negative overtravel inside
 ### 5.1 Analog Input
 | Pin | Address | Range | Type | Signal |
 |-----|---------|-------|------|--------|
-| AI0 | %IW0 | -10V to +10V | LREAL | G_aiReference (not used by the protocol; reserved for the pressure transducer) |
+| AI0 | %IW0 | -10V to +10V | LREAL | G_aiPressure: voltage across the pressure transducer's 4-20 mA loop shunt (`G_cfgPressureShuntOhms`), scaled to MPa gauge by `FB_PressureInput` |
 
 **Scaling**: MotionWorksIEC presents the analog input as an `LREAL` in volts directly (e.g. `-10.0` to `+10.0`). The application code reads and processes the signal as volts; no raw-to-voltage conversion is required in ST. The reference now arrives in engineering units through the Modbus holding registers (see `docs/master/ModbusRegisterMap.md`).
 

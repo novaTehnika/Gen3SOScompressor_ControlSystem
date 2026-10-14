@@ -49,19 +49,23 @@ assert(h.out.state == 1 && h.out.motionEnable == 0 && h.out.reference == 0);
 assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE && h.sl.ax.v == 0);
 fprintf('ok  position -> jog -> stop\n');
 
-% Jog -> pressure: same slave mode, so the master goes through idle.
+% Jog -> pressure: the slave closes the loop on its transducer. The axis
+% is placed near the chamber so the target is reached within the test.
 h.in.jogVelocity = 1;
 h = command(h, 3);
 h = runFor(h, 3);
-h.in.pressureVelocity = -1;
+h.sl.ax.x = h.sl.sim.chamberContactPos + 40;
+h.in.targetPressure = 2;
 h = command(h, 4);
 h = runUntil(h, 10, @(h) h.out.statusCode == 5);
-h = runFor(h, 2);
-assert(h.out.statusCode == 5 && h.sl.ax.v < -0.5);
+assert(h.out.statusCode == 5 && h.sl.G.G_sysCurrentState == E.E_SystemState.ST_PRESSURE_CTRL);
+h = runUntil(h, 30, @(h) h.y.performanceStatus == 1);
+assert(h.y.performanceStatus == 1 && abs(h.sl.ax.P - 2) <= 0.1, 'pressure %.3f MPa', h.sl.ax.P);
 h.in.op = 0;
 h = runFor(h, 3);
-assert(h.faultSeen == 0);
-fprintf('ok  jog -> pressure\n');
+assert(h.faultSeen == 0 && h.out.state == 1 && h.sl.ax.v == 0);
+fprintf('ok  jog -> pressure (%.2f MPa)\n', h.sl.ax.P);
+h.sl.ax.x = 80;                     % back out of the chamber for homing
 
 % Homing re-establishes the zero after the frame has been lost.
 h.sl.ax.offset = 12.3;
@@ -180,7 +184,7 @@ h.mcfg.posMax = h.sl.G.G_cfgPosSoftLimitMax - 5;
 h.in = struct('reset', 1, 'confCode', 0, 'faultActive', 0, 'inMotion', 0, ...
     'homingComplete', 0, 'brakeDisengage', 0, 'position', 0, 'estop', 0, ...
     'op', 0, 'cmdSeq', 0, 'targetPosition', 100, 'jogVelocity', 0, ...
-    'pressureVelocity', 0);
+    'targetPressure', 0);
 h.u = struct('heartbeat', 0, 'modeCode', 0, 'motionEnable', 0, ...
     'faultReset', 0, 'reference', 0);
 [h.sl, h.y] = slaveStep(h.sl, h.u);

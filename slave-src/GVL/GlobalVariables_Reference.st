@@ -82,8 +82,7 @@
         Range: -10V to +10V (LREAL, volts)
         ======================================================================== *)
 
-     G_aiReference         AT %IW0   : LREAL  (* Not used by the protocol; the *)
-                                             (* pressure channel takes this input *)
+     G_aiPressure          AT %IW0   : LREAL  (* Pressure transducer: voltage across the 4-20 mA loop shunt *)
 
 
      (* ========================================================================
@@ -118,6 +117,7 @@
      G_mbActualVelocity    AT %QD73816 : REAL  (* IR13-14: mm/s *)
      G_mbActualTorque      AT %QD73820 : REAL  (* IR15-16: % of rated *)
      G_mbCommandedPosition AT %QD73824 : REAL  (* IR17-18: mm *)
+     G_mbActualPressure    AT %QD73828 : REAL  (* IR19-20: MPa gauge *)
 
    END_VAR
 
@@ -203,6 +203,44 @@
      G_cfgTorqueLimitMax       : LREAL := 110.0       (* Maximum torque limit *)
      G_cfgTorqueLimitNormal    : LREAL := 100.0       (* Normal operating torque *)
      G_cfgTorqueStallThreshold : LREAL := 60.0        (* Torque threshold for piston exit guard *)
+
+
+     (* ========================================================================
+        PRESSURE TRANSDUCER AND PRESSURE MODE (mode 111)
+        The transducer is a 4-20 mA loop read as the voltage across a shunt on
+        the controller's analog input. FB_PressureInput scales it and checks
+        the live zero; FB_PressureController closes a PI loop that commands
+        piston velocity through Y_DirectControl in VelocityTLMode, clamped by
+        a stop law so the axis can stop within the pressure error at the
+        assumed chamber stiffness.
+        ======================================================================== *)
+
+     G_cfgPressureShuntOhms      : LREAL := 434.0      (* Shunt across the loop (ohm) *)
+     G_cfgPressureZeroMa         : LREAL := 4.0        (* Loop current at RangeMin (mA) *)
+     G_cfgPressureSpanMa         : LREAL := 16.0       (* Loop current span (mA) *)
+     G_cfgPressureRangeMin       : LREAL := 0.0        (* Pressure at ZeroMa (MPa gauge) *)
+     G_cfgPressureRangeMax       : LREAL := 16.0       (* Pressure at ZeroMa + SpanMa (MPa gauge) *)
+     G_cfgPressureSensorMinMa    : LREAL := 3.6        (* Loop current below this: open loop or unpowered transducer (mA) *)
+     G_cfgPressureSensorMaxMa    : LREAL := 20.5       (* Loop current above this: over range or shorted shunt (mA) *)
+     G_cfgPressureSensorFaultTime: TIME := T#100MS     (* Out-of-range current must persist this long before FAULT_PRESSURE_SENSOR *)
+     G_cfgPressureKp             : LREAL := 0.5        (* Velocity per pressure error (mm/s per MPa) *)
+     G_cfgPressureKi             : LREAL := 0.2        (* Velocity per integrated pressure error (mm/s per MPa*s) *)
+     G_cfgPressureVelMax         : LREAL := 5.0        (* Velocity clamp in pressure mode (mm/s) *)
+     G_cfgPressureAccel          : LREAL := 50.0       (* Y_DirectControl accel in pressure mode (mm/s^2) *)
+     G_cfgPressureDecel          : LREAL := 50.0       (* Y_DirectControl decel in pressure mode (mm/s^2). The chamber
+                                                          stiffens by orders of magnitude as the gas dissolves; the
+                                                          command must reverse within v^2/(2*decel) of travel *)
+     G_cfgPressureStopStiffness  : LREAL := 100.0      (* Chamber stiffness assumed by the stop law (MPa/mm): the
+                                                          velocity is clamped to sqrt(2*Decel*|error|/stiffness).
+                                                          Above the liquid-only chamber's ~20 MPa/mm because the
+                                                          filtered reading lags the chamber during the approach *)
+     G_cfgPressureStopVelMin     : LREAL := 0.5        (* The stop law never clamps below this (mm/s), so outflow
+                                                          can be balanced at zero error; overshoot from this
+                                                          velocity is at most stiffness*v^2/(2*decel) *)
+     G_cfgPressureTorqueLimit    : LREAL := 100.0      (* Torque limit in pressure mode (% of rated). Caps the piston
+                                                          force if the sensor reads low *)
+     G_cfgPressureTargetMax      : LREAL := 15.0       (* Highest target accepted from the master (MPa gauge) *)
+     G_cfgPressureInBand         : LREAL := 0.1        (* |actual - target| for the in-band status output (MPa) *)
 
 
      (* ========================================================================
@@ -358,6 +396,8 @@
      G_sysCommandedPosition    : LREAL := 0.0     (* Commanded position (mm) *)
      G_sysCommandedVelocity    : LREAL := 0.0     (* Commanded velocity (mm/s) *)
      G_sysCommandedTorque      : LREAL := 0.0     (* Commanded torque (%) *)
+
+     G_sysActualPressure       : LREAL := 0.0     (* Chamber pressure (MPa gauge) from fbPressureInput *)
 
 
      (* ========================================================================

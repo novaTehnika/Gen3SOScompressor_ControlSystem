@@ -27,7 +27,6 @@ h.u = struct('heartbeat', 0, 'modeCode', 0, 'motionEnable', 0, ...
     'faultReset', 0, 'reference', 0);
 [h.sl, h.y] = slaveStep(h.sl, h.u);
 h.mbRead = zeros(1, map.nRead);
-h.pressureVolt = 4;
 h.tick = 0;
 h.m = [];
 h.writeLost = false;    % master's registers do not reach the slave
@@ -77,18 +76,22 @@ h = runUntil(h, 15, @(h) h.m.state == 1);
 assert(h.m.state == 1 && h.tick / 1000 - t0 < cfg.tGoHomeStartMax + 3, 'Go Home from home did not end');
 fprintf('ok  go home with a slow drive start, and from home (%.1f s)\n', h.tick / 1000 - t0);
 
-% Pressure operation: below target the loop drives into the cylinder.
-h.app.targetPressure = 50;
-h.pressureVolt = 5;                 % about 23 atm
+% Pressure operation: the target goes to the slave in MPa as mode 7, the
+% slave's transducer reading comes back in IR19-20 and is shown in atm.
+% The axis is placed near the chamber once the slave has released it.
+h = command(h, 0);
+h = runUntil(h, 5, @(h) h.m.state == 1 && ...
+    h.sl.G.G_sysCurrentState == h.sl.E.E_SystemState.ST_IDLE);
+h.sl.ax.x = h.sl.sim.chamberContactPos + 40;
+h.app.targetPressure = 20;          % atm gauge
 h = command(h, 4);
 h = runUntil(h, 10, @(h) h.m.statusCode == 5);
-h = runUntil(h, 3, []);
-assert(h.m.statusCode == 5 && h.sl.ax.v > 0.5 && h.m.velocity > 0.5);
-assert(h.sl.ax.v <= cfg.pressureVelMax + 0.01);
-h.pressureVolt = 4 + 50 / (cfg.pressureGain * cfg.atmPerMPa);   % at target
-h = runUntil(h, 3, []);
-assert(abs(h.sl.ax.v) < 0.05);
-fprintf('ok  pressure operation\n');
+assert(h.m.statusCode == 5 && h.u.modeCode == 7);
+assert(abs(h.u.reference - 20 / cfg.atmPerMPa) < 1e-3);
+h = runUntil(h, 30, @(h) h.y.performanceStatus == 1);
+assert(h.y.performanceStatus == 1, 'pressure target not reached');
+assert(abs(h.m.pressure - h.sl.ax.P * cfg.atmPerMPa) < 0.5);
+fprintf('ok  pressure operation (%.1f atm shown)\n', h.m.pressure);
 
 % Drive fault: latched, the full code mirrored in the mode register, and
 % cleared by the operator reset.
@@ -101,6 +104,7 @@ h = command(h, 5);
 h = runUntil(h, 1.5, []);
 assert(h.y.faultActive == 0 && h.m.state == 1);
 fprintf('ok  fault, mirror and reset\n');
+h.sl.ax.x = 25;                     % back out of the chamber
 
 % Link loss seen by the slave while quiescent is not a fault: after the
 % reset it waits in brake hold, the master stopping is routine, and the
@@ -200,6 +204,7 @@ regs(map.ir.velocity:map.ir.velocity + 1)   = modbusPack(y.actualVelocity);
 regs(map.ir.torque:map.ir.torque + 1)       = modbusPack(y.actualTorque);
 regs(map.ir.commandedPosition:map.ir.commandedPosition + 1) = ...
     modbusPack(y.commandedPosition);
+regs(map.ir.pressure:map.ir.pressure + 1) = modbusPack(y.actualPressure);
 end
 
 
@@ -223,7 +228,7 @@ for n = 1:round(T * 1000)
         a = h.app;
         [m.mbWrite, m.doSafety, m.doMixer, m.position, m.velocity, m.pressure, ...
             m.statusCode, m.faultCode, m.state, m.linkOk] = masterStep(h.mbRead, ...
-            h.pressureVolt, a.op, a.cmdSeq, a.targetPosition, ...
+            a.op, a.cmdSeq, a.targetPosition, ...
             a.targetVelocity, a.jogDirection, a.targetPressure, a.estop, a.mixer);
         h.m = m;
     end
