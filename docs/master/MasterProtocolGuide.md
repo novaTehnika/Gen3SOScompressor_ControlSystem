@@ -97,7 +97,7 @@ outputs to their final values (safety relay off).
 | 100 | 4 | Torque Control | Analog input = torque command |
 | 101 | 5 | Go Home | Move to home position (G_cfgGoHomePosition) |
 | 110 | 6 | Home to Limit | Homing via limit switch; re-establishes the zero |
-| 111 | 7 | Reserved | Not implemented - confirmed but ignored; do not command |
+| 111 | 7 | Pressure Control | Reference = target pressure (MPa gauge); the slave closes the loop on its transducer and commands velocity |
 
 ---
 
@@ -222,6 +222,7 @@ carried by the register only:
 | 101 | Piston Exit | Safety guard triggered | Reduce force, check pressure |
 | 110 | Limit Switch | Unexpected limit activation | Check mechanics; if still on switch, jog off via ST_RECOVERY |
 | 111 | Encoder | Reserved - encoder alarms arrive as Drive (010) | Re-home (Mode 110) after an encoder alarm |
+| (8) | Pressure Sensor | Transducer loop current out of range during pressure control | Check the transducer loop; reset once IR19-20 reads a plausible pressure |
 
 ### Fault Reset Handshake
 
@@ -310,16 +311,32 @@ FAULT_PERSISTENT:
 | Position | mm | Soft limits, position gate (velocity and acceleration) |
 | Velocity | mm/s | `G_cfgVelLimitNormal` (5 mm/s) |
 | Torque | % of rated | `G_cfgTorqueLimitNormal` |
+| Pressure | MPa gauge | `0` to `G_cfgPressureTargetMax` (15 MPa); velocity within `G_cfgPressureVelMax` (5 mm/s) and the stop law; torque within `G_cfgPressureTorqueLimit` |
 
 The reference is read by the slave at most every 50 ms plus one 4 ms
 service tick. The master sends the next value with the same write that
 carries the mode code and MotionEnable.
 
-### Feedback (Slave to Master): IR11-18
+### Feedback (Slave to Master): IR11-20
 
 `G_mbActualPosition` (mm), `G_mbActualVelocity` (mm/s), `G_mbActualTorque`
-(%) and `G_mbCommandedPosition` (mm), as REAL values from the `G_sys*`
-globals, published once per scan and read every 50 ms.
+(%), `G_mbCommandedPosition` (mm) and `G_mbActualPressure` (MPa gauge), as
+REAL values from the `G_sys*` globals, published once per scan and read
+every 50 ms. The pressure is valid in every mode.
+
+### Pressure Mode: Reference and Status
+
+The slave scales the transducer on its analog input (`FB_PressureInput`)
+and closes a PI loop (`FB_PressureController`) that commands piston
+velocity through `Y_DirectControl` in VelocityTLMode, so the master only
+sends the target. `G_mbPerformanceStatus` (IR7) is 1 while the measured
+pressure is within `G_cfgPressureInBand` (0.1 MPa) of the target. The
+target may change at any time while the mode is active; it is clamped to
+`G_cfgPressureTargetMax`. Dropping MotionEnable halts the axis as in
+velocity mode. A transducer loop current out of range for
+`G_cfgPressureSensorFaultTime` raises `FAULT_PRESSURE_SENSOR` (8) in this
+mode only; the master should check IR19-20 for a plausible pressure before
+requesting the mode.
 
 ### Position Mode: Entry Requirement and Command Shaping
 
@@ -399,7 +416,7 @@ not elapsed time.
 |----------|--------|-----------|
 | Modbus exchange (write + read) | 50 ms | The controller answers one request per 4 ms tick and a blocking exchange costs 10-25 ms on the PC |
 | State machine (model step) | 25 ms | A blocking exchange may stall the model by one tick without loss |
-| Safety relay, stir bar, pressure input (DAQ) | 25 ms | Model step |
+| Safety relay, stir bar (DAQ) | 25 ms | Model step |
 
 ---
 
@@ -557,7 +574,7 @@ still active. See the [Fault Code Reference](FaultCodeReference.md#limit-recover
 | Torque | 100 | 4 |
 | Go Home | 101 | 5 |
 | Home Limit | 110 | 6 |
-| Reserved | 111 | 7 |
+| Pressure | 111 | 7 |
 
 ### Fault Codes
 | Fault | Binary | Decimal |
@@ -570,6 +587,7 @@ still active. See the [Fault Code Reference](FaultCodeReference.md#limit-recover
 | Piston Exit | 101 | 5 |
 | Limit Switch | 110 | 6 |
 | Encoder | 111 | 7 |
+| Pressure Sensor | - | 8 |
 
 ### Critical Timings
 | Parameter | Value |

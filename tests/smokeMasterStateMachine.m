@@ -14,7 +14,7 @@ h.y = slaveOutputs(h.sl);
 h.in = struct('reset', 1, 'confCode', 0, 'faultActive', 0, 'inMotion', 0, ...
     'homingComplete', 0, 'brakeDisengage', 0, 'position', 0, 'estop', 0, ...
     'op', 0, 'cmdSeq', 0, 'targetPosition', 300, 'jogVelocity', 0, ...
-    'pressureVelocity', 0);
+    'targetPressure', 0);
 h.out = [];
 
 h = runFor(h, 0.5);
@@ -57,14 +57,17 @@ h = runFor(h, 1);
 assert(h.out.state == 1 && h.out.motionEnable == 0 && h.out.reference == 0);
 fprintf('ok  position -> jog -> stop\n');
 
-% Jog -> pressure share slave mode 3, so the change goes through idle.
+% Jog -> pressure: different slave modes, so the master holds the mode
+% through the stop and requests the next one from hold. The target goes
+% to the slave as the reference.
 h.in.jogVelocity = 1;
 h = command(h, 3);
 h = runFor(h, 1);
-h.in.pressureVelocity = -1;
+h.in.targetPressure = 2;
 h = command(h, 4);
 h = runFor(h, 2);
-assert(h.out.statusCode == 5 && h.sl.state == 3 && h.sl.mode == 3);
+assert(h.out.statusCode == 5 && h.sl.state == 3 && h.sl.mode == 7);
+assert(h.out.reference == 2);
 h.in.op = 0;
 h = runFor(h, 1);
 fprintf('ok  jog -> pressure\n');

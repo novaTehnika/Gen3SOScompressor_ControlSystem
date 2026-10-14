@@ -7,6 +7,8 @@
    Description:
    Converts an E_FaultCode enumeration value to 3 digital output bits.
    Uses FB_FaultToInt to get the integer value, then extracts individual bits.
+   Codes above 7 show only their low three bits here; the Modbus fault
+   register carries the full value.
 
    Variables (define in MWiec GUI):
      VAR_INPUT:

@@ -36,6 +36,8 @@ ELSIF Value = UINT#6 THEN
     Fault := E_FaultCode#FAULT_LIMIT_SWITCH;
 ELSIF Value = UINT#7 THEN
     Fault := E_FaultCode#FAULT_ENCODER;
+ELSIF Value = UINT#8 THEN
+    Fault := E_FaultCode#FAULT_PRESSURE_SENSOR;
 ELSE
     Fault := E_FaultCode#FAULT_NONE;
 END_IF;

@@ -26,7 +26,7 @@ Safety and plant I/O do not depend on the network:
 | P0.0 safety relay / STO enable | Safety function |
 | Brake circuit (`G_doBrakeDisengage`) | Driven directly by the slave |
 | Overtravel switches | Slave inputs |
-| AI2 pressure transducer | Read by the master; the pressure PI loop is closed on the master |
+| Pressure transducer | On the slave's analog input; the slave closes the pressure loop and reports the reading in IR19-20 |
 | P0.4 stir bar motor | Not part of the slave protocol |
 
 ---

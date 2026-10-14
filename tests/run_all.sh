@@ -11,4 +11,5 @@ octave-cli --quiet --eval "
   smokeMasterStateMachine;
   closedLoopMasterSlave;
   closedLoopModbusStep;
+  slavePressureMode;
 "
