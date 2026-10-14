@@ -1,27 +1,26 @@
 function [mbWrite, doSafety, doMixer, position, velocity, pressure, ...
           statusCode, faultCode, state, linkOk] = masterStep( ...
-          mbRead, pressureVolt, op, cmdSeq, targetPosition, ...
+          mbRead, op, cmdSeq, targetPosition, ...
           targetVelocity, jogDirection, targetPressure, estop, mixer)
 %MASTERSTEP Entry point for the Simulink shell's MATLAB Function block:
-%   Modbus registers, DAQ pressure and app requests in; Modbus registers,
-%   DAQ lines and displayed values out. Called once per model step (cfg.dt).
-%   The Modbus blocks run every cfg.exchangePeriod and hold their values in
-%   between.
+%   Modbus registers and app requests in; Modbus registers, DAQ lines and
+%   displayed values out. Called once per model step (cfg.dt). The Modbus
+%   blocks run every cfg.exchangePeriod and hold their values in between.
 %
-%   mbRead        input registers IR1..IR18 as read by the Modbus Client
+%   mbRead        input registers IR1..IR20 as read by the Modbus Client
 %                 Read block (modbusMap, raw 16-bit values as doubles)
-%   pressureVolt  AI 2, pressure transducer (V)
 %   op, cmdSeq, targetPosition, targetVelocity, jogDirection,
 %   targetPressure, estop, mixer
-%                 values of the Constant blocks the app writes
+%                 values of the Constant blocks the app writes;
+%                 targetPressure in atm absolute, as the app shows pressure
 %
 %   mbWrite       holding registers HR1..HR6 for the Modbus Client Write
 %                 block (heartbeat, mode code, MotionEnable, FaultReset,
 %                 reference as two registers)
 %   doSafety      safety relay / STO enable (P0.0): 0 on E-stop or link loss
 %   doMixer       stir bar motor (P0.4)
-%   position (mm), velocity (mm/s), pressure (atm), statusCode, faultCode,
-%   state, linkOk  for the app
+%   position (mm), velocity (mm/s), pressure (atm absolute: the slave's
+%   gauge reading plus cfg.atmAmbient), statusCode, faultCode, state, linkOk  for the app
 %
 %   Link supervision: until the slave scan counter has been seen to advance
 %   the link is not up (STATUS_LINK_WAIT, safety relay off, E-stop path).
@@ -30,8 +29,7 @@ function [mbWrite, doSafety, doMixer, position, velocity, pressure, ...
 %   statusCode shows STATUS_LINK_LOST. That stays latched until the counter
 %   advances again and the operator sends Stop.
 
-persistent presBuf k heartbeat lastCounter tStale linkUp linkLost lastSeq ...
-           integ pressureActive started
+persistent heartbeat lastCounter tStale linkUp linkLost lastSeq started
 
 STATUS_LINK_LOST = 34;
 STATUS_LINK_WAIT = 35;
@@ -43,16 +41,12 @@ r = double(mbRead(:)');
 
 if isempty(started)
     started = true;
-    presBuf = pressureVolt * ones(1, cfg.pressureMedianLength);
-    k = 0;
     heartbeat = 0;
     lastCounter = r(map.ir.slaveCounter);
     tStale = 0;
     linkUp = false;
     linkLost = false;
     lastSeq = cmdSeq;
-    integ = 0;
-    pressureActive = false;
 end
 
 % Link watchdog on the slave scan counter.
@@ -73,15 +67,12 @@ if linkLost && tStale < cfg.commTimeout && newCmd && op == OP_STOP
     linkLost = false;
 end
 
-% Median filter on the pressure input.
-k = k + 1;
-presBuf(mod(k, cfg.pressureMedianLength) + 1) = pressureVolt;
-pressure = V2P(medianOf(presBuf), cfg);
-
 % Slave status from the input registers.
 faultActive = r(map.ir.faultActive) ~= 0;
 position = modbusUnpack(r(map.ir.position), r(map.ir.position + 1));
 velocity = modbusUnpack(r(map.ir.velocity), r(map.ir.velocity + 1));
+pressure = modbusUnpack(r(map.ir.pressure), r(map.ir.pressure + 1)) * cfg.atmPerMPa ...
+    + cfg.atmAmbient;
 
 in.reset            = 0;
 if faultActive
@@ -99,15 +90,9 @@ in.op               = op;
 in.cmdSeq           = cmdSeq;
 in.targetPosition   = targetPosition;
 in.jogVelocity      = abs(targetVelocity) * sign(jogDirection);
-in.pressureVelocity = 0;
-
-% The pressure loop runs only while the pressure operation is active, as
-% reported by the state machine on the previous step.
-[in.pressureVelocity, integ] = pressureController(targetPressure, pressure, ...
-    integ, pressureActive, cfg, cfg.dt);
+in.targetPressure   = (targetPressure - cfg.atmAmbient) / cfg.atmPerMPa;
 
 out = masterStateMachine(in, cfg, cfg.dt);
-pressureActive = out.statusCode == 5;
 
 % Holding registers for the next exchange.
 heartbeat = mod(heartbeat + 1, 65536);

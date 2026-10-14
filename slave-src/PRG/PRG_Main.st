@@ -22,7 +22,8 @@
    - Idle: ST_IDLE (first scan goes directly here)
    - Transition (Activation): ST_DRIVE_RESET, ST_DRIVE_ENABLE, ST_BRAKE_RELEASE
    - Operational: ST_BRAKE_HOLD, ST_POSITION_CTRL, ST_VELOCITY_CTRL,
-                  ST_TORQUE_CTRL, ST_GO_HOME, ST_HOME_LIMIT, ST_HOME_COMPLETE
+                  ST_TORQUE_CTRL, ST_PRESSURE_CTRL, ST_GO_HOME, ST_HOME_LIMIT,
+                  ST_HOME_COMPLETE
    - Transition (Inter-Mode): ST_HOLD_POSITION
    - Transition (Deactivation): ST_BRAKE_ENGAGE, ST_DRIVE_DISABLE
    - Fault: ST_FAULT, ST_FAULT_IDLE
@@ -39,7 +40,9 @@
        fbFilterOvertravelNeg : FB_DigitalInputFilter
        fbFilterOvertravelPos : FB_DigitalInputFilter
        fbFilterFaultReset  : FB_DigitalInputFilter
-       fbFilterAnalog      : FB_AnalogInputFilter
+       fbFilterPressure    : FB_AnalogInputFilter
+       fbPressureInput     : FB_PressureInput
+       fbPressureCtrl      : FB_PressureController
        fbModeDecoder       : FB_ModeDecoder
        fbHandshake         : FB_HandshakeManager
        fbFaultReset        : FB_FaultResetHandler
@@ -82,7 +85,7 @@
        bFilteredOvertravelNeg : BOOL
        bFilteredOvertravelPos : BOOL
        bFilteredFaultReset : BOOL
-       nFilteredAnalog     : LREAL
+       rFilteredPressureVolts : LREAL
        rAnalogFilterAlpha  : LREAL := 0.0
        bFaultResetInFaultState : BOOL
        eFaultResetActiveCode   : E_FaultCode
@@ -95,6 +98,9 @@
        rPosTarget          : LREAL            (* Soft-limit-clamped position target from the master, input to fbPosGate
        bPosGateActive      : BOOL             (* Set by a position state body this scan; gates fbPosGate.Enable
        bPosStopping        : BOOL             (* Motion enable dropped; braking under the gate before ST_HOLD_POSITION
+       (* Pressure loop (ST_PRESSURE_CTRL)
+       rPressureTarget     : LREAL            (* Clamped target from the master, input to fbPressureCtrl
+       bPressureCtrlActive : BOOL             (* Set by the pressure state body this scan; gates fbPressureCtrl.Enable
        (* Y_DirectControl hand-off to MC_Stop (see Command Arbitration)
        bKeepDirectControl  : BOOL             (* Keep Y_DirectControl enabled (zero command) until MC_Stop aborts it
        eKeepDirectMode     : Y_ControlMode    (* ControlMode of the direct-control session being stopped
@@ -142,7 +148,8 @@ bFilteredMotionEnable := fbFilterMotionEnable.FilteredOutput;
 bFilteredOvertravelNeg := fbFilterOvertravelNeg.FilteredOutput;
 bFilteredOvertravelPos := fbFilterOvertravelPos.FilteredOutput;
 bFilteredFaultReset := fbFilterFaultReset.FilteredOutput;
-nFilteredAnalog := fbFilterAnalog.FilteredOutput;
+rFilteredPressureVolts := fbFilterPressure.FilteredOutput;
+G_sysActualPressure := fbPressureInput.PressureMPa;
 
 G_sysRequestedMode := fbModeDecoder.DecodedMode;
 
@@ -176,6 +183,11 @@ bLimitConditionActive := bBlockNeg OR bBlockPos;
    body has not yet run, so the gate stays disabled and commands actual
    position for that scan rather than a stale target. *)
 bPosGateActive := FALSE;
+
+(* Likewise for the pressure loop. The in-band status output is only
+   meaningful in pressure mode and is recomputed there. *)
+bPressureCtrlActive := FALSE;
+G_doPerformanceStatus := FALSE;
 
 bEnterState := (G_sysCurrentState <> G_sysPreviousState);
 IF bEnterState THEN
@@ -260,6 +272,8 @@ ELSIF G_sysCurrentState = E_SystemState#ST_BRAKE_RELEASE THEN
                 G_sysCurrentState := E_SystemState#ST_VELOCITY_CTRL;
             ELSIF eTargetMode = E_OperatingMode#MODE_TORQUE THEN
                 G_sysCurrentState := E_SystemState#ST_TORQUE_CTRL;
+            ELSIF eTargetMode = E_OperatingMode#MODE_PRESSURE THEN
+                G_sysCurrentState := E_SystemState#ST_PRESSURE_CTRL;
             ELSIF eTargetMode = E_OperatingMode#MODE_GO_HOME THEN
                 G_sysCurrentState := E_SystemState#ST_GO_HOME;
             ELSIF eTargetMode = E_OperatingMode#MODE_HOME_LIMIT THEN
@@ -293,6 +307,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_BRAKE_HOLD THEN
                 ;
 
             ELSIF eTargetMode = E_OperatingMode#MODE_POSITION OR eTargetMode = E_OperatingMode#MODE_VELOCITY OR eTargetMode = E_OperatingMode#MODE_TORQUE OR
+                  eTargetMode = E_OperatingMode#MODE_PRESSURE OR
                   eTargetMode = E_OperatingMode#MODE_GO_HOME OR eTargetMode = E_OperatingMode#MODE_HOME_LIMIT THEN
                 G_sysCurrentState := E_SystemState#ST_BRAKE_RELEASE;
             END_IF;
@@ -369,6 +384,44 @@ ELSIF G_sysCurrentState = E_SystemState#ST_TORQUE_CTRL THEN
                                     stCurrentLimits.TorqueMax);
 
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
+
+        IF fTrigMotionEnable.Q THEN
+            G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
+        END_IF;
+
+
+ELSIF G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL THEN
+        (* ----------------------------------------------------------------
+           PRESSURE CONTROL - like ST_VELOCITY_CTRL, but the velocity
+           command comes from the pressure loop (fbPressureCtrl) and the
+           reference is the target pressure in MPa gauge. The pressure-mode
+           velocity clamp and torque limit apply; a command toward an active
+           limit is zeroed, as in recovery.
+           ---------------------------------------------------------------- *)
+        IF bEnterState THEN
+            G_sysConfirmedMode := E_OperatingMode#MODE_PRESSURE;
+            stCurrentLimits.VelMax := G_cfgPressureVelMax;
+            stCurrentLimits.TorqueMax := G_cfgPressureTorqueLimit;
+        END_IF;
+
+        rPressureTarget := LIMIT(LREAL#0.0, G_sysReference, G_cfgPressureTargetMax);
+        bPressureCtrlActive := TRUE;
+
+        (* fbPressureCtrl ran at the end of the previous scan. On the entry
+           scan it was disabled, so the command starts from zero. *)
+        G_sysCommandedVelocity := LIMIT(-stCurrentLimits.VelMax,
+                                      fbPressureCtrl.Velocity,
+                                      stCurrentLimits.VelMax);
+
+        IF bBlockNeg AND (G_sysCommandedVelocity < LREAL#0.0) THEN
+            G_sysCommandedVelocity := LREAL#0.0;
+        END_IF;
+        IF bBlockPos AND (G_sysCommandedVelocity > LREAL#0.0) THEN
+            G_sysCommandedVelocity := LREAL#0.0;
+        END_IF;
+
+        G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
+        G_doPerformanceStatus := ABS(G_sysActualPressure - rPressureTarget) <= G_cfgPressureInBand;
 
         IF fTrigMotionEnable.Q THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
@@ -475,6 +528,8 @@ ELSIF G_sysCurrentState = E_SystemState#ST_HOLD_POSITION THEN
                 G_sysCurrentState := E_SystemState#ST_VELOCITY_CTRL;
             ELSIF eTargetMode = E_OperatingMode#MODE_TORQUE THEN
                 G_sysCurrentState := E_SystemState#ST_TORQUE_CTRL;
+            ELSIF eTargetMode = E_OperatingMode#MODE_PRESSURE THEN
+                G_sysCurrentState := E_SystemState#ST_PRESSURE_CTRL;
             ELSIF eTargetMode = E_OperatingMode#MODE_GO_HOME THEN
                 G_sysCurrentState := E_SystemState#ST_GO_HOME;
             ELSIF eTargetMode = E_OperatingMode#MODE_HOME_LIMIT THEN
@@ -794,6 +849,7 @@ IF (G_sysCurrentState = E_SystemState#ST_DRIVE_ENABLE) OR
    (G_sysCurrentState = E_SystemState#ST_POSITION_CTRL) OR
    (G_sysCurrentState = E_SystemState#ST_VELOCITY_CTRL) OR
    (G_sysCurrentState = E_SystemState#ST_TORQUE_CTRL) OR
+   (G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL) OR
    (G_sysCurrentState = E_SystemState#ST_GO_HOME) OR
    (G_sysCurrentState = E_SystemState#ST_HOME_LIMIT) OR
    (G_sysCurrentState = E_SystemState#ST_HOME_COMPLETE) OR
@@ -850,6 +906,20 @@ ELSIF G_sysCurrentState = E_SystemState#ST_TORQUE_CTRL THEN
     G_cmdDirectControl.Torque := G_sysCommandedTorque;
     bKeepDirectControl := TRUE;
     eKeepDirectMode := Y_ControlMode#TorqueVLMode;
+
+ELSIF G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL THEN
+    (* Velocity control under the pressure loop, with its own slew limits:
+       the chamber stiffens by orders of magnitude as the gas dissolves, so
+       the command must be able to reverse within a fraction of a scan's
+       travel. *)
+    G_cmdDirectControl.Enable := TRUE;
+    G_cmdDirectControl.ControlMode := Y_ControlMode#VelocityTLMode;
+    G_cmdDirectControl.Velocity := G_sysCommandedVelocity;
+    G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
+    G_cmdDirectControl.Acceleration := G_cfgPressureAccel;
+    G_cmdDirectControl.Deceleration := G_cfgPressureDecel;
+    bKeepDirectControl := TRUE;
+    eKeepDirectMode := Y_ControlMode#VelocityTLMode;
 
 ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
     G_cmdDirectControl.Enable := TRUE;
@@ -926,11 +996,25 @@ fbFilterOvertravelNeg(RawInput := G_diOvertravelNeg, DebounceTime := G_cfgDeboun
 fbFilterOvertravelPos(RawInput := G_diOvertravelPos, DebounceTime := G_cfgDebounceTimeOvertravelPos);
 fbFilterFaultReset(RawInput := G_diFaultReset, DebounceTime := G_cfgDebounceTimeFault);
 
-fbFilterAnalog(
+fbFilterPressure(
     Enable := TRUE,
-    RawInput := G_aiReference,
+    RawInput := G_aiPressure,
     Alpha := rAnalogFilterAlpha,
     MedianFilterSize := G_cfgAnalogMedianSize
+);
+
+(* Pressure transducer scaling and live-zero supervision *)
+fbPressureInput(
+    Enable := TRUE,
+    Volts := rFilteredPressureVolts,
+    ShuntOhms := G_cfgPressureShuntOhms,
+    ZeroMa := G_cfgPressureZeroMa,
+    SpanMa := G_cfgPressureSpanMa,
+    RangeMin := G_cfgPressureRangeMin,
+    RangeMax := G_cfgPressureRangeMax,
+    MinMa := G_cfgPressureSensorMinMa,
+    MaxMa := G_cfgPressureSensorMaxMa,
+    FaultTime := G_cfgPressureSensorFaultTime
 );
 
 (* Mode decoder *)
@@ -1038,7 +1122,8 @@ fbSafetyMonitor(
     DriveFault := G_sysDriveFault,
     CurrentState := G_sysCurrentState,
     ExitGuardTriggered := fbPistonExitGuard.FaultTriggered,
-    CommLost := fbCommWatchdog.Lost
+    CommLost := fbCommWatchdog.Lost,
+    PressureSensorFault := fbPressureInput.SensorFault
 );
 
 (* Output multiplexer *)
@@ -1062,6 +1147,23 @@ fbPosGate(
     VelMax := stCurrentLimits.VelMax,
     AccelMax := G_cfgPosGateAccelMax,
     MaxDeviation := G_cfgPosGateMaxDeviation,
+    CycleTime := G_cfgScanTime
+);
+
+(* Pressure loop - enabled only on scans where the pressure state body ran,
+   so the transition scan commands zero velocity. Reset on entry clears the
+   integrator. *)
+fbPressureCtrl(
+    Enable := bPressureCtrlActive,
+    Reset := bEnterState AND bPressureCtrlActive,
+    Target := rPressureTarget,
+    Actual := G_sysActualPressure,
+    Kp := G_cfgPressureKp,
+    Ki := G_cfgPressureKi,
+    VelMax := stCurrentLimits.VelMax,
+    DecelMax := G_cfgPressureDecel,
+    Stiffness := G_cfgPressureStopStiffness,
+    StopVelMin := G_cfgPressureStopVelMin,
     CycleTime := G_cfgScanTime
 );
 

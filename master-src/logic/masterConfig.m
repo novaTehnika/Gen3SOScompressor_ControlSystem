@@ -11,31 +11,18 @@ cfg.posEOT       = 365;             % mm, position at the end of travel (compres
 cfg.boreDiameter = 2.602 * 25.4;    % mm (2.602 in)
 cfg.deadVolume   = 10;              % mL, volume left at the end of travel
 
-% Pressure transducer: a 4-20 mA loop read on AI 2 as the voltage across a
-% shunt resistor. 4 mA is pressureRangeMin and 20 mA pressureRangeMax. A
-% gauge transducer reads 0 at atmosphere, so one atmosphere is added to give
-% absolute pressure.
-cfg.pressureShuntOhms = 250;    % ohm
-cfg.pressureRangeMin  = 0;      % psi at 4 mA
-cfg.pressureRangeMax  = 1500;   % psi at 20 mA
-cfg.pressureIsGauge   = true;   % false for an absolute transducer
-cfg.atmPerPsi         = 1 / 14.6959;
-
-% Input filtering.
-cfg.pressureMedianLength = 3;
-
-% Pressure loop: velocity command per unit pressure error.
-cfg.pressureKp = 0.02533;   % mm/s per atm (0.25 mm/s per MPa)
-cfg.pressureKi = 0;         % mm/s per atm*s
+% Pressure: the app works in atm absolute, the slave in MPa gauge.
+cfg.atmPerMPa   = 9.869;
+cfg.atmAmbient  = 1;        % atm, added to the slave's gauge reading
+cfg.pressureMax = 15;       % MPa gauge, the slave's G_cfgPressureTargetMax
 
 % Master soft limits, inside the slave's configured travel.
 cfg.posMin = 5;             % mm
 cfg.posMax = 360;           % mm
 
-% Velocity command limits.
-cfg.jogVelMax      = 5;     % mm/s
-cfg.jogSpeeds      = [0.1 0.25 0.5 1 2 5];  % mm/s, app presets; the largest is the default
-cfg.pressureVelMax = 5;     % mm/s
+% Velocity command limit.
+cfg.jogVelMax = 5;          % mm/s
+cfg.jogSpeeds = [0.1 0.25 0.5 1 2 5];   % mm/s, app presets; the largest is the default
 
 % Position arrival judged from feedback.
 cfg.posTolerance = 0.5;     % mm

@@ -139,7 +139,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         COLOR_ESTOP    = [1 0.85 0]
 
         faultNames = ["Handshake", "Drive", "Position limit", ...
-            "Master link lost", "Piston exit guard", "Limit switch", "Encoder"]
+            "Master link lost", "Piston exit guard", "Limit switch", "Encoder", ...
+            "Pressure sensor"]
     end
 
     methods (Access = private)
@@ -447,6 +448,11 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 app.cfg.posEOT - app.cfg.posMin];
             setSpinnerRange(app, app.TargetPositionSpinner, limits);
             app.TargetPositionSpinner.Value = limits(2);
+
+            % Pressure targets are atm absolute, up to the slave's highest
+            % accepted target.
+            setSpinnerRange(app, app.TargetPressureSpinner, [app.cfg.atmAmbient, ...
+                floor(app.cfg.pressureMax * app.cfg.atmPerMPa + app.cfg.atmAmbient)]);
 
             % Preset jog speeds, starting at the fastest. The master clamps
             % any preset above jogVelMax.
@@ -1113,7 +1119,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             % Create TargetPressureSpinner
             app.TargetPressureSpinner = uispinner(app.ControlsPanel);
             app.TargetPressureSpinner.ValueChangedFcn = createCallbackFcn(app, @TargetSpinnerChanged, true);
-            app.TargetPressureSpinner.Limits = [1 100];
+            app.TargetPressureSpinner.Limits = [1 100];   % replaced by applyConfig
             app.TargetPressureSpinner.Enable = 'off';
             app.TargetPressureSpinner.Position = [539 13 100 22];
             app.TargetPressureSpinner.Value = 1;

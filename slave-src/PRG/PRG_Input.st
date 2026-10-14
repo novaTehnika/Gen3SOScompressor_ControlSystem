@@ -28,5 +28,5 @@ G_sysReference := REAL_TO_LREAL(G_mbReference);
 G_diOvertravelNeg := MO1_DI_06; (* Negative overtravel / home reference switch *)
 G_diOvertravelPos := MO1_DI_07; (* Positive overtravel switch *)
 
-(* Analog Input: not used by the protocol; kept for the pressure channel *)
-G_aiReference := MO1_AI_01;
+(* Analog Input: voltage across the pressure transducer's loop shunt *)
+G_aiPressure := MO1_AI_01;

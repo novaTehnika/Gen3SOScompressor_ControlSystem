@@ -2,7 +2,7 @@ function buildShell()
 %BUILDSHELL Generate the Simulink shell model SOS_Gen3_Master_Shell.slx.
 %
 %   The shell holds no logic: the Modbus Client blocks, the DAQ blocks for
-%   the safety relay, the stir bar motor and the pressure input, one MATLAB
+%   the safety relay and the stir bar motor, one MATLAB
 %   Function block that calls masterStep (master-src/logic), the Constant
 %   blocks the app writes and named Gain blocks the app reads. Run in MATLAB
 %   with Simulink, Simulink Desktop Real-Time and Industrial Communication
@@ -55,7 +55,6 @@ set_param(mdl, 'SolverType', 'Fixed-step', 'Solver', 'FixedStepDiscrete', ...
 % --- DAQ blocks ---------------------------------------------------------
 addDaq(mdl, 'DO Safety',   'Digital Output', '1', Ts);     % P0.0 safety relay
 addDaq(mdl, 'DO Mixer',    'Digital Output', '5', Ts);     % P0.4 stir bar
-addDaq(mdl, 'AI Pressure', 'Analog Input',   '3', Ts);     % AI 2 transducer
 set_param([mdl '/DO Safety'], 'InitialValue', '0', 'FinalValue', '0');
 set_param([mdl '/DO Mixer'],  'InitialValue', '0', 'FinalValue', '0');
 
@@ -111,7 +110,7 @@ add_block('simulink/Signal Attributes/Rate Transition', [mdl '/RT Write'], ...
 add_block('simulink/Signal Attributes/Rate Transition', [mdl '/RT Read'], ...
     'OutPortSampleTime', Ts);
 
-% --- Constants written by the app (masterStep inputs 3..10, in order) -----
+% --- Constants written by the app (masterStep inputs 2..9, in order) ------
 appInputs = {'RequestedMode', '0'; 'CommandSeq', '0'; 'TargetPosition', '300'; ...
              'TargetVelocity', '0'; 'JogDirection', '0'; 'TargetPressure', '5'; ...
              'ESTOP', '0'; 'Mixer', '0'};
@@ -127,12 +126,12 @@ chart = find(sfroot, '-isa', 'Stateflow.EMChart', 'Path', blk);
 chart.Script = sprintf([ ...
     'function [mbWrite, doSafety, doMixer, position, velocity, pressure, ...\n' ...
     '          statusCode, faultCode, state, linkOk] = fcn( ...\n' ...
-    '          mbRead, pressureVolt, op, cmdSeq, targetPosition, ...\n' ...
+    '          mbRead, op, cmdSeq, targetPosition, ...\n' ...
     '          targetVelocity, jogDirection, targetPressure, estop, mixer)\n' ...
     '%% All logic lives in master-src/logic/masterStep.m.\n' ...
     '[mbWrite, doSafety, doMixer, position, velocity, pressure, ...\n' ...
     '    statusCode, faultCode, state, linkOk] = masterStep( ...\n' ...
-    '    double(mbRead(:)''), pressureVolt, op, cmdSeq, targetPosition, ...\n' ...
+    '    double(mbRead(:)''), op, cmdSeq, targetPosition, ...\n' ...
     '    targetVelocity, jogDirection, targetPressure, estop, mixer);\n']);
 
 % --- Wiring -----------------------------------------------------------------
@@ -142,10 +141,9 @@ if hasPort(mdl, 'Modbus Read', 'Outport')
 else
     manual{end + 1} = 'connect Modbus Read/1 -> RT Read/1 after adding its register row';
 end
-add_line(mdl, 'RT Read/1',     'MasterStep/1');
-add_line(mdl, 'AI Pressure/1', 'MasterStep/2');
+add_line(mdl, 'RT Read/1', 'MasterStep/1');
 for k = 1:size(appInputs, 1)
-    add_line(mdl, [appInputs{k, 1} '/1'], sprintf('MasterStep/%d', k + 2));
+    add_line(mdl, [appInputs{k, 1} '/1'], sprintf('MasterStep/%d', k + 1));
 end
 add_line(mdl, 'MasterStep/1', 'RT Write/1');
 if hasPort(mdl, 'Modbus Write', 'Inport')
