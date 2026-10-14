@@ -10,8 +10,8 @@ cfg.atmPerMPa   = 9.869;
 cfg.pressureMax = 15;       % MPa gauge, the slave's G_cfgPressureTargetMax
 
 % Master soft limits, inside the slave's configured travel.
-cfg.posMin = 5;             % mm
-cfg.posMax = 360;           % mm
+cfg.posMin = 0;             % mm
+cfg.posMax = 367;           % mm
 
 % Velocity command limit.
 cfg.jogVelMax = 5;          % mm/s
