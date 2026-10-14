@@ -141,8 +141,13 @@ Codes 0-7 fit the three discrete lines; higher codes are carried by the register
 ### FAULT_COMM (100)
 
 **Description**: The master heartbeat register `G_mbHeartbeat` has not changed
-for `G_cfgCommTimeout` (150 ms). The master's commands can no longer be
-trusted, so the slave stops as for any fault.
+for `G_cfgCommTimeout` (300 ms) while motion is commanded (position,
+velocity and torque control, Go Home, the homing moves and the recovery
+moves). There the frozen registers would keep the axis moving, so the slave
+stops as for any fault. In every other state nothing moves, a stopped master
+is routine (closing the app also drops the safety relay), and the hold
+inactivity watchdog returns the slave to idle, so the link may come and go
+without a fault.
 
 **Detection**: `FB_CommWatchdog`, fed into `FB_SafetyMonitor` at priority
 just below the drive fault. The watchdog arms on the first heartbeat change

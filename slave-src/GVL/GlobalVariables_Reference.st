@@ -210,7 +210,7 @@
         ======================================================================== *)
 
      G_cfgHandshakeTimeout     : TIME := T#500MS      (* Handshake timeout: the master must raise motion enable within this window after confirmation; it needs at least two Modbus exchanges *)
-     G_cfgCommTimeout          : TIME := T#150MS      (* Master heartbeat unchanged this long raises FAULT_COMM *)
+     G_cfgCommTimeout          : TIME := T#300MS      (* Master heartbeat unchanged this long raises FAULT_COMM: several exchanges, to ride out a slow one *)
      G_cfgHoldPositionTimeout  : TIME := T#2M         (* Hold-position inactivity watchdog: if no handshake completes within this window after motion halts, gracefully shut down to idle (no fault) *)
      G_cfgBrakeEngageDelay     : TIME := T#500MS      (* Wait after brake engage command *)
      G_cfgBrakeDisengageDelay  : TIME := T#500MS      (* Wait after brake disengage command *)

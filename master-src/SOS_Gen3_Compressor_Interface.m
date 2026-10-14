@@ -151,8 +151,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         % Stop any operation, wait for the master to report the axis
         % stopped (up to its own stop timeout), then stop the model. The
-        % DAQ outputs fall to their final values (safety relay off) and the
-        % slave stops itself when the Modbus exchange stops.
+        % DAQ outputs fall to their final values (safety relay off) with
+        % MotionEnable already low.
         function disconnect(app)
             app.StatusLabel.Text = "Stopping...";
             drawnow;

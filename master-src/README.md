@@ -28,7 +28,7 @@ SOS_Gen3_Compressor_Interface      % then press "Connect to Compressor"
 `buildShell` sets everything: the Modbus blocks' register rows (the Write
 block writes as many registers as its input is wide, so its row has no
 count; the Read row reads 18) and the Modbus client (`ModbusClient`, TCP/IP,
-controller IP and port, 0.1 s timeout, byte order big-endian, word order
+controller IP and port, 0.5 s timeout, byte order big-endian, word order
 little-endian) in Configuration Parameters > Modbus. The controller IP and
 the timeout are `MODBUS_SETUP` at the top of the script. After a build,
 open the Modbus pane once to confirm the client is listed; if the builder
@@ -36,7 +36,7 @@ printed a manual step, do as printed. `modbusShellDiscover` prints the
 settings of a built model.
 
 Timing: model step 25 ms, Modbus exchange 50 ms. When the cable is pulled
-the slave stops itself within 150 ms (`FAULT_COMM`); the model keeps
+the slave stops itself within 300 ms (`FAULT_COMM`); the model keeps
 retrying the connection and stops with an error from the Read block once
 Windows TCP gives up, about 20 s later, which sets the DAQ outputs to their
 final values (safety relay off) and makes the app report the stopped model.
@@ -63,8 +63,8 @@ seen, and a lost slave link as status 34 until the operator presses Stop.
 "Disconnect". Disconnecting, or closing the app while connected (after a
 confirmation), requests a stop, waits for the master to report the axis
 stopped (at most `tStopMax`) and then stops the model. The DAQ outputs fall to
-0, which drops the safety relay, and the slave stops itself when the Modbus
-exchange stops (`FAULT_COMM`). Pressing STOP sends a Stop command as well as
+0, which drops the safety relay, and MotionEnable is already low, so the slave
+stays stopped once the Modbus exchange ends. Pressing STOP sends a Stop command as well as
 the E-stop, which also clears a lost-link status once the link is back. The
 mode buttons are enabled only in manual control, while connected with the
 slave link up and out of E-STOP.
