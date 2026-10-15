@@ -9,9 +9,8 @@
 This document collects the vendor documentation and bench measurements behind
 the Ethernet link between the lab PC and the MP2600iec. Modbus TCP is the
 chosen transport; the protocol over it is in
-[ModbusRegisterMap.md](ModbusRegisterMap.md). It replaces the discrete and
-analog master ↔ slave signals (DAQ DI/DO, AO reference, AI0 position
-feedback).
+[ModbusRegisterMap.md](ModbusRegisterMap.md). It carries every master ↔ slave
+signal except the hardwired ones listed below.
 It covers the transport options available with the installed software, how each
 is configured, and the open questions that must be answered on the bench. It is
 not a protocol specification. The current protocol is defined in
@@ -246,18 +245,16 @@ Limits and known issues (MotionWorks IEC 2.1.0 release notes, RN.MWIEC.14):
 ## 7. Requirements Common to All Options
 
 - **Exchange period up to 50 ms.** The link carries mode requests, set points,
-  status and feedback. Signals that must act within a few milliseconds (halt,
-  safety enable) stay on the digital lines, and the pressure loop runs on the
-  slave, so the master's step rate does not set the link rate.
+  status and feedback. The safety enable, which must act within a few
+  milliseconds, stays on the hardwired relay line (P0.0), and the pressure loop
+  runs on the slave, so the master's step rate does not set the link rate.
 - **Slave watchdog**: if the master heartbeat or sequence number does not advance
-  within a set time, latch a communication fault and halt. Fault code `100` is
-  currently reserved and unused (see [FaultCodeReference.md](FaultCodeReference.md)).
+  within a set time, latch a communication fault and halt (`FAULT_COMM`, code 4,
+  see [FaultCodeReference.md](FaultCodeReference.md)).
 - **Master watchdog**: treat stale slave data as a fault and drop the hardwired
   safety relay.
-- Reference and feedback in engineering units (mm, mm/s, %) replace the analog
-  two-stage voltage mapping.
-- Fault code and mode confirmation can be separate fields rather than sharing
-  three lines.
+- Reference and feedback in engineering units (mm, mm/s, %, MPa).
+- Fault code and mode confirmation in separate fields (IR4, IR3).
 
 ---
 

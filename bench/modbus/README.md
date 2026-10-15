@@ -125,9 +125,8 @@ restart.
 ## 5. Pass criteria
 
 The protocol exchange is one write and one read, sent back to back, at a
-period of up to 50 ms. Fast signals stay on the digital lines, and the
-pressure loop runs on the slave, so the master step rate does not apply to
-the link.
+period of up to 50 ms. The pressure loop runs on the slave, so the master
+step rate does not apply to the link.
 
 | Result | Criteria (cases A–C) | Consequence |
 |--------|----------------------|-------------|

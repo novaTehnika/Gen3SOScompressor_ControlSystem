@@ -33,9 +33,6 @@
    Variables (define in MWiec GUI):
      VAR:
        (* Function block instances
-       fbFilterModeBit0    : FB_DigitalInputFilter
-       fbFilterModeBit1    : FB_DigitalInputFilter
-       fbFilterModeBit2    : FB_DigitalInputFilter
        fbFilterMotionEnable: FB_DigitalInputFilter
        fbFilterOvertravelNeg : FB_DigitalInputFilter
        fbFilterOvertravelPos : FB_DigitalInputFilter
@@ -46,7 +43,6 @@
        fbModeDecoder       : FB_ModeDecoder
        fbHandshake         : FB_HandshakeManager
        fbFaultReset        : FB_FaultResetHandler
-       fbOutputMux         : FB_OutputMux
        fbSafetyMonitor     : FB_SafetyMonitor
        fbPistonExitGuard   : FB_PistonExitGuard
        fbGoHome            : FB_GoHome
@@ -57,6 +53,7 @@
        fbIsHoming          : FB_IsHomingMode
        fbIntToFaultCode    : FB_IntToFaultCode
        fbFaultToInt        : FB_FaultToInt
+       fbConfModeToInt     : FB_ModeToInt
        fbCommWatchdog      : FB_CommWatchdog
        (* Timers — each has exactly one call site (see end of body)
        tStateTimer         : TON
@@ -78,9 +75,6 @@
        eTargetState        : E_SystemState
        eTargetMode         : E_OperatingMode
        stCurrentLimits     : ST_AxisLimits
-       bFilteredModeBit0   : BOOL
-       bFilteredModeBit1   : BOOL
-       bFilteredModeBit2   : BOOL
        bFilteredMotionEnable : BOOL
        bFilteredOvertravelNeg : BOOL
        bFilteredOvertravelPos : BOOL
@@ -141,9 +135,6 @@ END_IF;
    Values reflect previous scan's filter outputs — negligible at 1ms cycle.
    -------------------------------------------------------------------------- *)
 
-bFilteredModeBit0 := fbFilterModeBit0.FilteredOutput;
-bFilteredModeBit1 := fbFilterModeBit1.FilteredOutput;
-bFilteredModeBit2 := fbFilterModeBit2.FilteredOutput;
 bFilteredMotionEnable := fbFilterMotionEnable.FilteredOutput;
 bFilteredOvertravelNeg := fbFilterOvertravelNeg.FilteredOutput;
 bFilteredOvertravelPos := fbFilterOvertravelPos.FilteredOutput;
@@ -988,13 +979,10 @@ END_IF;
    -------------------------------------------------------------------------- *)
 
 (* Input filters *)
-fbFilterModeBit0(RawInput := G_diModeBit0, DebounceTime := G_cfgDebounceTimeMode);
-fbFilterModeBit1(RawInput := G_diModeBit1, DebounceTime := G_cfgDebounceTimeMode);
-fbFilterModeBit2(RawInput := G_diModeBit2, DebounceTime := G_cfgDebounceTimeMode);
-fbFilterMotionEnable(RawInput := G_diMotionEnable, DebounceTime := G_cfgDebounceTimeMotion);
+fbFilterMotionEnable(RawInput := G_mbMotionEnable <> UINT#0, DebounceTime := G_cfgDebounceTimeMotion);
 fbFilterOvertravelNeg(RawInput := G_diOvertravelNeg, DebounceTime := G_cfgDebounceTimeOvertravelNeg);
 fbFilterOvertravelPos(RawInput := G_diOvertravelPos, DebounceTime := G_cfgDebounceTimeOvertravelPos);
-fbFilterFaultReset(RawInput := G_diFaultReset, DebounceTime := G_cfgDebounceTimeFault);
+fbFilterFaultReset(RawInput := G_mbFaultReset <> UINT#0, DebounceTime := G_cfgDebounceTimeFault);
 
 fbFilterPressure(
     Enable := TRUE,
@@ -1020,9 +1008,8 @@ fbPressureInput(
 (* Mode decoder *)
 fbModeDecoder(
     Enable := TRUE,
-    ModeBit0 := bFilteredModeBit0,
-    ModeBit1 := bFilteredModeBit1,
-    ModeBit2 := bFilteredModeBit2
+    ModeCode := G_mbModeCode,
+    DebounceTime := G_cfgDebounceTimeMode
 );
 
 (* Handshake manager *)
@@ -1058,7 +1045,7 @@ fbFaultReset(
     FaultReset := bFilteredFaultReset,
     MotionEnable := bFilteredMotionEnable,
     InFaultState := bFaultResetInFaultState,
-    BitsStable := fbModeDecoder.ModeStable,
+    CodeStable := fbModeDecoder.ModeStable,
     ActiveFaultCode := eFaultResetActiveCode,
     MasterFaultCode := fbIntToFaultCode.Fault
 );
@@ -1124,15 +1111,6 @@ fbSafetyMonitor(
     ExitGuardTriggered := fbPistonExitGuard.FaultTriggered,
     CommLost := fbCommWatchdog.Lost,
     PressureSensorFault := fbPressureInput.SensorFault
-);
-
-(* Output multiplexer *)
-fbOutputMux(
-    Enable := TRUE,
-    FaultActive := (G_sysCurrentState = E_SystemState#ST_FAULT) OR
-                   (G_sysCurrentState = E_SystemState#ST_FAULT_IDLE),
-    FaultCode := G_sysActiveFault,
-    ConfirmedMode := fbHandshake.ConfirmedMode
 );
 
 (* Position command gate - shapes rPosTarget into the Y_DirectControl command.
@@ -1215,12 +1193,12 @@ END_IF;
    Update Outputs
    -------------------------------------------------------------------------- *)
 
-G_doModeConfBit0 := fbOutputMux.DO0_Output;
-G_doModeConfBit1 := fbOutputMux.DO1_Output;
-G_doModeConfBit2 := fbOutputMux.DO2_Output;
-G_doFaultActive := fbOutputMux.FaultActiveOutput;
+G_doFaultActive := (G_sysCurrentState = E_SystemState#ST_FAULT) OR
+                   (G_sysCurrentState = E_SystemState#ST_FAULT_IDLE);
 
 (* Values published in the Modbus input registers by PRG_Output *)
+fbConfModeToInt(Mode := fbHandshake.ConfirmedMode);
+G_sysConfirmedModeCode := INT_TO_UINT(fbConfModeToInt.Value);
 fbFaultToInt(Fault := G_sysActiveFault);
 G_sysActiveFaultCode := INT_TO_UINT(fbFaultToInt.Value);
 IF G_sysScanCounter >= UINT#65535 THEN
