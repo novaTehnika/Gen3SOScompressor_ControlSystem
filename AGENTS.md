@@ -45,7 +45,7 @@ The slave ST is the single source of truth. `tools/st2m.py` translates it into O
 - `PRG_Main.st` holds the central state machine (idle → drive reset/enable → brake release → operational modes → hold/deactivate, plus fault and recovery states). It calls every user FB exactly once at the end of the file.
 - All built-in motion FBs (`MC_Power`, `MC_Stop`, `MC_MoveAbsolute`, `Y_DirectControl`, `MC_SetPosition`, Jog, …) and `G_sysAxis` live in a **Ladder Diagram POU that is not in this repo**. ST never calls them directly. It writes `G_cmd*` structs and reads `G_sta*` structs (types in `DataTypes.st`). Custom FBs that drive motion emit `Cmd*` outputs and take `Sta*` inputs, and `PRG_Main` wires them to the globals.
 - In the simulator, `slave-sim/axisModel.m` stands in for that LD POU plus the drive and mechanics. `slaveStep.m` takes the holding registers and returns the input registers in engineering units and runs one scan: `PRG_Input` → `PRG_Main` → `PRG_Output` → `axisModel`, so PRG_Main sees motion status one scan late. `slaveSimConfig.m` holds only the physical axis parameters. The slave's own config comes from the ST. Test hooks (`sl.hook.driveFault`, `blocked`, `torque`) inject faults.
-- Naming: Hungarian-style local prefixes (`b`, `n`, `r`, `t`, `e`, `st`, `fb`, `rTrig`/`fTrig`) and global prefixes `G_cfg*`, `G_sys*`, `G_pos*`, `G_di*`/`G_do*`, `G_ai*`/`G_ao*`. See `docs/slave/development/SlaveDeveloperGuide.md`.
+- Naming: Hungarian-style local prefixes (`b`, `n`, `r`, `t`, `e`, `st`, `fb`, `rTrig`/`fTrig`) and global prefixes `G_cfg*`, `G_sys*`, `G_pos*`, `G_di*`/`G_do*` (hardwired I/O), `G_ai*` (pressure input), `G_mb*` (Modbus registers). See `docs/slave/development/SlaveDeveloperGuide.md`.
 
 ### Master structure
 
