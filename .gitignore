@@ -7,4 +7,7 @@ master-src/shell/SOS_Gen3_Master_Shell.slx
 bench/modbus/ModbusBench.slx
 # Wireshark captures from bench runs
 bench/modbus/captures/
+# Pressure noise captures from bench runs
+bench/pressure/captures/
+bench/pressure/SafetyHold.slx
 octave-workspace
