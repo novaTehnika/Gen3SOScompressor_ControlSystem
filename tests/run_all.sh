@@ -8,6 +8,7 @@ cd "$(dirname "$0")/.."
 python3 tools/st2m.py slave-src slave-sim/generated
 python3 tools/st2py.py slave-src design/generated
 python3 tests/st2pyParity.py
+python3 design/pressure-loop/test_model.py
 
 octave-cli --quiet --eval "
   addpath('master-src/logic', 'slave-sim', 'slave-sim/generated', 'tests');

@@ -56,7 +56,7 @@ The slave ST is the single source of truth. `tools/st2m.py` translates it into O
 
 ### Design studies
 
-- `design/pressure-loop/` holds the Octave model used to design the slave pressure loop (plant, actuator, sensor and controller) and the studies run on it. Its README gives the model, the assumptions still to be measured and the results. It is not part of the product and nothing imports it.
+- `design/pressure-loop/` holds the Python model used to design the slave pressure loop (chamber, actuators, sensor chain) and the studies run on it. It runs the slave's own `FB_AnalogInputFilter`, `FB_PressureInput` and `FB_PressureController`, translated by `tools/st2py.py` into the gitignored `design/generated/` (regenerated automatically when stale) with their configuration read from the GVL, so the slave controller in the studies is the slave source. Run `python3 design/pressure-loop/test_model.py` for the checks and `study_compare.py` / `study_valve.py` (from the repo root or that directory; `--sweeps`, `--set key=value`, `--out DIR`) for the studies. Its README gives the model, the assumptions still to be measured and the results. It is not part of the product and nothing imports it.
 
 ### Master structure
 
