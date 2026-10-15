@@ -19,8 +19,8 @@ measured by the bench test in `bench/modbus`.
 Each exchange is one **Write Multiple Registers (FC16)** of holding registers
 1–6 followed at once by one **Read Input Registers (FC04)** of input registers
 1–18, so both land in the same controller service tick. The exchange period is
-up to 50 ms, a multiple of the master step. Fast signals stay on the digital
-lines; see [EthernetCommsReference.md](EthernetCommsReference.md).
+up to 50 ms, a multiple of the master step; see
+[EthernetCommsReference.md](EthernetCommsReference.md).
 
 ### Addressing
 

@@ -118,7 +118,7 @@ Step 9: RETRACT AWAIT              Step 10: COMPLETE
 
 ### Abort Handling
 
-If `G_diMotionEnable` goes LOW during homing:
+If MotionEnable (`G_mbMotionEnable`, HR3) goes LOW during homing:
 1. `FB_HomeLimit` clears all `Cmd*.Execute` lines and transitions to `ABORTING`.
 2. The currently-busy FB (Jog or MoveAbsolute) decelerates per its configured deceleration.
 3. Once both `StaJog.Done`/`!Busy` and `StaMoveAbsolute.!Busy` are observed, the FB returns to `IDLE`.
@@ -128,13 +128,13 @@ If `G_diMotionEnable` goes LOW during homing:
 
 ```
 MASTER:
-1. Command mode 110 (DI0=0, DI1=1, DI2=1)
-2. Set G_diMotionEnable = HIGH
-3. Wait for confirmation (DO0=0, DO1=1, DO2=1)
+1. Command mode 110 (HR2 G_mbModeCode = 6)
+2. Wait for confirmation (IR3 G_mbConfCode = 6)
+3. Set MotionEnable HIGH (HR3 = 1)
 4. Monitor progress:
-   - G_doInMotion = TRUE during approach/backoff
-   - G_doInMotion = FALSE during detect/setref
-5. Wait for G_doHomingComplete = TRUE
+   - IR6 G_mbInMotion = 1 during approach/backoff
+   - IR6 G_mbInMotion = 0 during detect/setref
+5. Wait for IR8 G_mbHomingComplete = 1
 6. Homing complete - the new zero is stored
 ```
 
@@ -268,13 +268,13 @@ END_IF
 ```
 MASTER:
 1. Ensure Mode 110 completed (if encoder was invalid)
-2. Command mode 111 (DI0=1, DI1=1, DI2=1)
-3. Set G_diMotionEnable = HIGH
-4. Wait for confirmation (DO0=1, DO1=1, DO2=1)
+2. Command mode 111
+3. Wait for confirmation in IR3 (G_mbConfCode)
+4. Set MotionEnable HIGH (HR3 = 1)
 5. Monitor progress:
-   - G_doInMotion = TRUE during approach phases
-   - G_doInMotion = FALSE when stall detected
-6. Wait for G_doHomingComplete = TRUE
+   - IR6 G_mbInMotion = 1 during approach phases
+   - IR6 G_mbInMotion = 0 when stall detected
+6. Wait for IR8 G_mbHomingComplete = 1
 7. Homing complete - full position calibration done
 ```
 
@@ -295,9 +295,9 @@ Move to the home position (`G_cfgGoHomePosition`). Provides convenience for retu
 
 ```
 MASTER:
-1. Command mode 101 (DI0=1, DI1=0, DI2=1)
-2. Wait for confirmation, then set G_diMotionEnable = HIGH
-3. Wait for G_doInMotion = FALSE
+1. Command mode 101 (HR2 G_mbModeCode = 5)
+2. Wait for confirmation (IR3 G_mbConfCode = 5), then set MotionEnable HIGH (HR3 = 1)
+3. Wait for IR6 G_mbInMotion = 0
 4. Axis is now at home position
 ```
 
@@ -372,7 +372,7 @@ MASTER: Command Mode 110 (Home to Limit)
 Limit homing executes; MC_SetPosition stores the new offset
     |
     v
-G_doHomingComplete = TRUE (until G_diMotionEnable drops)
+G_doHomingComplete = TRUE (until MotionEnable, HR3, drops)
 ```
 
 ---

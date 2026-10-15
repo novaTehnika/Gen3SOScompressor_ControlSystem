@@ -79,13 +79,13 @@ These parameters control the software filters applied to raw I/O signals to reje
 
 | Parameter | Default Value | Units | Description & Tuning Considerations |
 |---|---|---|---|
-| `G_cfgDebounceTimeMode`| T#50MS | ms | Debounce time for the mode command bits. **Tuning:** Increase if noisy signals cause mode commands to be unstable. Decrease for faster mode changes. |
-| `G_cfgDebounceTimeMotion`| T#20MS | ms | Debounce time for the Motion Enable signal. Should be relatively short for responsiveness. |
-| `G_cfgDebounceTimeFault`| T#20MS | ms | Debounce time for the Fault Reset signal. |
+| `G_cfgDebounceTimeMode`| T#50MS | ms | Debounce time for the mode code register (`G_mbModeCode`, HR2): the code must hold one value this long before it is decoded. **Tuning:** Increase if mode commands are unstable. Decrease for faster mode changes. |
+| `G_cfgDebounceTimeMotion`| T#20MS | ms | Debounce time for the Motion Enable register (`G_mbMotionEnable`, HR3). Should be relatively short for responsiveness. |
+| `G_cfgDebounceTimeFault`| T#20MS | ms | Debounce time for the Fault Reset register (`G_mbFaultReset`, HR4). |
 | `G_cfgDebounceTimeLimitStd`| T#5MS | ms | Debounce time for the Retract limit switch. |
 | `G_cfgDebounceTimeLimitHome`| T#2MS | ms | Debounce time for the Home limit switch. This is shorter to increase the precision and repeatability of the Home to Limit sequence. |
-| `G_cfgAnalogFilterTimeConst`| T#50MS | ms | Time constant for the IIR low-pass filter on the analog reference input. **Tuning:** Increase for smoother but delayed response. Decrease for faster but potentially noisier response. |
-| `G_cfgAnalogMedianSize`| 3 | count | The number of samples for the median filter on the analog input (valid: 3 or 5). The median filter is excellent at rejecting large, single-sample spikes. |
+| `G_cfgAnalogFilterTimeConst`| T#50MS | ms | Time constant for the IIR low-pass filter on the pressure transducer input (`G_aiPressure`). **Tuning:** Increase for smoother but delayed response. Decrease for faster but potentially noisier response. |
+| `G_cfgAnalogMedianSize`| 3 | count | The number of samples for the median filter on the pressure transducer input (valid: 3 or 5). The median filter is excellent at rejecting large, single-sample spikes. |
 
 ---
 
@@ -114,22 +114,3 @@ These parameters define the behavior of the three homing modes.
 |---|---|---|---|
 | `G_cfgGoHomePosition` | 0.0 | mm | The target position for the Go Home command. This should match `G_cfgHomeLimSetPosition`. |
 | `G_cfgGoHomeVelocity` | 50.0 | mm/s | The velocity used for the move-to-home motion. |
-
----
-
-## 7. Analog I/O Scaling
-
-These parameters define how analog voltages are mapped to physical units. For more details, see the [IOReference](../../master/IOReference.md).
-
-| Parameter | Default Value | Units | Description |
-|---|---|---|---|
-| `G_cfgAnalogVelMin` | -7.0 | mm/s | Velocity corresponding to a -10V command. |
-| `G_cfgAnalogVelMax` | 7.0 | mm/s | Velocity corresponding to a +10V command. |
-| `G_cfgAnalogTorqueMin`| -100.0 | % | Torque corresponding to a -10V command. |
-| `G_cfgAnalogTorqueMax`| 100.0 | % | Torque corresponding to a +10V command. |
-| `G_cfgPosMapStage1PosMin` | 0.0 | mm | Start position for the high-resolution mapping region. |
-| `G_cfgPosMapStage1VoltMin`| -10.0 | V | Voltage corresponding to the start position of Stage 1. |
-| `G_cfgPosMapTransitionPos`| 200.0| mm | Position where mapping changes from Stage 1 to Stage 2. |
-| `G_cfgPosMapTransitionVolt`| 5.0 | V | Voltage at the transition point. |
-| `G_cfgPosMapStage2PosMax` | 305.0 | mm | End position for the low-resolution mapping region. |
-| `G_cfgPosMapStage2VoltMax` | 10.0 | V | Voltage corresponding to the end position of Stage 2. |
