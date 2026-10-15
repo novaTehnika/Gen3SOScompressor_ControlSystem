@@ -47,6 +47,10 @@ The slave ST is the single source of truth. `tools/st2m.py` translates it into O
 - In the simulator, `slave-sim/axisModel.m` stands in for that LD POU plus the drive and mechanics. `slaveStep.m` takes the holding registers and returns the input registers in engineering units and runs one scan: `PRG_Input` → `PRG_Main` → `PRG_Output` → `axisModel`, so PRG_Main sees motion status one scan late. `slaveSimConfig.m` holds only the physical axis parameters. The slave's own config comes from the ST. Test hooks (`sl.hook.driveFault`, `blocked`, `torque`) inject faults.
 - Naming: Hungarian-style local prefixes (`b`, `n`, `r`, `t`, `e`, `st`, `fb`, `rTrig`/`fTrig`) and global prefixes `G_cfg*`, `G_sys*`, `G_pos*`, `G_di*`/`G_do*`, `G_ai*`/`G_ao*`. See `docs/slave/development/SlaveDeveloperGuide.md`.
 
+### Design studies
+
+- `design/pressure-loop/` holds the Octave model used to design the slave pressure loop (plant, actuator, sensor and controller) and the studies run on it. Its README gives the model, the assumptions still to be measured and the results. It is not part of the product and nothing imports it.
+
 ### Master structure
 
 - `master-src/logic/` holds all master logic as plain `.m` functions that run in both MATLAB and Octave. `masterStep.m` is the per-step entry point called from the Simulink MATLAB Function block. It takes the 18-register read vector and returns the 6-register write vector (`modbusMap.m` for indices, `modbusPack.m`/`modbusUnpack.m` for REAL values, low word first), keeps persistent filter and link-watchdog state and calls `masterStateMachine.m`, which sequences the handshake, motion and fault reset. `masterConfig.m` holds every constant, including the 25 ms step and the 50 ms exchange.
