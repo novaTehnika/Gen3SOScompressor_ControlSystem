@@ -62,7 +62,7 @@ def stiffstep(p, **kw):
 
 
 def discharge(p, **kw):
-    return Scenario('discharge', 30.0, 1.0, P0=10e6, Qf=1e-6, t_open=1.0, t_close=21.0).with_(**kw)
+    return Scenario('discharge', 30.0, 1.0, P0=10e6, Qf=p.Qf, t_open=1.0, t_close=21.0).with_(**kw)
 
 
 def valve(p, **kw):

@@ -17,6 +17,10 @@ pip install -r design/requirements.txt           # numpy, scipy, matplotlib
 python3 design/pressure-loop/test_model.py       # self-checks, a few seconds
 python3 design/pressure-loop/study_compare.py    # three scenarios, seven controllers, a few seconds
 python3 design/pressure-loop/study_valve.py      # dip versus valve opening time
+python3 design/pressure-loop/study_linear.py     # margins against chamber stiffness, about 35 s
+python3 design/pressure-loop/study_robust.py     # Monte Carlo over the uncertain parameters, about 5 min on 4 CPUs
+python3 design/pressure-loop/test_linear.py      # linear model against the nonlinear sim
+python3 design/pressure-loop/test_robust.py      # sampler, criteria and parallel runner
 ```
 
 The scripts run from the repository root or from this directory. Options:
@@ -47,7 +51,9 @@ The scripts run from the repository root or from this directory. Options:
 | `runner.py` | `run_cases` runs `Case(params, scenario, controller)` specs in parallel (spawn) |
 | `study_compare.py`, `study_valve.py` | velocity versus torque command and the slave controller across the three scenarios; pressure dip versus valve opening time |
 | `studyutil.py` | command line, CSV and plot helpers for the studies |
-| `test_model.py` | self-checks, also run by `tests/run_all.sh` |
+| `linear.py`, `study_linear.py` | discrete-time linear model of the velocity-command loop; margins, stability boundary, Bode and disturbance responses |
+| `robust.py`, `study_robust.py` | uncertain-parameter table, requirement limits, Latin hypercube sampler; tornado, corners and Monte Carlo per controller configuration |
+| `test_model.py`, `test_linear.py`, `test_robust.py` | self-checks, also run by `tests/run_all.sh` |
 
 ## Model
 
@@ -105,6 +111,68 @@ ten scans; and a velocity feedforward of the expected valve flow divided by
 A. Torque mode applies A times target as feedforward. It exists to explore
 structures the slave does not have.
 
+## Linear analysis
+
+`linear.py` models the slave's velocity-command loop at the scan time Ts,
+for stability margins across the chamber stiffness k = dP/dx:
+
+    L(z) = C(z) z^-1 Gd(z) z^-4 F(z)
+
+- `C = Kp + Ki Ts/(z-1)`: the PI of `FB_PressureController`.
+- `z^-1`: the command computed in a scan acts in the next one.
+- `Gd`: zero-order-hold discretisation of k/(s(tauV s + 1)), the drive
+  velocity loop and the chamber integrator.
+- `z^-4`: the median of 5 (two scans for slowly varying signals) and the
+  `PRG_Main` read order (two scans).
+- `F`: the first-order filter, alpha = Ts/(tau + Ts).
+
+Outflow Q acts on the chamber integrator directly, past the drive lag:
+P/Q = -(k Ts/A)/(z-1) S. The clamp, stop law, slew limits, median
+nonlinearity and gas dissolution are not modelled. With Ki scaled with Kp
+the loop depends on Kp·k only, so a stiffness-scheduled gain is Kp = wc/k
+for a chosen crossover wc. `test_linear.py` compares the model with the
+nonlinear simulation: step response, stability boundary and oscillation
+frequency, and outflow dip.
+
+## Robustness study
+
+`study_robust.py` checks a slave configuration against its requirements over
+the plausible ranges of the uncertain parameters and shows which parameters
+drive failures. `robust.py` holds the parameter table (`UNCERTAIN`), the
+limits (`THRESH`) and the sampler.
+
+| Parameter | Range | Sampling |
+|---|---|---|
+| K | 0.5–2.5 GPa | log |
+| Vl0 | 250–350 mL | linear |
+| Vg0 | 100–300 mL | linear |
+| tauDiss | 10–100 s | log |
+| tauV | 5–50 ms | log |
+| sensor noise | 1–20 kPa rms | log |
+| discharge flow Qf | 0.5–2 mL/s | linear |
+
+`mr`, `b` and `Fc` act only in torque mode and are not varied. Each sample
+runs compress, stiffstep, discharge and valve (0.3 s opening). Requirements:
+
+- compress and stiffstep end in band (`G_cfgPressureInBand`);
+- overshoot of at most 0.5 MPa (compress) and 0.6 MPa (stiffstep), from
+  `tests/slavePressureMode.m`;
+- late ripple of at most InBand/5;
+- discharge and valve dip of at most 1 MPa, and they end in band;
+- stroke of at most 105 mm (`G_cfgPosSoftLimitMax` minus the slave-sim
+  chamber contact position).
+
+The dip and stroke limits are placeholders until there is a stated
+requirement.
+
+The study runs a one-at-a-time sensitivity (tornado), all corners of the
+four most influential parameters, then a Latin hypercube (`--n`, default
+200) per configuration. The default configurations are the GVL, the GVL
+with flow feedforward, the 20 ms filter with `StopVelMin` 1 mm/s, and that
+with flow feedforward. Every configuration sees the same samples and noise
+seeds. `--cfg key=value` and `--flow-ff` run a single custom configuration
+instead.
+
 ## Assumptions to replace with bench measurements
 
 | Parameter | Value used | How to measure |
@@ -117,44 +185,127 @@ structures the slave does not have.
 
 ## Results with these parameters
 
-These results were produced with the earlier Octave model (fixed liquid volume, single slew limit, separate reimplementation of the controller).
+Gains are mm/s per MPa (Kp) and per second (Ki). "Slave (GVL)" is the
+slave's `FB_PressureController` with the GVL configuration: Kp 0.5, Ki 0.2,
+VelMax 5 mm/s, accel and decel 50 mm/s², stop-law stiffness 100 MPa/mm,
+StopVelMin 0.5 mm/s, 50 ms filter.
 
 **Velocity versus torque command.** Velocity command wins. The drive's own
 velocity loop absorbs the friction and the mass-spring resonance, and the
 pressure loop sees an integrator. In torque command the pressure loop sees
-the reflected mass on the stiff chamber, a resonance near 6 Hz with almost no
-damping, through the 50 ms filter. Feedback gain above about 5 percent of A
-(N per MPa) is unstable, leaving pure force feedforward, which holds within
-the friction dead band of about 0.25 MPa only if the force calibration is
-exact, and stick-slips during discharge. Torque stays as a force cap inside
-velocity mode.
+the reflected mass on the stiff chamber, a lightly damped resonance near
+5 Hz behind the sensor filter. Feedback gain above about 5 percent of A
+(N per MPa) is unstable. Through the slave's sensor chain, which adds two
+scans of delay, the derivative-damped torque controller (Kd 100) also
+oscillates (1.25 MPa ripple on stiffstep). Pure force feedforward holds
+only within the friction dead band of about 0.25 MPa, and only if the force
+calibration is exact. Torque stays as a force cap inside velocity mode.
 
-**Derivative action** trims the valve-opening dip from 0.55 to 0.49 MPa at
-three to five times the command activity from sensor noise. Not used.
+**Slave controller, nominal parameters:**
 
-**Accel and decel limit.** At the direct-control limit of 5 mm/s² the piston
-approaching the stiff regime at 5 mm/s overshoots the target by 15 to
-25 MPa. Pressure mode needs its own accel and decel of at least 50 mm/s² plus
-the stop-law clamp, which holds the overshoot to about 3 MPa at full approach
-velocity.
+| Scenario | settle s | overshoot MPa | rms error MPa | ripple MPa | stroke mm |
+|---|---|---|---|---|---|
+| compress to 10 MPa | 22.9 | 0.27 | 0.001 | 0.0002 | 59 |
+| stiffstep 10 → 12 MPa | 1.31 | 0.22 | 0.014 | 0.003 | 0.2 |
+| discharge 1 mL/s for 20 s | 24.4 | 0.60 | 0.022 | 0.005 | 5.9 |
 
-**Discharge valve opening.** Dip in MPa for a 1 mL/s final flow at 10 MPa in
-the liquid-only chamber, versus valve opening time:
+On the gas-rich approach the configured stop law limits overshoot to
+0.27 MPa. The legacy estimating stop law overshoots by 3.1 MPa at the same
+gains, because the filtered reading lags the stiffening chamber. The cost is
+a slower approach: the clamp stays below VelMax from the start, holding it
+near 3 mm/s. The discharge overshoot (0.6 MPa) comes after the flow stops,
+from integrator wind-up during the outflow.
+
+**Margins against stiffness** (linear model, GVL gains):
+
+| Chamber | k (MPa/mm) | Gain margin | Phase margin | Crossover (rad/s) | Max stable Kp |
+|---|---|---|---|---|---|
+| gas-rich | 0.002 | 92 dB | 2.8° | 0.02 | 2.1e4 |
+| liquid, K = 1 GPa | 11.4 | 17.1 dB | 61° | 5.5 | 3.65 |
+| liquid, K = 2.2 GPa | 25.2 | 10.2 dB | 41° | 10.8 | 1.65 |
+| stop-law stiffness | 100 | −1.8 dB | −7° | 26 | 0.405 |
+
+As a crossover wc = Kp·k (k in MPa/mm, Ki = 0.4 Kp):
+- the stability limit is about 41 rad/s;
+- 45° phase margin needs about 11 rad/s;
+- 60° phase margin needs about 6 rad/s.
+
+With the GVL Kp, the phase margin at liquid-only stiffness falls below
+45° above K ≈ 1.9 GPa, and the loop goes unstable above K ≈ 7 GPa. It is
+also unstable at the 100 MPa/mm the stop law assumes. So the stop law's stiffness
+is a conservative braking assumption, not a stiffness the loop could
+regulate at.
+
+At liquid-only stiffness, the 50 ms filter and the 20 ms drive lag cost
+about the same. The max stable Kp goes from 3.65 to 8.6 without the filter,
+to 8.2 without the drive lag, and to 11.6 without both.
+
+**Derivative action** trims the step-opening valve dip from 0.57 to
+0.49 MPa, at three to five times the command activity from sensor noise.
+Not used.
+
+**Accel and decel limit.** At the direct-control limit of 5 mm/s², the
+approach into the stiff regime overshoots by 15 MPa. Pressure mode needs
+its own accel and decel of 50 mm/s² together with the stop law.
+
+**Discharge valve opening.** Dip in MPa for a 1 mL/s final flow at 10 MPa
+in the liquid-only chamber, against valve opening time:
 
 | Controller | step | 0.3 s | 1 s | 3 s | 10 s |
 |---|---|---|---|---|---|
-| PI, Kp 0.25, Ki 0.2 | 0.90 | 0.90 | 0.80 | 0.46 | 0.15 |
-| PI, Kp 0.5, Ki 0.2 | 0.57 | 0.55 | 0.49 | 0.34 | 0.14 |
+| PI, Kp 0.25, Ki 0.2 | 0.91 | 0.90 | 0.81 | 0.47 | 0.15 |
+| Slave (GVL), Kp 0.5, Ki 0.2 | 0.57 | 0.56 | 0.49 | 0.35 | 0.14 |
 | PI, Kp 1, Ki 0.5, filter 20 ms | 0.31 | 0.28 | 0.23 | 0.15 | 0.06 |
-| PI, Kp 0.5, Ki 0.2, plus flow feedforward | 0.07 | 0.04 | 0.01 | 0.005 | 0.002 |
+| Slave (GVL) plus flow feedforward | 0.08 | 0.04 | 0.01 | 0.004 | 0.002 |
 | Torque feedforward (reference) | 0.25 | 0.25 | 0.25 | 0.25 | 0.25 |
 
 The dip is quasi-static, about Q/(A Kp), until the opening time exceeds the
-loop's integral time of about one second, so opening the valve slowly only
-helps beyond that. Feedforward of the expected flow, which the master knows
-when it opens the valve, cuts the dip below 0.1 MPa even for a step and
-tolerates a 30 percent flow error at a 0.15 MPa dip.
+loop's integral time of about one second. Opening the valve slowly only
+helps beyond that. Feedforward of the expected flow cuts the dip below
+0.1 MPa even for a step. The master knows that flow when it opens the valve.
 
-Gains are mm/s per MPa (Kp) and per second (Ki). Recommended configuration:
-PI on velocity, Kp about 0.5, Ki about 0.2, no derivative, pressure-mode
-accel and decel of 50 mm/s² or more, stop-law clamp, flow feedforward.
+**Robustness** (200 Latin hypercube samples; pass rate in percent, about
+±4 points at 90 %):
+
+| Requirement | GVL | GVL + flow FF | filter 20 ms, StopVelMin 1 | same + flow FF |
+|---|---|---|---|---|
+| compress overshoot ≤ 0.5 MPa | 98 | 98 | 100 | 100 |
+| stiffstep overshoot ≤ 0.6 MPa | 80 | 80 | 98 | 98 |
+| discharge dip ≤ 1 MPa | 76 | 100 | 88 | 100 |
+| valve dip ≤ 1 MPa | 82 | 100 | 94 | 100 |
+| valve ends in band | 81 | 100 | 100 | 100 |
+| all requirements | 61 | 80 | 86 | 98 |
+
+The other requirements pass in every sample: compress in band and ripple,
+stiffstep in band, discharge in band, and stroke (at most 88 mm). A second
+seed gives 64 / 82 / 89 / 100 for "all".
+
+The tornado ranks parameters by influence:
+Qf ≫ K > Vg0 > tauV > Vl0 > tauDiss > noise.
+
+- **Discharge flow Qf.** It drives the dip and band failures. The stop law
+  never commands less than StopVelMin, but above A·StopVelMin (1.7 mL/s at
+  0.5 mm/s) it can hold a sustained outflow only with a steady error of
+  about StopStiffness·v²/(2·Decel), 0.3 to 0.45 MPa.
+- **Bulk modulus K, with tauV.** These drive the stiffstep overshoot through
+  loss of margin. There are no failures in the lowest third of K and 58 % in
+  the highest third. High K with a slow drive is the worst corner for every
+  configuration.
+- **Gas volume Vg0.** It sets the stroke only.
+- **Sensor noise** up to 20 kPa has no effect on any requirement.
+
+**Single changes that made things worse** (from an 80-sample exploration):
+- Kp 0.25, accel and decel 100, or stop-law stiffness 40 each push the
+  compress overshoot from 0.27 MPa to between 1 and 2.6 MPa. The GVL gains
+  sit in a narrow optimum for the gas-rich approach.
+- Kp 1.0 with the 50 ms filter loses margin at high K.
+
+**Open questions:**
+- The discharge flow range, and whether the master will send it for
+  feedforward.
+- The dip limit.
+- The stroke budget.
+- Whether to raise `G_cfgPressureStopVelMin` above the largest Qf/A and
+  shorten `G_cfgAnalogFilterTimeConst` to 20 ms.
+
+Measure Qf, then K, then tauV first. They decide all three of these.
