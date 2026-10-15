@@ -10,3 +10,4 @@ bench/modbus/captures/
 # Pressure noise captures from bench runs
 bench/pressure/captures/
 bench/pressure/SafetyHold.slx
+octave-workspace

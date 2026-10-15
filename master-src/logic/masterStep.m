@@ -12,15 +12,15 @@ function [mbWrite, doSafety, doMixer, position, velocity, pressure, ...
 %   op, cmdSeq, targetPosition, targetVelocity, jogDirection,
 %   targetPressure, estop, mixer
 %                 values of the Constant blocks the app writes;
-%                 targetPressure in atm gauge, as the app shows pressure
+%                 targetPressure in atm absolute, as the app shows pressure
 %
 %   mbWrite       holding registers HR1..HR6 for the Modbus Client Write
 %                 block (heartbeat, mode code, MotionEnable, FaultReset,
 %                 reference as two registers)
 %   doSafety      safety relay / STO enable (P0.0): 0 on E-stop or link loss
 %   doMixer       stir bar motor (P0.4)
-%   position (mm), velocity (mm/s), pressure (atm gauge, from the slave's
-%   transducer), statusCode, faultCode, state, linkOk  for the app
+%   position (mm), velocity (mm/s), pressure (atm absolute: the slave's
+%   gauge reading plus cfg.atmAmbient), statusCode, faultCode, state, linkOk  for the app
 %
 %   Link supervision: until the slave scan counter has been seen to advance
 %   the link is not up (STATUS_LINK_WAIT, safety relay off, E-stop path).
@@ -71,7 +71,8 @@ end
 faultActive = r(map.ir.faultActive) ~= 0;
 position = modbusUnpack(r(map.ir.position), r(map.ir.position + 1));
 velocity = modbusUnpack(r(map.ir.velocity), r(map.ir.velocity + 1));
-pressure = modbusUnpack(r(map.ir.pressure), r(map.ir.pressure + 1)) * cfg.atmPerMPa;
+pressure = modbusUnpack(r(map.ir.pressure), r(map.ir.pressure + 1)) * cfg.atmPerMPa ...
+    + cfg.atmAmbient;
 
 in.reset            = 0;
 if faultActive
@@ -89,7 +90,7 @@ in.op               = op;
 in.cmdSeq           = cmdSeq;
 in.targetPosition   = targetPosition;
 in.jogVelocity      = abs(targetVelocity) * sign(jogDirection);
-in.targetPressure   = targetPressure / cfg.atmPerMPa;
+in.targetPressure   = (targetPressure - cfg.atmAmbient) / cfg.atmPerMPa;
 
 out = masterStateMachine(in, cfg, cfg.dt);
 

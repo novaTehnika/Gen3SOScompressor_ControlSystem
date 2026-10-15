@@ -31,8 +31,8 @@ function r = pressureNoiseRun(label, path, opts)
 %
 %   Captures are saved as captures/<label>_<n>_<step>_<timestamp>.csv in
 %   the format pressureNoiseReport reads, and the run as
-%   captures/<label>_run_<timestamp>.csv (t, position, velocity, pressure,
-%   status, step, exchange ms). r holds the same with the per-step
+%   captures/<label>_run_<timestamp>.csv (t, position, velocity, MPa
+%   gauge, status, step, exchange ms). r holds the same with the per-step
 %   windows and the reports.
 %
 %   The run ends early when the master reports a fault, link loss or an
@@ -147,8 +147,8 @@ while true
         probe.armRequest = true;
         seq.armRequest = false;
     end
-    runLog(end + 1, :) = [tNow m.position m.velocity m.pressure / cfg.atmPerMPa ...
-        m.statusCode seq.idx exchangeMs];
+    runLog(end + 1, :) = [tNow m.position m.velocity ...
+        (m.pressure - cfg.atmAmbient) / cfg.atmPerMPa m.statusCode seq.idx exchangeMs];
 
     if strcmp(seq.phase, 'finish') && tNow - seq.tPhase > 0.2 && ...
             (m.statusCode == C.STATUS_IDLE || any(m.statusCode == C.abortStatus) || ...
@@ -304,7 +304,7 @@ switch seq.phase
                 app.targetPosition = s.target;
             case 'pressure'
                 app.op = C.OP_PRESSURE;
-                app.targetPressure = s.target * cfg.atmPerMPa;
+                app.targetPressure = s.target * cfg.atmPerMPa + cfg.atmAmbient;   % the app's atm absolute
         end
         app.cmdSeq = app.cmdSeq + 1;
         seq.phase = 'enter';
