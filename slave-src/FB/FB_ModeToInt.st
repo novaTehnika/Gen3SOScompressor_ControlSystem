@@ -32,7 +32,7 @@ ELSIF Mode = E_OperatingMode#MODE_GO_HOME THEN
     Value := 5;
 ELSIF Mode = E_OperatingMode#MODE_HOME_LIMIT THEN
     Value := 6;
-ELSIF Mode = E_OperatingMode#MODE_RESERVED_111 THEN
+ELSIF Mode = E_OperatingMode#MODE_PRESSURE THEN
     Value := 7;
 ELSE
     Value := 0;

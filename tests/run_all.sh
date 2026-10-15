@@ -10,5 +10,6 @@ octave-cli --quiet --eval "
   addpath('master-src/logic', 'slave-sim', 'slave-sim/generated', 'tests');
   smokeMasterStateMachine;
   closedLoopMasterSlave;
-  closedLoopMasterStep;
+  closedLoopModbusStep;
+  slavePressureMode;
 "

@@ -15,14 +15,14 @@
 
    Modbus register k (1-based, as addressed by MATLAB/Simulink) maps to the
    byte offset of the group Hardware Configuration creates: holding registers
-   (FC#06,16) at %IB28672 + 2*(k-1), input registers (FC#04) at
-   %QB73792 + 2*(k-1). Check the group address ranges in the Global
-   Variables worksheet.
+   (FC#03,06,16, with "Use %M for bidirectional Holding Registers") at
+   %MB3.(483328 + 2*(k-1)), input registers (FC#04) at %QB73792 + 2*(k-1).
+   Check the group address ranges in the Global Variables worksheet.
 
    Variables (define in MWiec GUI):
-     VAR_GLOBAL (Modbus FC#06,16 holding registers, master -> slave):
-       G_mbHeartbeat       AT %IW28672 : UINT   (* HR1: master step counter
-       G_mbProbeDintIn     AT %ID28872 : DINT   (* HR101-102: master writes 16#1234, 16#5678
+     VAR_GLOBAL (Modbus FC#03,06,16 holding registers, master -> slave):
+       G_mbHeartbeat       AT %MW3.483328 : UINT   (* HR1: master step counter
+       G_mbProbeDintIn     AT %MD3.483528 : DINT   (* HR101-102: master writes 16#1234, 16#5678
      VAR_GLOBAL (Modbus FC#04 input registers, slave -> master):
        G_mbHeartbeatEcho   AT %QW73792 : UINT   (* IR1: last G_mbHeartbeat seen
        G_mbSlaveCounter    AT %QW73794 : UINT   (* IR2: scan counter, wraps 65535 -> 0

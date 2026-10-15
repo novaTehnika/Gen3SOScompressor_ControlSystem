@@ -3,20 +3,18 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
     % Properties that correspond to app components
     properties (Access = public)
         UIFigure                        matlab.ui.Figure
-        FileMenu                        matlab.ui.container.Menu
-        SimulinkMenu                    matlab.ui.container.Menu
         FaultActiveLamp                 matlab.ui.control.Lamp
         FaultActiveLampLabel            matlab.ui.control.Label
         MixerOnLamp                     matlab.ui.control.Lamp
         MixerOnLampLabel                matlab.ui.control.Label
-        FlowRatemLsGauge                matlab.ui.control.Gauge
-        FlowRatemLsGaugeLabel           matlab.ui.control.Label
-        PositionmmGauge                 matlab.ui.control.Gauge
-        PositionmmGaugeLabel            matlab.ui.control.Label
-        VelocitymmsGauge                matlab.ui.control.Gauge
-        VelocitymmsGaugeLabel           matlab.ui.control.Label
-        PressureatmGauge                matlab.ui.control.Gauge
-        PressureatmGaugeLabel           matlab.ui.control.Label
+        FlowPanel                       matlab.ui.container.Panel
+        FlowValue                       matlab.ui.control.Label
+        PositionPanel                   matlab.ui.container.Panel
+        PositionValue                   matlab.ui.control.Label
+        PressurePanel                   matlab.ui.container.Panel
+        PressureValue                   matlab.ui.control.Label
+        VolumePanel                     matlab.ui.container.Panel
+        VolumeValue                     matlab.ui.control.Label
         StatusLabel                     matlab.ui.control.Label
         ControlsPanel                   matlab.ui.container.Panel
         ESTOP                           matlab.ui.control.StateButton
@@ -26,7 +24,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         MixerButton                     matlab.ui.control.StateButton
         JogDownButton                   matlab.ui.control.StateButton
         JogUpButton                     matlab.ui.control.StateButton
-        JogSpeedSpinner                 matlab.ui.control.Spinner
+        JogSpeedDropDown                matlab.ui.control.DropDown
         PositionGoButton                matlab.ui.control.Button
         TargetPositionSpinner           matlab.ui.control.Spinner
         TargetPositionmmSpinnerLabel    matlab.ui.control.Label
@@ -95,10 +93,13 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
     properties (Access = private)
         modelName
         updateTimer
+        cfg                 % masterConfig: geometry and limits
         commandSeq = 0      % mirrors the CommandSeq block; a change marks a new command
         lastStatusCode = 0
+        wasRunning = false      % the model was running at the last poll
         resetDialogOpen = false
         estopActive = false     % master reports STATUS_ESTOP
+        linkReady = false       % master reports the slave link up
 
         % Operation started from a mode button. It stays active until the
         % model reports it ended, so its button can stop it.
@@ -119,9 +120,12 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         OP_RESET    = 5
         OP_GO_HOME  = 6
 
-        STATUS_STARTING = 7
-        STATUS_STOPPING = 6
-        STATUS_ESTOP    = 20
+        STATUS_STARTING  = 7
+        STATUS_STOPPING  = 6
+        STATUS_FAULT     = 10     % FaultCode block holds the code
+        STATUS_ESTOP     = 20
+        STATUS_LINK_LOST = 34
+        STATUS_LINK_WAIT = 35
 
         % Time the model gets to act on a request before a status that
         % does not show it running ends it
@@ -135,13 +139,42 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         COLOR_ESTOP    = [1 0.85 0]
 
         faultNames = ["Handshake", "Drive", "Position limit", ...
-            "Reserved", "Piston exit guard", "Limit switch", "Encoder"]
+            "Master link lost", "Piston exit guard", "Limit switch", "Encoder", ...
+            "Pressure sensor"]
     end
 
     methods (Access = private)
 
         function tf = isRunning(app)
-            tf = app.Simulation.Status == "running";
+            tf = ~isempty(app.Simulation) && isvalid(app.Simulation) && ...
+                app.Simulation.Status == "running";
+        end
+
+        % Stop any operation, wait for the master to report the axis
+        % stopped (up to its own stop timeout), then stop the model. The
+        % DAQ outputs fall to their final values (safety relay off) with
+        % MotionEnable already low.
+        function disconnect(app)
+            app.StatusLabel.Text = "Stopping...";
+            drawnow;
+            try
+                sendCommand(app, app.OP_STOP);
+                clearOp(app);
+                deadline = tic;
+                while toc(deadline) < app.cfg.tStopMax + 0.5
+                    code = readBlock(app, "StatusCode");
+                    if code < 1 || code > 8   % not moving, starting or stopping
+                        break
+                    end
+                    pause(0.05);
+                end
+                stop(app.Simulation);
+                app.wasRunning = false;     % not an unexpected stop
+                app.StatusLabel.Text = "Disconnected";
+            catch ME
+                app.StatusLabel.Text = append("Disconnect failed: ", ME.message);
+            end
+            updateButtons(app);
         end
 
         function p = blockPath(app, name)
@@ -251,6 +284,23 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         end
 
         function updateButtons(app)
+            connected = isRunning(app);
+            if connected
+                app.ConnectToCompressorButton.Text = "Disconnect";
+            else
+                app.ConnectToCompressorButton.Text = "Connect to Compressor";
+            end
+
+            % Mode buttons act only in manual control, connected with the
+            % slave link up and out of E-STOP.
+            canMove = app.ManualControlButton.Value && connected && ...
+                app.linkReady && ~app.ESTOP.Value && ~app.estopActive;
+            buttons = {app.HomeButton, app.GoHomeButton, app.PositionGoButton, ...
+                app.PressureGoButton, app.JogUpButton, app.JogDownButton};
+            for k = 1:numel(buttons)
+                buttons{k}.Enable = canMove;
+            end
+
             op = app.activeOp;
             setModeButton(app, app.HomeButton, op == app.OP_HOME, ...
                 "Home", "Stop");
@@ -297,29 +347,51 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
         end
 
+        % Timer callback. An error here would stop the timer and freeze the
+        % display, so it is reported on the status line instead.
         function pollModel(app)
             if ~isvalid(app)
                 return
             end
+            try
+                updateFromModel(app);
+            catch ME
+                app.StatusLabel.Text = append("Display update failed: ", ME.message);
+            end
+        end
+
+        function updateFromModel(app)
             if ~isRunning(app)
+                if app.wasRunning
+                    % A lost Modbus connection stops the model with an error;
+                    % the DAQ outputs are at their final values (safety relay off).
+                    app.StatusLabel.Text = append("Model stopped (", ...
+                        string(app.Simulation.Status), "). Check the slave link, then Connect.");
+                    app.wasRunning = false;
+                end
                 app.estopActive = false;
+                app.linkReady = false;
                 clearOp(app);
                 updateButtons(app);
                 return
             end
+            app.wasRunning = true;
 
             statusCode = readBlock(app, "StatusCode");
             app.estopActive = statusCode == app.STATUS_ESTOP;
+            app.linkReady = statusCode ~= app.STATUS_LINK_LOST && ...
+                statusCode ~= app.STATUS_LINK_WAIT;
             trackOp(app, statusCode);
             updateButtons(app);
-            app.PositionmmGauge.Value = clampTo(app, readBlock(app, "Position"), ...
-                app.PositionmmGauge.Limits);
-            app.VelocitymmsGauge.Value = clampTo(app, abs(readBlock(app, "Velocity")), ...
-                app.VelocitymmsGauge.Limits);
-            app.PressureatmGauge.Value = clampTo(app, readBlock(app, "Pressure"), ...
-                app.PressureatmGauge.Limits);
+            position = readBlock(app, "Position");
+            app.VolumeValue.Text = sprintf("%.1f", x2mL(position, app.cfg));
+            app.PressureValue.Text = sprintf("%.2f", readBlock(app, "Pressure"));
+            app.PositionValue.Text = sprintf("%.2f", app.cfg.posEOT - position);
+            % Positive while the piston moves toward the end of travel
+            app.FlowValue.Text = sprintf("%.2f", ...
+                mLPerMm(app.cfg) * readBlock(app, "Velocity"));
 
-            faulted = statusCode > 10 && statusCode < 20;
+            faulted = statusCode == app.STATUS_FAULT;
             if faulted
                 app.FaultActiveLamp.Color = [1 0 0];
             else
@@ -336,8 +408,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             % Ask the operator before resetting a fault. The dialog opens
             % when a fault is first latched and again after a failed reset.
             if faulted && ~app.resetDialogOpen && ...
-                    ~(app.lastStatusCode > 10 && app.lastStatusCode < 20)
-                askFaultReset(app, statusCode - 10);
+                    app.lastStatusCode ~= app.STATUS_FAULT
+                askFaultReset(app, readBlock(app, "FaultCode"));
             end
             app.lastStatusCode = statusCode;
         end
@@ -346,7 +418,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         function askFaultReset(app, faultCode)
             app.resetDialogOpen = true;
             message = sprintf("Slave fault %d: %s.\n\nCorrect the cause, then reset.", ...
-                faultCode, app.faultNames(faultCode));
+                faultCode, faultName(app, faultCode));
             uiconfirm(app.UIFigure, message, "Fault", ...
                 "Options", ["Reset fault", "Leave faulted"], ...
                 "DefaultOption", 2, "CancelOption", 2, "Icon", "error", ...
@@ -360,8 +432,42 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
         end
 
-        function v = clampTo(~, v, limits)
-            v = min(max(v, limits(1)), limits(2));
+        % Operator entry ranges from masterConfig, so the app and the
+        % master logic share one set of limits.
+        function applyConfig(app)
+            here = fileparts(mfilename("fullpath"));
+            if exist("masterConfig", "file") ~= 2
+                addpath(fullfile(here, "logic"));
+            end
+            app.cfg = masterConfig();
+
+            % Manual targets are distances from the end of travel, within
+            % the master's soft limits and not past the end of travel. The
+            % initial target is the retracted end, away from compression.
+            limits = [max(app.cfg.posEOT - app.cfg.posMax, 0), ...
+                app.cfg.posEOT - app.cfg.posMin];
+            setSpinnerRange(app, app.TargetPositionSpinner, limits);
+            app.TargetPositionSpinner.Value = limits(2);
+
+            % Pressure targets are atm absolute, up to the slave's highest
+            % accepted target.
+            setSpinnerRange(app, app.TargetPressureSpinner, [app.cfg.atmAmbient, ...
+                floor(app.cfg.pressureMax * app.cfg.atmPerMPa + app.cfg.atmAmbient)]);
+
+            % Preset jog speeds, starting at the fastest. The master clamps
+            % any preset above jogVelMax.
+            speeds = unique(app.cfg.jogSpeeds);
+            app.JogSpeedDropDown.Items = compose("%g mm/s", speeds);
+            app.JogSpeedDropDown.ItemsData = speeds;
+            app.JogSpeedDropDown.Value = speeds(end);
+        end
+
+        % A spinner rejects a value outside its limits and limits that
+        % exclude its value, so widen, move the value, then narrow.
+        function setSpinnerRange(~, spinner, limits)
+            spinner.Limits = [-Inf Inf];
+            spinner.Value = min(max(spinner.Value, limits(1)), limits(2));
+            spinner.Limits = limits;
         end
 
         function text = statusText(app, statusCode)
@@ -376,21 +482,26 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 case 7,  text = "Starting";
                 case 8,  text = "Going home";
                 case 9,  text = "Resetting fault";
+                case app.STATUS_FAULT
+                    text = append("FAULT: ", faultName(app, readBlock(app, "FaultCode")));
                 case app.STATUS_ESTOP, text = "E-STOP";
                 case 30, text = "Slave did not confirm the mode";
                 case 32, text = "Fault reset failed";
                 case 33, text = "Slave did not report stopped";
+                case app.STATUS_LINK_LOST
+                    text = "Slave link lost: press Stop once it is back";
+                case app.STATUS_LINK_WAIT
+                    text = "Waiting for the slave link";
                 otherwise
-                    if statusCode >= 10 && statusCode < 20
-                        code = statusCode - 10;
-                        if code >= 1
-                            text = append("FAULT: ", app.faultNames(code));
-                        else
-                            text = "FAULT";
-                        end
-                    else
-                        text = append("Status ", num2str(statusCode));
-                    end
+                    text = append("Status ", num2str(statusCode));
+            end
+        end
+
+        function name = faultName(app, faultCode)
+            if faultCode >= 1 && faultCode <= numel(app.faultNames)
+                name = app.faultNames(faultCode);
+            else
+                name = sprintf("code %d", faultCode);
             end
         end
 
@@ -408,7 +519,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 stopOp(app);
                 return
             end
-            setBlock(app, "TargetVelocity", app.JogSpeedSpinner.Value);
+            setBlock(app, "TargetVelocity", app.JogSpeedDropDown.Value);
             setBlock(app, "JogDirection", direction);
             if requestOp(app, app.OP_JOG)
                 app.activeJogDir = direction;
@@ -425,6 +536,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         function startupFcn(app)
             app.modelName = string(app.Simulation.ModelName);
 
+            applyConfig(app);
+
             app.updateTimer = timer( ...
                 ExecutionMode="fixedSpacing", ...
                 Period=0.2, ...
@@ -435,6 +548,11 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         % Button pushed function: ConnectToCompressorButton
         function ConnectButtonPushed(app, event)
+            if isRunning(app)
+                disconnect(app);
+                return
+            end
+
             app.StatusLabel.Text = "Connecting to Simulink...";
             drawnow;
 
@@ -458,23 +576,19 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             catch ME
                 app.StatusLabel.Text = append("Model unable to start: ", ME.message);
             end
+            updateButtons(app);
         end
 
         % Value changed function: ManualControlButton
         function ManualControlButtonPressed(app, event)
             value = app.ManualControlButton.Value;
-            app.HomeButton.Enable = value;
-            app.GoHomeButton.Enable = value;
             app.TargetPositionSpinner.Enable = value;
             app.TargetPositionmmSpinnerLabel.Enable = value;
-            app.PositionGoButton.Enable = value;
             app.TargetPressureSpinner.Enable = value;
             app.TargetPressureatmSpinnerLabel.Enable = value;
-            app.PressureGoButton.Enable = value;
-            app.JogDownButton.Enable = value;
-            app.JogUpButton.Enable = value;
-            app.JogSpeedSpinner.Enable = value;
+            app.JogSpeedDropDown.Enable = value;
             app.MixerButton.Enable = value;
+            updateButtons(app);
         end
 
         % Button pushed function: HomeButton
@@ -499,6 +613,19 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         % Close request function: UIFigure
         function UIFigureCloseRequest(app, event)
+            % The model keeps driving the axis without the app, so it is
+            % stopped before the app closes.
+            if isRunning(app)
+                choice = uiconfirm(app.UIFigure, ...
+                    "The compressor is connected. Stop it and disconnect before closing?", ...
+                    "Close", "Options", ["Stop and close", "Cancel"], ...
+                    "DefaultOption", 1, "CancelOption", 2, "Icon", "warning");
+                if choice ~= "Stop and close"
+                    return
+                end
+                disconnect(app);
+            end
+
             if ~isempty(app.updateTimer) && isvalid(app.updateTimer)
                 stop(app.updateTimer);
                 delete(app.updateTimer);
@@ -532,7 +659,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 stopOp(app);
                 return
             end
-            setBlock(app, "TargetPosition", target);
+            setBlock(app, "TargetPosition", app.cfg.posEOT - target);
             if requestOp(app, app.OP_POSITION)
                 app.activeTarget = target;
             end
@@ -558,6 +685,15 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             updateButtons(app);
         end
 
+        % Value changed function: JogSpeedDropDown
+        % The model reads TargetVelocity continuously, so a running jog
+        % takes the new speed at once.
+        function JogSpeedChanged(app, event)
+            if app.activeOp == app.OP_JOG && isRunning(app)
+                setBlock(app, "TargetVelocity", app.JogSpeedDropDown.Value);
+            end
+        end
+
         % Value changed function: JogDownButton
         function JogDownButtonPushed(app, event)
             toggleJog(app, -1);
@@ -577,10 +713,12 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         % Value changed function: ESTOP
         function ESTOPPushed(app, event)
+            % Pressing STOP also sends a Stop command, which is what clears
+            % a lost slave link once the link is back.
             if isRunning(app)
                 setBlock(app, "ESTOP", app.ESTOP.Value);
                 if app.ESTOP.Value
-                    setBlock(app, "RequestedMode", app.OP_STOP);
+                    sendCommand(app, app.OP_STOP);
                 end
             end
             if app.ESTOP.Value
@@ -593,22 +731,28 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
     % Component initialization
     methods (Access = private)
 
+        % A titled panel holding one large numeric value
+        function [panel, value] = createReadout(app, title, position, fontSize)
+            panel = uipanel(app.UIFigure);
+            panel.Title = title;
+            panel.FontWeight = 'bold';
+            panel.Position = position;
+            value = uilabel(panel);
+            value.HorizontalAlignment = 'center';
+            value.FontSize = fontSize;
+            value.FontWeight = 'bold';
+            value.Position = [5 10 position(3) - 10 position(4) - 45];
+            value.Text = '--';
+        end
+
         % Create UIFigure and components
         function createComponents(app)
 
             % Create UIFigure and hide until all components are created
             app.UIFigure = uifigure('Visible', 'off');
             app.UIFigure.Position = [100 100 1008 432];
-            app.UIFigure.Name = 'MATLAB App';
+            app.UIFigure.Name = 'SOS Gen3 Compressor';
             app.UIFigure.CloseRequestFcn = createCallbackFcn(app, @UIFigureCloseRequest, true);
-
-            % Create FileMenu
-            app.FileMenu = uimenu(app.UIFigure);
-            app.FileMenu.Text = 'File';
-
-            % Create SimulinkMenu
-            app.SimulinkMenu = uimenu(app.UIFigure);
-            app.SimulinkMenu.Text = 'Simulink';
 
             % Create TabGroup
             app.TabGroup = uitabgroup(app.UIFigure);
@@ -919,18 +1063,16 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.TargetPositionmmSpinnerLabel = uilabel(app.ControlsPanel);
             app.TargetPositionmmSpinnerLabel.HorizontalAlignment = 'right';
             app.TargetPositionmmSpinnerLabel.Enable = 'off';
-            app.TargetPositionmmSpinnerLabel.Position = [408 40 116 22];
-            app.TargetPositionmmSpinnerLabel.Text = 'Target Position (mm)';
+            app.TargetPositionmmSpinnerLabel.Position = [396 40 128 22];
+            app.TargetPositionmmSpinnerLabel.Text = 'Target from EOT (mm)';
 
             % Create TargetPositionSpinner
             app.TargetPositionSpinner = uispinner(app.ControlsPanel);
             app.TargetPositionSpinner.ValueChangedFcn = createCallbackFcn(app, @TargetSpinnerChanged, true);
             app.TargetPositionSpinner.Step = 5;
-            app.TargetPositionSpinner.Limits = [180 360];
             app.TargetPositionSpinner.RoundFractionalValues = 'on';
             app.TargetPositionSpinner.Enable = 'off';
             app.TargetPositionSpinner.Position = [539 40 100 22];
-            app.TargetPositionSpinner.Value = 180;
 
             % Create PositionGoButton
             app.PositionGoButton = uibutton(app.ControlsPanel, 'push');
@@ -953,15 +1095,12 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.JogDownButton.Text = 'Jog Down';
             app.JogDownButton.Position = [768 9 100 23];
 
-            % Create JogSpeedSpinner
-            app.JogSpeedSpinner = uispinner(app.ControlsPanel);
-            app.JogSpeedSpinner.Step = 0.1;
-            app.JogSpeedSpinner.Limits = [0.1 5];
-            app.JogSpeedSpinner.ValueDisplayFormat = '%.1f mm/s';
-            app.JogSpeedSpinner.Tooltip = {'Jog speed'};
-            app.JogSpeedSpinner.Enable = 'off';
-            app.JogSpeedSpinner.Position = [879 9 100 22];
-            app.JogSpeedSpinner.Value = 1;
+            % Create JogSpeedDropDown
+            app.JogSpeedDropDown = uidropdown(app.ControlsPanel);
+            app.JogSpeedDropDown.ValueChangedFcn = createCallbackFcn(app, @JogSpeedChanged, true);
+            app.JogSpeedDropDown.Tooltip = {'Jog speed'};
+            app.JogSpeedDropDown.Enable = 'off';
+            app.JogSpeedDropDown.Position = [879 9 100 22];
 
             % Create MixerButton
             app.MixerButton = uibutton(app.ControlsPanel, 'state');
@@ -980,7 +1119,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             % Create TargetPressureSpinner
             app.TargetPressureSpinner = uispinner(app.ControlsPanel);
             app.TargetPressureSpinner.ValueChangedFcn = createCallbackFcn(app, @TargetSpinnerChanged, true);
-            app.TargetPressureSpinner.Limits = [1 100];
+            app.TargetPressureSpinner.Limits = [1 100];   % replaced by applyConfig
             app.TargetPressureSpinner.Enable = 'off';
             app.TargetPressureSpinner.Position = [539 13 100 22];
             app.TargetPressureSpinner.Value = 1;
@@ -1005,50 +1144,15 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.StatusLabel.Position = [5 1 439 22];
             app.StatusLabel.Text = 'Idle';
 
-            % Create PressureatmGaugeLabel
-            app.PressureatmGaugeLabel = uilabel(app.UIFigure);
-            app.PressureatmGaugeLabel.HorizontalAlignment = 'center';
-            app.PressureatmGaugeLabel.Position = [54 273 84 22];
-            app.PressureatmGaugeLabel.Text = 'Pressure (atm)';
-
-            % Create PressureatmGauge
-            app.PressureatmGauge = uigauge(app.UIFigure, 'circular');
-            app.PressureatmGauge.Limits = [0 120];
-            app.PressureatmGauge.Position = [35 310 120 120];
-
-            % Create VelocitymmsGaugeLabel
-            app.VelocitymmsGaugeLabel = uilabel(app.UIFigure);
-            app.VelocitymmsGaugeLabel.HorizontalAlignment = 'center';
-            app.VelocitymmsGaugeLabel.Position = [53 116 87 22];
-            app.VelocitymmsGaugeLabel.Text = 'Velocity (mm/s)';
-
-            % Create VelocitymmsGauge
-            app.VelocitymmsGauge = uigauge(app.UIFigure, 'circular');
-            app.VelocitymmsGauge.Limits = [0 5];
-            app.VelocitymmsGauge.Position = [36 153 120 120];
-
-            % Create PositionmmGaugeLabel
-            app.PositionmmGaugeLabel = uilabel(app.UIFigure);
-            app.PositionmmGaugeLabel.HorizontalAlignment = 'center';
-            app.PositionmmGaugeLabel.Position = [228 276 79 22];
-            app.PositionmmGaugeLabel.Text = 'Position (mm)';
-
-            % Create PositionmmGauge
-            app.PositionmmGauge = uigauge(app.UIFigure, 'circular');
-            app.PositionmmGauge.Limits = [0 365];
-            app.PositionmmGauge.MajorTicks = [0 80 160 240 320 365];
-            app.PositionmmGauge.Position = [207 313 120 120];
-
-            % Create FlowRatemLsGaugeLabel
-            app.FlowRatemLsGaugeLabel = uilabel(app.UIFigure);
-            app.FlowRatemLsGaugeLabel.HorizontalAlignment = 'center';
-            app.FlowRatemLsGaugeLabel.Position = [221 116 96 22];
-            app.FlowRatemLsGaugeLabel.Text = 'Flow Rate (mL/s)';
-
-            % Create FlowRatemLsGauge
-            app.FlowRatemLsGauge = uigauge(app.UIFigure, 'circular');
-            app.FlowRatemLsGauge.Limits = [0 30];
-            app.FlowRatemLsGauge.Position = [208 153 120 120];
+            % Create readouts
+            [app.VolumePanel, app.VolumeValue] = createReadout(app, ...
+                'Volume (mL)', [15 275 170 140], 40);
+            [app.PressurePanel, app.PressureValue] = createReadout(app, ...
+                'Pressure (atm)', [200 275 170 140], 40);
+            [app.PositionPanel, app.PositionValue] = createReadout(app, ...
+                'Position from EOT (mm)', [15 125 170 140], 28);
+            [app.FlowPanel, app.FlowValue] = createReadout(app, ...
+                'Flow (mL/s)', [200 125 170 140], 28);
 
             % Create MixerOnLampLabel
             app.MixerOnLampLabel = uilabel(app.UIFigure);
@@ -1069,7 +1173,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             % Create FaultActiveLamp
             app.FaultActiveLamp = uilamp(app.UIFigure);
             app.FaultActiveLamp.Position = [464 162 20 20];
-            app.FaultActiveLamp.Color = [1 0 0];
+            app.FaultActiveLamp.Color = [0.6 0.6 0.6];
 
             % Show the figure after all components are created
             app.UIFigure.Visible = 'on';

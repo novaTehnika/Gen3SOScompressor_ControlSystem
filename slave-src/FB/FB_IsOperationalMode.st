@@ -6,7 +6,8 @@
 
    Description:
    Checks if the given operating mode is an operational mode (Brake Hold,
-   Position, Velocity or Torque), as opposed to Idle or a homing mode.
+   Position, Velocity, Torque or Pressure), as opposed to Idle or a homing
+   mode.
 
    NOTE: Implemented as an FB (not an FN) to work around a MotionWorks IEC
    native-code-gen defect that rejects user-enum parameters on FUNCTIONs
@@ -23,4 +24,5 @@
 Result := (Mode = E_OperatingMode#MODE_BRAKE_HOLD) OR
           (Mode = E_OperatingMode#MODE_POSITION) OR
           (Mode = E_OperatingMode#MODE_VELOCITY) OR
-          (Mode = E_OperatingMode#MODE_TORQUE);
+          (Mode = E_OperatingMode#MODE_TORQUE) OR
+          (Mode = E_OperatingMode#MODE_PRESSURE);

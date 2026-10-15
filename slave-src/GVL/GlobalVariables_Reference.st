@@ -82,19 +82,43 @@
         Range: -10V to +10V (LREAL, volts)
         ======================================================================== *)
 
-     G_aiReference         AT %IW0   : LREAL  (* Mode-dependent reference signal *)
-                                             (* Position mode: position reference *)
-                                             (* Velocity mode: velocity reference *)
-                                             (* Torque mode: torque reference *)
+     G_aiPressure          AT %IW0   : LREAL  (* Pressure transducer: voltage across the 4-20 mA loop shunt *)
 
 
      (* ========================================================================
-        ANALOG OUTPUTS (1 Available)
-        Range: -10V to +10V (LREAL, volts)
+        MODBUS HOLDING REGISTERS (master -> slave), group FC#03,06,16
+        With "Use %M for bidirectional Holding Registers" the group lives in
+        %M memory: register k is at %MB3.(483328 + 2*(k-1)). Declared under
+        the group that Hardware Configuration creates. See
+        docs/master/ModbusRegisterMap.md.
         ======================================================================== *)
 
-     G_aoPositionOutput    AT %QW0   : LREAL  (* Position output signal to master *)
-                                             (* Uses two-stage scaling for resolution *)
+     G_mbHeartbeat         AT %MW3.483328 : UINT  (* HR1: master step counter *)
+     G_mbModeCode          AT %MW3.483330 : UINT  (* HR2: mode code 0-7, or the full fault code mirrored during reset *)
+     G_mbMotionEnable      AT %MW3.483332 : UINT  (* HR3: 1 = MotionEnable *)
+     G_mbFaultReset        AT %MW3.483334 : UINT  (* HR4: 1 = FaultReset *)
+     G_mbReference         AT %MD3.483336 : REAL  (* HR5-6: reference, mm / mm/s / % by mode *)
+
+
+     (* ========================================================================
+        MODBUS INPUT REGISTERS (slave -> master), group FC#04
+        Register k is at byte offset 73792 + 2*(k-1).
+        ======================================================================== *)
+
+     G_mbHeartbeatEcho     AT %QW73792 : UINT  (* IR1: last G_mbHeartbeat received *)
+     G_mbSlaveCounter      AT %QW73794 : UINT  (* IR2: scan counter *)
+     G_mbConfCode          AT %QW73796 : UINT  (* IR3: DO0-2 value: mode confirmation or 3-bit fault code *)
+     G_mbFaultCode         AT %QW73798 : UINT  (* IR4: G_sysActiveFault, full value *)
+     G_mbFaultActive       AT %QW73800 : UINT  (* IR5: DO4 *)
+     G_mbInMotion          AT %QW73802 : UINT  (* IR6: DO6 *)
+     G_mbPerformanceStatus AT %QW73804 : UINT  (* IR7: DO3 *)
+     G_mbHomingComplete    AT %QW73806 : UINT  (* IR8: DO5 *)
+     G_mbActualPosition    AT %QD73812 : REAL  (* IR11-12: mm *)
+     G_mbActualVelocity    AT %QD73816 : REAL  (* IR13-14: mm/s *)
+     G_mbActualTorque      AT %QD73820 : REAL  (* IR15-16: % of rated *)
+     G_mbCommandedPosition AT %QD73824 : REAL  (* IR17-18: mm *)
+     G_mbActualPressure    AT %QD73828 : REAL  (* IR19-20: MPa gauge *)
+
    END_VAR
 
 
@@ -182,41 +206,49 @@
 
 
      (* ========================================================================
-        ANALOG I/O SCALING
-        Raw INT range: -32768 to +32767 = -10V to +10V
-
-        Two-stage position mapping provides higher resolution in the
-        in-cylinder region where precision matters most.
+        PRESSURE TRANSDUCER AND PRESSURE MODE (mode 111)
+        The transducer is a 4-20 mA loop read as the voltage across a shunt on
+        the controller's analog input. FB_PressureInput scales it and checks
+        the live zero; FB_PressureController closes a PI loop that commands
+        piston velocity through Y_DirectControl in VelocityTLMode, clamped by
+        a stop law so the axis can stop within the pressure error at the
+        assumed chamber stiffness.
         ======================================================================== *)
 
-     (* Velocity reference scaling (Mode 011) *)
-     G_cfgAnalogVelMin         : LREAL := -7.0        (* Velocity at -10V (mm/s) *)
-     G_cfgAnalogVelMax         : LREAL := 7.0         (* Velocity at +10V (mm/s) *)
-
-     (* Torque reference scaling (Mode 100) *)
-     G_cfgAnalogTorqueMin      : LREAL := -100.0      (* Torque at -10V (%) *)
-     G_cfgAnalogTorqueMax      : LREAL := 100.0       (* Torque at +10V (%) *)
-
-     (* Two-stage position mapping (used for both input and output) *)
-     (* Stage 1: In-cylinder region (higher resolution) *)
-     G_cfgPosMapStage1PosMin   : LREAL := 0.0         (* Stage 1 position start (mm) *)
-     G_cfgPosMapStage1VoltMin  : LREAL := -10.0       (* Stage 1 voltage start (V) *)
-     G_cfgPosMapStage1VoltMax  : LREAL := 5.0         (* Stage 1 voltage end (V) *)
-
-     (* Stage transition point *)
-     G_cfgPosMapTransitionPos  : LREAL := 200.0       (* Position at stage boundary (mm) *)
-     G_cfgPosMapTransitionVolt : LREAL := 0.0         (* Voltage at stage boundary (V) *)
-
-     (* Stage 2: Out-of-cylinder region (lower resolution) *)
-     G_cfgPosMapStage2PosMax   : LREAL := 365.0       (* Stage 2 position end (mm) *)
-     G_cfgPosMapStage2VoltMax  : LREAL := 10.0        (* Stage 2 voltage end (V) *)
+     G_cfgPressureShuntOhms      : LREAL := 434.0      (* Shunt across the loop (ohm) *)
+     G_cfgPressureZeroMa         : LREAL := 4.0        (* Loop current at RangeMin (mA) *)
+     G_cfgPressureSpanMa         : LREAL := 16.0       (* Loop current span (mA) *)
+     G_cfgPressureRangeMin       : LREAL := 0.0        (* Pressure at ZeroMa (MPa gauge) *)
+     G_cfgPressureRangeMax       : LREAL := 16.0       (* Pressure at ZeroMa + SpanMa (MPa gauge) *)
+     G_cfgPressureSensorMinMa    : LREAL := 3.6        (* Loop current below this: open loop or unpowered transducer (mA) *)
+     G_cfgPressureSensorMaxMa    : LREAL := 20.5       (* Loop current above this: over range or shorted shunt (mA) *)
+     G_cfgPressureSensorFaultTime: TIME := T#100MS     (* Out-of-range current must persist this long before FAULT_PRESSURE_SENSOR *)
+     G_cfgPressureKp             : LREAL := 0.5        (* Velocity per pressure error (mm/s per MPa) *)
+     G_cfgPressureKi             : LREAL := 0.2        (* Velocity per integrated pressure error (mm/s per MPa*s) *)
+     G_cfgPressureVelMax         : LREAL := 5.0        (* Velocity clamp in pressure mode (mm/s) *)
+     G_cfgPressureAccel          : LREAL := 50.0       (* Y_DirectControl accel in pressure mode (mm/s^2) *)
+     G_cfgPressureDecel          : LREAL := 50.0       (* Y_DirectControl decel in pressure mode (mm/s^2). The chamber
+                                                          stiffens by orders of magnitude as the gas dissolves; the
+                                                          command must reverse within v^2/(2*decel) of travel *)
+     G_cfgPressureStopStiffness  : LREAL := 100.0      (* Chamber stiffness assumed by the stop law (MPa/mm): the
+                                                          velocity is clamped to sqrt(2*Decel*|error|/stiffness).
+                                                          Above the liquid-only chamber's ~20 MPa/mm because the
+                                                          filtered reading lags the chamber during the approach *)
+     G_cfgPressureStopVelMin     : LREAL := 0.5        (* The stop law never clamps below this (mm/s), so outflow
+                                                          can be balanced at zero error; overshoot from this
+                                                          velocity is at most stiffness*v^2/(2*decel) *)
+     G_cfgPressureTorqueLimit    : LREAL := 100.0      (* Torque limit in pressure mode (% of rated). Caps the piston
+                                                          force if the sensor reads low *)
+     G_cfgPressureTargetMax      : LREAL := 15.0       (* Highest target accepted from the master (MPa gauge) *)
+     G_cfgPressureInBand         : LREAL := 0.1        (* |actual - target| for the in-band status output (MPa) *)
 
 
      (* ========================================================================
         TIMING PARAMETERS
         ======================================================================== *)
 
-     G_cfgHandshakeTimeout     : TIME := T#5MS        (* Internal handshake timeout (master must raise motion enable within this window after handshake start) *)
+     G_cfgHandshakeTimeout     : TIME := T#500MS      (* Handshake timeout: the master must raise motion enable within this window after confirmation; it needs at least two Modbus exchanges *)
+     G_cfgCommTimeout          : TIME := T#300MS      (* Master heartbeat unchanged this long raises FAULT_COMM: several exchanges, to ride out a slow one *)
      G_cfgHoldPositionTimeout  : TIME := T#2M         (* Hold-position inactivity watchdog: if no handshake completes within this window after motion halts, gracefully shut down to idle (no fault) *)
      G_cfgBrakeEngageDelay     : TIME := T#500MS      (* Wait after brake engage command *)
      G_cfgBrakeDisengageDelay  : TIME := T#500MS      (* Wait after brake disengage command *)
@@ -230,13 +262,13 @@
         ======================================================================== *)
 
      (* Digital input debounce times *)
-     G_cfgDebounceTimeMode         : TIME := T#50MS   (* Mode bits (DI0-2) debounce *)
-     G_cfgDebounceTimeMotion       : TIME := T#20MS   (* Motion enable (DI3) debounce *)
-     G_cfgDebounceTimeFault        : TIME := T#20MS   (* Fault reset (DI6) debounce *)
+     G_cfgDebounceTimeMode         : TIME := T#50MS   (* Mode code (G_mbModeCode) debounce *)
+     G_cfgDebounceTimeMotion       : TIME := T#20MS   (* Motion enable (G_mbMotionEnable) debounce *)
+     G_cfgDebounceTimeFault        : TIME := T#20MS   (* Fault reset (G_mbFaultReset) debounce *)
      G_cfgDebounceTimeOvertravelNeg: TIME := T#10MS   (* Negative overtravel / home reference (short for homing precision) *)
      G_cfgDebounceTimeOvertravelPos: TIME := T#10MS   (* Positive overtravel standard debounce *)
 
-     (* Analog input filter parameters *)
+     (* Analog input filter parameters (pressure channel) *)
      G_cfgAnalogFilterTimeConst: TIME := T#50MS       (* Low-pass filter time constant *)
      G_cfgAnalogMedianSize     : INT := 5             (* Median filter size (3 or 5) *)
 
@@ -337,6 +369,9 @@
      G_sysCurrentState         : E_SystemState := ST_INIT     (* Current state *)
      G_sysPreviousState        : E_SystemState := ST_INIT     (* Previous state *)
      G_sysRequestedMode        : E_OperatingMode := MODE_IDLE (* Mode from master *)
+     G_sysReference            : LREAL := 0.0     (* Reference from master: mm, mm/s or % by mode *)
+     G_sysScanCounter          : UINT := UINT#0   (* Incremented every scan, published in G_mbSlaveCounter *)
+     G_sysActiveFaultCode      : UINT := UINT#0   (* G_sysActiveFault as an integer, published in G_mbFaultCode *)
      G_sysConfirmedMode        : E_OperatingMode := MODE_IDLE (* Mode confirmed to master *)
      G_sysActiveFault          : E_FaultCode := FAULT_NONE    (* Active fault code *)
 
@@ -361,6 +396,8 @@
      G_sysCommandedPosition    : LREAL := 0.0     (* Commanded position (mm) *)
      G_sysCommandedVelocity    : LREAL := 0.0     (* Commanded velocity (mm/s) *)
      G_sysCommandedTorque      : LREAL := 0.0     (* Commanded torque (%) *)
+
+     G_sysActualPressure       : LREAL := 0.0     (* Chamber pressure (MPa gauge) from fbPressureInput *)
 
 
      (* ========================================================================

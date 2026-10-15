@@ -1,86 +1,118 @@
-function [doSlave, doMixer, refVoltage, position, velocity, pressure, ...
-          statusCode, faultCode, state] = masterStep( ...
-          diSlave, positionVolt, pressureVolt, op, cmdSeq, targetPosition, ...
+function [mbWrite, doSafety, doMixer, position, velocity, pressure, ...
+          statusCode, faultCode, state, linkOk] = masterStep( ...
+          mbRead, op, cmdSeq, targetPosition, ...
           targetVelocity, jogDirection, targetPressure, estop, mixer)
 %MASTERSTEP Entry point for the Simulink shell's MATLAB Function block:
-%   DAQ signals and app requests in, DAQ signals and displayed values out.
-%   Called once per model step (cfg.dt).
+%   Modbus registers and app requests in; Modbus registers, DAQ lines and
+%   displayed values out. Called once per model step (cfg.dt). The Modbus
+%   blocks run every cfg.exchangePeriod and hold their values in between.
 %
-%   diSlave       raw DAQ digital inputs, in the order
-%                 [conf0 conf1 conf2 performanceStatus faultActive
-%                  homingComplete inMotion]. The slave outputs sink the DAQ
-%                 lines, so a raw 0 is an asserted signal.
-%   positionVolt  AI 0, position feedback (V)
-%   pressureVolt  AI 2, pressure transducer (V)
+%   mbRead        input registers IR1..IR20 as read by the Modbus Client
+%                 Read block (modbusMap, raw 16-bit values as doubles)
 %   op, cmdSeq, targetPosition, targetVelocity, jogDirection,
 %   targetPressure, estop, mixer
-%                 values of the Constant blocks the app writes
+%                 values of the Constant blocks the app writes;
+%                 targetPressure in atm absolute, as the app shows pressure
 %
-%   doSlave       DAQ digital outputs, in the order
-%                 [safetyEnable modeBit1 motionEnable modeBit0 modeBit2 faultReset]
-%                 (lines P0.0 P0.1 P0.2 P0.5 P0.6 P0.7)
+%   mbWrite       holding registers HR1..HR6 for the Modbus Client Write
+%                 block (heartbeat, mode code, MotionEnable, FaultReset,
+%                 reference as two registers)
+%   doSafety      safety relay / STO enable (P0.0): 0 on E-stop or link loss
 %   doMixer       stir bar motor (P0.4)
-%   refVoltage    AO reference to the slave (V)
-%   position (mm), velocity (mm/s), pressure (atm), statusCode, faultCode,
-%   state         for the app
+%   position (mm), velocity (mm/s), pressure (atm absolute: the slave's
+%   gauge reading plus cfg.atmAmbient), statusCode, faultCode, state, linkOk  for the app
+%
+%   Link supervision: until the slave scan counter has been seen to advance
+%   the link is not up (STATUS_LINK_WAIT, safety relay off, E-stop path).
+%   Once up, a counter that stops advancing for cfg.commTimeout means the
+%   link is lost: the E-stop path is forced, the safety relay drops and
+%   statusCode shows STATUS_LINK_LOST. That stays latched until the counter
+%   advances again and the operator sends Stop.
 
-persistent posBuf presBuf k xPrev vFilt integ pressureActive started
+persistent heartbeat lastCounter tStale linkUp linkLost lastSeq started
+
+STATUS_LINK_LOST = 34;
+STATUS_LINK_WAIT = 35;
+OP_STOP = 0;
 
 cfg = masterConfig();
+map = modbusMap();
+r = double(mbRead(:)');
 
 if isempty(started)
     started = true;
-    posBuf = positionVolt * ones(1, cfg.posMedianLength);
-    presBuf = pressureVolt * ones(1, cfg.pressureMedianLength);
-    k = 0;
-    xPrev = V2x(positionVolt, cfg);
-    vFilt = 0;
-    integ = 0;
-    pressureActive = false;
+    heartbeat = 0;
+    lastCounter = r(map.ir.slaveCounter);
+    tStale = 0;
+    linkUp = false;
+    linkLost = false;
+    lastSeq = cmdSeq;
 end
 
-% Median filters on the two analog inputs.
-k = k + 1;
-posBuf(mod(k, cfg.posMedianLength) + 1) = positionVolt;
-presBuf(mod(k, cfg.pressureMedianLength) + 1) = pressureVolt;
-position = V2x(medianOf(posBuf), cfg);
-pressure = V2P(medianOf(presBuf), cfg);
+% Link watchdog on the slave scan counter.
+counter = r(map.ir.slaveCounter);
+if counter ~= lastCounter
+    tStale = 0;
+    lastCounter = counter;
+    linkUp = true;
+elseif linkUp
+    tStale = tStale + cfg.dt;
+end
+if tStale >= cfg.commTimeout
+    linkLost = true;
+end
+newCmd = cmdSeq ~= lastSeq;
+lastSeq = cmdSeq;
+if linkLost && tStale < cfg.commTimeout && newCmd && op == OP_STOP
+    linkLost = false;
+end
 
-% Velocity for display: differentiated position through a first-order lag.
-alpha = cfg.dt / (cfg.velFilterTau + cfg.dt);
-vFilt = vFilt + alpha * ((position - xPrev) / cfg.dt - vFilt);
-xPrev = position;
-velocity = vFilt;
+% Slave status from the input registers.
+faultActive = r(map.ir.faultActive) ~= 0;
+position = modbusUnpack(r(map.ir.position), r(map.ir.position + 1));
+velocity = modbusUnpack(r(map.ir.velocity), r(map.ir.velocity + 1));
+pressure = modbusUnpack(r(map.ir.pressure), r(map.ir.pressure + 1)) * cfg.atmPerMPa ...
+    + cfg.atmAmbient;
 
 in.reset            = 0;
-in.confCode         = bitsToCode(diSlave(1) == 0, diSlave(2) == 0, diSlave(3) == 0);
-in.faultActive      = double(diSlave(5) == 0);
-in.homingComplete   = double(diSlave(6) == 0);
-in.inMotion         = double(diSlave(7) == 0);
-in.brakeDisengage   = 0;    % not wired to the master
+if faultActive
+    in.confCode     = r(map.ir.faultCode);
+else
+    in.confCode     = r(map.ir.confCode);
+end
+in.faultActive      = double(faultActive);
+in.homingComplete   = double(r(map.ir.homingComplete) ~= 0);
+in.inMotion         = double(r(map.ir.inMotion) ~= 0);
+in.brakeDisengage   = 0;    % not carried by the link
 in.position         = position;
-in.estop            = double(estop ~= 0);
+in.estop            = double(estop ~= 0 || linkLost || ~linkUp);
 in.op               = op;
 in.cmdSeq           = cmdSeq;
 in.targetPosition   = targetPosition;
 in.jogVelocity      = abs(targetVelocity) * sign(jogDirection);
-in.pressureVelocity = 0;
-
-% The pressure loop runs only while the pressure operation is active, as
-% reported by the state machine on the previous step.
-[in.pressureVelocity, integ] = pressureController(targetPressure, pressure, ...
-    integ, pressureActive, cfg, cfg.dt);
+in.targetPressure   = (targetPressure - cfg.atmAmbient) / cfg.atmPerMPa;
 
 out = masterStateMachine(in, cfg, cfg.dt);
-pressureActive = out.statusCode == 5;
 
-[bit0, bit1, bit2] = modeBits(out.modeCode);
-safetyEnable = double(in.estop == 0);
-doSlave = [safetyEnable, bit1, out.motionEnable, bit0, bit2, out.faultReset];
-doMixer = double(mixer ~= 0 && in.estop == 0);
-refVoltage = min(max(out.refVoltage, -10), 10);
+% Holding registers for the next exchange.
+heartbeat = mod(heartbeat + 1, 65536);
+mbWrite = zeros(1, map.nWrite);
+mbWrite(map.hr.heartbeat)    = heartbeat;
+mbWrite(map.hr.modeCode)     = out.modeCode;
+mbWrite(map.hr.motionEnable) = out.motionEnable;
+mbWrite(map.hr.faultReset)   = out.faultReset;
+mbWrite(map.hr.reference:map.hr.reference + 1) = modbusPack(out.reference);
+
+doSafety = double(in.estop == 0);
+doMixer  = double(mixer ~= 0 && in.estop == 0);
 
 statusCode = out.statusCode;
-faultCode  = out.faultCode;
-state      = out.state;
+if linkLost
+    statusCode = STATUS_LINK_LOST;
+elseif ~linkUp
+    statusCode = STATUS_LINK_WAIT;
+end
+faultCode = out.faultCode;
+state     = out.state;
+linkOk    = double(linkUp && ~linkLost);
 end

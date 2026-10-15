@@ -5,7 +5,7 @@ function out = masterStateMachine(in, cfg, dt)
 %
 %   in fields
 %     reset             1 reinitialises all internal state
-%     confCode          slave DO0-2 as 0..7: mode confirmation, or the fault
+%     confCode          mode confirmation code from the slave, or the fault
 %                       code while faultActive is high
 %     faultActive       slave status bits (0/1)
 %     inMotion
@@ -18,19 +18,19 @@ function out = masterStateMachine(in, cfg, dt)
 %                       command. op = OP_STOP acts without a change.
 %     targetPosition    mm, read continuously during OP_POSITION
 %     jogVelocity       signed mm/s, read continuously during OP_JOG
-%     pressureVelocity  signed mm/s from the pressure controller, read
-%                       continuously during OP_PRESSURE
+%     targetPressure    MPa gauge, read continuously during OP_PRESSURE
 %
 %   out fields
-%     modeCode          0..7 for DO0-2 (mode command, or mirrored fault code)
+%     modeCode          mode command, or the mirrored fault code
 %     motionEnable      0/1
 %     faultReset        0/1
-%     refVoltage        analog reference (V)
+%     reference         mm in position mode, mm/s in jog, MPa gauge in
+%                       pressure mode
 %     statusCode        STATUS_* below
 %     faultCode         last fault code read from the slave
 %     state             ST_* below
 %
-%   Mode bits only change while motionEnable is low. A mode is commanded
+%   The mode code only changes while motionEnable is low. A mode is commanded
 %   with motionEnable low, the slave confirms it, and only then is
 %   motionEnable raised.
 
@@ -64,7 +64,7 @@ STATUS_STOPPING        = 6;
 STATUS_STARTING        = 7;
 STATUS_GOING_HOME      = 8;
 STATUS_RESETTING       = 9;
-STATUS_FAULT_BASE      = 10;    % + fault code
+STATUS_FAULT           = 10;    % faultCode holds the code
 STATUS_ESTOP           = 20;
 STATUS_NO_CONFIRM      = 30;
 STATUS_RESET_FAILED    = 32;
@@ -76,7 +76,7 @@ if isempty(s) || in.reset ~= 0
     s = struct('state', ST_INIT, 't', 0, 'tDwell', 0, ...
         'activeOp', OP_STOP, 'pendingOp', OP_STOP, 'lastSeq', in.cmdSeq, ...
         'note', STATUS_IDLE, 'modeCode', 0, 'motionEnable', 0, ...
-        'faultReset', 0, 'refVoltage', 0, 'statusCode', STATUS_IDLE, ...
+        'faultReset', 0, 'reference', 0, 'statusCode', STATUS_IDLE, ...
         'faultCode', 0);
 end
 
@@ -107,7 +107,7 @@ switch s.state
         s.modeCode = 0;
         s.motionEnable = 0;
         s.faultReset = 0;
-        s.refVoltage = 0;
+        s.reference = 0;
         s.statusCode = STATUS_IDLE;
         if s.t >= cfg.tInit
             next = ST_IDLE;
@@ -117,7 +117,7 @@ switch s.state
         s.modeCode = 0;
         s.motionEnable = 0;
         s.faultReset = 0;
-        s.refVoltage = 0;
+        s.reference = 0;
         s.activeOp = OP_STOP;
         if newCmd
             s.note = STATUS_IDLE;
@@ -141,7 +141,7 @@ switch s.state
     case ST_REQUEST
         s.modeCode = slaveModeFor(s.activeOp);
         s.motionEnable = 0;
-        s.refVoltage = entryReference(s.activeOp, in.position, cfg);
+        s.reference = entryReference(s.activeOp, in, cfg);
         s.statusCode = STATUS_STARTING;
         if s.t == 0
             s.tDwell = 0;
@@ -162,7 +162,7 @@ switch s.state
 
     case ST_ENABLE
         s.motionEnable = 1;
-        s.refVoltage = entryReference(s.activeOp, in.position, cfg);
+        s.reference = entryReference(s.activeOp, in, cfg);
         s.statusCode = STATUS_STARTING;
         if in.op == OP_STOP
             next = ST_STOP;
@@ -179,12 +179,12 @@ switch s.state
         done = false;
 
         if s.activeOp == OP_HOME
-            s.refVoltage = 0;
+            s.reference = 0;
             s.statusCode = STATUS_HOMING;
             done = in.homingComplete ~= 0;
 
         elseif s.activeOp == OP_GO_HOME
-            s.refVoltage = 0;
+            s.reference = 0;
             s.statusCode = STATUS_GOING_HOME;
             % The slave has no arrival output for Go Home; the axis coming
             % to rest ends it.
@@ -197,7 +197,7 @@ switch s.state
 
         elseif s.activeOp == OP_POSITION
             target = min(max(in.targetPosition, cfg.posMin), cfg.posMax);
-            s.refVoltage = x2V(target, cfg);
+            s.reference = target;
             if abs(in.position - target) <= cfg.posTolerance
                 s.tDwell = min(s.tDwell + dt, cfg.tArrive);
             else
@@ -211,13 +211,11 @@ switch s.state
 
         elseif s.activeOp == OP_JOG
             v = limitVelocity(in.jogVelocity, cfg.jogVelMax, in.position, cfg);
-            s.refVoltage = v / cfg.velPerVolt;
+            s.reference = v;
             s.statusCode = STATUS_JOG;
 
-        else    % OP_PRESSURE
-            v = limitVelocity(in.pressureVelocity, cfg.pressureVelMax, ...
-                              in.position, cfg);
-            s.refVoltage = v / cfg.velPerVolt;
+        else    % OP_PRESSURE: the slave closes the loop on its transducer
+            s.reference = pressureTarget(in.targetPressure, cfg);
             s.statusCode = STATUS_PRESSURE;
         end
 
@@ -231,8 +229,11 @@ switch s.state
 
     case ST_STOP
         s.motionEnable = 0;
-        if s.activeOp ~= OP_POSITION
-            s.refVoltage = 0;
+        % Velocity modes stop on a zero reference. Position and pressure
+        % keep theirs: the slave applies the reference at once but
+        % debounces the enable drop, so a zero target would be acted on.
+        if s.activeOp ~= OP_POSITION && s.activeOp ~= OP_PRESSURE
+            s.reference = 0;
         end
         s.statusCode = STATUS_STOPPING;
         if in.op == OP_STOP
@@ -270,11 +271,11 @@ switch s.state
     case ST_FAULT_LATCH
         s.motionEnable = 0;
         s.faultReset = 0;
-        s.refVoltage = 0;
+        s.reference = 0;
         s.activeOp = OP_STOP;
         s.pendingOp = OP_STOP;
         if s.t >= cfg.tFaultSettle
-            % Mirror the slave's fault code onto the mode bits.
+            % Mirror the slave's fault code into the mode code.
             if in.confCode ~= s.modeCode || s.faultCode ~= in.confCode
                 s.tDwell = 0;
             else
@@ -283,7 +284,7 @@ switch s.state
             s.faultCode = in.confCode;
             s.modeCode = in.confCode;
         end
-        s.statusCode = STATUS_FAULT_BASE + s.faultCode;
+        s.statusCode = STATUS_FAULT;
         if in.faultActive == 0
             s.note = STATUS_IDLE;
             next = ST_IDLE;
@@ -294,7 +295,7 @@ switch s.state
     case ST_FAULT_RESET
         s.motionEnable = 0;
         s.faultReset = 1;
-        s.refVoltage = 0;
+        s.reference = 0;
         s.statusCode = STATUS_RESETTING;
         if in.faultActive == 0
             s.faultReset = 0;
@@ -309,7 +310,7 @@ switch s.state
     otherwise   % ST_ESTOP
         s.motionEnable = 0;
         s.faultReset = 0;
-        s.refVoltage = 0;
+        s.reference = 0;
         s.activeOp = OP_STOP;
         s.pendingOp = OP_STOP;
         s.statusCode = STATUS_ESTOP;
@@ -339,7 +340,7 @@ end
 out.modeCode     = s.modeCode;
 out.motionEnable = s.motionEnable;
 out.faultReset   = s.faultReset;
-out.refVoltage   = s.refVoltage;
+out.reference    = s.reference;
 out.statusCode   = s.statusCode;
 out.faultCode    = s.faultCode;
 out.state        = s.state;
@@ -354,20 +355,31 @@ elseif op == 6      % OP_GO_HOME: move to the home position
     mode = 5;
 elseif op == 2      % OP_POSITION
     mode = 2;
-else                % OP_JOG, OP_PRESSURE: Velocity
+elseif op == 4      % OP_PRESSURE: the slave's pressure loop
+    mode = 7;
+else                % OP_JOG: Velocity
     mode = 3;
 end
 end
 
 
-function V = entryReference(op, position, cfg)
+function r = entryReference(op, in, cfg)
 % Reference held while a mode is being entered. Position mode is entered
-% with the reference equal to the actual position; velocity modes with zero.
+% with the reference equal to the actual position, pressure mode with the
+% target, velocity modes with zero.
 if op == 2
-    V = x2V(position, cfg);
+    r = in.position;
+elseif op == 4
+    r = pressureTarget(in.targetPressure, cfg);
 else
-    V = 0;
+    r = 0;
 end
+end
+
+
+function p = pressureTarget(p, cfg)
+% Clamp the target pressure to what the slave accepts.
+p = min(max(p, 0), cfg.pressureMax);
 end
 
 

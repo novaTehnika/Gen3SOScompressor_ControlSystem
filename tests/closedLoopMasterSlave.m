@@ -5,7 +5,9 @@ function closedLoopMasterSlave(handshakeTimeout)
 %   closedLoopMasterSlave()      slave handshake timeout 0.5 s (docs/master)
 %   closedLoopMasterSlave(t)     slave handshake timeout t seconds
 %
-%   The master steps every 3 ms and the slave every 2 ms on a 1 ms tick.
+%   The master steps every 25 ms, the Modbus exchange runs every 50 ms and
+%   the slave every 2 ms, on a 1 ms tick. Registers are exchanged in
+%   engineering units; packing is covered by closedLoopModbusStep.
 %   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
 
@@ -43,23 +45,27 @@ assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_VELOCITY_CTRL);
 assert(h.brakeEngagements == brake0);
 h.in.op = 0;
 h = runFor(h, 3);
-assert(h.out.state == 1 && h.out.motionEnable == 0 && h.out.refVoltage == 0);
+assert(h.out.state == 1 && h.out.motionEnable == 0 && h.out.reference == 0);
 assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE && h.sl.ax.v == 0);
 fprintf('ok  position -> jog -> stop\n');
 
-% Jog -> pressure: same slave mode, so the master goes through idle.
+% Jog -> pressure: the slave closes the loop on its transducer. The axis
+% is placed near the chamber so the target is reached within the test.
 h.in.jogVelocity = 1;
 h = command(h, 3);
 h = runFor(h, 3);
-h.in.pressureVelocity = -1;
+h.sl.ax.x = h.sl.sim.chamberContactPos + 40;
+h.in.targetPressure = 2;
 h = command(h, 4);
 h = runUntil(h, 10, @(h) h.out.statusCode == 5);
-h = runFor(h, 2);
-assert(h.out.statusCode == 5 && h.sl.ax.v < -0.5);
+assert(h.out.statusCode == 5 && h.sl.G.G_sysCurrentState == E.E_SystemState.ST_PRESSURE_CTRL);
+h = runUntil(h, 30, @(h) h.y.performanceStatus == 1);
+assert(h.y.performanceStatus == 1 && abs(h.sl.ax.P - 2) <= 0.1, 'pressure %.3f MPa', h.sl.ax.P);
 h.in.op = 0;
 h = runFor(h, 3);
-assert(h.faultSeen == 0);
-fprintf('ok  jog -> pressure\n');
+assert(h.faultSeen == 0 && h.out.state == 1 && h.sl.ax.v == 0);
+fprintf('ok  jog -> pressure (%.2f MPa)\n', h.sl.ax.P);
+h.sl.ax.x = 80;                     % back out of the chamber for homing
 
 % Homing re-establishes the zero after the frame has been lost.
 h.sl.ax.offset = 12.3;
@@ -96,11 +102,11 @@ h = command(h, 2);
 h = runFor(h, 3);
 h.sl.hook.driveFault = true;
 h = runFor(h, 0.5);
-assert(h.out.statusCode == 12 && h.out.motionEnable == 0);
+assert(h.out.statusCode == 10 && h.out.faultCode == 2 && h.out.motionEnable == 0);
 assert(h.out.modeCode == 2 && h.out.faultReset == 0);
 h.sl.hook.driveFault = false;
 h = runFor(h, 2);
-assert(h.out.statusCode == 12 && h.y.faultActive == 1);
+assert(h.out.statusCode == 10 && h.y.faultActive == 1);
 h = command(h, 5);
 h = runFor(h, 1.5);
 assert(h.y.faultActive == 0 && h.out.state == 1 && h.out.faultReset == 0);
@@ -123,8 +129,8 @@ h.in.jogVelocity = 2;
 h = command(h, 3);
 h = runFor(h, 3);
 h.in.estop = 1;
-h = runFor(h, 0.01);
-assert(h.out.motionEnable == 0 && h.out.refVoltage == 0);
+h = runFor(h, 0.05);
+assert(h.out.motionEnable == 0 && h.out.reference == 0);
 h = runFor(h, 3);
 assert(h.out.statusCode == 20 && h.sl.ax.v == 0);
 h.in.estop = 0;
@@ -153,22 +159,20 @@ function h = harnessInit(handshakeTimeout)
 h.sl = slaveInit();
 h.sl.G.G_cfgHandshakeTimeout = handshakeTimeout;
 
-% The master must use the slave's analog position map.
+% The master's soft limit sits inside the slave's.
 h.mcfg = masterConfig();
-h.mcfg.posMapXtr  = h.sl.G.G_cfgPosMapTransitionPos;
-h.mcfg.posMapXmax = h.sl.G.G_cfgPosMapStage2PosMax;
-h.mcfg.posMax     = h.sl.G.G_cfgPosSoftLimitMax - 5;
-assert(abs(h.mcfg.velPerVolt - h.sl.G.G_cfgAnalogVelMax / 10) < 1e-9, ...
-    'masterConfig.velPerVolt does not match G_cfgAnalogVelMax');
+h.mcfg.posMax = h.sl.G.G_cfgPosSoftLimitMax - 5;
 
 h.in = struct('reset', 1, 'confCode', 0, 'faultActive', 0, 'inMotion', 0, ...
     'homingComplete', 0, 'brakeDisengage', 0, 'position', 0, 'estop', 0, ...
     'op', 0, 'cmdSeq', 0, 'targetPosition', 100, 'jogVelocity', 0, ...
-    'pressureVelocity', 0);
-h.u = struct('modeBit0', 0, 'modeBit1', 0, 'modeBit2', 0, 'motionEnable', 0, ...
-    'faultReset', 0, 'refVoltage', 0);
+    'targetPressure', 0);
+h.u = struct('heartbeat', 0, 'modeCode', 0, 'motionEnable', 0, ...
+    'faultReset', 0, 'reference', 0);
 [h.sl, h.y] = slaveStep(h.sl, h.u);
+h.ySnap = h.y;
 h.out = [];
+h.heartbeat = 0;
 h.tick = 0;
 h.t = 0;
 h.vMax = 0;
@@ -195,19 +199,32 @@ for k = 1:round(T * 1000)
     h.tick = h.tick + 1;
     h.t = h.tick / 1000;
 
-    if mod(h.tick, 3) == 0
-        h.in.confCode       = bitsToCode(h.y.confBit0, h.y.confBit1, h.y.confBit2);
-        h.in.faultActive    = h.y.faultActive;
-        h.in.inMotion       = h.y.inMotion;
-        h.in.homingComplete = h.y.homingComplete;
-        h.in.brakeDisengage = h.y.brakeDisengage;
-        h.in.position       = V2x(h.y.positionVolt, h.mcfg);
-        h.out = masterStateMachine(h.in, h.mcfg, 0.003);
+    if mod(h.tick, round(h.mcfg.dt * 1000)) == 0
+        y = h.ySnap;
+        if y.faultActive ~= 0
+            h.in.confCode   = y.faultCode;
+        else
+            h.in.confCode   = y.confCode;
+        end
+        h.in.faultActive    = y.faultActive;
+        h.in.inMotion       = y.inMotion;
+        h.in.homingComplete = y.homingComplete;
+        h.in.brakeDisengage = 0;
+        h.in.position       = y.actualPosition;
+        h.out = masterStateMachine(h.in, h.mcfg, h.mcfg.dt);
         h.in.reset = 0;
-        [h.u.modeBit0, h.u.modeBit1, h.u.modeBit2] = modeBits(h.out.modeCode);
+        h.heartbeat = mod(h.heartbeat + 1, 65536);
+    end
+
+    % Modbus exchange: the master's registers reach the slave and the
+    % slave's registers are sampled for the master's next steps.
+    if mod(h.tick, round(h.mcfg.exchangePeriod * 1000)) == 0 && ~isempty(h.out)
+        h.u.heartbeat    = h.heartbeat;
+        h.u.modeCode     = h.out.modeCode;
         h.u.motionEnable = h.out.motionEnable;
         h.u.faultReset   = h.out.faultReset;
-        h.u.refVoltage   = h.out.refVoltage;
+        h.u.reference    = h.out.reference;
+        h.ySnap = h.y;
     end
 
     if mod(h.tick, 2) == 0

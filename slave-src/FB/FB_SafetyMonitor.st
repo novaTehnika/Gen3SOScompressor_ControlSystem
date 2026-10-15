@@ -11,15 +11,20 @@
 
    Monitored Conditions:
    - Drive faults (from servo amplifier; encoder alarms surface here via the drive)
+   - Master link loss (heartbeat stale, from FB_CommWatchdog) while motion is commanded
    - Overtravel faults (unexpected switch triggers; positive switch never expected)
    - Position limit violations (beyond soft limits)
+   - Pressure sensor faults (loop current out of range, from
+     FB_PressureInput) while the pressure loop is closed on the sensor
    - Piston exit guard faults (from FB_PistonExitGuard)
 
    Fault Priority (highest to lowest):
    1. Drive fault (FAULT_DRIVE)
-   2. Limit switch fault (FAULT_LIMIT_SWITCH)
-   3. Position limit fault (FAULT_POSITION)
-   4. Piston exit fault (FAULT_PISTON_EXIT)
+   2. Link loss (FAULT_COMM)
+   3. Limit switch fault (FAULT_LIMIT_SWITCH)
+   4. Position limit fault (FAULT_POSITION)
+   5. Pressure sensor fault (FAULT_PRESSURE_SENSOR)
+   6. Piston exit fault (FAULT_PISTON_EXIT)
 
    Integration:
    - Called every scan after state machine, before output update
@@ -36,13 +41,17 @@
        DriveFault          : BOOL             (* Drive has reported a fault
        CurrentState        : E_SystemState    (* Current state machine state
        ExitGuardTriggered  : BOOL             (* Piston exit guard triggered fault
+       CommLost            : BOOL             (* Master heartbeat stale
+       PressureSensorFault : BOOL             (* Transducer loop current out of range (from FB_PressureInput)
      VAR_OUTPUT:
        FaultDetected       : BOOL             (* A fault condition exists
        FaultCode           : E_FaultCode      (* Fault code to report
        FaultLimitSwitch    : BOOL             (* Limit switch fault detected
        FaultPosition       : BOOL             (* Position limit exceeded
        FaultDrive          : BOOL             (* Drive fault detected
+       FaultComm           : BOOL             (* Link loss detected
        FaultPistonExit     : BOOL             (* Piston exit guard fault
+       FaultPressureSensor : BOOL             (* Pressure sensor fault while in pressure control
      VAR:
        bLatchedFault       : BOOL
        eLatchedFaultCode   : E_FaultCode
@@ -50,6 +59,7 @@
        bInHomingState      : BOOL
        bInFaultState       : BOOL
        bInRecoveryState    : BOOL             (* TRUE in ST_RECOVERY / ST_RECOVERY_POSITION / ST_RECOVERY_VELOCITY
+       bCommandedMotion    : BOOL             (* TRUE in the states that command motion (control, go home, homing, recovery moves)
    ============================================================================ *)
 
 (* ============================================================================
@@ -63,7 +73,9 @@ IF NOT Enable THEN
     FaultLimitSwitch := FALSE;
     FaultPosition := FALSE;
     FaultDrive := FALSE;
+    FaultComm := FALSE;
     FaultPistonExit := FALSE;
+    FaultPressureSensor := FALSE;
     bLatchedFault := FALSE;
     eLatchedFaultCode := E_FaultCode#FAULT_NONE;
     RETURN;
@@ -77,6 +89,7 @@ END_IF;
 bInMotionState := (CurrentState = E_SystemState#ST_POSITION_CTRL) OR
                   (CurrentState = E_SystemState#ST_VELOCITY_CTRL) OR
                   (CurrentState = E_SystemState#ST_TORQUE_CTRL) OR
+                  (CurrentState = E_SystemState#ST_PRESSURE_CTRL) OR
                   (CurrentState = E_SystemState#ST_GO_HOME) OR
                   (CurrentState = E_SystemState#ST_HOLD_POSITION);
 
@@ -102,6 +115,30 @@ bInRecoveryState := (CurrentState = E_SystemState#ST_RECOVERY) OR
    -------------------------------------------------------------------------- *)
 
 FaultDrive := DriveFault;
+
+(* --------------------------------------------------------------------------
+   LINK LOSS MONITORING
+   The master heartbeat has stopped; its commands can no longer be trusted.
+   A fault only while motion is commanded: there the frozen registers would
+   keep the axis moving. In every other state nothing moves, the master
+   stopping is routine (the app closed, which also drops the safety relay
+   and the drive), and the hold inactivity watchdog returns the slave to
+   idle on its own.
+   -------------------------------------------------------------------------- *)
+
+bCommandedMotion := (CurrentState = E_SystemState#ST_POSITION_CTRL) OR
+                    (CurrentState = E_SystemState#ST_VELOCITY_CTRL) OR
+                    (CurrentState = E_SystemState#ST_TORQUE_CTRL) OR
+                    (CurrentState = E_SystemState#ST_PRESSURE_CTRL) OR
+                    (CurrentState = E_SystemState#ST_GO_HOME) OR
+                    (CurrentState = E_SystemState#ST_HOME_LIMIT) OR
+                    (CurrentState = E_SystemState#ST_HOME_LIM_APPROACH) OR
+                    (CurrentState = E_SystemState#ST_HOME_LIM_DETECT) OR
+                    (CurrentState = E_SystemState#ST_HOME_LIM_BACKOFF) OR
+                    (CurrentState = E_SystemState#ST_HOME_LIM_SETREF) OR
+                    (CurrentState = E_SystemState#ST_RECOVERY_POSITION) OR
+                    (CurrentState = E_SystemState#ST_RECOVERY_VELOCITY);
+FaultComm := CommLost AND bCommandedMotion;
 
 (* --------------------------------------------------------------------------
    OVERTRAVEL FAULT MONITORING
@@ -171,16 +208,30 @@ END_IF;
 FaultPistonExit := ExitGuardTriggered;
 
 (* --------------------------------------------------------------------------
+   PRESSURE SENSOR MONITORING
+   Only while the pressure loop is closed on the sensor. In every other
+   state a bad reading is visible to the master in the pressure register and
+   drives nothing.
+   -------------------------------------------------------------------------- *)
+
+FaultPressureSensor := PressureSensorFault AND
+                       (CurrentState = E_SystemState#ST_PRESSURE_CTRL);
+
+(* --------------------------------------------------------------------------
    FAULT PRIORITY AND OUTPUT
    Determine highest priority RAW fault for this scan.
    Must run BEFORE latch clearing so the clear check sees the current scan's
    value, not a stale value from the previous scan's latch override below.
    -------------------------------------------------------------------------- *)
 
-(* Priority order: Drive > LimitSwitch > Position > PistonExit *)
+(* Priority order: Drive > Comm > LimitSwitch > Position > PressureSensor > PistonExit *)
 IF FaultDrive THEN
     FaultDetected := TRUE;
     FaultCode := E_FaultCode#FAULT_DRIVE;
+
+ELSIF FaultComm THEN
+    FaultDetected := TRUE;
+    FaultCode := E_FaultCode#FAULT_COMM;
 
 ELSIF FaultLimitSwitch THEN
     FaultDetected := TRUE;
@@ -189,6 +240,10 @@ ELSIF FaultLimitSwitch THEN
 ELSIF FaultPosition THEN
     FaultDetected := TRUE;
     FaultCode := E_FaultCode#FAULT_POSITION;
+
+ELSIF FaultPressureSensor THEN
+    FaultDetected := TRUE;
+    FaultCode := E_FaultCode#FAULT_PRESSURE_SENSOR;
 
 ELSIF FaultPistonExit THEN
     FaultDetected := TRUE;
