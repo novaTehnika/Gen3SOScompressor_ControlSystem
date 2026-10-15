@@ -288,7 +288,7 @@ elseif sl.state == 3                                % operating
     end
     sl.pos = max(sl.pos + v * dt, 0);
     sl.moving = double(v ~= 0);
-    if sl.pos > 365
+    if sl.pos > 375                             % positive overtravel switch
         sl = slaveFault(sl, 3);
         next = 6;
     elseif meFell
