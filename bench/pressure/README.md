@@ -131,11 +131,31 @@ capture rms and the strongest spectral line.
 
 ## 5. Results
 
-| Label | Capacitor | Step | Window rms (mV) | Capture rms (mV) | Strongest line (Hz, mV) | Notes |
-|-------|-----------|------|-----------------|------------------|-------------------------|-------|
-| | none | idle | | | | |
-| | none | jog | | | | |
-| | none | pressure | | | | |
-| | | idle | | | | |
-| | | jog | | | | |
-| | | pressure | | | | |
+Shunt 434 ohm, transducer wired as in service, chamber without liquid.
+Captures at rest first (`pressureNoiseProbe`, static 1.07 MPa gauge), then
+with the axis moving (`pressureNoiseRun`). Capacitor across the shunt at
+the controller terminals; the electrolytic with its positive lead on the
+shunt high side.
+
+| Label | Capacitor | Step | Window rms (mV) | Capture rms (mV) | Bands 25-100 / 100-250 Hz (mV) | Strongest line (Hz, mV) | Notes |
+|-------|-----------|------|-----------------|------------------|--------------------------------|-------------------------|-------|
+| noCap | none | at rest | | 1.96 | 1.15 / 1.30 | 8, 0.75 | p-p 10.6 mV |
+| wCermCap | 10 nF ceramic | at rest | | 1.93 | 1.31 / 1.31 | 58, 0.77 | no effect |
+| 2.2uF | 2.2 uF electrolytic | at rest | | 0.90 | 0.48 / 0.61 | 102, 0.30 | |
+| 4.7uF | 4.7 uF electrolytic | at rest | | 0.80 | 0.47 / 0.55 | 20, 0.33 | p-p 4.8 mV |
+| 6.9uF | 2.2 + 4.7 uF | at rest | | 0.62 | 0.35 / 0.46 | 132, 0.21 | |
+| noCap | none | jog +2 mm/s | | 1.60 | 0.77 / 1.27 | 232, 0.57 | |
+| noCap | none | jog -2 mm/s | | 1.56 | 0.77 / 1.20 | 134, 0.58 | |
+| 4u7 | 4.7 uF + 10 nF | idle | | 0.76 | 0.46 / 0.59 | 26, 0.25 | |
+| 4u7 | 4.7 uF + 10 nF | jog +2 mm/s | | 3.42 | 0.43 / 0.53 | 4, 0.52 | rms is the pressure rising 23 mV/s while the piston compressed the gas |
+| 4u7 | 4.7 uF + 10 nF | pressure 0.5 MPa | | 0.80 | 0.41 / 0.60 | 18, 0.30 | holding at 0.41-0.43 MPa |
+
+The ADC step is 0.2 mV. No spectral line stands out in any capture: the
+noise is broadband, and neither jogging nor pressure control adds to it.
+Through the slave's median-5 and 20 ms filters it is 0.001 MPa rms bare
+and 0.0005 MPa with 4.7 uF, against the 0.1 MPa in-band threshold.
+Fitted: 4.7 uF electrolytic with 10 nF ceramic in parallel, corner 78 Hz,
+as the anti-alias for the 2 ms sampling. Sensor filter: 20 ms.
+
+Link during the runs (raw frames): exchange median 12.9 ms, p99 22.5 ms;
+longest gap between cycles 108 ms.
