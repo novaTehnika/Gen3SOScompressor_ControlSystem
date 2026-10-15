@@ -40,6 +40,13 @@ The slave ST is the single source of truth. `tools/st2m.py` translates it into O
 - st2m supports only the ST subset already used: assignments, IF/ELSIF/ELSE, FOR, RETURN, named-input FB calls, typed/TIME literals, 1-D arrays, ABS/SQRT/MIN/MAX/LIMIT, TON/R_TRIG/F_TRIG. It errors on anything else. If you use a new construct, extend st2m.
 - FB instances become structs, and inputs omitted from a call keep their previous value (IEC semantics). Generated lines carry `% :N` pointing back to the ST source line.
 
+### Slave → Python translation (`tools/st2py.py`)
+
+`python3 tools/st2py.py slave-src design/generated` translates every `FB_*.st` into a Python module for design studies (`design/generated/` is gitignored; never edit it by hand). It subclasses st2m's `Translator` and overrides only the target-language spellings, and it reads declarations the same way, so st2py and st2m must stay in step on the ST subset: a construct added to one needs the matching override in the other, and `tests/st2pyParity.py` runs both on the same input sequences and compares every variable.
+
+- Output: one `FB_<Name>.py` per block with `new_FB_<Name>()` (a `SimpleNamespace` holding every VAR_INPUT/VAR_OUTPUT/VAR at its header default) and `FB_<Name>(s, dt)` (one scan, mutates `s` in place, `dt` in seconds), plus `st_runtime.py` (enumerations as `E`, `TON`/`R_TRIG`/`F_TRIG`, helpers, struct constructors). Imports are flat, so put `design/generated` on `sys.path`.
+- Programs (`PRG_*`) are not translated, and blocks that reference `G_*` globals or I/O points are rejected. ST arrays must be 0-based and become lists.
+
 ### Slave structure
 
 - `PRG_Main.st` holds the central state machine (idle → drive reset/enable → brake release → operational modes → hold/deactivate, plus fault and recovery states). It calls every user FB exactly once at the end of the file.
@@ -63,6 +70,7 @@ The slave ST is the single source of truth. `tools/st2m.py` translates it into O
 - `smokeMasterStateMachine`: master state machine against a protocol-level stand-in slave (not the ST sim).
 - `closedLoopMasterSlave`: `masterStateMachine` against the generated slave in engineering units. The master steps every 25 ms, the exchange runs every 50 ms and the slave every 2 ms on a 1 ms tick.
 - `closedLoopModbusStep`: `masterStep` through the packed register vectors, including link loss on either side.
+- `st2pyParity.py` (Python, run by `run_all.sh`): every scalar-input function block translated by st2py and by st2m, driven with the same seeded random inputs; all variables must agree to 1e-9.
 
 ## Conventions
 
