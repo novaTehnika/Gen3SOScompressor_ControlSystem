@@ -163,6 +163,7 @@ sl.state = 0;  sl.t = 0;
 sl.hs = 0;     sl.tHs = 0;   sl.hsMode = 0;  sl.hsConf = 0;
 sl.mode = 0;
 sl.pos = 40;   sl.moving = 0;
+sl.posLimit = masterConfig().posMax + 5;   % the slave's soft limit lies outside the master's
 sl.faultCode = 0;
 sl.brake = 0;  sl.brakeCycles = 0;
 sl.rawMode = 0;    sl.tRawMode = 0;  sl.reqMode = 0;  sl.tReqMode = 0;
@@ -288,7 +289,7 @@ elseif sl.state == 3                                % operating
     end
     sl.pos = max(sl.pos + v * dt, 0);
     sl.moving = double(v ~= 0);
-    if sl.pos > 365
+    if sl.pos > sl.posLimit
         sl = slaveFault(sl, 3);
         next = 6;
     elseif meFell

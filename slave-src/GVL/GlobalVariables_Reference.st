@@ -269,7 +269,7 @@
      G_cfgDebounceTimeOvertravelPos: TIME := T#10MS   (* Positive overtravel standard debounce *)
 
      (* Analog input filter parameters (pressure channel) *)
-     G_cfgAnalogFilterTimeConst: TIME := T#50MS       (* Low-pass filter time constant *)
+     G_cfgAnalogFilterTimeConst: TIME := T#20MS       (* Low-pass filter time constant *)
      G_cfgAnalogMedianSize     : INT := 5             (* Median filter size (3 or 5) *)
 
 
