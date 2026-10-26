@@ -10,24 +10,31 @@ at the piston (`tauV`). The friction test is a separate bench.
 Everything is measured through the protocol the master already uses: the
 slave reports position, velocity, torque and pressure in IR11-20 every 50 ms
 (`docs/master/ModbusRegisterMap.md`). The drive lag alone needs the 2 ms
-scan, which an optional slave-side probe program provides, as the pressure
-noise bench did. Nothing in `slave-src/` changes.
+scan, which the friction bench's step probe (`bench/friction/slave/PRG_StepProbe.st`,
+already on the controller) provides. Nothing in `slave-src/` changes.
+
+This bench shares the friction bench's conventions: the same Modbus master
+pattern, the same log columns and capture format, the same `captures/`
+directory (`bench/friction/captures`) and the same slave program. Its run
+script differs in what the steps can do: ramps that end on a pressure,
+command changes within one mode session without a stop, and pressure and
+position guards.
 
 | File | Contents |
 |------|----------|
-| `charRun.m` | The master for a run: drives a path of steps through `masterStep` as the shell does, logs the feedback every 50 ms, stops the axis when the pressure or the position leaves the envelope, and reads the axis probe between exchanges |
-| `charConfig.m` | Chamber and outlet geometry, the guards, the probe registers and the slave settings read from `slave-src/GVL/GlobalVariables_Reference.st` |
-| `charLink.m` | Raw Modbus TCP link over `tcpclient` (FC04, FC06, FC16), reusable by other benches |
+| `charRun.m` | The master for a run: drives a path of steps through `masterStep` as the shell does, logs every exchange in `frictionRun`'s format, stops the axis when the pressure or the position leaves the envelope, and reads the step probe between exchanges |
+| `charConfig.m` | Chamber and outlet geometry, the pressure limits and the slave settings read from `slave-src/GVL/GlobalVariables_Reference.st` |
+| `charLink.m` | Raw Modbus TCP link over `tcpclient` (FC04, FC06, FC16) |
 | `charBulkModulus.m` | Test 1: K from slow ramps, with a bound on residual gas and, from two fills, the split between liquid and series compliance |
 | `charOrificeFlow.m` | Test 2: Cd and the square-root law from deliveries at held pressure, with the collected-volume check |
-| `charDriveLag.m` | Test 3: tauV and dead time from the probe captures, the lag at the piston from the pressure channel, or an estimate from the 50 ms log |
-| `charReadRun.m`, `charReadCapture.m` | Readers for the two CSV formats |
-| `slave/PRG_AxisProbe.st` | Optional slave program: 250-scan capture of the velocity command and feedback, torque and pressure around a command change |
-| `captures/` | Logs (gitignored) |
+| `charDriveLag.m` | Test 3: tauV and dead time from the step probe captures, and from the 50 ms log the lag plus dead time at the motor and, through the pressure, at the piston |
+| `charReadCsv.m` | Reader for the logs and captures of either bench |
 
-`tests/charRunSim.m` runs `charRun` and the fits against the simulated slave,
-`tests/charFitsSynthetic.m` the fits on synthetic logs with known parameters;
-`tests/run_all.sh` runs both.
+`tests/charRunSim.m` runs `charRun` and the fits against the simulated slave
+(through the friction bench's `fakeProbeLink`), `tests/charFitsSynthetic.m`
+the fits on synthetic logs with known parameters; `tests/run_all.sh` runs
+both. `frictionRun`'s logs can be given to the fits too: a delivery logged
+for the friction bench is also an orifice flow point.
 
 ## 1. Setup
 
@@ -42,31 +49,26 @@ relay.
 
 ```matlab
 cd bench/characterisation
-addpath ../pressure                      % SafetyHold.slx lives there
+addpath ../friction ../pressure          % frictionBenchConfig, SafetyHold.slx
 r = charRun('label', path);              % see sections 3 to 5 for the paths
 ```
 
 The run ends with the axis stopped, prints a table of the steps and saves
-`captures/<label>_run_<timestamp>.csv` (and one capture file per probe
-capture). Ctrl-C stops the axis the same way. The guards are
-`charConfig.pressureStop` (11.0 MPa, below the 12 MPa ceiling) and the
-position band inside the slave's soft limits; `opts.pressureStop`,
-`opts.posStop` and `opts.posMin` override them for a run and cannot be set
-above the ceiling.
+`../friction/captures/<label>_char_<timestamp>.csv` (columns as in
+`bench/friction/README.md` section 3) and one
+`<label>_cap_<n>_<step>_<timestamp>.csv` per probe capture (columns `t`,
+`vCmd`, `velocity`, `torque`, `position`, as the friction bench's captures).
+Ctrl-C stops the axis the same way. The guards are `charConfig.pressureStop`
+(11.0 MPa, below the 12 MPa ceiling) and the position band inside the
+slave's soft limits; `opts.pressureStop`, `opts.posStop` and `opts.posMin`
+override them for a run and cannot be set above the ceiling.
 
 ### Slave
 
-No change for tests 1 and 2. For test 3 at full resolution, load
-`slave/PRG_AxisProbe.st` as the pressure noise bench loaded
-`PRG_PressureProbe`: declare the globals in its header (holding register
-HR101 in the FC#03,06,16 group, input registers IR101-104 and the four
-`ARRAY[0..249] OF INT` from IR121 in the FC#04 group), **enlarge the FC#04
-input register group to at least 1120 registers** (byte range `%QB73792` to
-`%QB76031`), assign the program to the 2 ms task beside `PRG_Main`, compile,
-download. It reads globals only. It uses the same probe registers as
-`PRG_PressureProbe` and `PRG_ModbusBench`, so only one of the three is loaded
-at a time. Without it, run test 3 anyway: the 50 ms log gives the lag to
-about 25 ms.
+No change for tests 1 and 2. Test 3 uses `PRG_StepProbe`, set up as in
+`bench/friction/README.md` section 4.5; `charRun` arms it before every
+command change in a velocity session when `opts.probe` is true. Without it,
+run test 3 anyway: the 50 ms log gives the lag to about 25 ms.
 
 ### Settings that matter
 
@@ -125,8 +127,8 @@ path = {{'ramp',  0.1, 10.0, 90}, {'dwell', 2}, ...     % up to 10 MPa at 0.1 mm
         {'ramp',  0.1, 10.0, 90}, {'dwell', 2}, ...     % are each covered up and
         {'ramp', -0.1,  6.5, 90}, {'dwell', 2}, ...     % down
         {'ramp',  0.1, 10.0, 90}, {'dwell', 2}, {'ramp', -0.1, 3.0, 90}};
-r = charRun('K300', path);                  % add opts.probe = true with the axis probe loaded
-rk = charBulkModulus(r.runFile, struct('deadVolume_mL', 25, 'fillVolume_mL', 300));
+r = charRun('K300', path);                  % add opts.probe = true with the step probe loaded
+rk = charBulkModulus(r.file, struct('deadVolume_mL', 25, 'fillVolume_mL', 300));
 ```
 
 Start the path from about 2.5 MPa (reach it with a `pressure` step or a
@@ -208,7 +210,8 @@ opening from the velocity and the pressure dip). Refill and repeat at 7 and
 4 MPa.
 
 ```matlab
-rq = charOrificeFlow({'captures/Q4_run_...csv', 'captures/Q7_run_...csv', 'captures/Q10_run_...csv'}, ...
+rq = charOrificeFlow({'../friction/captures/Q4_char_...csv', '../friction/captures/Q7_char_...csv', ...
+    '../friction/captures/Q10_char_...csv'}, ...
     struct('K_Pa', rk.K_Pa, 'deadVolume_mL', 25, 'fillVolume_mL', 300, 'collected_mL', [m4 m7 m10] / 1.005));
 ```
 
@@ -250,75 +253,68 @@ The slave's velocity feedback (`G_sysActualVelocity`, from
 the motor encoder, differentiated by the drive and scaled through the
 70:1 gearbox and the 5.08 mm lead. It measures the motor, so gearbox lost
 motion and screw compliance are invisible to it. The test therefore has
-two parts: the motor-side lag from the velocity feedback, and the
-piston-side lag from the pressure, which only the piston moves.
+two parts: the motor-side lag from the velocity feedback at the scan rate,
+and the piston-side lag from the pressure, which only the piston moves.
 
-**Unpressurised** (the chamber drained or the fill port open, so the piston
-meets no load; the valve must not be the only outlet, since 2 mm/s would
-push 7 mL/s through the orifices and build pressure):
+**Motor side.** The friction bench measures this (`bench/friction/README.md`
+section 4.5): `frictionRun(label, 'steps')` with `PRG_StepProbe` loaded and
+`stepResponseFit` on the captures. `charDriveLag` reads the same captures
+and fits the same model by least squares, so either script gives tauV at
+the motor; they should agree within a millisecond or two. Keep the step
+size at or below 0.2 s times the slew (`G_cfgDirectCtrlAccel`: 1 mm/s at
+5 mm/s^2) so the ramp fits in the capture, and hold each command at least
+3 s so the capture (1 s) and its readout (1 s) finish before the next
+change. Raising the slew to the pressure-mode values (50 mm/s^2) for the
+test separates the lag from the ramp more sharply.
 
-```matlab
-opts.probe = true;                                   % PRG_AxisProbe loaded
-path = {{'velstep', [1 0 -1 0 1 0 -1 0 2 0 -2 0], 2 * ones(1, 12)}};
-r = charRun('lag_dry', path, opts);
-rl = charDriveLag(r.files);                          % the capture files
-```
-
-Each command change arms the probe one exchange before the reference goes
-out; the probe triggers on the change of `G_sysCommandedVelocity` (the
-value `PRG_Main` hands to `Y_DirectControl`, before the drive's slew) and
-keeps 50 scans before it and 200 after. Hold each command at least 2 s so
-the capture (0.5 s) and its readout (0.4 s) finish. Keep the step size at
-or below 0.2 s times the slew (`G_cfgDirectCtrlAccel`: 1 mm/s at
-5 mm/s^2, 2 mm/s at 10 mm/s^2) so the ramp fits in the capture; raising
-the slew to the pressure-mode values (50 mm/s^2) for the test separates
-the lag from the ramp more sharply. Steps about a running velocity
-(`[1 2 1 0]`) avoid the stiction at zero speed.
-
-The fit slews the recorded command at the GVL limits, delays it and
-passes it through a first-order lag, and adjusts the lag and the dead time
-to the feedback (`opts.fitAccel` also scales the slew, as a check that the
-drive uses the configured limits). It prints per capture tauV, the dead
-time, the residual, and the model-free times at which the feedback reaches
-10 % and 63 % of the step.
-
-**Pressurised** (liquid-only chamber at 3 to 5 MPa, from section 2): small
+**Piston side** (liquid-only chamber at 3 to 5 MPa, from section 2): small
 steps, because at 11 MPa/mm a 0.2 mm/s step for 0.3 s moves the pressure
 by 0.7 MPa:
 
 ```matlab
+opts.probe = true;                                   % PRG_StepProbe loaded
 path = {{'ramp', 0.1, 4.0, 60}, {'dwell', 3}, ...
         {'velstep', [0.2 0 -0.2 0 0.2 0 -0.2 0], [0.3 3 0.3 3 0.3 3 0.3 3]}};
 r = charRun('lag_wet', path, opts);
-rl = charDriveLag(r.files);
+rl = charDriveLag([r.capFiles {r.file}]);
 ```
 
-When a capture's pressure moves by more than 0.1 MPa the script also fits
-the pressure channel: the same lag model for the piston velocity,
-integrated at a stiffness k, then the slave's median filter (two scans for
-a smooth signal), the low-pass (`G_cfgAnalogFilterTimeConst`, 20 ms on the
-machine, 50 ms earlier) and the two-scan pipeline, eqs. 16 to 18. The
-pressure lags the piston by the filter, so the filter constant must be the
-one loaded; the fit returns tauP, the dead time and k (which should match
-test 1's stiffness). The `ramp` starts in a velocity session are captured
-too, so the K runs of test 1 with `opts.probe = true` already give
-pressurised lag data.
+`PRG_StepProbe` does not record the pressure, so the piston-side lag comes
+from the 50 ms log: for every velocity step whose pressure moves by more
+than 0.1 MPa, the script fits the pressure column to the lag model
+integrated at the step's own stiffness (its pressure change over its
+position change) and passed through the slave's median filter (two scans
+for a smooth signal), the low-pass (`G_cfgAnalogFilterTimeConst`, 20 ms on
+the machine, 50 ms earlier) and the two-scan pipeline, eqs. 16 to 18. The
+filter constant must be the one loaded. The sample period limits the
+result, lag plus dead time, to about 25 ms; the `ramp` starts of test 1
+are pressurised steps too, so the K runs already give these points. A
+capture with the pressure in it would resolve this at 2 ms: a fifth
+array (`G_sysActualPressure`, INT in 0.001 MPa) added to `PRG_StepProbe`
+is the change, if the piston-side lag turns out to matter.
+
+The fit slews the command at the GVL limits, delays it and passes it
+through a first-order lag, and adjusts the lag and the dead time to the
+data (`opts.fitAccel` also scales the slew, as a check that the drive uses
+the configured limits). It prints per capture tauV, the dead time, the
+residual, and the model-free times at which the feedback reaches 10 % and
+63 % of the step; per log the velocity and pressure ensembles.
 
 **Expected values.** The design study assumed 20 ms and studied 5 to
 50 ms. A Sigma-7 velocity loop tuned for this load is typically 10 to
 30 ms; the dead time between `G_sysCommandedVelocity` and the feedback is
 two to four scans (Mechatrolink out and back, plus the task order) and
 should be below 20 ms. The piston-side lag can exceed the motor-side lag
-when the chamber is stiff; a difference above 10 ms is worth carrying into
-the model as tauV. Accept a residual below 5 % of the step, a spread of
-tauV across captures below 30 %, up and down steps within 20 % of each
-other.
+when the chamber is stiff; a difference above the 25 ms the log can
+resolve is worth carrying into the model as tauV. Accept a capture
+residual below 5 % of the step, a spread of tauV across captures below
+30 %, up and down steps within 20 % of each other.
 
-**Without the probe** the 50 ms log still has the command (the logged
-reference, sent in the next exchange) and the feedback. `charDriveLag` on
-the run file fits every step as an ensemble and returns the lag plus dead
-time to about 25 ms, enough to say whether 20 ms is the right order but not
-to separate the two.
+**Without the probe** the 50 ms log still has the command (the reference
+as sent) and the feedback. `charDriveLag` on the log alone fits every
+step as an ensemble and returns the lag plus dead time to about 25 ms,
+enough to say whether 20 ms is the right order but not to separate the
+two.
 
 ## 6. Carrying the results into the model
 
@@ -329,7 +325,7 @@ to separate the two.
 | `K` | `charBulkModulus` (`r.K_Pa`) | Pa |
 | `Vl0` | the fill of the runs (`r` prints it) | m^3 |
 | `Cd` | `charOrificeFlow` (`r.Cd`) | - |
-| `tauV` | `charDriveLag` (`r.tauV_s`, the piston-side value when measured) | s |
+| `tauV` | `charDriveLag` (`r.tauV_s` at the motor; `r.tauP_s` at the piston when it exceeds it by more than the log resolves) or `stepResponseFit` | s |
 
 `V_dead` is not a `Params` field; the delivery scenario stops at `V_empty`.
 Record the measured dead volume with the results so that the stroke checks

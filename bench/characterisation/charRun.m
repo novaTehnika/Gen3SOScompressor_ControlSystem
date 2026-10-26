@@ -4,10 +4,12 @@ function r = charRun(label, path, opts)
 %   The script is the master for the run: one Modbus TCP connection carries
 %   the protocol exchange (HR1-6 out, IR1-20 back, every 50 ms, sequenced by
 %   masterStep as in the shell) and, between exchanges, the registers of the
-%   optional axis probe (slave/PRG_AxisProbe.st), which captures the
-%   velocity command and feedback at the 2 ms scan. The shell model must not
-%   be running: a second client stalls the shell's exchange and the slave
-%   raises FAULT_COMM while motion is commanded. The safety relay is held by
+%   friction bench's step probe (bench/friction/slave/PRG_StepProbe.st),
+%   which captures the velocity command and feedback at the 2 ms scan. The
+%   log and the captures are in frictionRun's formats, so the fits of both
+%   benches read either. The shell model must not be running: a second
+%   client stalls the shell's exchange and the slave raises FAULT_COMM while
+%   motion is commanded. The safety relay is held by
 %   bench/pressure/SafetyHold.slx (buildSafetyHold), started and stopped here.
 %
 %   r = charRun(label, path)
@@ -23,8 +25,9 @@ function r = charRun(label, path, opts)
 %     {'dwell', seconds}                velocity mode, zero command
 %     {'velstep', [v1 v2 ...], [s1 s2 ...]}
 %                                       velocity mode; each command held for
-%                                       its seconds, the axis probe armed
-%                                       before each change
+%                                       its seconds, the step probe armed
+%                                       before each change (a capture and
+%                                       its readout take 2 s)
 %     {'position', mm, seconds}         position mode: move, then hold
 %     {'hold', seconds}                 position mode at the position where
 %                                       the step starts
@@ -32,6 +35,8 @@ function r = charRun(label, path, opts)
 %   Consecutive steps of the same mode (jog, ramp, dwell, velstep; position,
 %   hold; pressure) run in one session: the command changes without a stop
 %   and a handshake in between. A step of another mode stops the axis first.
+%   A velocity session is entered at rest and its first command sent once
+%   the mode runs, so the log shows every command as a step.
 %
 %   Guards, every master step: the run stops (MotionEnable low, mode 0) when
 %   the pressure exceeds opts.pressureStop, the position leaves
@@ -43,24 +48,28 @@ function r = charRun(label, path, opts)
 %   opts.pressureStop  MPa gauge (charConfig.pressureStop)
 %   opts.posStop, opts.posMin
 %                      mm (charConfig: inside the slave's soft limits)
-%   opts.probe         true to arm and read the axis probe (default false)
+%   opts.probe         true to arm and read the step probe (default false)
 %   opts.safetyModel   model that holds the safety relay ('SafetyHold';
 %                      '' when the relay is held another way)
-%   opts.saveDir       where the CSV files go (default captures/)
+%   opts.saveDir       where the CSV files go (default bench/friction/captures)
 %   opts.link, opts.now, opts.wait
 %                      transport and clock, replaced by the simulator test
 %
-%   Files, in opts.saveDir:
-%     <label>_run_<timestamp>.csv    t, position, velocity, torque, MPa,
-%                                    reference, modeCode, motionEnable,
-%                                    status, inBand, step, exchangeMs
-%     <label>_<n>_<stepname>_<timestamp>.csv
-%                                    axis probe capture n: t (0 at the
-%                                    scan the command changed), velocity,
-%                                    command, torque, MPa, every 2 ms
-%   r holds the same (r.runLog, r.captures), the step table, r.abort and
-%   the file names. charBulkModulus, charOrificeFlow and charDriveLag read
-%   these files.
+%   Files, in opts.saveDir, beside the friction bench's logs:
+%     <label>_char_<timestamp>.csv   one row per exchange: t, step, status
+%                                    (masterStateMachine code), mode (slave
+%                                    mode of the step), ref (HR5-6 as sent),
+%                                    position, velocity, torque, pressure
+%                                    (MPa gauge), inMotion, inBand,
+%                                    exchangeMs
+%     <label>_cap_<n>_<stepname>_<timestamp>.csv
+%                                    step probe capture n: 500 scans from
+%                                    the arm, t, vCmd, velocity, torque,
+%                                    position; the command changes about
+%                                    one exchange in
+%   r holds the same (r.runLog, r.captures), the step table, r.abort,
+%   r.file and r.capFiles. charBulkModulus, charOrificeFlow, charDriveLag
+%   and the friction bench's fits read these files.
 
 if nargin < 1 || isempty(label)
     label = 'run';
@@ -72,18 +81,21 @@ if nargin < 3
     opts = struct();
 end
 here = fileparts(mfilename('fullpath'));
-addpath(fullfile(here, '..', '..', 'master-src', 'logic'), fullfile(here, '..', 'modbus'));
+addpath(fullfile(here, '..', '..', 'master-src', 'logic'), fullfile(here, '..', 'modbus'), ...
+    fullfile(here, '..', 'friction'));
 ccfg = charConfig();
 cfg = masterConfig();
 map = modbusMap();
-pr = ccfg.probe;
+pr = frictionBenchConfig().probe;
+pr.nRegs = 5 * pr.nScan;        % three INT arrays and one DINT array
+pr.scan = ccfg.scanTime;
 
 opts = withDefault(opts, 'pressureStop', ccfg.pressureStop);
 opts = withDefault(opts, 'posStop', ccfg.posStop);
 opts = withDefault(opts, 'posMin', ccfg.posMin);
 opts = withDefault(opts, 'probe', false);
 opts = withDefault(opts, 'safetyModel', 'SafetyHold');
-opts = withDefault(opts, 'saveDir', fullfile(here, 'captures'));
+opts = withDefault(opts, 'saveDir', fullfile(here, '..', 'friction', 'captures'));
 if ~isfield(opts, 'now')
     t0 = tic;
     opts.now = @() toc(t0);
@@ -113,7 +125,7 @@ app = struct('op', C.OP_STOP, 'cmdSeq', 0, 'targetPosition', 0, ...
 mbWrite = zeros(1, map.nWrite);
 mbRead = zeros(1, map.nRead);
 m = struct('statusCode', C.STATUS_LINK_WAIT, 'state', 0, 'position', 0, ...
-    'velocity', 0, 'pressure', 0, 'torque', 0, 'inBand', 0, 'faultCode', 0, 'linkOk', 0);
+    'velocity', 0, 'pressure', 0, 'torque', 0, 'inMotion', 0, 'inBand', 0, 'faultCode', 0, 'linkOk', 0);
 
 seq.idx = 0;            % current step, 0 before the first
 seq.phase = 'wait';     % wait, next, enter, run, stop, finish
@@ -121,6 +133,7 @@ seq.tPhase = 0;
 seq.sub = 0;            % velstep sub-step
 seq.tSub = 0;
 seq.armPending = false; % reference change waits one cycle for the probe arm
+seq.firstPending = false; % a velocity session's first command waits for the mode to run
 seq.abort = '';
 
 probe.enabled = opts.probe;
@@ -130,7 +143,8 @@ probe.armValue = 0;
 probe.pending = false;
 probe.tArm = 0;
 probe.chunk = 0;
-probe.regs = zeros(1, 4 * pr.nSamples);
+probe.regs = zeros(1, pr.nRegs);
+probe.pos0 = 0;
 probe.failures = 0;
 probe.step = 0;
 
@@ -158,6 +172,7 @@ while true
         end
     end
     exchangeMs = toc(tx) * 1000;
+    ref = modbusUnpack(mbWrite(map.hr.reference), mbWrite(map.hr.reference + 1));   % as sent this exchange
     [mbWrite, m] = stepMaster(mbRead, app, map, cfg);
 
     % --- Guards and path sequencing on the master's status ------------------
@@ -168,10 +183,13 @@ while true
         probe.step = seq.idx;
         seq.armRequest = false;
     end
-    runLog(end + 1, :) = [tNow m.position m.velocity m.torque m.pressure ...
-        modbusUnpack(mbWrite(map.hr.reference), mbWrite(map.hr.reference + 1)) ...
-        mbWrite(map.hr.modeCode) mbWrite(map.hr.motionEnable) m.statusCode m.inBand ...
-        seq.idx exchangeMs];
+    if seq.idx >= 1 && seq.idx <= nSteps
+        mode = slaveModeOf(steps(seq.idx).op);
+    else
+        mode = 0;
+    end
+    runLog(end + 1, :) = [tNow seq.idx m.statusCode mode ref m.position m.velocity ...
+        m.torque m.pressure m.inMotion m.inBand exchangeMs];
 
     if strcmp(seq.phase, 'finish') && tNow - seq.tPhase > 0.2 && ...
             (m.statusCode == C.STATUS_IDLE || any(m.statusCode == C.abortStatus) || ...
@@ -181,7 +199,7 @@ while true
 
     % --- One probe transaction in the gap ----------------------------------
     if probe.enabled
-        [probe, captures] = probeSlot(probe, link, pr, captures, tNow, ccfg.scanTime);
+        [probe, captures] = probeSlot(probe, link, pr, captures, tNow);
     end
 
     % --- Second master step of the cycle, registers held -------------------
@@ -196,9 +214,11 @@ r.steps = steps;
 r.abort = seq.abort;
 r.runLog = runLog;
 r.captures = captures;
+r.columns = {'t', 'step', 'status', 'mode', 'ref', 'position', 'velocity', ...
+    'torque', 'pressure', 'inMotion', 'inBand', 'exchangeMs'};
 r.exchangeFailures = exchangeFailures;
 r.probeFailures = probe.failures;
-r.files = {};
+r.capFiles = {};
 if ~isempty(seq.abort)
     fprintf('\nRUN STOPPED: %s; master status %d, fault code %d\n', seq.abort, ...
         m.statusCode, m.faultCode);
@@ -209,36 +229,35 @@ end
 stamp = datestr(now, 'yyyymmdd_HHMMSS');
 for c = 1:numel(captures)
     cap = captures{c};
-    fname = fullfile(opts.saveDir, sprintf('%s_%d_%s_%s.csv', label, c, ...
+    fname = fullfile(opts.saveDir, sprintf('%s_cap_%d_%s_%s.csv', label, c, ...
         steps(max(cap.step, 1)).name, stamp));
     fid = fopen(fname, 'w');
-    fprintf(fid, 't,velocity,command,torque,MPa\n');
-    fprintf(fid, '%.4f,%.4f,%.4f,%.2f,%.4f\n', [cap.t(:) cap.velocity(:) cap.command(:) ...
-        cap.torque(:) cap.pressure(:)]');
+    fprintf(fid, 't,vCmd,velocity,torque,position\n');
+    fprintf(fid, '%.3f,%.3f,%.3f,%.2f,%.5f\n', cap.data');
     fclose(fid);
     cap.file = fname;
     captures{c} = cap;
-    r.files{end + 1} = fname;
+    r.capFiles{end + 1} = fname;
 end
 r.captures = captures;
-fname = fullfile(opts.saveDir, sprintf('%s_run_%s.csv', label, stamp));
+fname = fullfile(opts.saveDir, sprintf('%s_char_%s.csv', label, stamp));
 fid = fopen(fname, 'w');
-fprintf(fid, 't,position,velocity,torque,MPa,reference,modeCode,motionEnable,status,inBand,step,exchangeMs\n');
-fprintf(fid, '%.3f,%.4f,%.4f,%.2f,%.4f,%.4f,%d,%d,%d,%d,%d,%.1f\n', runLog');
+fprintf(fid, '%s\n', strjoin(r.columns, ','));
+fprintf(fid, '%.3f,%d,%d,%d,%.4f,%.4f,%.4f,%.3f,%.4f,%d,%d,%.1f\n', runLog');
 fclose(fid);
-r.runFile = fname;
+r.file = fname;
 
 fprintf('\n%-4s %-9s %-18s %8s %9s %9s %9s %9s\n', 'step', 'type', 'target', 'seconds', ...
     'x start', 'x end', 'P start', 'P end');
 for s = 1:nSteps
-    rows = runLog(runLog(:, 11) == s, :);
+    rows = runLog(runLog(:, 2) == s, :);
     if isempty(rows)
         fprintf('%-4d %-9s %-18s %8s\n', s, steps(s).name, steps(s).targetText, 'not run');
         continue;
     end
     fprintf('%-4d %-9s %-18s %8.1f %6.3f mm %6.3f mm %6.3f MPa %6.3f MPa\n', s, steps(s).name, ...
-        steps(s).targetText, rows(end, 1) - rows(1, 1), rows(1, 2), rows(end, 2), ...
-        rows(1, 5), rows(end, 5));
+        steps(s).targetText, rows(end, 1) - rows(1, 1), rows(1, 6), rows(end, 6), ...
+        rows(1, 9), rows(end, 9));
 end
 fprintf('%d captures, exchange failures %d, probe failures %d, exchange p99 %.1f ms\n', ...
     numel(captures), exchangeFailures, probe.failures, prctileOf(runLog(:, 12), 99));
@@ -256,7 +275,19 @@ mbWrite = double(mbWrite(:)');
 m.pressure = (pAtm - cfg.atmAmbient) / cfg.atmPerMPa;      % MPa gauge, as the slave reports it
 r = double(mbRead(:)');
 m.torque = modbusUnpack(r(map.ir.torque), r(map.ir.torque + 1));
+m.inMotion = double(r(map.ir.inMotion) ~= 0);
 m.inBand = double(r(map.ir.performanceStatus) ~= 0);
+end
+
+
+function mode = slaveModeOf(op)
+% Slave mode code of a step's master operation, for the log.
+switch op
+    case 2, mode = 2;
+    case 3, mode = 3;
+    case 4, mode = 7;
+    otherwise, mode = 0;
+end
 end
 
 
@@ -336,11 +367,20 @@ switch seq.phase
         end
         s = steps(seq.idx);
         seq.sub = 1;
+        seq.firstPending = false;
         if ~chained
             app.op = s.op;
             app.cmdSeq = app.cmdSeq + 1;
         end
-        [app, seq] = applyCommand(app, seq, s, 1, m, probe, cfg);
+        if ~chained && s.op == C.OP_JOG
+            % A velocity session is entered at rest; its first command goes
+            % out once the mode runs, so a capture armed for it sees it.
+            app.targetVelocity = 0;
+            app.jogDirection = 0;
+            seq.firstPending = true;
+        else
+            [app, seq] = applyCommand(app, seq, s, 1, m, probe, cfg);
+        end
         seq.phase = 'enter';
         seq.tPhase = tNow;
         fprintf('  step %d: %s %s%s\n', seq.idx, s.name, s.targetText, chainText(chained));
@@ -361,6 +401,10 @@ switch seq.phase
             seq.phase = 'run';
             seq.tPhase = tNow;
             seq.tSub = tNow;
+            if seq.firstPending
+                seq.firstPending = false;
+                [app, seq] = applyCommand(app, seq, s, 1, m, probe, cfg);
+            end
         elseif inPhase > limit
             seq.abort = sprintf('step %d (%s) not running after %.0f s (status %d)', ...
                 seq.idx, s.name, inPhase, m.statusCode);
@@ -481,9 +525,10 @@ end
 end
 
 
-function [probe, captures] = probeSlot(probe, link, pr, captures, tNow, Ts)
+function [probe, captures] = probeSlot(probe, link, pr, captures, tNow)
 % One probe transaction per cycle: arm when asked, otherwise poll the
-% state and fetch the rings in 125-register chunks once a capture is ready.
+% state and read the capture block by block once it is ready, as
+% frictionRun does with the same program.
 if probe.pending && tNow - probe.tArm > pr.timeout
     fprintf('  probe armed at %.2f s not ready after %g s: skipped\n', probe.tArm, pr.timeout);
     probe.pending = false;
@@ -501,21 +546,24 @@ try
     end
     switch probe.next
         case 'poll'
-            s = link.read(pr.irState, 4);
-            if probe.pending && s(1) == 3 && s(2) == probe.armValue
+            s = link.read(pr.irState, 5);
+            if probe.pending && s(1) == 2 && s(2) == probe.armValue
+                probe.pos0 = modbusUnpack(s(4), s(5));
                 probe.next = 'fetch';
                 probe.chunk = 0;
-                probe.trigIdx = s(3);
-                probe.count = s(4);
             end
         case 'fetch'
-            nTotal = 4 * pr.nSamples;
-            start = probe.chunk * 125;
-            n = min(125, nTotal - start);
-            probe.regs(start + 1:start + n) = link.read(pr.irSamples + start, n);
+            start = probe.chunk * pr.blockRegs;
+            n = min(pr.blockRegs, pr.nRegs - start);
+            probe.regs(start + 1:start + n) = link.read(pr.irFirst + start, n);
             probe.chunk = probe.chunk + 1;
-            if probe.chunk * 125 >= nTotal
-                captures{end + 1} = unroll(probe, pr, Ts);
+            if start + n >= pr.nRegs
+                cap.step = probe.step;
+                cap.tArm = probe.tArm;
+                cap.tRead = tNow;
+                cap.pos0 = probe.pos0;
+                cap.data = decodeCapture(probe.regs, pr, probe.pos0);
+                captures{end + 1} = cap;
                 probe.pending = false;
                 probe.next = 'poll';
                 fprintf('  capture %d taken (armed at %.2f s, step %d)\n', numel(captures), ...
@@ -531,24 +579,25 @@ end
 end
 
 
-function cap = unroll(probe, pr, Ts)
-% Order the four rings from the oldest sample, with t = 0 at the trigger
-% scan (the first scan in which the changed command was visible).
-N = pr.nSamples;
-if probe.count ~= N
-    warning('charRun:ring', 'probe ring length %d, expected %d', probe.count, N);
+function data = decodeCapture(regs, pr, pos0)
+% The four arrays of PRG_StepProbe as [t vCmd velocity torque position].
+N = pr.nScan;
+vCmd = int16Of(regs(1:N)) / pr.velScale;
+vel = int16Of(regs(N + 1:2 * N)) / pr.velScale;
+trq = int16Of(regs(2 * N + 1:3 * N)) / pr.trqScale;
+w = regs(3 * N + 1:5 * N);
+lo = w(1:2:end);
+hi = w(2:2:end);
+pos = double(typecast(uint32(lo + 65536 * hi), 'int32')) / pr.posScale + pos0;
+t = (0:N - 1)' * pr.scan;
+data = [t vCmd(:) vel(:) trq(:) pos(:)];
 end
-order = mod(probe.trigIdx - pr.preTrigger + (0:N - 1), N) + 1;
-raw = reshape(probe.regs, N, 4);
-raw(raw > 32767) = raw(raw > 32767) - 65536;          % INT registers
-raw = raw(order, :);
-cap.step = probe.step;
-cap.tArm = probe.tArm;
-cap.t = ((0:N - 1)' - pr.preTrigger) * Ts;
-cap.velocity = raw(:, 1) / pr.scale(1);
-cap.command  = raw(:, 2) / pr.scale(2);
-cap.torque   = raw(:, 3) / pr.scale(3);
-cap.pressure = raw(:, 4) / pr.scale(4);
+
+
+function x = int16Of(w)
+% Signed value of 16-bit registers.
+x = double(w);
+x(x >= 32768) = x(x >= 32768) - 65536;
 end
 
 

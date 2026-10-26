@@ -1,6 +1,6 @@
 function r = charOrificeFlow(files, opts)
 %CHARORIFICEFLOW Orifice bank discharge coefficient Cd from deliveries at a
-%   held pressure logged by charRun (README section 4).
+%   held pressure logged by frictionRun (README section 4).
 %
 %   r = charOrificeFlow(file)
 %   r = charOrificeFlow({file1, file2, ...}, opts)
@@ -74,9 +74,9 @@ win = struct('file', {}, 'step', {}, 't1', {}, 't2', {}, 'P_MPa', {}, 'Q_mL_s', 
     'v_mm_s', {}, 'Cd', {}, 'dPdt', {}, 'sub', {});
 grav = struct('file', {}, 'collected_mL', {}, 'predicted_mL', {}, 'ratio', {});
 for f = 1:numel(files)
-    d = charReadRun(files{f});
+    d = charReadCsv(files{f});
     name = shortName(files{f});
-    inP = d.modeCode == 7 & d.motionEnable == 1 & d.status == 5;
+    inP = d.mode == 7 & d.status == 5;
     steps = unique(d.step(inP));
     for st = steps'
         rows = find(inP & d.step == st);

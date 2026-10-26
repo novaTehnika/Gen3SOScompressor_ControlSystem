@@ -1,11 +1,11 @@
 function r = charBulkModulus(files, opts)
 %CHARBULKMODULUS Effective bulk modulus K of the saline-filled chamber from
-%   slow constant-velocity ramps logged by charRun (README section 3).
+%   slow constant-velocity ramps logged by frictionRun (README section 3).
 %
 %   r = charBulkModulus(file)
 %   r = charBulkModulus({file1, file2, ...}, opts)
 %
-%   Each ramp segment (one 'ramp' step, constant command, pressure inside
+%   Each ramp segment (one command of a 'ramps' step, pressure inside
 %   opts.pressureRange) is fitted as x(P) = x0 + c1 (P - P0) + c2 g(P),
 %   with g(P) = 1/(P0 + Patm) - 1/(P + Patm). A liquid of bulk modulus K
 %   gives c1 = V / (K A); an undissolved gas volume Vg at P0 gives
@@ -74,16 +74,16 @@ seg = struct('file', {}, 'step', {}, 'dir', {}, 'Pmin', {}, 'Pmax', {}, 'xMean',
     'V_mL', {}, 'dPdx', {}, 'K_lin_GPa', {}, 'K_liq_GPa', {}, 'Vg_mL', {}, ...
     'residual_MPa', {}, 'residual_x_mm', {}, 'n', {}, 'rate_MPa_s', {});
 for f = 1:numel(files)
-    d = charReadRun(files{f});
+    d = charReadCsv(files{f});
     if isfield(opts, 'fillVolume_mL')
         fill = opts.fillVolume_mL(min(f, numel(opts.fillVolume_mL))) * 1000;    % mm^3
     else
         fill = NaN;
     end
-    inVel = d.modeCode == 3 & d.motionEnable == 1 & d.status == 4 & d.reference ~= 0;
-    keys = unique([d.step(inVel) sign(d.reference(inVel))], 'rows');
+    inVel = d.mode == 3 & d.status == 4 & d.ref ~= 0;
+    keys = unique([d.step(inVel) sign(d.ref(inVel))], 'rows');
     for k = 1:size(keys, 1)
-        rows = find(inVel & d.step == keys(k, 1) & sign(d.reference) == keys(k, 2));
+        rows = find(inVel & d.step == keys(k, 1) & sign(d.ref) == keys(k, 2));
         t0 = d.t(rows(1));
         rows = rows(d.t(rows) >= t0 + opts.skip & abs(d.velocity(rows)) >= opts.minSpeed & ...
             d.pressure(rows) >= opts.pressureRange(1) & d.pressure(rows) <= opts.pressureRange(2));

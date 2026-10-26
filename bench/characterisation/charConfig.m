@@ -1,7 +1,7 @@
 function cfg = charConfig()
 %CHARCONFIG Constants for the pressure loop characterisation bench: the
-%   chamber and outlet geometry the fits need, the run guards, the axis
-%   probe registers and the slave settings read from the GVL reference.
+%   chamber and outlet geometry the fits need, the pressure limits for the
+%   runs and the slave settings read from the GVL reference.
 %
 %   Geometry comes from masterConfig (bore, end of travel, dead volume) so
 %   the bench and the operator app agree. The dead volume there is a
@@ -30,9 +30,9 @@ cfg.orificeArea_m2  = cfg.nOrifice * pi / 4 * (cfg.dOrifice_um * 1e-6)^2;   % 4.
 cfg.tubeVolume_mL   = pi / 4 * 1.0^2 * 300 / 1000;      % 1 mm bore, 300 mm: 0.236 mL of air before the valve opens
 cfg.CdNominal       = 0.7;
 
-% --- Run guards (charRun) ----------------------------------------------------
+% --- Run limits (frictionRun opts.pMax, opts.xStop) ----------------------------
 cfg.pressureCeiling = 12.0;     % MPa gauge, never exceeded
-cfg.pressureStop    = 11.0;     % MPa gauge: charRun drops MotionEnable above this
+cfg.pressureStop    = 11.0;     % MPa gauge: pMax for the ramps and deliveries of this bench
 cfg.posStopMargin   = 3.0;      % mm inside the slave's positive soft limit
 cfg.exchangePeriod  = m.exchangePeriod;
 cfg.dt              = m.dt;
@@ -57,19 +57,6 @@ cfg.softLimitMax    = g.G_cfgPosSoftLimitMax;
 cfg.softLimitMin    = g.G_cfgPosSoftLimitMin;
 cfg.posStop         = min(cfg.softLimitMax, m.posMax) - cfg.posStopMargin;
 cfg.posMin          = max(cfg.softLimitMin, m.posMin) + 0.5;
-
-% --- Axis probe registers (slave/PRG_AxisProbe.st), 1-based -------------------
-cfg.probe.hrArm      = 101;     % a changed value arms a capture
-cfg.probe.irState    = 101;     % 0 idle, 1 armed, 2 triggered, 3 ready
-cfg.probe.irArmEcho  = 102;
-cfg.probe.irTrigIdx  = 103;     % ring index of the trigger scan
-cfg.probe.irCount    = 104;     % ring length
-cfg.probe.irSamples  = 121;     % four INT rings of nSamples: velocity, command, torque, pressure
-cfg.probe.nSamples   = 250;
-cfg.probe.preTrigger = 50;      % scans kept before the trigger
-cfg.probe.scale      = [1000 1000 10 1000];   % counts per mm/s, mm/s, %, MPa
-cfg.probe.trigger    = 0.05;    % mm/s change of the command that triggers
-cfg.probe.timeout    = 4;       % s from arm to ready before the capture is skipped
 end
 
 

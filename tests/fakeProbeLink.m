@@ -9,12 +9,17 @@ function out = fakeProbeLink(cmd, varargin)
 %   fakeProbeLink('faultAt', t)         drive fault injected at t seconds
 %   fakeProbeLink('slave', fn)          sl = fn(sl): edit the simulated slave
 %   fakeProbeLink('torqueModel', p)     report a friction torque (below)
+%   fakeProbeLink('valveAt', t, Cd)     outlet valve opens at t seconds: the
+%                                       chamber drains through the orifice
+%                                       bank, Q = Cd A_o sqrt(2P/rho), after
+%                                       losing the tube's 0.236 mL at once
 %   t    = fakeProbeLink('now')
 %          fakeProbeLink('wait', t)     run the slave until t
 %   regs = fakeProbeLink('read', start, n)
 %          fakeProbeLink('write', start, values)
 %          fakeProbeLink('writeOne', address, value)
-%   S    = fakeProbeLink('state')
+%   S    = fakeProbeLink('state')       S.collectLog is [t, mm^3 that left]
+%                                       while the valve is open
 %
 %   The torque model stands in for the drive's torque feedback, which the
 %   axis model reports as zero. With p a struct of F0, Fc, dFs, vs, b, mu,
@@ -45,6 +50,8 @@ switch cmd
         S.tick = 0;
         S.faultAt = Inf;
         S.torque = [];
+        S.valve = struct('at', Inf, 'Cd', 0.7, 'open', false, 'collected', 0);
+        S.collectLog = zeros(0, 2);
         S.stick = struct('until', -Inf, 'sign', 0, 'armed', true);
         S.vLag = 0;
         S.sp = struct('arm', 0, 'lastArm', 0, 'state', 0, 'echo', 0, 'idx', 0, 'pos0', 0, ...
@@ -59,6 +66,11 @@ switch cmd
         S.sl = varargin{1}(S.sl);
     case 'torqueModel'
         S.torque = varargin{1};
+    case 'valveAt'
+        S.valve.at = varargin{1};
+        if numel(varargin) > 1
+            S.valve.Cd = varargin{2};
+        end
     case 'now'
         out = S.tick / 1000;
     case 'wait'
@@ -71,6 +83,7 @@ switch cmd
                 if ~isempty(S.torque)
                     S = torqueScan(S);
                 end
+                S = valveScan(S);
                 [S.sl, S.y] = slaveStep(S.sl, S.u);
                 S = lagScan(S);
                 S = probeScan(S);
@@ -159,6 +172,27 @@ else
 end
 sl.hook.torque = F / p.newtonPerPct + p.noisePct * randn();
 S.sl = sl;
+end
+
+
+function S = valveScan(S)
+% Orifice outflow once the valve is open: 32 orifices of 40 um discharging
+% to atmosphere, after the air in the 1 mm bore tube has left.
+if isinf(S.valve.at)
+    return;
+end
+t = S.tick / 1000;
+if ~S.valve.open && t >= S.valve.at
+    S.valve.open = true;
+    S.sl.ax.vOut = S.sl.ax.vOut + 236;                        % mm^3, the tube
+end
+if S.valve.open
+    Ao = 32 * pi / 4 * (40e-6)^2;                             % m^2
+    Q = S.valve.Cd * Ao * sqrt(2 * max(S.sl.ax.P, 0) * 1e6 / 1000) * 1e9;    % mm^3/s
+    S.sl.hook.outflow = Q;
+    S.valve.collected = S.valve.collected + Q * S.sl.G.G_cfgScanTime;
+    S.collectLog(end + 1, :) = [t S.valve.collected];
+end
 end
 
 

@@ -18,6 +18,11 @@ logs every exchange.
 | `stepResponseFit.m` | Reads the captures: the drive's velocity-loop lag from steps taken while moving, the breakaway and stick time from steps from rest, the torque ripple at the lead and motor periods |
 | `captures/` | Run logs and captures (gitignored) |
 
+The pressure loop's other parameters (bulk modulus, orifice flow, drive lag
+at the piston) have their own bench in `bench/characterisation/`, which
+runs through the same protocol, writes the same log and capture formats to
+this `captures/` directory and uses the same step probe.
+
 The friction sets need nothing on the slave beyond `PRG_Main` and nothing
 in `master-src`: the run uses the protocol registers
 (`docs/master/ModbusRegisterMap.md`) in the modes the slave already has,

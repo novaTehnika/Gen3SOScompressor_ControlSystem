@@ -4,12 +4,14 @@ function charFitsSynthetic()
 %   the split between liquid and series compliance from two fills;
 %   charOrificeFlow recovers Cd and the square-root exponent from
 %   deliveries at three pressures; charDriveLag recovers tauV and the dead
-%   time from 2 ms captures, from the pressure channel through the sensor
-%   chain, and roughly from 50 ms run logs.
+%   time from 2 ms step probe captures, and roughly from 50 ms run logs,
+%   including the piston-side lag from the pressure column through the
+%   sensor chain. The logs are in frictionRun's formats.
 %   Run from the repository root:  addpath master-src/logic tests
 
 here = fileparts(mfilename('fullpath'));
-addpath(fullfile(here, '..', 'bench', 'characterisation'), fullfile(here, '..', 'bench', 'modbus'));
+addpath(fullfile(here, '..', 'bench', 'characterisation'), fullfile(here, '..', 'bench', 'friction'), ...
+    fullfile(here, '..', 'bench', 'modbus'));
 cfg = charConfig();
 A = cfg.pistonArea_mm2;
 Patm = cfg.Patm_MPa;
@@ -82,11 +84,10 @@ fprintf('ok  orifice flow: Cd %.3f (set %.3f), exponent %.3f, collected within %
 
 % --- Drive lag ---------------------------------------------------------------------
 tau = 0.020; Td = 0.006; accel = 10;
-Ts = cfg.scanTime;
-c1 = fullfile(dir, 'lag_1_velstep_up.csv');
-c2 = fullfile(dir, 'lag_2_velstep_down.csv');
-writeCapture(c1, 0, 1.0, tau, Td, accel, 0, 0, cfg);
-writeCapture(c2, 1.0, 0, tau, Td, accel, 0, 0, cfg);
+c1 = fullfile(dir, 'lag_cap_1_up.csv');
+c2 = fullfile(dir, 'lag_cap_2_down.csv');
+writeCapture(c1, 0, 1.0, tau, Td, accel, cfg);
+writeCapture(c2, 1.0, 0, tau, Td, accel, cfg);
 r = charDriveLag({c1, c2}, struct('quiet', true, 'accel', accel, 'decel', accel));
 assert(all(abs([r.captures.tauV] - tau) < 0.002), 'tauV %s, set %.3f', mat2str([r.captures.tauV], 3), tau);
 assert(all(abs([r.captures.Td] - Td) < 0.002), 'Td %s, set %.3f', mat2str([r.captures.Td], 3), Td);
@@ -94,24 +95,23 @@ assert(r.pass);
 fprintf('ok  drive lag: tauV %.1f / %.1f ms (set %.0f), Td %.1f / %.1f ms (set %.0f) from 2 ms captures\n', ...
     1000 * [r.captures.tauV], 1000 * tau, 1000 * [r.captures.Td], 1000 * Td);
 
-% Under pressure the pressure channel gives the lag at the piston through
-% the median, low-pass and pipeline delay.
-c3 = fullfile(dir, 'lag_3_ramp.csv');
-writeCapture(c3, 0, 0.3, 0.035, Td, accel, 11.0, 4.0, cfg);
-r = charDriveLag(c3, struct('quiet', true, 'accel', accel, 'decel', accel));
-assert(abs(r.captures.tauP - 0.035) < 0.004, 'tauP %.4f, set 0.035', r.captures.tauP);
-assert(abs(r.captures.k_MPa_mm - 11.0) / 11 < 0.05, 'stiffness %.2f, set 11', r.captures.k_MPa_mm);
-assert(abs(r.tauV_s - 0.035) < 0.004);
-fprintf('ok  drive lag at the piston from the pressure: %.1f ms (set 35), stiffness %.1f MPa/mm (set 11)\n', ...
-    1000 * r.captures.tauP, r.captures.k_MPa_mm);
-
-% The 50 ms run log alone: lag plus dead time to about 25 ms.
+% The 50 ms run log alone: lag plus dead time to about 25 ms, from the
+% velocity unpressurised and from the pressure of pressurised steps, where
+% the piston lags more than the motor.
 f5 = fullfile(dir, 'lag_run.csv');
-writeStepLog(f5, tau, Td, accel, cfg);
+writeStepLog(f5, tau, Td, accel, 0, 0, cfg);
 r = charDriveLag(f5, struct('quiet', true, 'accel', accel, 'decel', accel));
 assert(~isempty(r.runLog) && r.runLog.nSteps == 6);
 assert(abs(r.tauV_s - (tau + Td)) < 0.025, 'run log lag %.3f s, set %.3f', r.tauV_s, tau + Td);
-fprintf('ok  drive lag from the 50 ms log: %.0f ms (set %.0f incl. dead time)\n', 1000 * r.tauV_s, 1000 * (tau + Td));
+assert(isnan(r.tauP_s), 'a pressure lag from an unpressurised log');
+f6 = fullfile(dir, 'lag_run_wet.csv');
+writeStepLog(f6, 0.040, Td, accel, 11.0, 4.0, cfg);
+r = charDriveLag(f6, struct('quiet', true, 'accel', accel, 'decel', accel));
+assert(r.runLog.nStepsP == 6, '%d pressurised steps found', r.runLog.nStepsP);
+assert(abs(r.tauP_s - 0.046) < 0.025, 'piston lag %.3f s, set 0.046', r.tauP_s);
+assert(abs(r.runLog.k_MPa_mm - 11) / 11 < 0.1, 'stiffness %.2f, set 11', r.runLog.k_MPa_mm);
+fprintf('ok  drive lag from the 50 ms log: dry %.0f ms (set %.0f), piston side %.0f ms (set 46), stiffness %.1f MPa/mm\n', ...
+    1000 * r.tauV_s, 1000 * (tau + Td), 1000 * r.tauP_s, r.runLog.k_MPa_mm);
 
 fprintf('all passed\n');
 end
@@ -135,9 +135,9 @@ for dirn = [1 -1]
     tr = (ts(1):0.05:ts(end))';
     P = interp1(ts, Ps, tr) + 0.002 * randn(size(tr));
     x = interp1(ts, xs, tr) + 0.0005 * randn(size(tr));
-    step = 1 + (dirn < 0);
-    rows = [rows; tr x 0.1 * dirn * ones(size(tr)) 20 * ones(size(tr)) P 0.1 * dirn * ones(size(tr)) ...
-        3 * ones(size(tr)) ones(size(tr)) 4 * ones(size(tr)) zeros(size(tr)) step * ones(size(tr)) 12 * ones(size(tr))]; %#ok<AGROW>
+    n = numel(tr);
+    rows = [rows; tr ones(n, 1) 4 * ones(n, 1) 3 * ones(n, 1) 0.1 * dirn * ones(n, 1) x ...
+        0.1 * dirn * ones(n, 1) 20 * ones(n, 1) P ones(n, 1) zeros(n, 1) 12 * ones(n, 1)]; %#ok<AGROW>
     t = ts(end) + 0.05;
 end
 writeRun(file, rows);
@@ -196,22 +196,21 @@ for i = 1:n
     end
 end
 v = [0; diff(x) ./ dt];
-rows = [t x v 30 * ones(n, 1) P + 0.002 * randn(n, 1) Ptarget * ones(n, 1) 7 * ones(n, 1) ones(n, 1) ...
-    5 * ones(n, 1) inBand ones(n, 1) 12 * ones(n, 1)];
+rows = [t ones(n, 1) 5 * ones(n, 1) 7 * ones(n, 1) Ptarget * ones(n, 1) x v 30 * ones(n, 1) ...
+    P + 0.002 * randn(n, 1) double(abs(v) > 0.1) inBand 12 * ones(n, 1)];
 writeRun(file, rows);
 collected = collected / 1000;
 end
 
 
-function writeCapture(file, v0, v1, tau, Td, accel, k, P0, cfg)
-% 2 ms capture: 50 scans at v0, command step to v1 at t = 0, slew at accel,
-% dead time, first-order lag; the pressure through the slave's chain.
+function writeCapture(file, v0, v1, tau, Td, accel, cfg)
+% PRG_StepProbe capture: 500 scans at 2 ms from the arm, the command step
+% from v0 to v1 at 0.1 s, slew at accel, dead time, first-order lag.
 Ts = cfg.scanTime;
-N = cfg.probe.nSamples;
-pre = cfg.probe.preTrigger;
-t = ((0:N - 1)' - pre) * Ts;
+N = 500;
+t = (0:N - 1)' * Ts;
 cmd = v0 * ones(N, 1);
-cmd(t >= 0) = v1;
+cmd(t >= 0.1) = v1;
 vref = cmd(1) * ones(N, 1);
 for i = 2:N
     d = cmd(i) - vref(i - 1);
@@ -223,41 +222,39 @@ v = v0 * ones(N, 1);
 for i = 2:N
     v(i) = a * v(i - 1) + (1 - a) * vd(i - 1);
 end
-Praw = P0 + k * cumsum(v) * Ts;
-med = (cfg.medianSize - 1) / 2;
-Pm = [Praw(1) * ones(med, 1); Praw(1:end - med)];
-alpha = Ts / (cfg.filterTau + Ts);
-Pf = Pm;
-for i = 2:N
-    Pf(i) = Pf(i - 1) + alpha * (Pm(i) - Pf(i - 1));
-end
-P = [Pf(1) * ones(cfg.pipelineScans, 1); Pf(1:end - cfg.pipelineScans)];
-if k == 0
-    P = zeros(N, 1);
-end
+x = cumsum(v) * Ts;
 fid = fopen(file, 'w');
-fprintf(fid, 't,velocity,command,torque,MPa\n');
-fprintf(fid, '%.4f,%.4f,%.4f,%.2f,%.4f\n', [t v + 0.005 * randn(N, 1) cmd 10 * ones(N, 1) ...
-    P + 0.0005 * randn(N, 1)]');
+fprintf(fid, 't,vCmd,velocity,torque,position\n');
+fprintf(fid, '%.3f,%.3f,%.3f,%.2f,%.5f\n', [t cmd v + 0.005 * randn(N, 1) 10 * ones(N, 1) x]');
 fclose(fid);
 end
 
 
-function writeStepLog(file, tau, Td, accel, cfg)
-% 50 ms run log of a velocity session: 0 -> 1 -> 0 -> -1 -> 0 -> 1 -> 0,
-% each held 3 s. The logged reference leads the slave's command by one
-% exchange plus the dead time; the feedback is read at the row's time.
+function writeStepLog(file, tau, Td, accel, k, P0, cfg)
+% 50 ms run log of a velocity session: 0 -> v -> 0 -> -v -> 0 -> v -> 0,
+% each held 3 s, with v = 1 mm/s unpressurised (k = 0) and 0.2 mm/s at a
+% stiffness k (MPa/mm) from P0, the pressure through the slave's sensor
+% chain. The reference is logged in the row of the exchange that sent it
+% and the slave acts on it a service tick later; the feedback is read at
+% the row's time.
 Ts = cfg.scanTime;
 dtEx = 0.05;
-seqV = [0 1 0 -1 0 1 0];
+if k > 0
+    vStep = 0.2;
+else
+    vStep = 1;
+end
+seqV = vStep * [0 1 0 -1 0 1 0];
 hold = 3;
 tEnd = hold * numel(seqV);
 tg = (0:Ts:tEnd)';
 cmd = zeros(size(tg));
-ref = zeros(size(tg));
+tr = (0.013:dtEx:tEnd - 0.1)';                     % the exchange is not aligned with the steps
+refRow = zeros(size(tr));
 for s = 1:numel(seqV)
-    ref(tg >= (s - 1) * hold) = seqV(s);
-    cmd(tg >= (s - 1) * hold + dtEx) = seqV(s);
+    tSent = tr(find(tr >= (s - 1) * hold, 1));     % the exchange that carries the new reference
+    refRow(tr >= tSent) = seqV(s);
+    cmd(tg >= tSent + 0.004) = seqV(s);            % the slave's service tick
 end
 vref = zeros(size(tg));
 for i = 2:numel(tg)
@@ -270,18 +267,27 @@ v = zeros(size(tg));
 for i = 2:numel(tg)
     v(i) = a * v(i - 1) + (1 - a) * vd(i - 1);
 end
-tr = (0.013:dtEx:tEnd - 0.1)';                     % the exchange is not aligned with the steps
+x = 250 + cumsum(v) * Ts;
+Praw = P0 + k * cumsum(v) * Ts;
+med = (cfg.medianSize - 1) / 2;
+Pm = [Praw(1) * ones(med, 1); Praw(1:end - med)];
+alpha = Ts / (cfg.filterTau + Ts);
+Pf = Pm;
+for i = 2:numel(tg)
+    Pf(i) = Pf(i - 1) + alpha * (Pm(i) - Pf(i - 1));
+end
+P = [Pf(1) * ones(cfg.pipelineScans, 1); Pf(1:end - cfg.pipelineScans)];
 n = numel(tr);
-rows = [tr 250 + cumsum(interp1(tg, v, tr)) * dtEx interp1(tg, v, tr) + 0.005 * randn(n, 1) ...
-    10 * ones(n, 1) zeros(n, 1) interp1(tg, ref, tr, 'previous') 3 * ones(n, 1) ones(n, 1) 4 * ones(n, 1) ...
-    zeros(n, 1) ones(n, 1) 12 * ones(n, 1)];
+vr = interp1(tg, v, tr) + 0.005 * randn(n, 1);
+rows = [tr ones(n, 1) 4 * ones(n, 1) 3 * ones(n, 1) refRow interp1(tg, x, tr) ...
+    vr 10 * ones(n, 1) interp1(tg, P, tr) + 0.002 * randn(n, 1) double(abs(vr) > 0.1) zeros(n, 1) 12 * ones(n, 1)];
 writeRun(file, rows);
 end
 
 
 function writeRun(file, rows)
 fid = fopen(file, 'w');
-fprintf(fid, 't,position,velocity,torque,MPa,reference,modeCode,motionEnable,status,inBand,step,exchangeMs\n');
-fprintf(fid, '%.3f,%.4f,%.4f,%.2f,%.4f,%.4f,%d,%d,%d,%d,%d,%.1f\n', rows');
+fprintf(fid, 't,step,status,mode,ref,position,velocity,torque,pressure,inMotion,inBand,exchangeMs\n');
+fprintf(fid, '%.3f,%d,%d,%d,%.4f,%.4f,%.4f,%.3f,%.4f,%d,%d,%.1f\n', rows');
 fclose(fid);
 end
