@@ -85,19 +85,24 @@ COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
 # uses it; --flow-ff still runs it as a bound on what knowing the flow
 # would buy.
 F20 = {'AnalogFilterTimeConst': 0.02, 'StopVelMin': 2.0}
+# The scheduled arms assume the dead volume at the low end of its range
+# (a lower bound keeps the stiffness estimate an upper bound) and the
+# saline volume and charge as configured for the run.
+SCHED = {'V_dead_cfg': 20e-6}
 CONFIGS = {
     'GVL': ControllerSpec('GVL'),
     'f20+vmin2': ControllerSpec('f20+vmin2', F20),
-    'sched6': ControllerSpec('sched6', F20, sched=dict(wc=6.0)),
-    'sched11': ControllerSpec('sched11', F20, sched=dict(wc=11.0)),
+    'sched6': ControllerSpec('sched6', F20, sched=dict(wc=6.0, **SCHED)),
+    'sched11': ControllerSpec('sched11', F20,
+                              sched=dict(wc=11.0, **SCHED)),
     'sched11+v7a100': ControllerSpec(
         'sched11+v7a100',
         {**F20, 'VelMax': 7.0, 'Accel': 100.0, 'Decel': 100.0},
-        sched=dict(wc=11.0)),
+        sched=dict(wc=11.0, **SCHED)),
     'sched11+K1.2': ControllerSpec(
         'sched11+K1.2',
         {**F20, 'VelMax': 7.0, 'Accel': 100.0, 'Decel': 100.0},
-        sched=dict(wc=11.0, K_cfg=1.2e9)),
+        sched=dict(wc=11.0, K_cfg=1.2e9, **SCHED)),
 }
 
 

@@ -25,7 +25,8 @@ The simulation steps in slave scans of length Ts. In each scan:
 The one-scan delay between steps 2 and 3 reproduces the order in which
 PRG_Main calls its function blocks. In the scan the valve opens, the
 plant also loses the tube's air volume, eq. (37). A run ends early when
-the chamber is empty. The traces are recorded after the plant step,
+the piston reaches the limit switch (the chamber is down to its dead
+volume). The traces are recorded after the plant step,
 except the measured pressure, which is the reading the controller used
 in that scan.
 
@@ -162,7 +163,7 @@ def run(par, scenario, controller, legacy_sensor=False, seed=1):
         Q[k] = plant.Q
         V_out[k] = plant.V_out
         V_l[k] = plant.V_l
-        P_sat[k] = par.P_sat(plant.n_dis, max(plant.V_l, par.V_empty))
+        P_sat[k] = par.P_sat(plant.n_dis, max(plant.V_l, 1e-6))
         if plant.empty:
             n_run = k + 1
             break

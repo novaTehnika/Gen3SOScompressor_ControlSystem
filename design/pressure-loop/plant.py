@@ -29,7 +29,8 @@ orifice flow at the chamber pressure times the valve's area fraction,
 eq. (36), or a prescribed flow when the scenario gives one. The tube
 between the valve and the orifices holds air before the valve opens, so
 in the opening scan the chamber also loses the tube's volume, eq. (37).
-The delivery ends when the saline is gone.
+The delivery ends when the piston reaches the limit switch, where the
+chamber volume is down to the dead volume.
 
 The actuator has two forms. In velocity mode, which the slave uses, the
 drive's profile generator limits the rate of change of the commanded
@@ -108,7 +109,7 @@ class Plant:
         self.Qf = scenario.Qf           # [m^3/s] prescribed flow, or 0
         # [m^3/s per sqrt(Pa)] orifice coefficient Cd A sqrt(2 / rho)
         self.k_orifice = par.Cd * par.A_orifice * math.sqrt(2 / par.rho)
-        self.V_empty = par.V_empty      # [m^3]
+        self.V_dead = par.V_dead        # [m^3]
 
         # Velocity actuator parameters
         self.accel = par.amax if accel is None else accel   # [m/s^2]
@@ -162,9 +163,9 @@ class Plant:
 
     @property
     def empty(self):
-        """True once the saline volume is down to V_empty, where the
-        delivery is stopped."""
-        return self.y[iy_Vl] <= self.V_empty
+        """True once the chamber volume is down to the dead volume, where
+        the piston reaches the limit switch and the machine halts."""
+        return self.chamber_volume <= self.V_dead
 
     # ----- Continuous-time model ----------------------------------------
     def derivatives(self, y, u_act, valve, Q_tube):

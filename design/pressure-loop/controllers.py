@@ -321,7 +321,9 @@ class ScheduledSlaveController(SlaveController):
     the estimated chamber stiffness.
 
     The estimate, eq. (39), is the stiffest chamber consistent with what
-    the slave knows. The chamber volume is V_ch = A (x_contact - x). The
+    the slave knows. The chamber volume is V_ch = A (x_limit - x) +
+    V_dead_cfg, with x_limit the limit-switch position where the piston
+    halts and V_dead_cfg the configured dead volume (a lower bound). The
     free gas is the least there can be: the configured charge less what
     the configured saline volume can hold at the highest pressure seen
     so far (dissolution lags, so the true free gas is never less, and a
@@ -368,6 +370,8 @@ class ScheduledSlaveController(SlaveController):
                  plausible.
       V_l_cfg    [m^3] Saline volume assumed by the estimate, a lower
                  bound on the true value. None uses the run's Vl0.
+      V_dead_cfg [m^3] Dead volume assumed by the estimate, a lower
+                 bound on the true value. None uses the run's V_dead.
       ratio_cfg  [-] Charge assumed by the estimate. None uses the run's
                  ratio (the recipe is known to the slave); a fixed value
                  stands for a slave that does not know it.
@@ -383,10 +387,11 @@ class ScheduledSlaveController(SlaveController):
     """
 
     def __init__(self, name='scheduled', wc=6.0, K_cfg=2.2e9, V_l_cfg=None,
-                 ratio_cfg=None, ki_ratio=0.4, kp_min=0.001, kp_max=5.0,
-                 lag=None, stop_from_k=True, e_int=0.5, flow_ff=False,
-                 **overrides):
+                 V_dead_cfg=None, ratio_cfg=None, ki_ratio=0.4,
+                 kp_min=0.001, kp_max=5.0, lag=None, stop_from_k=True,
+                 e_int=0.5, flow_ff=False, **overrides):
         super().__init__(name, flow_ff, **overrides)
+        self.V_dead_cfg = V_dead_cfg
         self.e_int = e_int
         self.wc = wc
         self.K_cfg = K_cfg
@@ -410,13 +415,17 @@ class ScheduledSlaveController(SlaveController):
         else:
             ratio = self.ratio_cfg
         self.n_cfg = par.n_charge(ratio)                        # [mol]
-        # Contact position: the piston position at zero chamber volume,
-        # which the slave would hold as a configured constant measured
-        # on the machine
+        # Limit-switch position: where the chamber is down to the true
+        # dead volume. The slave knows it from its own position, and the
+        # configured dead volume is the lower bound of the range.
         P0, ng0, nd0 = scenario.initial(par)
         Vch0 = (par.Vl0 * (1 - P0 / par.K)
                 + ng0 * self.RT / (P0 + par.Patm))              # [m^3]
-        self.x_contact = Vch0 / par.A                           # [m]
+        self.x_limit = (Vch0 - par.V_dead) / par.A              # [m]
+        if self.V_dead_cfg is None:
+            self.V_dead_run = par.V_dead                        # [m^3]
+        else:
+            self.V_dead_run = self.V_dead_cfg
         # Stop-law constants
         self.decel = c['G_cfgPressureDecel'] * 1e-3             # [m/s^2]
         self.D_mm = c['G_cfgPressureDecel']                     # [mm/s^2]
@@ -443,7 +452,8 @@ class ScheduledSlaveController(SlaveController):
         pressure P_meas [Pa] and piston position x [m], eq. (39)."""
         P_abs = max(P_meas, 0.0) + self.Patm                    # [Pa]
         self.P_ref = max(self.P_ref, P_abs)                     # [Pa]
-        V_ch = max(self.A * (self.x_contact - x), 1e-9)         # [m^3]
+        V_ch = (max(self.A * (self.x_limit - x), 0.0)
+                + self.V_dead_run)                              # [m^3]
         V_l = min(self.V_l_cfg_run, V_ch)                       # [m^3]
         n_sat = self.kH * self.P_ref * self.V_l_cfg_run         # [mol]
         n_gas = max(self.n_cfg - n_sat, 0.0)                    # [mol]

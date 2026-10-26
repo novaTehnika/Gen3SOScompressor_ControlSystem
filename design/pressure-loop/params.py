@@ -80,7 +80,8 @@ class Params:
     # [Pa] Effective bulk modulus of the liquid. Water alone is 2.2 GPa;
     # hose and seal compliance lower the effective value.
     K: float = 1.0e9
-    # [m^3] Saline volume at the start of a run
+    # [m^3] Saline volume at the start of a run, including the dead
+    # volume
     Vl0: float = 300e-6
     # [mol/(m^3 Pa)] Henry's-law constant for oxygen in saline: 1.28e-5
     # for pure water, reduced 5 % by salting out at 0.9 % NaCl
@@ -118,10 +119,12 @@ class Params:
     # [s] Valve opening time; 0 opens the valve in one scan. The ball
     # valve is opened rapidly.
     Topen: float = 0.0
-    # [m^3] Saline volume at which the delivery is stopped. The master
-    # ends the delivery before the piston reaches the end of its stroke;
-    # the simulation ends there too.
-    V_empty: float = 5e-6
+    # [m^3] Dead volume: the chamber volume the piston cannot sweep
+    # (passages and fittings), left when the piston reaches the limit
+    # switch at the end of its stroke. The machine halts there and the
+    # delivery ends; so does the simulation. Known to lie in 20 to
+    # 30 mL.
+    V_dead: float = 25e-6
 
     # ----- Derived outlet quantities -------------------------------------
     @property

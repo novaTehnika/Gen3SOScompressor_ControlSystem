@@ -73,6 +73,8 @@ UNCERTAIN = [
               'water 2.2 GPa; hoses, seals and residual gas lower it'),
     Uncertain('Vl0', 250e-6, 350e-6, False, 1e6, 'mL',
               'saline in the chamber, hoses and fittings'),
+    Uncertain('V_dead', 20e-6, 30e-6, False, 1e6, 'mL',
+              'dead volume left at the limit switch'),
     Uncertain('tauDiss', 10.0, 100.0, True, 1.0, 's',
               'gas dissolution time constant'),
     Uncertain('tauV', 0.005, 0.05, True, 1e3, 'ms',

@@ -197,13 +197,15 @@ def check_outlet():
     ok(f'outlet: {Q10 * 1e6:.2f} mL/s at 10 MPa; the tube volume drops '
        f'the pressure {dP_step / 1e6:.2f} MPa in the opening scan')
 
-    # The run ends when the saline is gone and reports the volume.
+    # The run ends at the limit switch, with the dead volume left, and
+    # reports the volume delivered.
     r = sim.run(par, scenarios.deliver(par, T=300.0),
                 ctl.SlaveController())
-    assert r.t[-1] < 299 and r.V_l[-1] <= par.V_empty
-    assert abs(r['V_delivered'] - (par.Vl0 - par.V_empty) * 1e6) < 3
-    ok(f'delivery ends when the chamber is empty: {r["V_delivered"]:.0f} '
-       f'mL in {r.t[-1]:.0f} s')
+    assert r.t[-1] < 299 and abs(r.V_l[-1] - par.V_dead) < 1e-6
+    assert abs(r['V_delivered'] - (par.Vl0 - par.V_dead) * 1e6) < 3
+    ok(f'delivery ends at the limit switch with {r.V_l[-1] * 1e6:.0f} mL '
+       f'of dead volume left: {r["V_delivered"]:.0f} mL in '
+       f'{r.t[-1]:.0f} s')
 
 
 def check_solver():
@@ -431,14 +433,30 @@ def check_closed_loop():
 
     # With the GVL settings the stop law caps the piston near the speed
     # the outflow needs, so the loop holds a steady error through the
-    # delivery, and the emptying chamber takes it unstable at the end.
+    # delivery. With the stop law relaxed it holds to the limit switch,
+    # but at the smallest dead volume the end stiffness is past the GVL
+    # gain's stability limit and the loop ends in a bounded limit cycle;
+    # the scheduled controller does not.
     r = sim.run(par, scenarios.deliver(par), ctl.SlaveController())
     assert 1.5 < r['dip'] < 3.0, r['dip']
-    assert math.isnan(r['tSettle']) and r['V_ok'] < r['V_delivered']
-    assert r['P_max'] > par.P_ceiling / 1e6
+    assert math.isnan(r['tSettle']) and r['V_ok'] < 30, r['V_ok']
     ok(f'delivery 1:1 with the GVL settings: dip {r["dip"]:.2f} MPa, '
-       f'never back in band, loses control after {r["V_ok"]:.0f} of '
-       f'{r["V_delivered"]:.0f} mL (P_max {r["P_max"]:.0f} MPa)')
+       f'never back in band, error above 1 MPa after {r["V_ok"]:.0f} of '
+       f'{r["V_delivered"]:.0f} mL')
+    q = par.with_(V_dead=20e-6)
+    relaxed = ctl.SlaveController('r', AnalogFilterTimeConst=0.02,
+                                  StopVelMin=2.0)
+    sched = ctl.ScheduledSlaveController('s', wc=11.0,
+                                         AnalogFilterTimeConst=0.02,
+                                         StopVelMin=2.0)
+    r1 = sim.run(q, scenarios.deliver(q), relaxed)
+    r2 = sim.run(q, scenarios.deliver(q), sched)
+    assert r1['V_ok'] == r1['V_delivered'] and r1['ripple'] > 0.01
+    assert r2['V_ok'] == r2['V_delivered'] and r2['ripple'] < 0.001
+    ok(f'delivery to a 20 mL dead volume (end stiffness '
+       f'{r1.stiffness[-1] / 1e9:.0f} MPa/mm): the relaxed GVL loop ends '
+       f'in a {r1["ripple"] * 1e3:.0f} kPa limit cycle, the scheduled '
+       f'loop in {r2["ripple"] * 1e3:.1f} kPa of ripple')
 
 
 def check_runner():
