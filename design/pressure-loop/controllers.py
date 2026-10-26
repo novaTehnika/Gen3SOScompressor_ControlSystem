@@ -38,6 +38,15 @@ Structured Text, wired as PRG_Main wires it. It is a PI controller whose
 output is clamped by a stop law (README eq. (19)). It can optionally add
 a flow feedforward (eq. (20)), which the slave does not have.
 
+ScheduledSlaveController runs the same block with its gains and its
+stop-law stiffness set every scan from an estimate of the chamber
+stiffness, eqs. (39) to (41). The estimate uses only what the slave
+has: the measured pressure, the piston position against a configured
+contact position, and the configured saline volume and charge. It is an
+upper bound on the stiffness, so the scheduled gain is a lower bound on
+the gain that gives the chosen crossover. This is the candidate for the
+slave; it is prototyped here before being ported to Structured Text.
+
 LegacyController is a PID controller written for the earlier studies
 (eqs. (21) to (25)). It can estimate the chamber stiffness online for its
 stop law, add a flow feedforward, and command either velocity or force.
@@ -304,3 +313,175 @@ def legacy_set():
         'T-FF-Kd100':
             L('T-FF-Kd100', 'T', 0, 0, 100),
     }
+
+
+# %% ===== SCHEDULED SLAVE CONTROLLER ====================================
+class ScheduledSlaveController(SlaveController):
+    """FB_PressureController with Kp, Ki and the stop law scheduled on
+    the estimated chamber stiffness.
+
+    The estimate, eq. (39), is the stiffest chamber consistent with what
+    the slave knows. The chamber volume is V_ch = A (x_contact - x). The
+    free gas is the least there can be: the configured charge less what
+    the configured saline volume can hold at the highest pressure seen
+    so far (dissolution lags, so the true free gas is never less, and a
+    dip cannot have dissolved more). The saline volume is the configured
+    value, or the chamber volume when that is smaller (as it is late in
+    a delivery). With K_cfg the largest plausible bulk modulus,
+
+      V_gas_est = max(n_cfg - kH P_ref V_l_cfg, 0) R T / P_abs
+      C_est = V_gas_est / P_abs + min(V_l_cfg, V_ch) / K_cfg
+      k_est = A / C_est
+
+    is never below the true stiffness while V_l_cfg is at or below the
+    true saline volume. The gain follows from the chosen crossover wc,
+    eq. (40), Kp = wc / k_est, held within [kp_min, kp_max], with Ki in
+    the fixed ratio ki_ratio to Kp.
+
+    The integrator is held at zero (through the block's Reset input)
+    until the pressure first comes within e_int of the target, because
+    with a low scheduled gain the approach would otherwise wind it up
+    and the stored velocity would carry the pressure past the target.
+    After that the block's own conditional anti-windup applies.
+
+    The stop law, eq. (41), brakes for the chamber there is and for the
+    measurement lag: the piston must stop within the error after
+    travelling for the lag at its present speed and then decelerating,
+    v lag + v^2 / (2 D) <= |e| / k_est, so
+
+      v_stop = -D lag + sqrt((D lag)^2 + 2 D |e| / k_est)
+
+    with lag the filter, median, pipeline and command delays. The block's
+    own stop law is this with lag equal to one scan and a fixed
+    stiffness; here it is disabled (a negligible Stiffness) and the limit
+    is applied through the block's VelMax input, which is equivalent to
+    giving the block a Lag input and a scheduled Stiffness.
+
+    FB_PressureController multiplies its stored error integral by Ki, so
+    when Ki changes the integral is rescaled by the old over the new Ki
+    to keep the integral term continuous; the Structured Text port must
+    do the same or integrate Ki * e instead.
+
+    Arguments beyond SlaveController's:
+      wc         [rad/s] Target crossover of the pressure loop.
+      K_cfg      [Pa] Bulk modulus assumed by the estimate, the largest
+                 plausible.
+      V_l_cfg    [m^3] Saline volume assumed by the estimate, a lower
+                 bound on the true value. None uses the run's Vl0.
+      ratio_cfg  [-] Charge assumed by the estimate. None uses the run's
+                 ratio (the recipe is known to the slave); a fixed value
+                 stands for a slave that does not know it.
+      ki_ratio   [1/s] Ki / Kp.
+      kp_min     [(mm/s)/MPa] Bounds on the scheduled Kp.
+      kp_max
+      lag        [s] Measurement lag used by the stop law. None derives
+                 it from the slave configuration.
+      stop_from_k  If False the block's own stop law is kept as
+                 configured.
+      e_int      [MPa] Error below which the integrator is first
+                 released.
+    """
+
+    def __init__(self, name='scheduled', wc=6.0, K_cfg=2.2e9, V_l_cfg=None,
+                 ratio_cfg=None, ki_ratio=0.4, kp_min=0.001, kp_max=5.0,
+                 lag=None, stop_from_k=True, e_int=0.5, flow_ff=False,
+                 **overrides):
+        super().__init__(name, flow_ff, **overrides)
+        self.e_int = e_int
+        self.wc = wc
+        self.K_cfg = K_cfg
+        self.V_l_cfg = V_l_cfg
+        self.ratio_cfg = ratio_cfg
+        self.ki_ratio = ki_ratio
+        self.kp_min, self.kp_max = kp_min, kp_max
+        self.lag = lag
+        self.stop_from_k = stop_from_k
+
+    def reset(self, par, scenario):
+        u0 = super().reset(par, scenario)
+        c = self.c
+        self.RT = par.R * par.T                                 # [J/mol]
+        self.Patm = par.Patm                                    # [Pa]
+        self.kH = par.kH                                   # [mol/(m^3 Pa)]
+        V_l_cfg = par.Vl0 if self.V_l_cfg is None else self.V_l_cfg
+        self.V_l_cfg_run = V_l_cfg                              # [m^3]
+        if self.ratio_cfg is None:
+            ratio = scenario.ratio
+        else:
+            ratio = self.ratio_cfg
+        self.n_cfg = par.n_charge(ratio)                        # [mol]
+        # Contact position: the piston position at zero chamber volume,
+        # which the slave would hold as a configured constant measured
+        # on the machine
+        P0, ng0, nd0 = scenario.initial(par)
+        Vch0 = (par.Vl0 * (1 - P0 / par.K)
+                + ng0 * self.RT / (P0 + par.Patm))              # [m^3]
+        self.x_contact = Vch0 / par.A                           # [m]
+        # Stop-law constants
+        self.decel = c['G_cfgPressureDecel'] * 1e-3             # [m/s^2]
+        self.D_mm = c['G_cfgPressureDecel']                     # [mm/s^2]
+        self.v_floor = c['G_cfgPressureStopVelMin']             # [mm/s]
+        if self.lag is None:
+            # Filter time constant, median and pipeline scans, and the
+            # scan in which the command takes effect
+            Ts = c['G_cfgScanTime']
+            n_med = 5 if c['G_cfgAnalogMedianSize'] >= 5 else 3
+            self.lag_run = (c['G_cfgAnalogFilterTimeConst']
+                            + ((n_med - 1) // 2 + 2 + 1) * Ts)   # [s]
+        else:
+            self.lag_run = self.lag
+        if self.stop_from_k:
+            self.fb.Stiffness = 1e-6        # the block's stop law is off
+        self.P_ref = 0.0                    # [Pa] highest pressure seen
+        self.arrived = False
+        self.k_est = math.nan
+        self.v_lim = math.nan
+        return u0
+
+    def estimate_stiffness(self, P_meas, x):
+        """[Pa/m] Upper bound on the chamber stiffness from the measured
+        pressure P_meas [Pa] and piston position x [m], eq. (39)."""
+        P_abs = max(P_meas, 0.0) + self.Patm                    # [Pa]
+        self.P_ref = max(self.P_ref, P_abs)                     # [Pa]
+        V_ch = max(self.A * (self.x_contact - x), 1e-9)         # [m^3]
+        V_l = min(self.V_l_cfg_run, V_ch)                       # [m^3]
+        n_sat = self.kH * self.P_ref * self.V_l_cfg_run         # [mol]
+        n_gas = max(self.n_cfg - n_sat, 0.0)                    # [mol]
+        V_gas = n_gas * self.RT / P_abs                         # [m^3]
+        C = V_gas / P_abs + V_l / self.K_cfg                    # [m^3/Pa]
+        return self.A / C
+
+    def stop_velocity(self, err_mpa, k_mm):
+        """[mm/s] Stop-law limit for error err_mpa [MPa] at stiffness k_mm
+        [MPa/mm] with the measurement lag, eq. (41), never below the
+        configured StopVelMin."""
+        D, lag = self.D_mm, self.lag_run
+        dist = abs(err_mpa) / k_mm                              # [mm]
+        v = -D * lag + math.sqrt((D * lag)**2 + 2 * D * dist)
+        return max(self.v_floor, v)
+
+    def step(self, P_meas, target, t, scenario, x=0.0):
+        fb = self.fb
+        k = self.estimate_stiffness(P_meas, x)                  # [Pa/m]
+        self.k_est = k
+        k_mm = k / 1e9                          # [Pa/m -> MPa/mm]
+        # Scheduled gain, eq. (40): [rad/s / (MPa/mm) -> (mm/s)/MPa]
+        Kp = min(max(self.wc / k_mm, self.kp_min), self.kp_max)
+        Ki = self.ki_ratio * Kp
+        # Rescale the stored integral so Ki * rInteg is continuous
+        if fb.Ki > 0.0 and Ki != fb.Ki:
+            fb.rInteg *= fb.Ki / Ki
+        fb.Kp, fb.Ki = Kp, Ki
+        err = (min(max(target * 1e-6, 0.0), self.target_max)
+               - P_meas * 1e-6)                                 # [MPa]
+        if self.stop_from_k:
+            self.v_lim = min(self.vel_max, self.stop_velocity(err, k_mm))
+            fb.VelMax = self.v_lim
+        # Hold the integrator until the first arrival near the target
+        if not self.arrived and abs(err) < self.e_int:
+            self.arrived = True
+        hold = not self.arrived
+        u = super().step(P_meas, target, t, scenario, x)
+        if hold:
+            fb.rInteg = 0.0
+        return u

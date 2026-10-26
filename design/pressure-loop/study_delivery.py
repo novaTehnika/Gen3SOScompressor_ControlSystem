@@ -17,7 +17,9 @@ or losing control. The pressure dip when the valve opens and the loss
 of control as the emptying chamber stiffens both limit the deliverable
 volume, and the saturation pressure rises with the charge, so the
 result is a trade-off between the oxygen ratio and the volume that can
-be delivered.
+be delivered. The controllers compared are the slave as configured, the
+slave with the stop law relaxed, and the scheduled slave controller at
+several settings.
 
 For each controller and ratio it prints the opening dip, the lowest
 pressure, the margin above saturation, the volume delivered before the
@@ -55,21 +57,24 @@ TRACE_RATIO = 1.0                       # [-] ratio of the plotted traces
 def controller_set():
     """Return the controllers compared.
 
-    The slave arms change one setting each from the GVL. The legacy PI
-    and the flow-feedforward arm are references; the feedforward is not
-    implementable on the machine.
+    The slave arms change one setting each from the GVL. The scheduled
+    arms are ScheduledSlaveController at two crossovers, with the 20 ms
+    filter and StopVelMin 2 mm/s (the outflow needs 1.2 mm/s), and one
+    that assumes a measured bulk modulus. The flow-feedforward arm is a
+    bound; the feedforward is not implementable on the machine.
     """
     S = ctl.SlaveController
+    Sch = ctl.ScheduledSlaveController
+    f20 = dict(AnalogFilterTimeConst=0.02, StopVelMin=2.0)
     return [
         S('slave (GVL)'),
-        S('slave f20', AnalogFilterTimeConst=0.02),
-        S('slave f20 vmin2', AnalogFilterTimeConst=0.02, StopVelMin=2.0),
-        S('slave f20 stiff20', AnalogFilterTimeConst=0.02,
-          StopStiffness=20.0),
-        S('slave f20 stiff20 dec100', AnalogFilterTimeConst=0.02,
-          StopStiffness=20.0, Decel=100.0, Accel=100.0),
-        ctl.LegacyController('V-PI1-.5 a50 tf20', 'V', 1.0, 0.5, 0,
-                             False, 50e-3, tauF=0.02),
+        S('slave f20 vmin2', **f20),
+        Sch('sched wc6 f20 vmin2', wc=6.0, **f20),
+        Sch('sched wc11 f20 vmin2', wc=11.0, **f20),
+        Sch('sched wc11 ki1 f20 vmin2 v7 a100', wc=11.0, ki_ratio=1.0,
+            VelMax=7.0, Accel=100.0, Decel=100.0, **f20),
+        Sch('sched wc11 K1.2 f20 vmin2 v7 a100', wc=11.0, K_cfg=1.2e9,
+            VelMax=7.0, Accel=100.0, Decel=100.0, **f20),
         S('slave +flowFF (bound)', flow_ff=True),
     ]
 
@@ -85,7 +90,7 @@ def main(argv=None):
     ratios = [float(x) for x in args.ratios.split(',')]
     cs = controller_set()
     names = [c.name for c in cs]
-    width = max(26, max(map(len, names)))
+    width = max(34, max(map(len, names)))
 
     # Collect data: every controller at every ratio
     cases = []

@@ -51,7 +51,7 @@ accept these options:
 | `solver.py` | Holds the fixed-step integration methods, equations (34) and (35). |
 | `study_convergence.py` | Measures the integration error against the time step for both methods. |
 | `sensor.py` | Models the measurement chain: `SlaveSensor` (transducer, shunt, noise and the slave's filter and scaling blocks) and `LegacySensor`. |
-| `controllers.py` | Defines `SlaveController` (the slave's block, with a flow feedforward option kept only as a bound) and `LegacyController` (PID with a stiffness-estimating stop law and a torque mode). Both share the `reset` and `step` interface. |
+| `controllers.py` | Defines `SlaveController` (the slave's block, with a flow feedforward option kept only as a bound), `ScheduledSlaveController` (the same block with its gains and stop law scheduled on an estimate of the chamber stiffness, equations (39) to (41)) and `LegacyController` (PID with a stiffness-estimating stop law and a torque mode). All share the `reset` and `step` interface. |
 | `scenarios.py` | Defines the operating cases `compress`, `deliver`, `cycle` and the `stiffstep` probe. |
 | `sim.py` | Runs one closed-loop simulation: `run(params, scenario, controller)` returns a `Result` with traces and metrics. |
 | `metrics.py` | Computes the loop metrics (overshoot, settling time, ripple, stroke) and the process metrics (pressure ceiling, saturation margin, opening dip, deliverable volume). |
@@ -162,6 +162,28 @@ valve at 1 s and runs until the saline is gone (about 80 s). `cycle`
 does both in one run with a 60 s hold. `stiffstep` (a liquid-only
 10 → 12 MPa step) is kept as a stiff-regime margin probe; it is not a
 process case.
+
+**Scheduled slave controller.** The candidate for the slave. It runs
+`FB_PressureController` with Kp, Ki and the stop law set every scan from
+an upper bound on the chamber stiffness computed from what the slave
+has: the measured pressure, the piston position against a configured
+contact position, and the configured saline volume, charge and bulk
+modulus, eq. (39). The free gas is taken as the least there can be
+(the charge less what the saline could hold at the highest pressure
+seen), the saline volume as the configured value or the chamber volume
+when that is smaller, and the bulk modulus as the largest plausible, so
+the bound never falls below the true stiffness while the configured
+saline volume is at or below the true one. The gain is Kp = wc/k_est for
+a chosen crossover wc, eq. (40), with Ki in a fixed ratio to Kp, so the
+loop's crossover is at most wc whatever the chamber is doing: soft on
+the approach, stiffening as the gas dissolves, and stiffening again as
+the chamber empties. The stop law, eq. (41), brakes for the estimated
+stiffness and for the measurement lag, through the block's VelMax
+input. The integrator is held at zero until the pressure first comes
+within 0.5 MPa of the target, because the low scheduled gain would
+otherwise let it wind up on the approach. The block multiplies its
+stored integral by Ki, so the integral is rescaled when Ki changes; the
+Structured Text port must do the same.
 
 **Legacy controller.** This is a PID controller with a filtered
 derivative, an output clamp and conditional anti-windup: the integrator
@@ -332,6 +354,33 @@ Saturation pressure of n_dis moles of oxygen dissolved in V_l of saline
 
     (38) P_sat = n_dis / (kH V_l) - Patm
 
+### Scheduled slave controller
+
+Stiffness bound from the measured pressure P and piston position x,
+with V_ch = A (x_contact − x) the chamber volume, V_l_cfg the configured
+saline volume (a lower bound), n_cfg the configured charge, K_cfg the
+largest plausible bulk modulus and P_ref the highest absolute pressure
+seen in the run:
+
+    (39) V_gas_est = max(n_cfg - kH P_ref V_l_cfg, 0) R T / P_abs
+         C_est = V_gas_est / P_abs + min(V_l_cfg, V_ch) / K_cfg
+         k_est = A / C_est
+
+Scheduled gains for a target crossover wc, bounded, with Ki in a fixed
+ratio to Kp:
+
+    (40) Kp = clamp(wc / k_est, Kp_min, Kp_max),   Ki = r_i Kp
+
+Stop law with the measurement lag: the piston travels for the lag at its
+speed and then decelerates at D, and must stop within the error at the
+estimated stiffness, v lag + v^2 / (2 D) <= |e| / k_est, so
+
+    (41) v_stop = -D lag + sqrt((D lag)^2 + 2 D |e| / k_est)
+         v_lim = min(VelMax, max(StopVelMin, v_stop))
+
+The block's own stop law, eq. (19), is this with lag = Ts and a fixed
+stiffness.
+
 ### Linear model
 
 Plant, the zero-order-hold discretization of k / (s (tauV s + 1)), with
@@ -489,9 +538,12 @@ the ceiling limits the overshoot.
 The study runs a one-at-a-time sensitivity (tornado), then all corners of
 the four most influential parameters, then a Latin hypercube sample
 (`--n`, default 200) for each configuration. The default configurations
-are the GVL, the GVL with a 20 ms filter, the 20 ms filter with
-`StopVelMin` 2 mm/s, and the 20 ms filter with a stop-law stiffness of
-20 MPa/mm. Every configuration sees the same samples and noise seeds.
+are the GVL; the GVL with the stop law relaxed (20 ms filter,
+`StopVelMin` 2 mm/s); the scheduled controller at wc = 6 and 11 rad/s
+with those settings; the scheduled controller at wc = 11 with the
+drive's limits (VelMax 7 mm/s, accel and decel 100 mm/s²); and the same
+assuming a measured bulk modulus (K_cfg = 1.2 GPa). Every configuration
+sees the same samples and noise seeds.
 `--cfg key=value` runs a single custom configuration instead, and
 `--flow-ff` adds a flow feedforward to it as a bound; the machine cannot
 supply the flow, so no built-in configuration uses it.
@@ -558,19 +610,105 @@ exceeds 1 MPa; with StopVelMin 2 it delivers 281 mL) but not the
 end-of-delivery instability, and a 20 MPa/mm stop stiffness removes the
 steady error but overshoots every compression past the 12 MPa ceiling,
 because the filtered reading lags the stiffening chamber on the
-approach. The instability at the end needs a gain that falls with the
-remaining volume, and the approach needs the conservative stop law or a
-gain that rises with the pressure; that schedule is the subject of the
-next study. With the gains on the machine no configuration passes every
+approach. With the gains on the machine no configuration passes every
 requirement at 1:1 in the robustness study.
 
-**Charge against saturation.** The saturation pressure is 3.6 MPa for
-1:1, 7.2 MPa for 2:1, 9.0 MPa for 2.5:1 and 10.0 MPa for 3:1 (saline).
-At 2.5:1 and above the opening dip of about 2 MPa degasses the solution
-immediately, so nothing is deliverable with the present gains, and at
-3:1 the chamber already holds free gas at 10 MPa. The deliverable
-charge at a given target pressure is set by the opening dip plus the
-margin: each megapascal of dip costs about 0.3 in the ratio.
+**Scheduled controller.** `ScheduledSlaveController` (equations (39) to
+(41)) fixes both. Because the loop's crossover is held at or below wc
+whatever the stiffness, the linear margins are the same at every point
+of a run: with the 20 ms filter, 69° of phase margin and 18 dB of gain
+margin at wc = 6 rad/s, and 57° and 13 dB at wc = 11 rad/s, from
+0.1 MPa/mm to 1000 MPa/mm. When the estimate overstates the stiffness
+the crossover falls and the margin grows, so the bound errs safe; when
+the configured bulk modulus is below the true one the crossover rises
+in proportion (K_cfg 1.2 GPa against a true 2.5 GPa gives 23 rad/s at
+wc = 11, still stable with 34° of phase margin). Nominal results, 1:1,
+with the 20 ms filter and StopVelMin 2 mm/s:
+
+| Arm | Compress: arrive s / overshoot MPa | Delivery: dip MPa / margin MPa / V_ok mL |
+|---|---|---|
+| GVL (for reference) | 3.7 / 0.35 | 2.16 / −3.5 (crash) / 19 |
+| scheduled, wc 6 | 5.5 / 0.03 | 3.38 / 3.1 / 292 (all) |
+| scheduled, wc 11 | 3.5 / 0.01 | 2.18 / 4.3 / 292 (all) |
+| scheduled, wc 11, Ki = Kp | 3.3 / 0.06 | 2.07 / 4.4 / 292 (all) |
+| scheduled, wc 11, VelMax 7, accel/decel 100 | 3.1 / 0.01 | 2.18 / 4.3 / 292 (all) |
+| scheduled, wc 11, K_cfg 1.2 GPa, VelMax 7, accel/decel 100 | 2.0 / 0.00 | 1.51 / 4.9 / 292 (all) |
+
+The scheduled arms compress with no measurable overshoot, because the
+stop law brakes for the estimated stiffness and the measurement lag and
+the integrator is held until arrival, and they deliver the whole
+chamber with the pressure back in band, because the gain falls as the
+chamber empties. The approach is also faster than the GVL's once wc is
+11 rad/s. Raising the drive limits to 7 mm/s and 100 mm/s² shortens the
+compression (3.5 → 3.1 s) but does not change the opening dip, which is
+set by the gain at the moment the valve opens and the integral time, not
+by how fast the piston can accelerate.
+
+**The opening dip is what limits the charge.** With feedback alone the
+dip is close to the quasi-static Q/(A·Kp) of eq. (33) plus part of the
+0.8 MPa tube step: 3.4 MPa at Kp 0.24 (wc 6 against a 2.2 GPa bound),
+2.2 MPa at Kp 0.44 (wc 11), 1.5 MPa at Kp 0.8 (wc 11 against a 1.2 GPa
+bound). A faster integrator (Ki = Kp instead of 0.4 Kp) trims 0.1 MPa.
+The flow-feedforward bound (1.1 MPa) shows what a flow measurement
+would buy and is not available. The charge that can be delivered without
+degassing follows directly: the saturation pressure is about 3.5 MPa
+per unit of ratio, so each megapascal of dip costs about 0.3 in the
+ratio.
+
+| Charge | P_sat MPa | GVL | sched wc 6 | sched wc 11 | sched wc 11, K_cfg 1.2 |
+|---|---|---|---|---|---|
+| 1:1 | 3.6 | 19 mL | 292 | 292 | 292 |
+| 1.5:1 | 5.4 | 19 | 292 | 292 | 292 |
+| 2:1 | 7.2 | 19 | 0 (margin −0.6) | 292 (margin 0.6) | 292 (margin 1.3) |
+| 2.5:1 | 9.0 | 0 | 0 | 0 (margin −1.2) | 0 (margin −0.6) |
+| 3:1 | 10.0 | 0 | 0 | 0 | 0 |
+
+(Volume delivered before a violation, nominal parameters, 0.5 MPa
+margin. At 3:1 the saline is saturated at 10 MPa and the chamber holds
+free gas; no controller can deliver it without bubbles at this target.)
+
+**Robustness** (100 Latin hypercube samples over the table above;
+pass rate for every requirement, in percent):
+
+| Charge | GVL | stop law relaxed | sched wc 6 | sched wc 11 | sched wc 11, limits 7 / 100 | sched wc 11, K_cfg 1.2 |
+|---|---|---|---|---|---|---|
+| 1:1 | 0 | 3 | 78 | **100** | **100** | **100** |
+| 2:1 | 0 | 3 | 0 | 45 | 45 | 78 |
+
+At 1:1 the wc = 11 arms pass every sample: compression in band and
+under the ceiling, no degassing, control to the end of every delivery,
+stroke within limits. The wc = 6 arm loses control in 22 % of samples,
+all at low K with high Cd, where its low gain lets the dip linger above
+1 MPa for more than 5 s; this is slowness, not instability. At 2:1 the
+margin is thin and the failures are driven by K (0 % of the lowest third
+fail, 65 to 88 % of the highest third) and Cd: a stiff chamber with a
+large outflow gives a deep dip. Assuming a measured K ≤ 1.2 GPa raises
+the 2:1 pass rate from 45 % to 78 %. The uncertain parameters rank
+K ≈ tauV ≈ Cd > noise > Vl0 > tauDiss on the key metrics.
+
+**What this means for the machine.**
+- 1:1 is deliverable with margin to spare under every plausible
+  parameter, with the scheduled controller at wc = 11 rad/s, the 20 ms
+  filter and StopVelMin 2 mm/s.
+- 2:1 is deliverable at nominal parameters and in about half the
+  plausible ones; measuring K (and Cd) decides it, and a K near 1 GPa
+  makes it reliable.
+- 2.5:1 and above are not deliverable at a 10 MPa target by feedback
+  alone; a higher target (the ceiling permits about 11.5 MPa with the
+  scheduled controller's negligible overshoot) or a smaller tube volume
+  (less of the 0.8 MPa step) are the levers.
+- The drive's limits (7 mm/s, 100 mm/s²) are worth raising for a faster
+  compression but do not change the deliverable charge.
+
+**Porting the schedule to the slave** needs four things in
+`FB_PressureController` or `PRG_Main`: configured constants for the
+contact position, the saline volume (a lower bound), the charge and the
+bulk modulus (an upper bound), and the target crossover; the stiffness
+bound of eq. (39) computed each scan from `G_sysActualPressure` and the
+actual position; a `Lag` input to the stop law (eq. (41)) in place of
+the fixed one-scan step; and an integrator that accumulates Ki·e (or is
+rescaled when Ki changes) and is held at zero until the first arrival
+within 0.5 MPa of the target.
 
 **Margins against stiffness** (linear model, GVL gains):
 
@@ -596,7 +734,12 @@ filter, to 8.2 without the drive lag, and to 11.6 without both.
 
 **Open questions:**
 - The mechanical pressure ceiling: 12 MPa is assumed; 15 MPa may break
-  the piston.
+  the piston. A higher target is the main lever for a larger charge.
 - The degas margin to design to. It sets where the charge against
   volume trade-off is read, not whether a configuration works.
-- The measured orifice flow and friction (see the assumptions table).
+- The measured bulk modulus K, orifice flow (Cd) and drive lag (tauV),
+  which decide whether 2:1 is reliable, and the friction (see the
+  assumptions table).
+- Whether the saline volume and the charge can be given to the slave
+  (as configuration or over the protocol), which the schedule's
+  stiffness bound needs.

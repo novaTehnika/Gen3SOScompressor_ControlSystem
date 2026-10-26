@@ -78,9 +78,12 @@ def write_traces(path, results, par, step=5):
     mode."""
     names = [r.name for r in results]
     r0 = results[0]
-    cols = ([r0.t, r0.target / 1e6]                     # [Pa -> MPa]
-            + [r.P / 1e6 for r in results]
-            + [r.u_plot() for r in results])
+    # Runs end at different times when the chamber empties; the CSV
+    # covers the shortest.
+    n = min(len(r.t) for r in results)
+    cols = ([r0.t[:n], r0.target[:n] / 1e6]             # [Pa -> MPa]
+            + [r.P[:n] / 1e6 for r in results]
+            + [r.u_plot()[:n] for r in results])
     head = ','.join(['t', 'target'] + [f'P_{n}' for n in names]
                     + [f'u_{n}' for n in names])
     np.savetxt(path, np.column_stack(cols)[::step], delimiter=',',

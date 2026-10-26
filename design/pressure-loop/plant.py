@@ -148,8 +148,8 @@ class Plant:
     def outflow(self, P, V_l, valve, Q_tube):
         """[m^3/s] Outflow at pressure P [Pa] with saline volume V_l
         [m^3], valve area fraction valve and tube flow Q_tube [m^3/s],
-        eq. (36). It is zero once the chamber is empty."""
-        if V_l <= self.V_empty:
+        eq. (36). It is zero once the saline is gone."""
+        if V_l <= 0.0:
             return 0.0
         if valve > 0.0:
             if self.Qf > 0.0:
@@ -162,7 +162,8 @@ class Plant:
 
     @property
     def empty(self):
-        """True once the saline is gone and the delivery has ended."""
+        """True once the saline volume is down to V_empty, where the
+        delivery is stopped."""
         return self.y[iy_Vl] <= self.V_empty
 
     # ----- Continuous-time model ----------------------------------------

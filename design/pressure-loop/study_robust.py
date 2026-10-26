@@ -78,20 +78,26 @@ COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
 
 
 # %% ===== STUDY ARMS ====================================================
-# Each candidate arm changes one thing from the GVL, so the effect of
-# each change can be attributed.
+# The arms are the GVL, the GVL with the stop law relaxed (20 ms filter,
+# StopVelMin 2 mm/s), and the scheduled controller at two crossovers,
+# with the drive's limits raised, and assuming a measured bulk modulus.
 # Flow feedforward is not practical on this machine, so no built-in arm
 # uses it; --flow-ff still runs it as a bound on what knowing the flow
 # would buy.
+F20 = {'AnalogFilterTimeConst': 0.02, 'StopVelMin': 2.0}
 CONFIGS = {
     'GVL': ControllerSpec('GVL'),
-    'f20': ControllerSpec('f20', {'AnalogFilterTimeConst': 0.02}),
-    'f20+vmin2': ControllerSpec(
-        'f20+vmin2',
-        {'AnalogFilterTimeConst': 0.02, 'StopVelMin': 2.0}),
-    'f20+stiff20': ControllerSpec(
-        'f20+stiff20',
-        {'AnalogFilterTimeConst': 0.02, 'StopStiffness': 20.0}),
+    'f20+vmin2': ControllerSpec('f20+vmin2', F20),
+    'sched6': ControllerSpec('sched6', F20, sched=dict(wc=6.0)),
+    'sched11': ControllerSpec('sched11', F20, sched=dict(wc=11.0)),
+    'sched11+v7a100': ControllerSpec(
+        'sched11+v7a100',
+        {**F20, 'VelMax': 7.0, 'Accel': 100.0, 'Decel': 100.0},
+        sched=dict(wc=11.0)),
+    'sched11+K1.2': ControllerSpec(
+        'sched11+K1.2',
+        {**F20, 'VelMax': 7.0, 'Accel': 100.0, 'Decel': 100.0},
+        sched=dict(wc=11.0, K_cfg=1.2e9)),
 }
 
 
@@ -548,6 +554,9 @@ def main(argv=None):
     say('thresholds: ' + ', '.join(f'{k}={v:g}'
                                    for k, v in THRESH.items()))
     say(f'oxygen charge {args.ratio:g}:1')
+    for spec in specs:
+        say(f'arm {spec.name}: {spec.overrides or "GVL"}'
+            + (f' scheduled {spec.sched}' if spec.sched else ''))
     nw = args.workers or os.cpu_count() or 1
     pool = R.make_pool(nw) if nw > 1 else None
 

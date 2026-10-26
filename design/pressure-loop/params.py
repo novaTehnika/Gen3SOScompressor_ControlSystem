@@ -118,9 +118,10 @@ class Params:
     # [s] Valve opening time; 0 opens the valve in one scan. The ball
     # valve is opened rapidly.
     Topen: float = 0.0
-    # [m^3] Liquid volume at which the chamber counts as empty and the
-    # delivery ends
-    V_empty: float = 2e-6
+    # [m^3] Saline volume at which the delivery is stopped. The master
+    # ends the delivery before the piston reaches the end of its stroke;
+    # the simulation ends there too.
+    V_empty: float = 5e-6
 
     # ----- Derived outlet quantities -------------------------------------
     @property

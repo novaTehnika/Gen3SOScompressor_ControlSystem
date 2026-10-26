@@ -25,7 +25,8 @@ The checks cover:
   - the slew limits, stall and force balance of the actuators;
   - the slave sensor chain against the legacy chain;
   - the wiring of the slave controller against its block called
-    directly;
+    directly, and the scheduled controller's stiffness bound,
+    integrator continuity and stop law;
   - reference values of the legacy model, and closed-loop runs of the
     slave controller;
   - the parallel runner against serial runs.
@@ -343,6 +344,63 @@ def check_wiring():
 
 
 # %% ===== CLOSED LOOP ===================================================
+def check_scheduled():
+    par = Params()
+    S = ctl.ScheduledSlaveController
+
+    # The stiffness estimate is an upper bound on the true stiffness
+    # when the configured volume and bulk modulus bound the true ones,
+    # through a compression and a delivery.
+    class Logged(S):
+        def reset(self, p, sc):
+            self.k_log = []
+            return super().reset(p, sc)
+
+        def step(self, P, tg, t, sc, x=0.0):
+            u = super().step(P, tg, t, sc, x)
+            self.k_log.append(self.k_est)
+            return u
+    for name in ('compress', 'deliver'):
+        c = Logged('s', wc=11.0, K_cfg=par.K, V_l_cfg=par.Vl0,
+                   AnalogFilterTimeConst=0.02, StopVelMin=2.0)
+        r = sim.run(par, scenarios.make(name, par), c)
+        ratio = np.array(c.k_log) / r.stiffness
+        assert ratio.min() > 0.98, (name, ratio.min())
+        assert r['V_ok'] == r['V_delivered'] and r['P_max'] < 10.5
+    ok(f'scheduled controller: k_est >= k_true through compress and '
+       f'deliver (lowest ratio {ratio.min():.3f}); the 1:1 delivery '
+       f'runs to the end with control (dip {r["dip"]:.2f} MPa)')
+
+    # Changing Ki leaves the integral term continuous.
+    c = S('s')
+    sc = scenarios.stiffstep(par)
+    c.reset(par, sc)
+    c.arrived = True
+    for k in range(200):
+        c.step(10e6, 10.2e6, k * par.Ts, sc, 0.0)
+    fb = c.fb
+    integral_term = fb.Ki * fb.rInteg
+    fb.Ki, fb.rInteg = 2.0 * fb.Ki, fb.rInteg / 2.0     # same term
+    c.step(10e6, 10.2e6, 0.4, sc, 0.0)
+    assert abs(fb.Ki * fb.rInteg - integral_term
+               - fb.Ki * 0.2 * par.Ts) < 1e-12
+    ok('scheduled controller: the integral term is continuous across a '
+       'gain change')
+
+    # With lag equal to one scan the stop law is the block's own.
+    c = S('s', lag=par.Ts)
+    c.reset(par, sc)
+    cfg = par.cfg()
+    D, Ts = cfg['G_cfgPressureDecel'], cfg['G_cfgScanTime']
+    for e, k in ((0.3, 11.4), (2.0, 100.0), (8.0, 1.0)):
+        step = D * Ts
+        v_fb = -step + math.sqrt(step * step + 2 * D * e / k)
+        v_fb = max(cfg['G_cfgPressureStopVelMin'], v_fb)
+        assert abs(c.stop_velocity(e, k) - v_fb) < 1e-12
+    ok('scheduled controller: the stop law with one scan of lag equals '
+       "FB_PressureController's")
+
+
 def check_legacy_reference():
     # Reference values for this case without noise, computed with Heun
     # at nsub = 5
@@ -405,6 +463,7 @@ if __name__ == '__main__':
     check_actuators()
     check_sensor()
     check_wiring()
+    check_scheduled()
     check_legacy_reference()
     check_closed_loop()
     check_runner()

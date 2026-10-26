@@ -267,6 +267,17 @@ class ControllerSpec:
     flow_ff: bool = False
     ff_scale: float = 1.0
     ratio: float = 1.0      # oxygen charge the arm is run with
+    sched: dict = None      # ScheduledSlaveController arguments, or None
+
+
+def make_controller(spec):
+    """Return the controller of a study arm."""
+    if spec.sched is not None:
+        return ctl.ScheduledSlaveController(
+            spec.name, flow_ff=spec.flow_ff, **spec.sched,
+            **spec.overrides)
+    return ctl.SlaveController(spec.name, flow_ff=spec.flow_ff,
+                               **spec.overrides)
 
 
 def point_metrics(point):
@@ -279,7 +290,7 @@ def point_metrics(point):
     values, scen, spec, seed = point
     par = make_params(values, spec.ratio)
     s = make_scenario(scen, par, spec.ff_scale)
-    c = ctl.SlaveController(flow_ff=spec.flow_ff, **spec.overrides)
+    c = make_controller(spec)
     try:
         with np.errstate(invalid='raise', over='raise', divide='raise'):
             r = sim.run(par, s, c, seed=seed)
