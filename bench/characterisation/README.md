@@ -33,8 +33,24 @@ position guards.
 `tests/charRunSim.m` runs `charRun` and the fits against the simulated slave
 (through the friction bench's `fakeProbeLink`), `tests/charFitsSynthetic.m`
 the fits on synthetic logs with known parameters; `tests/run_all.sh` runs
-both. `frictionRun`'s logs can be given to the fits too: a delivery logged
-for the friction bench is also an orifice flow point.
+both.
+
+## 0. What the friction bench's runs already give
+
+The friction bench's logs are in the same format, so two of the three
+parameters come out of runs made for it:
+
+| Friction bench run | Gives | Command |
+|---|---|---|
+| `'delivery'` at 10, 5 and 2.5 MPa | Cd and the square-root law (test 2) | `charOrificeFlow({'../friction/captures/d10_delivery_*.csv', ...}, struct('K_Pa', ..., 'collected_mL', [...]))`; leave `collected_mL` out if the discharge was not weighed |
+| `'steps'` captures | tauV at the motor (test 3, motor side) | `stepResponseFit` or `charDriveLag` on the capture files |
+
+What needs a new run: K (section 3, slow ramps in a liquid-only chamber,
+which no friction set does) and the piston-side lag (section 5, velocity
+steps in a liquid-only chamber at 3 to 5 MPa with the probe recording the
+pressure; the gas-charge set's chamber is too soft for the pressure to
+move). The friction bench's deliveries also serve test 1's purge, section
+2 step 4.
 
 ## 1. Setup
 
