@@ -14,4 +14,6 @@ octave-cli --quiet --eval "
   slavePressureMode;
   pressureNoiseRunSim;
   frictionRunSim;
+  charRunSim;
+  charFitsSynthetic;
 "

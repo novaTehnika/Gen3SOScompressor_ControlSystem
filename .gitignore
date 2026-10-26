@@ -13,3 +13,5 @@ bench/pressure/SafetyHold.slx
 octave-workspace
 # Friction bench logs
 bench/friction/captures/
+# Characterisation bench logs
+bench/characterisation/captures/

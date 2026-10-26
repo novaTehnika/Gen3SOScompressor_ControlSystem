@@ -1,0 +1,340 @@
+# Pressure Loop Characterisation Bench
+
+Measures three parameters of the pressure loop that the design model in
+`design/pressure-loop/` (`params.py`) carries as assumptions, so that the
+measured values replace them: the effective bulk modulus of the saline-filled
+chamber (`K`), the discharge coefficient of the outlet orifice bank (`Cd`, the
+outflow at a known pressure) and the lag of the drive's velocity loop as seen
+at the piston (`tauV`). The friction test is a separate bench.
+
+Everything is measured through the protocol the master already uses: the
+slave reports position, velocity, torque and pressure in IR11-20 every 50 ms
+(`docs/master/ModbusRegisterMap.md`). The drive lag alone needs the 2 ms
+scan, which an optional slave-side probe program provides, as the pressure
+noise bench did. Nothing in `slave-src/` changes.
+
+| File | Contents |
+|------|----------|
+| `charRun.m` | The master for a run: drives a path of steps through `masterStep` as the shell does, logs the feedback every 50 ms, stops the axis when the pressure or the position leaves the envelope, and reads the axis probe between exchanges |
+| `charConfig.m` | Chamber and outlet geometry, the guards, the probe registers and the slave settings read from `slave-src/GVL/GlobalVariables_Reference.st` |
+| `charLink.m` | Raw Modbus TCP link over `tcpclient` (FC04, FC06, FC16), reusable by other benches |
+| `charBulkModulus.m` | Test 1: K from slow ramps, with a bound on residual gas and, from two fills, the split between liquid and series compliance |
+| `charOrificeFlow.m` | Test 2: Cd and the square-root law from deliveries at held pressure, with the collected-volume check |
+| `charDriveLag.m` | Test 3: tauV and dead time from the probe captures, the lag at the piston from the pressure channel, or an estimate from the 50 ms log |
+| `charReadRun.m`, `charReadCapture.m` | Readers for the two CSV formats |
+| `slave/PRG_AxisProbe.st` | Optional slave program: 250-scan capture of the velocity command and feedback, torque and pressure around a command change |
+| `captures/` | Logs (gitignored) |
+
+`tests/charRunSim.m` runs `charRun` and the fits against the simulated slave,
+`tests/charFitsSynthetic.m` the fits on synthetic logs with known parameters;
+`tests/run_all.sh` runs both.
+
+## 1. Setup
+
+### Lab PC
+
+As for the pressure noise bench (`bench/pressure/README.md` section 2): the
+shell model must be stopped, `cfg.address` in `bench/modbus/modbusBenchConfig.m`
+set to the controller IP, and `SafetyHold.slx` built once with
+`bench/pressure/buildSafetyHold` and set to Connected IO. `charRun` starts it
+before the first command and stops it at the end, which releases the safety
+relay.
+
+```matlab
+cd bench/characterisation
+addpath ../pressure                      % SafetyHold.slx lives there
+r = charRun('label', path);              % see sections 3 to 5 for the paths
+```
+
+The run ends with the axis stopped, prints a table of the steps and saves
+`captures/<label>_run_<timestamp>.csv` (and one capture file per probe
+capture). Ctrl-C stops the axis the same way. The guards are
+`charConfig.pressureStop` (11.0 MPa, below the 12 MPa ceiling) and the
+position band inside the slave's soft limits; `opts.pressureStop`,
+`opts.posStop` and `opts.posMin` override them for a run and cannot be set
+above the ceiling.
+
+### Slave
+
+No change for tests 1 and 2. For test 3 at full resolution, load
+`slave/PRG_AxisProbe.st` as the pressure noise bench loaded
+`PRG_PressureProbe`: declare the globals in its header (holding register
+HR101 in the FC#03,06,16 group, input registers IR101-104 and the four
+`ARRAY[0..249] OF INT` from IR121 in the FC#04 group), **enlarge the FC#04
+input register group to at least 1120 registers** (byte range `%QB73792` to
+`%QB76031`), assign the program to the 2 ms task beside `PRG_Main`, compile,
+download. It reads globals only. It uses the same probe registers as
+`PRG_PressureProbe` and `PRG_ModbusBench`, so only one of the three is loaded
+at a time. Without it, run test 3 anyway: the 50 ms log gives the lag to
+about 25 ms.
+
+### Settings that matter
+
+`charConfig` reads the GVL reference, which must match the controller:
+velocity-mode slew (`G_cfgDirectCtrlAccel`, `G_cfgDirectCtrlDecel`), the
+velocity clamp, the soft limits, the pressure filter (`G_cfgAnalogFilterTimeConst`,
+`G_cfgAnalogMedianSize`) and the scan time. The ramps and steps below stay
+within `G_cfgVelLimitMax`, the torque limits (34 kN at 10 MPa is about 37 %
+of rated torque through the 70:1 gearbox) and the soft limits; the position
+guard stops a delivery 3 mm before the positive soft limit, so the soft limit
+must allow the piston to approach the end of travel if a delivery is to run
+to the end. The pressure target in the operator app is in atm absolute; this
+bench works in MPa gauge throughout, as the slave does.
+
+## 2. Volumes: dead volume and fill
+
+Both fits need the liquid volume, and the master's `deadVolume` (10 mL in
+`masterConfig`) is a placeholder; the chamber is thought to hold 20 to 30 mL
+that the piston cannot sweep. Measure it once:
+
+1. Jog the piston to the end of travel (the position guard allows up to
+   3 mm inside the soft limit; note the position `x_EOT` reached and compare
+   it with `masterConfig.posEOT`).
+2. With the outlet valve open and the fill port open, fill the chamber from
+   a burette or syringe until liquid appears at the orifices. The volume
+   added is the dead volume `V_dead`.
+
+Then, for every liquid-only run:
+
+3. Retract to about 285 mm (300 mL fill), fill through the port with the
+   valve open until liquid runs from the orifices with no bubbles, close
+   the port and the valve. Weigh the saline added (1.005 g/mL at 20 degC)
+   as `V_fill`, which should agree with `A (x_EOT - x) + V_dead` to within
+   a few mL; the difference is air or an error in `V_dead`.
+4. Purge dissolved and trapped gas: compress to 10 MPa in pressure mode,
+   hold 5 min, and watch the position in a `hold` step (position mode): a
+   pressure that falls at constant position is gas dissolving or a leak.
+   Repeat until the pressure holds to within 0.05 MPa over a minute.
+
+`A` is 3431 mm^2 (3.431e-3 m^2, 2.602 in bore), so the piston sweeps
+3.43 mL per mm.
+
+## 3. Test 1: bulk modulus K
+
+The chamber is liquid-only and purged (section 2). The piston moves at a
+slow constant velocity while the pressure is logged against the position;
+K = (dP/dx) V / A. At 300 mL and K = 1 GPa the stiffness is 11.4 MPa/mm, so
+0.1 mm/s raises the pressure by 1.1 MPa/s and 3 to 10 MPa takes 0.6 mm and
+6 s. The ramps end on the pressure, with the guard as the backstop.
+
+```matlab
+path = {{'ramp',  0.1, 10.0, 90}, {'dwell', 2}, ...     % up to 10 MPa at 0.1 mm/s
+        {'ramp', -0.1,  3.0, 90}, {'dwell', 2}, ...     % down to 3 MPa
+        {'ramp',  0.1,  6.5, 90}, {'dwell', 2}, ...     % two more pairs, so the
+        {'ramp', -0.1,  3.0, 90}, {'dwell', 2}, ...     % bands 3-6.5 and 6.5-10
+        {'ramp',  0.1, 10.0, 90}, {'dwell', 2}, ...     % are each covered up and
+        {'ramp', -0.1,  6.5, 90}, {'dwell', 2}, ...     % down
+        {'ramp',  0.1, 10.0, 90}, {'dwell', 2}, {'ramp', -0.1, 3.0, 90}};
+r = charRun('K300', path);                  % add opts.probe = true with the axis probe loaded
+rk = charBulkModulus(r.runFile, struct('deadVolume_mL', 25, 'fillVolume_mL', 300));
+```
+
+Start the path from about 2.5 MPa (reach it with a `pressure` step or a
+first short ramp) so the first ramp begins in the fitted range. The ramps
+run in one velocity session; the slave slews the command at
+`G_cfgDirectCtrlAccel`, so the 0.1 mm/s is reached within a few scans.
+
+The fit (`charBulkModulus`) regresses the position on the pressure in each
+ramp with a liquid term and an isothermal gas term. It reports per ramp the
+slope dP/dx, the effective K (liquid plus whatever gas is left, which is
+what the loop sees), the liquid-only K, the gas volume the curvature
+implies, and the residual. Then up against down (hysteresis: friction,
+backlash or a leak), the spread, and the `params.py` line.
+
+**Expected values** (300 mL, 0.1 mm/s; the script prints this table):
+
+| K | dP/dx | dP/dt | travel 3 -> 10 MPa |
+|---|---|---|---|
+| 0.5 GPa | 5.7 MPa/mm | 0.57 MPa/s | 1.22 mm |
+| 1.0 GPa | 11.4 MPa/mm | 1.14 MPa/s | 0.61 mm |
+| 1.5 GPa | 17.2 MPa/mm | 1.72 MPa/s | 0.41 mm |
+| 2.0 GPa | 22.9 MPa/mm | 2.29 MPa/s | 0.31 mm |
+| 2.5 GPa | 28.6 MPa/mm | 2.86 MPa/s | 0.24 mm |
+
+Water alone is 2.2 GPa. A good run shows a nearly straight P(x) with a
+slope in this table, the same within 10 % up and down and in both pressure
+bands, and a gas volume below 0.05 mL. A pressure that rises more slowly at
+3 MPa than at 10 MPa (upward curvature) is residual gas: a bubble of 0.1 mL
+at 5 MPa adds 7 % to the compliance of 300 mL at 1 GPa, which is why the
+fit bounds it and the acceptance limits its share to 5 %. A K below 0.5 GPa
+with no gas term is the actuator, a hose or a seal flexing; see below.
+
+**Residual gas.** Dissolved gas does not change the compressibility; only
+free gas does. The curvature fit bounds the free gas; the hold in section 2
+shows whether it is still dissolving. Both bands should give the same K
+once the gas is gone.
+
+**What the encoder measures.** The position is the motor encoder scaled
+through the gearbox and screw, so any compliance between motor and piston
+(screw, nut, thrust bearing, frame) is in series with the liquid and lowers
+the measured K. That is the right value for the loop, which also sees it
+through the encoder, but it does not scale with the liquid volume as the
+liquid term does. To separate them, repeat the ramps at a second fill
+(150 mL, piston about 40 mm further in) and pass both files: the compliance
+dx/dP against V gives the liquid K from the slope and the series stiffness
+from the intercept (`r.split`). The series term matters at the end of a
+delivery, when the liquid term is small.
+
+**Oxygen charge (if time allows).** Admit a known charge (for example 1:1,
+300 mL STP, from the supply at 0.5 to 1.4 MPa), compress to 10 MPa, wait
+for the dissolution to settle (minutes), and run the same path with
+`opts.chargeRatio = 1`. The script prints the model's free gas volume at
+each pressure against the fitted gas term; agreement within a factor of two
+supports the model's Henry's-law term with its 5 % salting-out. At 3 MPa a
+1:1 charge still has free gas and the curvature is large, so fit the bands
+separately.
+
+## 4. Test 2: orifice flow and Cd
+
+Liquid-only chamber, about 300 mL. In pressure mode at a held target the
+piston stands still; when the ball valve is opened the pressure dips and
+the loop drives the piston at the velocity that balances the outflow, so
+Q = A v at steady state without a flow meter, and the collected volume is
+the check. The first 0.24 mL after the valve opens fill the 1 mm tube and
+are excluded, as is the settling of the loop.
+
+```matlab
+r = charRun('Q10', {{'pressure', 4, 15}, {'pressure', 10, 100}}, struct('posStop', 280));
+```
+
+Approach in two stages: the loop's stop law makes the approach to 10 MPa
+safe, but a first stage at 4 MPa shows the chamber is liquid-full before
+the pressure gets high. Once the second target is reached and steady, open
+the valve quickly and collect the discharge in a tared beaker; the run ends
+when the position guard stops it (set `posStop` for the volume to deliver,
+3.43 mL per mm) or after the step's seconds. Note the beaker mass, and the
+run clock at opening if a watch is handy (the script otherwise finds the
+opening from the velocity and the pressure dip). Refill and repeat at 7 and
+4 MPa.
+
+```matlab
+rq = charOrificeFlow({'captures/Q4_run_...csv', 'captures/Q7_run_...csv', 'captures/Q10_run_...csv'}, ...
+    struct('K_Pa', rk.K_Pa, 'deadVolume_mL', 25, 'fillVolume_mL', 300, 'collected_mL', [m4 m7 m10] / 1.005));
+```
+
+The fit reports per steady window the pressure, Q from the piston velocity
+with the compressibility correction, Cd, and the drift; sub-windows of 10 s
+show whether Q holds along the stroke; the exponent of Q = c P^n over the
+three pressures; the collected volume against the swept volume (with the
+decompression after the stop and the tube volume accounted for); and the
+`params.py` line.
+
+**Expected values** (32 orifices of 40 um, A_o = 4.02e-8 m^2):
+
+| P | Q, Cd 0.6 | Q, Cd 0.7 | Q, Cd 0.8 | piston at Cd 0.7 |
+|---|---|---|---|---|
+| 4 MPa | 2.16 mL/s | 2.52 mL/s | 2.88 mL/s | 0.73 mm/s |
+| 7 MPa | 2.85 mL/s | 3.33 mL/s | 3.81 mL/s | 0.97 mm/s |
+| 10 MPa | 3.41 mL/s | 3.98 mL/s | 4.55 mL/s | 1.16 mm/s |
+
+Accept Cd between 0.5 and 0.9, an exponent of 0.4 to 0.6, a spread of Cd
+over windows below 10 % and a collected volume within 5 % of the swept
+volume. A Cd that falls with time or pressure points to orifices clogging;
+a Cd well above 0.8 to a leak past the valve or the seals; an exponent
+far from 0.5 to a flow that is not orifice-limited (a partly open valve,
+or air in the tube).
+
+The steady pressure need not equal the target: with the gains on the
+machine the loop settles below the target during a delivery (design
+README, "Delivery with the gains on the machine"). The fit uses the
+measured pressure, so that does not matter, but the pressure must be
+steady; the `settleRate` option (0.05 MPa/s) defines steady.
+
+## 5. Test 3: drive lag tauV
+
+The design model represents the drive's velocity loop, the gearbox and the
+ball screw together as one first-order lag between the slewed velocity
+command and the piston velocity (eqs. 11 and 12 of the design README).
+The slave's velocity feedback (`G_sysActualVelocity`, from
+`MC_ReadActualVelocity` in the LD POU) is the controller's axis velocity:
+the motor encoder, differentiated by the drive and scaled through the
+70:1 gearbox and the 5.08 mm lead. It measures the motor, so gearbox lost
+motion and screw compliance are invisible to it. The test therefore has
+two parts: the motor-side lag from the velocity feedback, and the
+piston-side lag from the pressure, which only the piston moves.
+
+**Unpressurised** (the chamber drained or the fill port open, so the piston
+meets no load; the valve must not be the only outlet, since 2 mm/s would
+push 7 mL/s through the orifices and build pressure):
+
+```matlab
+opts.probe = true;                                   % PRG_AxisProbe loaded
+path = {{'velstep', [1 0 -1 0 1 0 -1 0 2 0 -2 0], 2 * ones(1, 12)}};
+r = charRun('lag_dry', path, opts);
+rl = charDriveLag(r.files);                          % the capture files
+```
+
+Each command change arms the probe one exchange before the reference goes
+out; the probe triggers on the change of `G_sysCommandedVelocity` (the
+value `PRG_Main` hands to `Y_DirectControl`, before the drive's slew) and
+keeps 50 scans before it and 200 after. Hold each command at least 2 s so
+the capture (0.5 s) and its readout (0.4 s) finish. Keep the step size at
+or below 0.2 s times the slew (`G_cfgDirectCtrlAccel`: 1 mm/s at
+5 mm/s^2, 2 mm/s at 10 mm/s^2) so the ramp fits in the capture; raising
+the slew to the pressure-mode values (50 mm/s^2) for the test separates
+the lag from the ramp more sharply. Steps about a running velocity
+(`[1 2 1 0]`) avoid the stiction at zero speed.
+
+The fit slews the recorded command at the GVL limits, delays it and
+passes it through a first-order lag, and adjusts the lag and the dead time
+to the feedback (`opts.fitAccel` also scales the slew, as a check that the
+drive uses the configured limits). It prints per capture tauV, the dead
+time, the residual, and the model-free times at which the feedback reaches
+10 % and 63 % of the step.
+
+**Pressurised** (liquid-only chamber at 3 to 5 MPa, from section 2): small
+steps, because at 11 MPa/mm a 0.2 mm/s step for 0.3 s moves the pressure
+by 0.7 MPa:
+
+```matlab
+path = {{'ramp', 0.1, 4.0, 60}, {'dwell', 3}, ...
+        {'velstep', [0.2 0 -0.2 0 0.2 0 -0.2 0], [0.3 3 0.3 3 0.3 3 0.3 3]}};
+r = charRun('lag_wet', path, opts);
+rl = charDriveLag(r.files);
+```
+
+When a capture's pressure moves by more than 0.1 MPa the script also fits
+the pressure channel: the same lag model for the piston velocity,
+integrated at a stiffness k, then the slave's median filter (two scans for
+a smooth signal), the low-pass (`G_cfgAnalogFilterTimeConst`, 20 ms on the
+machine, 50 ms earlier) and the two-scan pipeline, eqs. 16 to 18. The
+pressure lags the piston by the filter, so the filter constant must be the
+one loaded; the fit returns tauP, the dead time and k (which should match
+test 1's stiffness). The `ramp` starts in a velocity session are captured
+too, so the K runs of test 1 with `opts.probe = true` already give
+pressurised lag data.
+
+**Expected values.** The design study assumed 20 ms and studied 5 to
+50 ms. A Sigma-7 velocity loop tuned for this load is typically 10 to
+30 ms; the dead time between `G_sysCommandedVelocity` and the feedback is
+two to four scans (Mechatrolink out and back, plus the task order) and
+should be below 20 ms. The piston-side lag can exceed the motor-side lag
+when the chamber is stiff; a difference above 10 ms is worth carrying into
+the model as tauV. Accept a residual below 5 % of the step, a spread of
+tauV across captures below 30 %, up and down steps within 20 % of each
+other.
+
+**Without the probe** the 50 ms log still has the command (the logged
+reference, sent in the next exchange) and the feedback. `charDriveLag` on
+the run file fits every step as an ensemble and returns the lag plus dead
+time to about 25 ms, enough to say whether 20 ms is the right order but not
+to separate the two.
+
+## 6. Carrying the results into the model
+
+`params.py` fields and the units the scripts print them in:
+
+| Field | Script | Unit |
+|---|---|---|
+| `K` | `charBulkModulus` (`r.K_Pa`) | Pa |
+| `Vl0` | the fill of the runs (`r` prints it) | m^3 |
+| `Cd` | `charOrificeFlow` (`r.Cd`) | - |
+| `tauV` | `charDriveLag` (`r.tauV_s`, the piston-side value when measured) | s |
+
+`V_dead` is not a `Params` field; the delivery scenario stops at `V_empty`.
+Record the measured dead volume with the results so that the stroke checks
+and the master's `deadVolume` can be corrected.
+
+## 7. Results
+
+(none yet)
