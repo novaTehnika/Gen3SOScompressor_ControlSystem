@@ -160,7 +160,7 @@
         VELOCITY LIMITS (mm/s)
         ======================================================================== *)
 
-     G_cfgVelLimitMax          : LREAL := 5.0         (* Maximum velocity limit *)
+     G_cfgVelLimitMax          : LREAL := 7.0         (* Maximum velocity limit *)
      G_cfgVelLimitNormal       : LREAL := 5.0         (* Normal operating velocity *)
 
 
@@ -171,8 +171,8 @@
         Velocity/Position; zero values leave the servo unable to move.
         ======================================================================== *)
 
-     G_cfgDirectCtrlAccel      : LREAL := 5.0         (* Accel for Y_DirectControl operating modes (mm/s^2) *)
-     G_cfgDirectCtrlDecel      : LREAL := 5.0         (* Decel for Y_DirectControl operating modes (mm/s^2) *)
+     G_cfgDirectCtrlAccel      : LREAL := 10.0         (* Accel for Y_DirectControl operating modes (mm/s^2) *)
+     G_cfgDirectCtrlDecel      : LREAL := 10.0         (* Decel for Y_DirectControl operating modes (mm/s^2) *)
 
 
      (* ========================================================================
