@@ -6,12 +6,24 @@ function out = fakeProbeLink(cmd, varargin)
 %
 %   fakeProbeLink('init')               fresh slave, axis 40 mm into the chamber
 %   fakeProbeLink('faultAt', t)         drive fault injected at t seconds
+%   fakeProbeLink('slave', fn)          sl = fn(sl): edit the simulated slave
+%   fakeProbeLink('torqueModel', p)     report a friction torque (below)
 %   t    = fakeProbeLink('now')
 %          fakeProbeLink('wait', t)     run the slave until t
 %   regs = fakeProbeLink('read', start, n)
 %          fakeProbeLink('write', start, values)
 %          fakeProbeLink('writeOne', address, value)
 %   S    = fakeProbeLink('state')
+%
+%   The torque model stands in for the drive's torque feedback, which the
+%   axis model reports as zero. With p a struct of F0, Fc, dFs, vs, b, mu,
+%   noisePct and tStick, the reported torque (% rated) is the piston force
+%     F0 + sign(v) (Fc + dFs exp(-(|v|/vs)^2) + mu P A) + b v + P A
+%   in N divided by newtonPerPct, plus white noise, with v the axis
+%   velocity (mm/s), P the chamber pressure (MPa) and A the piston area
+%   (mm^2). A nonzero tStick holds the axis still for that long after each
+%   command from rest while the torque ramps to F0 + sign (Fc + dFs) + P A,
+%   which is what breakaway looks like in the log.
 
 persistent S
 out = [];
@@ -28,12 +40,18 @@ switch cmd
         [S.sl, S.y] = slaveStep(S.sl, S.u);
         S.tick = 0;
         S.faultAt = Inf;
+        S.torque = [];
+        S.stick = struct('until', -Inf, 'sign', 0, 'armed', true);
         S.noise = 0.001;        % V rms added to the sampled input
         S.p = struct('window', 0, 'state', 0, 'echo', 0, 'arm', 0, 'lastArm', 0, ...
             'idx', 0, 'samples', zeros(1, 250), 'sum', 0, 'sumSq', 0, ...
             'min', Inf, 'max', -Inf, 'n', 0, 'stats', zeros(1, 4), 'live', 0);
     case 'faultAt'
         S.faultAt = varargin{1};
+    case 'slave'
+        S.sl = varargin{1}(S.sl);
+    case 'torqueModel'
+        S.torque = varargin{1};
     case 'now'
         out = S.tick / 1000;
     case 'wait'
@@ -43,6 +61,9 @@ switch cmd
                 S.sl.hook.driveFault = true;
             end
             if mod(S.tick, 2) == 0
+                if ~isempty(S.torque)
+                    S = torqueScan(S);
+                end
                 [S.sl, S.y] = slaveStep(S.sl, S.u);
                 S = probeScan(S);
             end
@@ -77,6 +98,38 @@ switch cmd
     case 'state'
         out = S;
 end
+end
+
+
+function S = torqueScan(S)
+% Torque feedback from the friction model, and the stick after a command
+% from rest.
+p = S.torque;
+sl = S.sl;
+t = S.tick / 1000;
+cmd = sl.G.G_cmdDirectControl;
+commanded = cmd.Enable && cmd.ControlMode == sl.E.Y_ControlMode.VelocityTLMode && cmd.Velocity ~= 0;
+if ~commanded
+    S.stick.armed = true;
+end
+if commanded && S.stick.armed && abs(sl.ax.v) < 0.05 && p.tStick > 0
+    S.stick.armed = false;
+    S.stick.until = t + p.tStick;
+    S.stick.sign = sign(cmd.Velocity);
+end
+v = sl.ax.v;
+PA = sl.ax.P * sl.sim.pistonArea;               % MPa * mm^2 = N
+if t < S.stick.until
+    sl.hook.blocked = true;
+    frac = 1 - (S.stick.until - t) / p.tStick;
+    F = PA + p.F0 + S.stick.sign * frac * (p.Fc + p.dFs);
+else
+    sl.hook.blocked = false;
+    s = sign(v);
+    F = PA + p.F0 + s * (p.Fc + p.dFs * exp(-(abs(v) / p.vs)^2) + p.mu * PA) + p.b * v;
+end
+sl.hook.torque = F / p.newtonPerPct + p.noisePct * randn();
+S.sl = sl;
 end
 
 

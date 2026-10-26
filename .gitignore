@@ -11,3 +11,5 @@ bench/modbus/captures/
 bench/pressure/captures/
 bench/pressure/SafetyHold.slx
 octave-workspace
+# Friction bench logs
+bench/friction/captures/
