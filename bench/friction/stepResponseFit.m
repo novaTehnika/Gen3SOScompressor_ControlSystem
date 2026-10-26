@@ -68,8 +68,8 @@ trans = [];
 steady = [];
 for f = 1:numel(files)
     d = dlmread(files{f}, ',', 1, 0);
-    if size(d, 2) ~= 5
-        error('%s: %d columns, expected t,vCmd,velocity,torque,position', files{f}, size(d, 2));
+    if size(d, 2) < 5
+        error('%s: %d columns, expected t,vCmd,velocity,torque,position[,pressure]', files{f}, size(d, 2));
     end
     t = d(:, 1); vCmd = d(:, 2); v = d(:, 3); F = d(:, 4) * k; x = d(:, 5);
     dt = median(diff(t));

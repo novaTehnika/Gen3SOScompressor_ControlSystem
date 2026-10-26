@@ -65,8 +65,8 @@ function r = charRun(label, path, opts)
 %     <label>_cap_<n>_<stepname>_<timestamp>.csv
 %                                    step probe capture n: 500 scans from
 %                                    the arm, t, vCmd, velocity, torque,
-%                                    position; the command changes about
-%                                    one exchange in
+%                                    position, pressure; the command
+%                                    changes about one exchange in
 %   r holds the same (r.runLog, r.captures), the step table, r.abort,
 %   r.file and r.capFiles. charBulkModulus, charOrificeFlow, charDriveLag
 %   and the friction bench's fits read these files.
@@ -87,7 +87,7 @@ ccfg = charConfig();
 cfg = masterConfig();
 map = modbusMap();
 pr = frictionBenchConfig().probe;
-pr.nRegs = 5 * pr.nScan;        % three INT arrays and one DINT array
+pr.nRegs = 6 * pr.nScan;        % three INT arrays, one DINT array, one INT array
 pr.scan = ccfg.scanTime;
 
 opts = withDefault(opts, 'pressureStop', ccfg.pressureStop);
@@ -232,8 +232,8 @@ for c = 1:numel(captures)
     fname = fullfile(opts.saveDir, sprintf('%s_cap_%d_%s_%s.csv', label, c, ...
         steps(max(cap.step, 1)).name, stamp));
     fid = fopen(fname, 'w');
-    fprintf(fid, 't,vCmd,velocity,torque,position\n');
-    fprintf(fid, '%.3f,%.3f,%.3f,%.2f,%.5f\n', cap.data');
+    fprintf(fid, 't,vCmd,velocity,torque,position,pressure\n');
+    fprintf(fid, '%.3f,%.3f,%.3f,%.2f,%.5f,%.4f\n', cap.data');
     fclose(fid);
     cap.file = fname;
     captures{c} = cap;
@@ -580,7 +580,7 @@ end
 
 
 function data = decodeCapture(regs, pr, pos0)
-% The four arrays of PRG_StepProbe as [t vCmd velocity torque position].
+% The five arrays of PRG_StepProbe as [t vCmd velocity torque position pressure].
 N = pr.nScan;
 vCmd = int16Of(regs(1:N)) / pr.velScale;
 vel = int16Of(regs(N + 1:2 * N)) / pr.velScale;
@@ -589,8 +589,9 @@ w = regs(3 * N + 1:5 * N);
 lo = w(1:2:end);
 hi = w(2:2:end);
 pos = double(typecast(uint32(lo + 65536 * hi), 'int32')) / pr.posScale + pos0;
+pres = int16Of(regs(5 * N + 1:6 * N)) / pr.presScale;
 t = (0:N - 1)' * pr.scan;
-data = [t vCmd(:) vel(:) trq(:) pos(:)];
+data = [t vCmd(:) vel(:) trq(:) pos(:) pres(:)];
 end
 
 

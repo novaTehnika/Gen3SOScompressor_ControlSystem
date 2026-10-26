@@ -5,24 +5,25 @@
    Controller: Yaskawa MP2600iec
 
    Description:
-   Serves bench/friction/frictionRun.m. On a change of the arm register it
-   records 500 consecutive scans (1 s at 2 ms) of the commanded velocity,
-   the actual velocity, the actual torque and the position into the probe
-   registers, so the master can see a velocity step response, the breakaway
-   and the torque ripple at the full sample rate, which the protocol
-   registers (read every 50 ms) cannot show. Reads G_sys* globals only and
+   Serves bench/friction/frictionRun.m and bench/characterisation/charRun.m.
+   On a change of the arm register it records 500 consecutive scans (1 s at
+   2 ms) of the commanded velocity, the actual velocity, the actual torque,
+   the position and the chamber pressure into the probe registers, so the
+   master can see a velocity step response, the breakaway, the torque
+   ripple and the pressure's response to the piston at the full sample
+   rate, which the protocol registers (read every 50 ms) cannot show. Reads G_sys* globals only and
    uses registers 111 and 401 and up, so it runs beside PRG_Main. Not
    loaded together with PRG_ModbusBench or PRG_PressureProbe, which use
    the same holding register area.
 
    Assign to the 2 ms cyclic task. The FC#04 input register group must
-   extend to IR2910 (see ../README.md). If the group cannot be made that
+   extend to IR3410 (see ../README.md). If the group cannot be made that
    large, shorten the capture: change 500 and the array bounds together,
    and nScan in frictionBenchConfig.m.
 
    Samples are integers: velocities in 0.001 mm/s, torque in 0.01 % of
    rated, position in 0.01 um from the first sample, whose absolute value
-   is published as a REAL.
+   is published as a REAL, pressure in 0.001 MPa gauge.
 
    Variables (define in MWiec GUI):
      VAR_GLOBAL (Modbus FC#03,06,16 holding registers, master -> slave):
@@ -36,6 +37,7 @@
        G_mbStepVel         AT %QW75612 : ARRAY[0..499] OF INT   (* IR911-1410: G_sysActualVelocity, 0.001 mm/s
        G_mbStepTorque      AT %QW76612 : ARRAY[0..499] OF INT   (* IR1411-1910: G_sysActualTorque, 0.01 %
        G_mbStepPos         AT %QD77612 : ARRAY[0..499] OF DINT  (* IR1911-2910: G_sysActualPosition - Pos0, 0.01 um
+       G_mbStepPressure    AT %QW79612 : ARRAY[0..499] OF INT   (* IR2911-3410: G_sysActualPressure, 0.001 MPa gauge
      VAR:
        rPos0               : LREAL            (* Position at the first sample (mm)
        nLastArm            : UINT := 0        (* Arm value already acted on
@@ -68,6 +70,7 @@ IF G_mbStepState = UINT#1 THEN
     G_mbStepVel[nIdx]    := LREAL_TO_INT(LIMIT(LREAL#-32767.0, G_sysActualVelocity * LREAL#1000.0, LREAL#32767.0));
     G_mbStepTorque[nIdx] := LREAL_TO_INT(LIMIT(LREAL#-32767.0, G_sysActualTorque * LREAL#100.0, LREAL#32767.0));
     G_mbStepPos[nIdx]    := LREAL_TO_DINT((G_sysActualPosition - rPos0) * LREAL#100000.0);
+    G_mbStepPressure[nIdx] := LREAL_TO_INT(LIMIT(LREAL#-32767.0, G_sysActualPressure * LREAL#1000.0, LREAL#32767.0));
     nIdx := nIdx + 1;
     IF nIdx >= 500 THEN
         G_mbStepArmEcho := nLastArm;

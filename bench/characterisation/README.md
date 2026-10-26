@@ -27,7 +27,7 @@ position guards.
 | `charLink.m` | Raw Modbus TCP link over `tcpclient` (FC04, FC06, FC16) |
 | `charBulkModulus.m` | Test 1: K from slow ramps, with a bound on residual gas and, from two fills, the split between liquid and series compliance |
 | `charOrificeFlow.m` | Test 2: Cd and the square-root law from deliveries at held pressure, with the collected-volume check |
-| `charDriveLag.m` | Test 3: tauV and dead time from the step probe captures, and from the 50 ms log the lag plus dead time at the motor and, through the pressure, at the piston |
+| `charDriveLag.m` | Test 3: tauV and dead time from the step probe captures at the motor and, through their pressure channel, at the piston; the 50 ms log as a coarse check |
 | `charReadCsv.m` | Reader for the logs and captures of either bench |
 
 `tests/charRunSim.m` runs `charRun` and the fits against the simulated slave
@@ -279,19 +279,20 @@ r = charRun('lag_wet', path, opts);
 rl = charDriveLag([r.capFiles {r.file}]);
 ```
 
-`PRG_StepProbe` does not record the pressure, so the piston-side lag comes
-from the 50 ms log: for every velocity step whose pressure moves by more
-than 0.1 MPa, the script fits the pressure column to the lag model
-integrated at the step's own stiffness (its pressure change over its
-position change) and passed through the slave's median filter (two scans
-for a smooth signal), the low-pass (`G_cfgAnalogFilterTimeConst`, 20 ms on
-the machine, 50 ms earlier) and the two-scan pipeline, eqs. 16 to 18. The
-filter constant must be the one loaded. The sample period limits the
-result, lag plus dead time, to about 25 ms; the `ramp` starts of test 1
-are pressurised steps too, so the K runs already give these points. A
-capture with the pressure in it would resolve this at 2 ms: a fifth
-array (`G_sysActualPressure`, INT in 0.001 MPa) added to `PRG_StepProbe`
-is the change, if the piston-side lag turns out to matter.
+`PRG_StepProbe` records the pressure beside the velocity, so for every
+capture whose pressure moves by more than 0.1 MPa the script also fits
+the pressure channel: the lag model for the piston velocity, integrated
+at the capture's own stiffness (its pressure change over its position
+change) and passed through the slave's median filter (two scans for a
+smooth signal), the low-pass (`G_cfgAnalogFilterTimeConst`, 20 ms on the
+machine, 50 ms earlier) and the two-scan pipeline, eqs. 16 to 18. The
+filter constant must be the one loaded. The result is the lag at the
+piston plus its dead time, at the 2 ms scan: behind the sensor chain the
+two trade against each other, so the fit determines their sum, which is
+also the value a model without a dead time needs. The 50 ms log is fitted
+the same way as a check, to about 25 ms; the `ramp` starts of test 1 are
+pressurised steps too, so the K runs with `opts.probe` already give these
+points.
 
 The fit slews the command at the GVL limits, delays it and passes it
 through a first-order lag, and adjusts the lag and the dead time to the
@@ -304,9 +305,9 @@ residual, and the model-free times at which the feedback reaches 10 % and
 50 ms. A Sigma-7 velocity loop tuned for this load is typically 10 to
 30 ms; the dead time between `G_sysCommandedVelocity` and the feedback is
 two to four scans (Mechatrolink out and back, plus the task order) and
-should be below 20 ms. The piston-side lag can exceed the motor-side lag
-when the chamber is stiff; a difference above the 25 ms the log can
-resolve is worth carrying into the model as tauV. Accept a capture
+should be below 20 ms. The piston-side value can exceed the motor-side
+lag plus dead time when the chamber is stiff; a difference of more than a
+few milliseconds is worth carrying into the model as tauV. Accept a capture
 residual below 5 % of the step, a spread of tauV across captures below
 30 %, up and down steps within 20 % of each other.
 
@@ -325,7 +326,7 @@ two.
 | `K` | `charBulkModulus` (`r.K_Pa`) | Pa |
 | `Vl0` | the fill of the runs (`r` prints it) | m^3 |
 | `Cd` | `charOrificeFlow` (`r.Cd`) | - |
-| `tauV` | `charDriveLag` (`r.tauV_s` at the motor; `r.tauP_s` at the piston when it exceeds it by more than the log resolves) or `stepResponseFit` | s |
+| `tauV` | `charDriveLag` (`r.tauV_s` at the motor; `r.tauP_s` at the piston, the value the model stands for, when it exceeds it) or `stepResponseFit` | s |
 
 `V_dead` is not a `Params` field; the delivery scenario stops at `V_empty`.
 Record the measured dead volume with the results so that the stroke checks

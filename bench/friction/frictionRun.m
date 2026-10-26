@@ -69,7 +69,7 @@ function r = frictionRun(label, set, opts)
 %   inMotion, inBand, exchangeMs. frictionFit reads it. Each probe capture
 %   is saved as captures/<label>_cap_<set>_<n>_<step>_<tag>_<timestamp>.csv
 %   with t (s from the first scan), vCmd and velocity (mm/s), torque
-%   (% rated) and position (mm); the tag names the transition (t<k>_<v>)
+%   (% rated), position (mm) and pressure (MPa gauge); the tag names the transition (t<k>_<v>)
 %   or 'steady'. stepResponseFit reads them. r holds the same with the
 %   steps, the captures and the abort reason.
 %
@@ -150,7 +150,7 @@ nSteps = numel(steps);
 
 C = codes();
 pr = fcfg.probe;
-pr.nRegs = 5 * pr.nScan;       % three INT arrays and one DINT array
+pr.nRegs = 6 * pr.nScan;       % three INT arrays, one DINT array, one INT array
 pr.scan = bcfg.slaveScan;
 
 % --- Safety relay and the stop on exit --------------------------------------
@@ -303,8 +303,8 @@ for c = 1:numel(captures)
     cname = fullfile(opts.saveDir, sprintf('%s_cap_%s_%d_%d_%s_%s.csv', label, setName, ...
         c, cap.step, cap.tag, stamp));
     fid = fopen(cname, 'w');
-    fprintf(fid, 't,vCmd,velocity,torque,position\n');
-    fprintf(fid, '%.3f,%.3f,%.3f,%.2f,%.5f\n', cap.data');
+    fprintf(fid, 't,vCmd,velocity,torque,position,pressure\n');
+    fprintf(fid, '%.3f,%.3f,%.3f,%.2f,%.5f,%.4f\n', cap.data');
     fclose(fid);
     cap.file = cname;
     captures{c} = cap;
@@ -602,7 +602,7 @@ end
 
 
 function data = decodeCapture(regs, pr, pos0)
-% The four arrays of PRG_StepProbe as [t vCmd velocity torque position].
+% The five arrays of PRG_StepProbe as [t vCmd velocity torque position pressure].
 N = pr.nScan;
 vCmd = int16Of(regs(1:N)) / pr.velScale;
 vel = int16Of(regs(N + 1:2 * N)) / pr.velScale;
@@ -611,8 +611,9 @@ w = regs(3 * N + 1:5 * N);
 lo = w(1:2:end);
 hi = w(2:2:end);
 pos = double(typecast(uint32(lo + 65536 * hi), 'int32')) / pr.posScale + pos0;
+pres = int16Of(regs(5 * N + 1:6 * N)) / pr.presScale;
 t = (0:N - 1)' * pr.scan;
-data = [t vCmd(:) vel(:) trq(:) pos(:)];
+data = [t vCmd(:) vel(:) trq(:) pos(:) pres(:)];
 end
 
 

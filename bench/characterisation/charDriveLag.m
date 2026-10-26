@@ -7,28 +7,27 @@ function r = charDriveLag(files, opts)
 %   r = charDriveLag(file)
 %   r = charDriveLag({capture1, capture2, ..., runLog}, opts)
 %
-%   Captures (PRG_StepProbe, 2 ms: t, vCmd, velocity, torque, position)
-%   give the lag at the motor: tauV and Td are fitted to the velocity
-%   feedback by least squares. The feedback is the controller's axis
-%   velocity, the motor encoder differentiated and scaled through the gear
-%   ratio and screw lead, so gearbox lost motion and screw compliance are
-%   invisible to it. bench/friction/stepResponseFit does the same by a grid
-%   search; the two should agree.
+%   Captures (PRG_StepProbe, 2 ms: t, vCmd, velocity, torque, position,
+%   pressure) give the lag at the motor: tauV and Td are fitted to the
+%   velocity feedback by least squares. The feedback is the controller's
+%   axis velocity, the motor encoder differentiated and scaled through the
+%   gear ratio and screw lead, so gearbox lost motion and screw compliance
+%   are invisible to it. bench/friction/stepResponseFit does the same by a
+%   grid search; the two should agree. When a capture's pressure moves by
+%   more than opts.minPressureSwing, the pressure is fitted too: the same
+%   lag model for the piston velocity, integrated at the stiffness the
+%   capture's own pressure and position change give, through the slave's
+%   median, low-pass and pipeline delay (eqs. 16 to 18). Only the piston
+%   moves the pressure, so that lag (tauP) is the one at the piston, which
+%   is what tauV in the model stands for.
 %
 %   Run logs (frictionRun or charRun, 50 ms) are fitted as an ensemble:
 %   every reference change in velocity mode is a step, the command reaching
 %   the slave within a service tick of the exchange that logged it.
 %     velocity   tauV and Td from the velocity column, resolved to about
 %                25 ms by the sample period.
-%     pressure   for steps whose pressure moves by more than
-%                opts.minPressureSwing, the pressure column is fitted to
-%                the same lag model integrated at the chamber stiffness and
-%                passed through the slave's median, low-pass and pipeline
-%                delay (eqs. 16 to 18). Only the piston moves the pressure,
-%                so this is the lag at the piston, which is what tauV in
-%                the model stands for; the sample period limits it to the
-%                same 25 ms. The stiffness of each step comes from its own
-%                pressure and position change.
+%     pressure   the same pressure fit on the pressurised steps, to the
+%                same 25 ms, for runs without captures.
 %
 %   opts.accel, opts.decel  mm/s^2 (default charConfig: G_cfgDirectCtrlAccel/Decel)
 %   opts.fitAccel           also fit a common scale on the slew limits (default false)
@@ -40,14 +39,20 @@ function r = charDriveLag(files, opts)
 %   opts.quiet              no printing
 %
 %   r.captures   per capture: file, step size, tauV, Td, residual (fraction
-%                of the step), t10 and t63 of the feedback from the command
+%                of the step), t10 and t63 of the feedback from the command,
+%                and tauP, TdP, k_MPa_mm, residualP from the pressure (NaN
+%                when it did not move)
 %   r.runLog     per log: the velocity ensemble (tauV, Td, nSteps,
 %                residual) and the pressure ensemble (tauP, TdP, nSteps,
 %                residualP, k_MPa_mm)
 %   r.tauV_s     value for params.py: the mean of the capture fits, or the
 %                run-log velocity fit without captures
-%   r.tauP_s     the piston-side lag plus dead time from the pressure, NaN
-%                without a pressurised step
+%   r.tauP_s     the piston-side lag plus dead time from the pressure, the
+%                mean over the capture fits or the run-log ensemble; NaN
+%                without a pressurised step. Behind the sensor chain the
+%                two trade against each other, so their sum is what the
+%                fit determines, and it is the value for a model without a
+%                dead time.
 %   r.pass, r.checks
 
 if ischar(files)
@@ -76,7 +81,7 @@ say('  1 mm/s step ramps for %.0f ms; the lag shows as the feedback trailing the
     1000 / opts.accel);
 
 caps = struct('file', {}, 'stepSize', {}, 'tauV', {}, 'Td', {}, 'accelScale', {}, ...
-    'residual', {}, 't10', {}, 't63', {});
+    'residual', {}, 't10', {}, 't63', {}, 'tauP', {}, 'TdP', {}, 'k_MPa_mm', {}, 'residualP', {});
 logs = [];
 for f = 1:numel(files)
     d = charReadCsv(files{f});
@@ -91,11 +96,14 @@ for f = 1:numel(files)
 end
 
 if ~isempty(caps)
-    say('\n%-28s %7s %8s %7s %6s %6s %6s\n', 'capture', 'step', 'tauV ms', 'Td ms', 'res %', 't10 ms', 't63 ms');
+    say('\n%-28s %7s %8s %7s %6s %6s %6s %8s %7s %8s %6s\n', 'capture', 'step', 'tauV ms', 'Td ms', ...
+        'res %', 't10 ms', 't63 ms', 'tauP ms', 'TdP ms', 'k MPa/mm', 'resP %');
     for k = 1:numel(caps)
         c = caps(k);
-        say('%-28s %+7.2f %8.1f %7.1f %6.1f %6.0f %6.0f\n', c.file, c.stepSize, ...
-            c.tauV * 1000, c.Td * 1000, 100 * c.residual, c.t10 * 1000, c.t63 * 1000);
+        say('%-28s %+7.2f %8.1f %7.1f %6.1f %6.0f %6.0f %8s %7s %8s %6s\n', c.file, c.stepSize, ...
+            c.tauV * 1000, c.Td * 1000, 100 * c.residual, c.t10 * 1000, c.t63 * 1000, ...
+            fmt(c.tauP * 1000, '%.1f'), fmt(c.TdP * 1000, '%.1f'), fmt(c.k_MPa_mm, '%.2f'), ...
+            fmt(100 * c.residualP, '%.1f'));
     end
 end
 r.captures = caps;
@@ -129,8 +137,18 @@ if ~isempty(vel)
         checks{end + 1} = check('tauV_ms', 1000 * lumped, 2, 100, 'plausible lag plus dead time');
     end
 end
+capsP = caps(arrayfun(@(c) ~isnan(c.tauP), caps));
 pres = logs(arrayfun(@(l) ~isnan(l.tauP), logs));
-if ~isempty(pres)
+if ~isempty(capsP)
+    tauP = [capsP.tauP] + [capsP.TdP];
+    r.tauP_s = mean(tauP);
+    say('Piston-side lag plus dead time from the pressure of %d captures: %.1f +/- %.1f ms, stiffness %s MPa/mm\n', ...
+        numel(tauP), 1000 * mean(tauP), 1000 * std(tauP), mat2str([capsP.k_MPa_mm], 3));
+    say('  (the sensor chain hides the split between the two; the fit found tauP %s ms, TdP %s ms)\n', ...
+        mat2str(1000 * [capsP.tauP], 3), mat2str(1000 * [capsP.TdP], 3));
+    checks{end + 1} = check('residualP', max([capsP.residualP]), 0, 0.1, 'capture pressure fit residual as a fraction of the swing');
+    checks{end + 1} = check('tauP_ms', 1000 * [min(tauP) max(tauP)], 2, 150, 'plausible piston-side lag plus dead time');
+elseif ~isempty(pres)
     r.tauP_s = sum(([pres.tauP] + [pres.TdP]) .* [pres.nStepsP]) / sum([pres.nStepsP]);
     say('Run log pressure: piston-side lag plus dead time %.0f ms from %d pressurised steps, stiffness %s MPa/mm\n', ...
         1000 * r.tauP_s, sum([pres.nStepsP]), mat2str([pres.k_MPa_mm], 3));
@@ -154,7 +172,10 @@ if ~isnan(r.tauV_s)
     end
     say('\n');
 end
-if ~isnan(r.tauP_s)
+if ~isempty(capsP)
+    say('  # piston side from the pressure in %d captures: %.4f s including dead time;\n', numel(capsP), r.tauP_s);
+    say('  # use it for tauV when it exceeds the motor-side lag plus dead time\n');
+elseif ~isnan(r.tauP_s)
     say('  # piston side from the pressure: %.4f s including dead time, to about 0.025 s;\n', r.tauP_s);
     say('  # use it for tauV when it exceeds the motor-side value by more than that\n');
 end
@@ -207,8 +228,46 @@ i10 = find(sign(c.stepSize) * (vt - v0) >= 0.10 * abs(c.stepSize), 1);
 i63 = find(sign(c.stepSize) * (vt - v0) >= 0.63 * abs(c.stepSize), 1);
 c.t10 = pick(tt, i10) - t(j + 1);
 c.t63 = pick(tt, i63) - t(j + 1);
-say('  %s: step %+.2f mm/s, tauV %.1f ms, Td %.1f ms, residual %.1f %%\n', c.file, c.stepSize, ...
-    1000 * c.tauV, 1000 * c.Td, 100 * c.residual);
+
+% Pressure channel: the lag at the piston. The stiffness is fitted with
+% the lag and the dead time, starting from the capture's own pressure and
+% position change (the filtered pressure lags, so that start is a little
+% low); the offset is linear and taken out in closed form.
+c.tauP = NaN; c.TdP = NaN; c.k_MPa_mm = NaN; c.residualP = NaN;
+if isfield(d, 'pressure') && max(d.pressure) - min(d.pressure) >= opts.minPressureSwing
+    P = d.pressure;
+    dx = d.position(end) - d.position(1);
+    if abs(dx) > 1e-4 && (P(end) - P(1)) / dx > 0
+        k0 = (P(end) - P(1)) / dx;
+        costP = @(th) sum((P - pressFit(th, cmd, Ts, v0, P, opts)).^2);
+        thp = fminsearch(costP, [log(0.02) 0.004 log(k0)], optimset('TolX', 1e-7, 'TolFun', 1e-10, ...
+            'MaxFunEvals', 6000, 'MaxIter', 3000));
+        c.tauP = exp(thp(1));
+        c.TdP = max(thp(2), 0);
+        c.k_MPa_mm = exp(thp(3));
+        c.residualP = sqrt(mean((P - pressFit(thp, cmd, Ts, v0, P, opts)).^2)) / (max(P) - min(P));
+    end
+end
+say('  %s: step %+.2f mm/s, tauV %.1f ms, Td %.1f ms, residual %.1f %%%s\n', c.file, c.stepSize, ...
+    1000 * c.tauV, 1000 * c.Td, 100 * c.residual, pressText(c));
+end
+
+
+function txt = pressText(c)
+if isnan(c.tauP)
+    txt = '';
+else
+    txt = sprintf('; pressure: tauP %.1f ms, TdP %.1f ms, k %.2f MPa/mm, residual %.1f %%', ...
+        1000 * c.tauP, 1000 * c.TdP, c.k_MPa_mm, 100 * c.residualP);
+end
+end
+
+
+function Pm = pressFit(th, cmd, Ts, v0, P, opts)
+% The pressure model at the stiffness exp(th(3)), with the offset that
+% fits P best.
+Pm = pressModel(th(1:2), cmd, Ts, v0, exp(th(3)), 0, opts);
+Pm = Pm + mean(P - Pm);
 end
 
 
@@ -400,6 +459,15 @@ if n <= 0
     return;
 end
 y = [fill * ones(n, 1); u(1:end - n)];
+end
+
+
+function s = fmt(v, f)
+if isnan(v)
+    s = '-';
+else
+    s = sprintf(f, v);
+end
 end
 
 

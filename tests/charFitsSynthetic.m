@@ -86,14 +86,30 @@ fprintf('ok  orifice flow: Cd %.3f (set %.3f), exponent %.3f, collected within %
 tau = 0.020; Td = 0.006; accel = 10;
 c1 = fullfile(dir, 'lag_cap_1_up.csv');
 c2 = fullfile(dir, 'lag_cap_2_down.csv');
-writeCapture(c1, 0, 1.0, tau, Td, accel, cfg);
-writeCapture(c2, 1.0, 0, tau, Td, accel, cfg);
+writeCapture(c1, 0, 1.0, tau, Td, accel, 0, 0, cfg);
+writeCapture(c2, 1.0, 0, tau, Td, accel, 0, 0, cfg);
 r = charDriveLag({c1, c2}, struct('quiet', true, 'accel', accel, 'decel', accel));
 assert(all(abs([r.captures.tauV] - tau) < 0.002), 'tauV %s, set %.3f', mat2str([r.captures.tauV], 3), tau);
 assert(all(abs([r.captures.Td] - Td) < 0.002), 'Td %s, set %.3f', mat2str([r.captures.Td], 3), Td);
+assert(all(isnan([r.captures.tauP])) && isnan(r.tauP_s), 'a pressure fit on a dry capture');
 assert(r.pass);
 fprintf('ok  drive lag: tauV %.1f / %.1f ms (set %.0f), Td %.1f / %.1f ms (set %.0f) from 2 ms captures\n', ...
     1000 * [r.captures.tauV], 1000 * tau, 1000 * [r.captures.Td], 1000 * Td);
+
+% Under pressure the capture's pressure channel gives the lag at the
+% piston through the median, low-pass and pipeline delay, here set larger
+% than the motor's.
+c3 = fullfile(dir, 'lag_cap_3_wet.csv');
+writeCapture(c3, 0, 0.3, 0.035, Td, accel, 11.0, 4.0, cfg);
+r = charDriveLag(c3, struct('quiet', true, 'accel', accel, 'decel', accel));
+% Behind the sensor chain the lag and the dead time trade against each
+% other; their sum is what the fit determines.
+assert(abs(r.captures.tauP + r.captures.TdP - (0.035 + Td)) < 0.004, 'tauP + TdP %.4f, set %.3f', ...
+    r.captures.tauP + r.captures.TdP, 0.035 + Td);
+assert(abs(r.captures.k_MPa_mm - 11.0) / 11 < 0.05, 'stiffness %.2f, set 11', r.captures.k_MPa_mm);
+assert(abs(r.tauP_s - (0.035 + Td)) < 0.004 && r.pass);
+fprintf('ok  drive lag at the piston from the capture pressure: %.1f ms incl. dead time (set 41), stiffness %.1f MPa/mm (set 11)\n', ...
+    1000 * r.tauP_s, r.captures.k_MPa_mm);
 
 % The 50 ms run log alone: lag plus dead time to about 25 ms, from the
 % velocity unpressurised and from the pressure of pressurised steps, where
@@ -203,9 +219,11 @@ collected = collected / 1000;
 end
 
 
-function writeCapture(file, v0, v1, tau, Td, accel, cfg)
+function writeCapture(file, v0, v1, tau, Td, accel, k, P0, cfg)
 % PRG_StepProbe capture: 500 scans at 2 ms from the arm, the command step
-% from v0 to v1 at 0.1 s, slew at accel, dead time, first-order lag.
+% from v0 to v1 at 0.1 s, slew at accel, dead time, first-order lag (the
+% piston's when k > 0), and the pressure at stiffness k from P0 through
+% the slave's sensor chain.
 Ts = cfg.scanTime;
 N = 500;
 t = (0:N - 1)' * Ts;
@@ -222,10 +240,29 @@ v = v0 * ones(N, 1);
 for i = 2:N
     v(i) = a * v(i - 1) + (1 - a) * vd(i - 1);
 end
-x = cumsum(v) * Ts;
+x = 250 + cumsum(v) * Ts;
+Praw = P0 + k * cumsum(v) * Ts;
+med = (cfg.medianSize - 1) / 2;
+Pm = [Praw(1) * ones(med, 1); Praw(1:end - med)];
+alpha = Ts / (cfg.filterTau + Ts);
+Pf = Pm;
+for i = 2:N
+    Pf(i) = Pf(i - 1) + alpha * (Pm(i) - Pf(i - 1));
+end
+P = [Pf(1) * ones(cfg.pipelineScans, 1); Pf(1:end - cfg.pipelineScans)];
+if k > 0
+    % The motor runs ahead of the piston: its feedback shows a shorter lag.
+    am = exp(-Ts / 0.015);
+    vm = v0 * ones(N, 1);
+    for i = 2:N
+        vm(i) = am * vm(i - 1) + (1 - am) * vd(i - 1);
+    end
+    v = vm;
+end
 fid = fopen(file, 'w');
-fprintf(fid, 't,vCmd,velocity,torque,position\n');
-fprintf(fid, '%.3f,%.3f,%.3f,%.2f,%.5f\n', [t cmd v + 0.005 * randn(N, 1) 10 * ones(N, 1) x]');
+fprintf(fid, 't,vCmd,velocity,torque,position,pressure\n');
+fprintf(fid, '%.3f,%.3f,%.3f,%.2f,%.5f,%.4f\n', [t cmd v + 0.005 * randn(N, 1) 10 * ones(N, 1) x ...
+    P + 0.0005 * randn(N, 1)]');
 fclose(fid);
 end
 

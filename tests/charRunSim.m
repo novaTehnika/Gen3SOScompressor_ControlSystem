@@ -36,7 +36,8 @@ s5 = L(L(:, STEP) == 5, :);
 assert(any(s5(:, MODE) == 2) && any(s5(:, STATUS) == 3), 'hold did not run in position mode');
 assert(numel(r.captures) == 5, 'expected one capture per command change, got %d', numel(r.captures));
 cap = r.captures{1};
-assert(cap.step == 1 && size(cap.data, 1) == 500);
+assert(cap.step == 1 && size(cap.data, 1) == 500 && size(cap.data, 2) == 6);
+assert(abs(cap.data(1, 6) - s1(1, P)) < 0.3, 'capture pressure %.2f, log %.2f MPa', cap.data(1, 6), s1(1, P));
 j = find(cap.data(:, 2) ~= 0, 1);
 assert(~isempty(j) && abs(cap.data(j, 2) - 0.1) < 1e-3 && j > 5, 'first capture not around the 0.1 mm/s command');
 assert(cap.data(min(j + 60, 500), 3) > 0.09, 'velocity did not follow the command in the capture');
@@ -56,9 +57,16 @@ lag = charDriveLag([r.capFiles {r.file}], struct('quiet', true));
 assert(all([lag.captures.tauV] < 0.006), 'lag %s s on a lag-free axis', mat2str([lag.captures.tauV], 3));
 assert(all([lag.captures.residual] < 0.03), 'lag fit residual %s', mat2str([lag.captures.residual], 3));
 assert(~isempty(lag.runLog) && lag.runLog.nSteps >= 2, 'run log steps not found');   % the 0.1 mm/s commands are below minStep
-assert(lag.runLog.nStepsP >= 1 && lag.tauP_s < 0.06, 'piston lag %.3f s on a lag-free axis', lag.tauP_s);
-fprintf('ok  drive lag fit: captures %.1f ms, run log %.0f ms, pressure %.0f ms\n', ...
-    1000 * lag.tauV_s, 1000 * (lag.runLog.tauV + lag.runLog.Td), 1000 * lag.tauP_s);
+assert(lag.runLog.nStepsP >= 1, 'no pressurised step in the run log');
+% The gas spring stiffens by a fifth over the 0.5 mm/s capture, which the
+% constant-stiffness model absorbs as a few tens of milliseconds; a liquid
+% chamber holds its stiffness to a percent over a capture.
+capsP = lag.captures(~isnan([lag.captures.tauP]));
+assert(numel(capsP) >= 1 && all([capsP.tauP] + [capsP.TdP] < 0.03), ...
+    'piston lag %s s from the captures of a lag-free axis', mat2str([capsP.tauP] + [capsP.TdP], 3));
+assert(lag.tauP_s < 0.03, 'piston lag %.3f s on a lag-free axis', lag.tauP_s);
+fprintf('ok  drive lag fit: captures %.1f ms, run log %.0f ms, pressure %.1f ms from %d captures\n', ...
+    1000 * lag.tauV_s, 1000 * (lag.runLog.tauV + lag.runLog.Td), 1000 * lag.tauP_s, numel(capsP));
 
 % The gas spring is not a liquid: the bulk modulus fit must reject it and
 % attribute the compliance to gas of about the chamber volume.

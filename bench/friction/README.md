@@ -14,7 +14,7 @@ logs every exchange.
 | `frictionBenchConfig.m` | Torque to force conversion, speed points and durations, limits the run enforces, fit windows |
 | `frictionRun.m` | The master for a run: drives a set of jog steps or a pressure-mode delivery through `masterStep` at the 50 ms exchange and logs position, velocity, torque and pressure to `captures/` |
 | `frictionFit.m` | Reads the logs, checks each step, fits the friction unloaded and loaded, prints the model values |
-| `slave/PRG_StepProbe.st` | Optional slave program: on request captures 500 scans of commanded velocity, velocity, torque and position in the probe registers |
+| `slave/PRG_StepProbe.st` | Optional slave program: on request captures 500 scans of commanded velocity, velocity, torque, position and pressure in the probe registers |
 | `stepResponseFit.m` | Reads the captures: the drive's velocity-loop lag from steps taken while moving, the breakaway and stick time from steps from rest, the torque ripple at the lead and motor periods |
 | `captures/` | Run logs and captures (gitignored) |
 
@@ -237,21 +237,23 @@ from standing.
 The 50 ms log cannot show the drive's velocity-loop lag (`tauV`, 20 ms in
 the model), a breakaway shorter than one exchange, or the torque ripple
 at the motor turn. `PRG_StepProbe` records 500 consecutive scans (1 s at
-2 ms) of the commanded velocity, the actual velocity, the torque and the
-position into input registers when the run writes its arm register, and
-the run reads the block out in the gaps between exchanges, as the
-pressure noise bench does.
+2 ms) of the commanded velocity, the actual velocity, the torque, the
+position and the chamber pressure into input registers when the run
+writes its arm register, and the run reads the block out in the gaps
+between exchanges, as the pressure noise bench does. The pressure channel
+serves the characterisation bench, which reads the lag at the piston from
+it (`bench/characterisation/README.md` section 5).
 
 Slave setup, once:
 
 1. Hardware Configuration, online: the Modbus server as in service, with
-   the **FC#04 input register group enlarged to at least 2910 registers**
-   (byte range `%QB73792` to `%QB79611`). Save and cycle power. If the
+   the **FC#04 input register group enlarged to at least 3410 registers**
+   (byte range `%QB73792` to `%QB80611`). Save and cycle power. If the
    group cannot be made that large, shorten the capture: change the
    bounds and the count in the program header together, and
    `cfg.probe.nScan` in `frictionBenchConfig.m`.
 2. Declare the globals in the header of `slave/PRG_StepProbe.st` in the
-   matching groups. The four arrays are located; if the editor refuses an
+   matching groups. The five arrays are located; if the editor refuses an
    array at a direct address, declare it with a named type
    (`ARRAY[0..499] OF INT`, `ARRAY[0..499] OF DINT`) from the Data Types
    worksheet.
@@ -279,8 +281,8 @@ for the ripple. 2v must stay within the 5 mm/s limit, so v is at most
 
 Captures are saved as `captures/<label>_cap_<set>_<n>_<step>_<tag>_<timestamp>.csv`
 with `t` (s from the first scan), `vCmd` and `velocity` (mm/s), `torque`
-(% rated) and `position` (mm); the tag is `t<k>_<v>` for the k-th
-transition to v, or `steady`.
+(% rated), `position` (mm) and `pressure` (MPa gauge); the tag is
+`t<k>_<v>` for the k-th transition to v, or `steady`.
 
 ```matlab
 f = stepResponseFit('captures/s1_cap_*.csv');
@@ -412,9 +414,10 @@ deliveries should lie on one line in `F - P A` against `P A`.
   the slewed response, which is what the model also sees; a sharper step
   needs `G_cfgDirectCtrlAccel` raised on the machine for the run, or the
   SERVOPACK's own trace in SigmaWin+.
-- The pressure force in the captures: `PRG_StepProbe` does not record the
-  pressure, so breakaway from a capture under load includes `P A`. Use the
-  50 ms log, which carries the pressure, for loaded breakaway.
+- The pressure force in the captures: `stepResponseFit` reports the
+  breakaway from the torque alone, so from a capture under load it
+  includes `P A`. The capture carries the pressure; use the 50 ms log's
+  breakaway, which removes it, for loaded starts.
 
 ## 8. Results
 

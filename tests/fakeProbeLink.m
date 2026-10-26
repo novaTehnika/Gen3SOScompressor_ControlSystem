@@ -3,7 +3,7 @@ function out = fakeProbeLink(cmd, varargin)
 %   simulated slave behind the protocol registers (IR1-20, HR1-6), an
 %   emulation of PRG_PressureProbe behind the probe registers (HR101,
 %   IR101-113, IR121-370) and one of PRG_StepProbe behind its registers
-%   (HR111, IR401-405, IR411-2910). Time advances only in 'wait'.
+%   (HR111, IR401-405, IR411-3410). Time advances only in 'wait'.
 %
 %   fakeProbeLink('init')               fresh slave, axis 40 mm into the chamber
 %   fakeProbeLink('faultAt', t)         drive fault injected at t seconds
@@ -55,7 +55,8 @@ switch cmd
         S.stick = struct('until', -Inf, 'sign', 0, 'armed', true);
         S.vLag = 0;
         S.sp = struct('arm', 0, 'lastArm', 0, 'state', 0, 'echo', 0, 'idx', 0, 'pos0', 0, ...
-            'vCmd', zeros(1, 500), 'vel', zeros(1, 500), 'trq', zeros(1, 500), 'pos', zeros(1, 500));
+            'vCmd', zeros(1, 500), 'vel', zeros(1, 500), 'trq', zeros(1, 500), 'pos', zeros(1, 500), ...
+            'pres', zeros(1, 500));
         S.noise = 0.001;        % V rms added to the sampled input
         S.p = struct('window', 0, 'state', 0, 'echo', 0, 'arm', 0, 'lastArm', 0, ...
             'idx', 0, 'samples', zeros(1, 250), 'sum', 0, 'sumSq', 0, ...
@@ -93,7 +94,7 @@ switch cmd
     case 'read'
         start = varargin{1};
         n = varargin{2};
-        regs = zeros(1, 2910);
+        regs = zeros(1, 3410);
         regs(1:S.map.nRead) = packRead(S.y, S.map);
         if ~isempty(S.torque)
             regs(S.map.ir.velocity:S.map.ir.velocity + 1) = modbusPack(S.vLag);
@@ -118,7 +119,8 @@ switch cmd
         d = mod(round(sp.pos * 1e5), 2^32);
         regs(1911:2:2910) = mod(d, 65536);
         regs(1912:2:2910) = floor(d / 65536);
-        assert(start >= 1 && start + n - 1 <= 2910, 'read outside the register groups');
+        regs(2911:3410) = u16s(round(sp.pres * 1000));
+        assert(start >= 1 && start + n - 1 <= 3410, 'read outside the register groups');
         out = regs(start:start + n - 1);
     case 'write'
         w = varargin{2};
@@ -224,6 +226,7 @@ if sp.state == 1
     sp.vel(sp.idx) = S.vLag;
     sp.trq(sp.idx) = S.sl.hook.torque;
     sp.pos(sp.idx) = G.G_sysActualPosition - sp.pos0;
+    sp.pres(sp.idx) = G.G_sysActualPressure;
     if sp.idx >= 500
         sp.echo = sp.lastArm;
         sp.state = 2;
