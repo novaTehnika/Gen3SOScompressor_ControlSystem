@@ -59,6 +59,7 @@ The slave ST is the single source of truth. `tools/st2m.py` translates it into O
 - `smokeMasterStateMachine`: master state machine against a protocol-level stand-in slave (not the ST sim).
 - `closedLoopMasterSlave`: `masterStateMachine` against the generated slave in engineering units. The master steps every 25 ms, the exchange runs every 50 ms and the slave every 2 ms on a 1 ms tick.
 - `closedLoopModbusStep`: `masterStep` through the packed register vectors, including link loss on either side.
+- `charRunSim`, `charFitsSynthetic`: the characterisation bench (`bench/characterisation/`) against the simulated slave, and its three fits on synthetic logs with known parameters.
 
 ## Conventions
 
