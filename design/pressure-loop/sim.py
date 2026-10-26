@@ -19,12 +19,15 @@ The simulation steps in slave scans of length Ts. In each scan:
   2. The controller computes a new command from the reading
      (controllers.py).
   3. The plant advances one scan with the command computed in the
-     previous scan, held constant (plant.py and solver.py).
+     previous scan, held constant, and with the outlet valve in the
+     state the scenario gives for this scan (plant.py and solver.py).
 
 The one-scan delay between steps 2 and 3 reproduces the order in which
-PRG_Main calls its function blocks. The traces are recorded after the
-plant step, except the measured pressure, which is the reading the
-controller used in that scan.
+PRG_Main calls its function blocks. In the scan the valve opens, the
+plant also loses the tube's air volume, eq. (37). A run ends early when
+the chamber is empty. The traces are recorded after the plant step,
+except the measured pressure, which is the reading the controller used
+in that scan.
 
 FILE DEPENDENCY:
 ./
@@ -64,10 +67,13 @@ class Result:
     x: np.ndarray          # [m] piston position
     target: np.ndarray     # [Pa] pressure target
     stiffness: np.ndarray  # [Pa/m] chamber stiffness dP/dx
-    Qout: np.ndarray       # [m^3/s] liquid outflow
+    Qout: np.ndarray       # [m^3/s] outflow through the outlet
     metrics: dict          # see metrics.py
     cost: float            # see metrics.loop_cost
     A: float = 0.0         # [m^2] piston area, for u_plot()
+    P_sat: np.ndarray = None   # [Pa] saturation pressure of the saline
+    V_out: np.ndarray = None   # [m^3] saline delivered so far
+    V_l: np.ndarray = None     # [m^3] saline remaining
 
     def __getitem__(self, key):
         return self.metrics[key]
@@ -106,7 +112,7 @@ def run(par, scenario, controller, legacy_sensor=False, seed=1):
     N = round(scenario.T / Ts)                              # [-] scans
     t = np.arange(N) * Ts                                   # [s]
     target = np.array([scenario.target(tk) for tk in t])    # [Pa]
-    Q = np.array([scenario.Qout(tk) for tk in t])           # [m^3/s]
+    valve = np.array([scenario.valve(tk) for tk in t])      # [-]
     if par.noise:
         z = np.random.default_rng(seed).standard_normal(N)
     else:
@@ -118,21 +124,33 @@ def run(par, scenario, controller, legacy_sensor=False, seed=1):
                   controller.decel)
     sensor = make_sensor(par, controller, scenario.P0, legacy_sensor)
 
+    # The tube's air volume leaves the chamber in the opening scan as a
+    # flow of V_tube / Ts, eq. (37)
+    Q_tube_open = par.V_tube / Ts if scenario.tube else 0.0  # [m^3/s]
+    vented = False
+
     # Trace storage. Python lists of floats are faster than numpy arrays
     # for element-by-element writes in the loop.
-    P, P_meas, u_trace, v, x, stiffness = ([0.0] * N for _ in range(6))
+    (P, P_meas, u_trace, v, x, stiffness, Q, P_sat, V_out,
+     V_l) = ([0.0] * N for _ in range(10))
     t_list, target_list = t.tolist(), target.tolist()
-    Q_list, z_list = Q.tolist(), z.tolist()
+    valve_list, z_list = valve.tolist(), z.tolist()
 
     # Scan loop
+    n_run = N
     for k in range(N):
         # 1. Sensor reading
         reading = sensor.read(plant.P, z_list[k])
         # 2. Controller command for the next scan
         u_next = controller.step(reading, target_list[k], t_list[k],
                                  scenario, plant.x)
-        # 3. Plant advance with the previous scan's command
-        plant.scan(u_applied, Q_list[k])
+        # 3. Plant advance with the previous scan's command and this
+        #    scan's valve state
+        Q_tube = 0.0
+        if valve_list[k] > 0.0 and not vented:
+            Q_tube = Q_tube_open
+            vented = True
+        plant.scan(u_applied, valve_list[k], Q_tube)
         u_applied = u_next
 
         P[k] = plant.P
@@ -141,12 +159,20 @@ def run(par, scenario, controller, legacy_sensor=False, seed=1):
         v[k] = plant.v
         x[k] = plant.x
         stiffness[k] = plant.stiffness
+        Q[k] = plant.Q
+        V_out[k] = plant.V_out
+        V_l[k] = plant.V_l
+        P_sat[k] = par.P_sat(plant.n_dis, max(plant.V_l, par.V_empty))
+        if plant.empty:
+            n_run = k + 1
+            break
 
-    # Post-processing
-    r = Result(controller.name, scenario.name, controller.mode, t,
-               np.array(P), np.array(P_meas), np.array(u_trace),
-               np.array(v), np.array(x), target, np.array(stiffness), Q,
-               {}, 0.0, par.A)
+    # Post-processing. A run that ended early is truncated.
+    arr = lambda a: np.array(a[:n_run])  # noqa: E731
+    r = Result(controller.name, scenario.name, controller.mode, t[:n_run],
+               arr(P), arr(P_meas), arr(u_trace), arr(v), arr(x),
+               target[:n_run], arr(stiffness), arr(Q), {}, 0.0, par.A,
+               arr(P_sat), arr(V_out), arr(V_l))
     r.metrics = metrics.compute(r, par, scenario, controller.mode)
     r.cost = metrics.loop_cost(r.metrics)
     return r

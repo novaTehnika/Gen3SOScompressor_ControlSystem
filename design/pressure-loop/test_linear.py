@@ -225,7 +225,7 @@ def check_v3_disturbance():
     Q = 2e-7                                                # [m^3/s]
     kp = CFG['G_cfgPressureKp']
     s = scenarios.stiffstep(PAR, T=8.0, target1=10e6, Qf=Q, t_open=1.0,
-                            Topen=0.0)
+                            Topen=0.0, tube=False)
     r = sim.run(PAR, s, ctl.SlaveController())
     n0 = round(s.t_open / PAR.Ts)
     lp = lin.loop(PAR, K_LIQ)

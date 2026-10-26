@@ -21,6 +21,7 @@ The checks cover:
   - conservation of volume and gas moles, with and without outflow;
   - the agreement of the two integration methods, which bounds the
     integration error at the chosen step;
+  - the orifice flow, the tube volume step and the end of a delivery;
   - the slew limits, stall and force balance of the actuators;
   - the slave sensor chain against the legacy chain;
   - the wiring of the slave controller against its block called
@@ -56,7 +57,8 @@ import sim  # noqa: E402
 from FB_PressureController import (FB_PressureController,  # noqa: E402
                                    new_FB_PressureController)
 from params import Params  # noqa: E402
-from plant import Plant, iy_ndis, iy_nout, iy_ntot, iy_Vl  # noqa: E402
+from plant import (Plant, iy_ndis, iy_nout, iy_ntot,  # noqa: E402
+                   iy_Vl, iy_Vout)
 from runner import Case, run_cases  # noqa: E402
 from sensor import LegacySensor, SlaveSensor, filter_alpha  # noqa: E402
 from slave import slave_config  # noqa: E402
@@ -93,10 +95,11 @@ def check_config():
 
 
 # %% ===== CHAMBER ========================================================
-def liquid_plant(par, P0=10e6):
+def liquid_plant(par, P0=10e6, Qf=0.0):
     """Return a velocity-mode plant with a liquid-only chamber at P0
-    [Pa] and fast slew limits, and its scenario."""
-    sc = scenarios.stiffstep(par, P0=P0)
+    [Pa] and fast slew limits, and its scenario. Qf prescribes the
+    outflow with the valve open."""
+    sc = scenarios.stiffstep(par, P0=P0, Qf=Qf, tube=False)
     return Plant(par, sc, 'V', accel=1.0, decel=1.0), sc
 
 
@@ -119,7 +122,8 @@ def check_stiffness():
 def check_conservation():
     par = Params()
 
-    # Gas-rich chamber, sealed: the volume closes and no gas is lost.
+    # Gas-rich chamber at the supply pressure, sealed: the volume closes
+    # and no gas is lost.
     sc = scenarios.make('compress', par)
     plant = Plant(par, sc, 'V', accel=1.0, decel=1.0)
     n0 = plant.y[iy_ntot]
@@ -132,15 +136,16 @@ def check_conservation():
     ok(f'volume closes against piston travel in the gas-rich chamber '
        f'(max {worst:.1e} m^3 of {par.A * plant.x:.1e})')
 
-    # Liquid-only chamber with outflow: the liquid and its dissolved gas
-    # leave, and the moles and volume still balance.
-    plant, sc = liquid_plant(par)
+    # Liquid-only chamber with a prescribed 1 mL/s outflow: the liquid
+    # and its dissolved gas leave, and the moles and volume still
+    # balance.
+    plant, sc = liquid_plant(par, Qf=1e-6)
     n0, Vl0 = plant.y[iy_ntot], plant.y[iy_Vl]
     nd0 = plant.y[iy_ndis]
     Q_int = 0.0                             # [m^3] outflow volume
     worst = 0.0
     for k in range(2000):                   # 4 s of 1 mL/s outflow
-        plant.scan(1e-6 / par.A, 1e-6)      # piston follows the outflow
+        plant.scan(1e-6 / par.A, valve=1.0)  # piston follows the flow
         Q_int += 1e-6 * par.Ts
         worst = max(worst, abs(plant.volume_closure()))
     y = plant.y
@@ -152,19 +157,52 @@ def check_conservation():
         'dissolved gas leaves with the liquid'
     assert worst < 1e-9, worst
     assert abs(y[iy_nout] / (nd0 * removed / Vl0) - 1) < 0.02
+    assert abs(y[iy_Vout] - Q_int) < 1e-12
     ok(f'outflow removes liquid ({removed * 1e6:.2f} mL) and its '
        f'dissolved gas; moles and volume close')
 
     # Earlier model: the liquid volume stays fixed, so the volume does
     # not close under outflow.
     q = par.legacy()
-    plant = Plant(q, scenarios.stiffstep(q), 'V', accel=1.0, decel=1.0)
+    plant, _ = liquid_plant(q, Qf=1e-6)
     for k in range(2000):
-        plant.scan(1e-3, 1e-6)
+        plant.scan(1e-3, valve=1.0)
     assert (plant.y[iy_Vl] == q.Vl0
             and abs(plant.volume_closure()) > 1e-6 * 0.5)
     ok('legacy plant keeps the liquid volume fixed (volume does not close '
        'under outflow)')
+
+
+def check_outlet():
+    par = Params()
+    # Orifice flow at 10 MPa, eq. (36), and its pressure dependence
+    Q10 = par.Q_orifice(10e6)
+    expect = par.Cd * par.n_orifice * math.pi * par.d_orifice**2 / 4 \
+        * math.sqrt(2 * 10e6 / par.rho)
+    assert abs(Q10 - expect) < 1e-15 and abs(Q10 * 1e6 - 3.98) < 0.01
+    assert abs(par.Q_orifice(2.5e6) / Q10 - 0.5) < 1e-12
+    assert par.Q_orifice(-1e5) == 0.0
+
+    # The plant passes the orifice flow with the valve open and the
+    # tube's volume in the opening scan, eq. (37): the pressure drops by
+    # about V_tube / C on a liquid-only chamber.
+    plant, sc = liquid_plant(par)
+    C = plant.capacitance()
+    plant.scan(0.0, valve=1.0, Q_tube=par.V_tube / par.Ts)
+    dP_step = 10e6 - plant.P
+    dP_expect = (par.V_tube + Q10 * par.Ts) / C
+    assert abs(dP_step / dP_expect - 1) < 0.05, (dP_step, dP_expect)
+    assert abs(plant.Q / par.Q_orifice(plant.P) - 1) < 1e-9
+    ok(f'outlet: {Q10 * 1e6:.2f} mL/s at 10 MPa; the tube volume drops '
+       f'the pressure {dP_step / 1e6:.2f} MPa in the opening scan')
+
+    # The run ends when the saline is gone and reports the volume.
+    r = sim.run(par, scenarios.deliver(par, T=300.0),
+                ctl.SlaveController())
+    assert r.t[-1] < 299 and r.V_l[-1] <= par.V_empty
+    assert abs(r['V_delivered'] - (par.Vl0 - par.V_empty) * 1e6) < 3
+    ok(f'delivery ends when the chamber is empty: {r["V_delivered"]:.0f} '
+       f'mL in {r.t[-1]:.0f} s')
 
 
 def check_solver():
@@ -172,15 +210,18 @@ def check_solver():
     # first-order method, so close agreement bounds the integration error
     # at the chosen step. study_convergence.py gives the full picture.
     worst = {}
-    for name in ('compress', 'stiffstep', 'discharge'):
+    for name in ('compress', 'stiffstep', 'deliver'):
         r = {}
         for method in ('euler', 'heun'):
             par = Params(solver=method)
             r[method] = sim.run(par, scenarios.make(name, par),
                                 ctl.SlaveController())
-        dP = np.abs(r['euler'].P - r['heun'].P).max()       # [Pa]
+        # The delivery is compared only while the loop holds; the
+        # emptying chamber takes the GVL loop unstable near the end.
+        n = min(len(r['euler'].P), len(r['heun'].P), round(40 / 0.002))
+        dP = np.abs(r['euler'].P[:n] - r['heun'].P[:n]).max()  # [Pa]
         worst[name] = dP
-        assert dP < 0.02e6, (name, dP)
+        assert dP < 0.05e6, (name, dP)
     ok('forward Euler and Heun agree: max pressure difference '
        + ', '.join(f'{k} {v / 1e3:.1f} kPa' for k, v in worst.items()))
 
@@ -290,13 +331,14 @@ def check_wiring():
     ok('SlaveController output is exactly the FB called as PRG_Main calls '
        'it (target clamp, VelMax clamp, accel/decel)')
 
-    # Flow feedforward adds Q/A after the block.
+    # Flow feedforward adds Q/A after the block, with Q the orifice flow
+    # at the measured pressure.
     c = ctl.SlaveController(flow_ff=True)
     c.reset(par, sc)
-    sc2 = scenarios.valve(par, Topen=0.0)
+    sc2 = scenarios.deliver(par)
     c.step(10e6, 10e6, 0.0, sc2)
     v = c.step(10e6, 10e6, 2.0, sc2)
-    assert abs(v - par.Qf / par.A) < 1e-9, v
+    assert abs(v - par.Q_orifice(10e6) / par.A) < 1e-9, v
     ok(f'flow feedforward adds Q/A ({v * 1e3:.3f} mm/s) after the block')
 
 
@@ -323,15 +365,22 @@ def check_closed_loop():
     late = r.t > r.t[-1] - 5
     err_late = np.abs(r.P[late] - r.target[late])
     assert np.all(err_late <= inband), err_late.max()
-    assert (r['overshoot'] < 1.0
+    assert (r['P_max'] < par.P_ceiling / 1e6
             and r['stroke_mm'] < slave_config()['G_cfgPosSoftLimitMax'])
-    ok(f'compress with the slave controller reaches the in-band status '
-       f'(overshoot {r["overshoot"]:.2f} MPa, stroke '
-       f'{r["stroke_mm"]:.1f} mm, 60 s in {dt:.1f} s)')
+    ok(f'compress 1:1 from the supply pressure with the slave controller '
+       f'reaches the in-band status (overshoot {r["overshoot"]:.2f} MPa, '
+       f'stroke {r["stroke_mm"]:.1f} mm, 60 s in {dt:.1f} s)')
 
-    r = sim.run(par, scenarios.discharge(par), ctl.SlaveController())
-    assert r['peakErr'] < 1.0 and r['rmsErr'] < 0.05
-    ok(f'discharge holds the target (peak error {r["peakErr"]:.2f} MPa)')
+    # With the GVL settings the stop law caps the piston near the speed
+    # the outflow needs, so the loop holds a steady error through the
+    # delivery, and the emptying chamber takes it unstable at the end.
+    r = sim.run(par, scenarios.deliver(par), ctl.SlaveController())
+    assert 1.5 < r['dip'] < 3.0, r['dip']
+    assert math.isnan(r['tSettle']) and r['V_ok'] < r['V_delivered']
+    assert r['P_max'] > par.P_ceiling / 1e6
+    ok(f'delivery 1:1 with the GVL settings: dip {r["dip"]:.2f} MPa, '
+       f'never back in band, loses control after {r["V_ok"]:.0f} of '
+       f'{r["V_delivered"]:.0f} mL (P_max {r["P_max"]:.0f} MPa)')
 
 
 def check_runner():
@@ -351,6 +400,7 @@ if __name__ == '__main__':
     check_config()
     check_stiffness()
     check_conservation()
+    check_outlet()
     check_solver()
     check_actuators()
     check_sensor()

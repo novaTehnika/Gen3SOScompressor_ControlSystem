@@ -12,9 +12,11 @@ CREATION DATE:
 PURPOSE/DESCRIPTION:
 This script tests how robust the slave's pressure loop is to the plant
 parameters that are not yet measured. For each slave configuration (an
-"arm" of the study) it runs the compress, stiffstep, discharge and valve
-scenarios and checks the requirements defined in robust.py. The study
-has three parts:
+"arm" of the study) it runs the compress and deliver scenarios at the
+given oxygen charge and checks the requirements defined in robust.py:
+the pressure ceiling, no degassing, control kept to the end of the
+delivery, in band after compression, and the stroke. The study has
+three parts:
 
   1. One-at-a-time sensitivity (tornado). Each uncertain parameter is
      set to its low and then its high value with the others at nominal.
@@ -34,9 +36,10 @@ directory.
 
 Usage:
     python3 study_robust.py [--n 200] [--seed 1] [--workers N]
-                            [--out DIR] [--configs GVL,f20,...]
-                            [--corner-n 4] [--cfg Kp=0.25 ...]
-                            [--flow-ff] [--ff-scale 0.7]
+                            [--out DIR] [--ratio 1.0]
+                            [--configs GVL,f20,...] [--corner-n 4]
+                            [--cfg Kp=0.25 ...] [--flow-ff]
+                            [--ff-scale 0.7]
 
 --cfg and --flow-ff run a single arm named "custom" instead of the
 built-in arms. --cfg takes the SlaveController short names (Kp, Ki,
@@ -51,6 +54,7 @@ FILE DEPENDENCY:
 
 import argparse
 import csv
+import dataclasses
 import itertools
 import math
 import os
@@ -82,9 +86,12 @@ COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
 CONFIGS = {
     'GVL': ControllerSpec('GVL'),
     'f20': ControllerSpec('f20', {'AnalogFilterTimeConst': 0.02}),
-    'f20+vmin1': ControllerSpec(
-        'f20+vmin1',
-        {'AnalogFilterTimeConst': 0.02, 'StopVelMin': 1.0}),
+    'f20+vmin2': ControllerSpec(
+        'f20+vmin2',
+        {'AnalogFilterTimeConst': 0.02, 'StopVelMin': 2.0}),
+    'f20+stiff20': ControllerSpec(
+        'f20+stiff20',
+        {'AnalogFilterTimeConst': 0.02, 'StopStiffness': 20.0}),
 }
 
 
@@ -120,16 +127,18 @@ def flat(by_scen):
 
 
 def severity(by_scen):
-    """Return the largest ratio of metric to limit over the key metrics.
+    """Return the largest excess over the limit among the key metrics
+    (KeyMetric.excess). A value above 1 means a requirement fails."""
+    return max(km.excess(by_scen[km.scenario][km.metric])
+               for km in R.KEY_METRICS)
 
-    A value above 1 means a requirement fails. A non-finite metric
-    counts as infinitely severe.
-    """
-    worst = 0.0
-    for (s, k), lim in R.KEY_METRICS.items():
-        v = by_scen[s][k]
-        worst = max(worst, math.inf if not math.isfinite(v) else v / lim)
-    return worst
+
+def over_limit(by_scen):
+    """Return the key metrics that fail, as 'scenario.metric value'."""
+    return [f'{km.scenario}.{km.metric} '
+            f'{by_scen[km.scenario][km.metric]:.3g}'
+            for km in R.KEY_METRICS
+            if km.excess(by_scen[km.scenario][km.metric]) > 1]
 
 
 def fmt_vals(values):
@@ -139,7 +148,7 @@ def fmt_vals(values):
 
 
 # %% ===== 1. ONE-AT-A-TIME SENSITIVITY (TORNADO) ========================
-def _swing(b, d, lim, k=None):
+def _swing(b, d, km, k=None):
     """Return the range of a metric over (nominal b, low, high), divided
     by its limit.
 
@@ -150,7 +159,7 @@ def _swing(b, d, lim, k=None):
     vals = [b, *d]
     if not all(math.isfinite(v) for v in vals):
         return math.inf
-    return (max(vals) - min(vals)) / lim
+    return (max(vals) - min(vals)) / abs(km.limit)
 
 
 def tornado(spec, pool, seed, out):
@@ -163,7 +172,7 @@ def tornado(spec, pool, seed, out):
         values += [{**nom, u.name: u.lo}, {**nom, u.name: u.hi}]
     res = run_values(spec, values, [seed] * len(values), pool)
     base = res[0]
-    keys = list(R.KEY_METRICS)
+    keys = [km.key for km in R.KEY_METRICS]
 
     # (low, high) value of each key metric, per parameter
     rows = {}
@@ -175,7 +184,7 @@ def tornado(spec, pool, seed, out):
     score = {}
     for name, d in rows.items():
         score[name] = max(_swing(base[k[0]][k[1]], d[k],
-                                 R.KEY_METRICS[k]) for k in keys)
+                                 R.KEY_BY_KEY[k]) for k in keys)
     order = sorted(NAMES, key=lambda n: -score[n])
 
     say(f'\n=== 1. one-at-a-time sensitivity, {spec.name}')
@@ -187,7 +196,7 @@ def tornado(spec, pool, seed, out):
     for n in order:
         u = R.BY_NAME[n]
         k = max(keys, key=lambda k: _swing(base[k[0]][k[1]], rows[n],
-                                           R.KEY_METRICS[k], k))
+                                           R.KEY_BY_KEY[k], k))
         lo, hi = rows[n][k]
         rng = f'{u.lo * u.scale:g}-{u.hi * u.scale:g} {u.unit}'
         say(f'{n:<8}{rng:>16}{score[n]:8.2f}  {k[0]}.{k[1]} '
@@ -219,7 +228,7 @@ def plot_tornado(path, name, base, rows, order, keys):
         ax.set_yticks(range(len(names)))
         ax.set_yticklabels(names, fontsize=8)
         ax.axvline(0, color='k', lw=0.8)
-        lim = R.KEY_METRICS[k]
+        lim = R.KEY_BY_KEY[k].limit
         ax.axvline(lim - b, color='k', ls='--', lw=0.8)
         ax.set_title(f'{k[0]} {k[1]} (nominal {b:.3g}, limit {lim:g})',
                      fontsize=9)
@@ -330,25 +339,28 @@ def report_mc(arms, n):
     say('  ' + '; '.join(f'{r}: {R.describe(r)}'
                          for r in R.REQUIREMENTS))
 
-    say('\ndip pass rate (%) at other limits, discharge / valve')
-    for lim in R.DIP_LEVELS:
-        row = f'  dip <= {lim:g} MPa'.ljust(22)
+    say('\ndelivery degas pass rate (%) at other margins')
+    for lim in (0.25, 0.5, 1.0, 2.0):
+        row = f'  P - P_sat >= {lim:g} MPa'.ljust(22)
         for a in arms:
-            d = np.mean([r['discharge']['dip'] <= lim for r in a['res']])
-            v = np.mean([r['valve']['dip'] <= lim for r in a['res']])
-            row += f'{100 * d:>{w - 4}.0f} /{100 * v:<3.0f}'
+            d = np.mean([r['deliver']['degasMargin'] >= lim
+                         for r in a['res']])
+            row += f'{100 * d:>{w}.0f}'
         say(row)
 
     say('\nmetric distributions (p50 / p90 / p99 / max); limit in '
         'brackets')
-    for (s, k), lim in R.KEY_METRICS.items():
-        say(f'{s}.{k} [{lim:g}]')
+    for km in R.KEY_METRICS:
+        s, k, lim = km.scenario, km.metric, km.limit
+        say(f'{s}.{k} [{"<=" if km.upper else ">="} {lim:g}]')
         for a in arms:
             x = np.array([r[s][k] for r in a['res']], float)
             fin = x[np.isfinite(x)]
             n_bad = len(x) - len(fin)
+            # Percentiles run toward the failing side of the limit.
+            q = [50, 90, 99, 100] if km.upper else [50, 10, 1, 0]
             if len(fin):
-                p = np.percentile(fin, [50, 90, 99, 100])
+                p = np.percentile(fin, q)
             else:
                 p = [math.nan] * 4
             note = f'   ({n_bad} non-finite)' if n_bad else ''
@@ -357,10 +369,10 @@ def report_mc(arms, n):
 
     tset = {}
     for a in arms:
-        x = np.array([r['compress']['tSettle'] for r in a['res']], float)
+        x = np.array([r['compress']['t_arrive'] for r in a['res']], float)
         tset[a['spec'].name] = (np.nanpercentile(x, [50, 90]),
                                 int(np.isnan(x).sum()))
-    say('compress time to settle in band (s) p50 / p90 (never settled): '
+    say('compress time to arrive in band (s) p50 / p90 (never arrived): '
         + '; '.join(f'{k} {v[0][0]:.1f} / {v[0][1]:.1f} ({v[1]})'
                     for k, v in tset.items()))
 
@@ -406,22 +418,18 @@ def worst(arm, k=3):
         sv = severity(res[i])
         sv_text = 'inf' if math.isinf(sv) else f'{sv:.2f}'
         say(f'  #{i} severity {sv_text}: {fmt_vals(values[i])}')
-        over = [f'{s}.{m} {res[i][s][m]:.3g}'
-                for (s, m), lim in R.KEY_METRICS.items()
-                if not res[i][s][m] <= lim]
         say(f'     fails {fails or "none"}; metrics over limit: '
-            f'{", ".join(over) or "none"}')
+            f'{", ".join(over_limit(res[i])) or "none"}')
 
 
 def plot_scatter(path, arm):
     """Plot six key metrics, each against the parameter with which it
     has the largest Spearman rank correlation."""
     spec, values, res = arm['spec'], arm['values'], arm['res']
-    keys = [('compress', 'overshoot'), ('stiffstep', 'overshoot'),
-            ('discharge', 'dip'), ('valve', 'dip'),
-            ('compress', 'stroke_mm'), ('valve', 'maxErrLate')]
+    kms = [km for km in R.KEY_METRICS if km.metric != 'maxErrLate']
     fig, axs = plt.subplots(2, 3, figsize=(15, 8))
-    for ax, k in zip(axs.flat, keys):
+    for ax, km in zip(axs.flat, kms):
+        k = km.key
         y = np.array([r[k[0]][k[1]] for r in res], float)
         ok = np.isfinite(y)
 
@@ -438,8 +446,8 @@ def plot_scatter(path, arm):
             continue
 
         x = np.array([v[best.name] for v in values]) * best.scale
-        lim = R.KEY_METRICS[k]
-        bad = ~(y <= lim)
+        lim = km.limit
+        bad = np.array([km.excess(v) > 1 for v in y])
         # Non-finite failures are drawn at the largest finite value.
         y_cap = np.nanmax(y[ok]) if ok.any() else 0
         ax.scatter(x[~bad], y[~bad], s=12, c='#1f77b4', label='pass')
@@ -514,6 +522,8 @@ def main(argv=None):
                     help='comma list of built-in arms (default all)')
     ap.add_argument('--corner-n', type=int, default=4,
                     help='parameters in the corner study')
+    ap.add_argument('--ratio', type=float, default=1.0,
+                    help='oxygen charge, STP volume per saline volume')
     ap.add_argument('--no-tornado', action='store_true')
     args = ap.parse_args(argv)
     out = Path(args.out)
@@ -526,6 +536,7 @@ def main(argv=None):
     else:
         names = args.configs.split(',') if args.configs else list(CONFIGS)
         specs = [CONFIGS[n] for n in names]
+    specs = [dataclasses.replace(s, ratio=args.ratio) for s in specs]
 
     # Parameter ranges and limits
     t0 = time.time()
@@ -536,6 +547,7 @@ def main(argv=None):
             f'{u.hi * u.scale:<8g}{u.unit:<6}{sampling} {u.why}')
     say('thresholds: ' + ', '.join(f'{k}={v:g}'
                                    for k, v in THRESH.items()))
+    say(f'oxygen charge {args.ratio:g}:1')
     nw = args.workers or os.cpu_count() or 1
     pool = R.make_pool(nw) if nw > 1 else None
 

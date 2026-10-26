@@ -9,21 +9,27 @@ CREATION DATE:
 10/15/2026
 
 PURPOSE/DESCRIPTION:
-This module models the compressor chamber and the servo actuator that
-drives its piston. The Plant class holds the state, computes the state
-derivatives, and advances the state by one slave scan with the
-actuator command held constant.
+This module models the compressor chamber, its outlet and the servo
+actuator that drives the piston. The Plant class holds the state,
+computes the state derivatives, and advances the state by one slave scan
+with the actuator command held constant.
 
-The chamber holds liquid and oxygen gas. The piston of area A sweeps the
-chamber volume. The gas is isothermal and dissolves into the liquid
+The chamber holds saline and oxygen gas. The piston of area A sweeps the
+chamber volume. The gas is isothermal and dissolves into the saline
 according to Henry's law with a first-order time constant. The pressure
-follows from continuity: the piston displacement, the liquid outflow and
-the gas that dissolves change the volume available to the contents, and
-the chamber capacitance (the gas term plus the liquid term) converts
-that volume change to a pressure change. When the option
-liquid_depletes is set, the outflow removes liquid and carries away the
-gas dissolved in it. Equations (1) to (10) of the README give the chamber
-model.
+follows from continuity: the piston displacement, the outflow and the
+gas that dissolves change the volume available to the contents, and the
+chamber capacitance (the gas term plus the liquid term) converts that
+volume change to a pressure change. When the option liquid_depletes is
+set, the outflow removes saline and carries away the gas dissolved in
+it. Equations (1) to (10) of the README give the chamber model.
+
+The outlet is the orifice bank. With the valve open, the outflow is the
+orifice flow at the chamber pressure times the valve's area fraction,
+eq. (36), or a prescribed flow when the scenario gives one. The tube
+between the valve and the orifices holds air before the valve opens, so
+in the opening scan the chamber also loses the tube's volume, eq. (37).
+The delivery ends when the saline is gone.
 
 The actuator has two forms. In velocity mode, which the slave uses, the
 drive's profile generator limits the rate of change of the commanded
@@ -44,6 +50,8 @@ FILE DEPENDENCY:
     solver.py
 """
 
+import math
+
 import solver
 
 
@@ -52,20 +60,22 @@ import solver
 iy_x = 0       # [m] piston position, positive into the cylinder
 iy_v = 1       # [m/s] piston velocity
 iy_P = 2       # [Pa] chamber gauge pressure
-iy_ndis = 3    # [mol] gas dissolved in the liquid
+iy_ndis = 3    # [mol] gas dissolved in the saline
 iy_ntot = 4    # [mol] gas in the chamber, free and dissolved
-iy_Vl = 5      # [m^3] liquid volume at zero gauge pressure
+iy_Vl = 5      # [m^3] saline volume at zero gauge pressure
 iy_nout = 6    # [mol] dissolved gas carried out by the outflow
-N_STATES = 7
+iy_Vout = 7    # [m^3] saline delivered through the outlet
+N_STATES = 8
 
 
 # %% ===== PLANT MODEL ===================================================
 class Plant:
-    """Chamber and actuator for one simulation run.
+    """Chamber, outlet and actuator for one simulation run.
 
     Arguments:
       par       Params with the plant parameters.
-      scenario  Scenario that supplies the initial pressure and gas.
+      scenario  Scenario that supplies the initial contents and the
+                prescribed outflow, if any.
       mode      'V' for velocity command [m/s] or 'T' for force
                 command [N].
       accel     [m/s^2] slew limit while the velocity command grows in
@@ -94,6 +104,12 @@ class Plant:
         self.tauDiss = par.tauDiss      # [s]
         self.dt = par.Ts / par.nsub     # [s] integration step
 
+        # Outlet parameters, eq. (36)
+        self.Qf = scenario.Qf           # [m^3/s] prescribed flow, or 0
+        # [m^3/s per sqrt(Pa)] orifice coefficient Cd A sqrt(2 / rho)
+        self.k_orifice = par.Cd * par.A_orifice * math.sqrt(2 / par.rho)
+        self.V_empty = par.V_empty      # [m^3]
+
         # Velocity actuator parameters
         self.accel = par.amax if accel is None else accel   # [m/s^2]
         if par.slew_asym:
@@ -121,24 +137,50 @@ class Plant:
         y[iy_Vl] = par.Vl0
         self.y = y
         self.v_ref = 0.0                        # [m/s] slewed command
+        self.Q = 0.0                            # [m^3/s] last outflow
 
         # [m^3] Chamber volume at x = 0. The contents fill the chamber,
         # so it equals the stressed liquid plus the free gas (eq. (9)).
         self.Vch0 = (par.Vl0 * (1 - P0 / par.K)
                      + ng0 * self.RT / (P0 + par.Patm))
 
+    # ----- Outflow ------------------------------------------------------
+    def outflow(self, P, V_l, valve, Q_tube):
+        """[m^3/s] Outflow at pressure P [Pa] with saline volume V_l
+        [m^3], valve area fraction valve and tube flow Q_tube [m^3/s],
+        eq. (36). It is zero once the chamber is empty."""
+        if V_l <= self.V_empty:
+            return 0.0
+        if valve > 0.0:
+            if self.Qf > 0.0:
+                Q = valve * self.Qf
+            else:
+                Q = valve * self.k_orifice * math.sqrt(max(P, 0.0))
+        else:
+            Q = 0.0
+        return Q + Q_tube
+
+    @property
+    def empty(self):
+        """True once the saline is gone and the delivery has ended."""
+        return self.y[iy_Vl] <= self.V_empty
+
     # ----- Continuous-time model ----------------------------------------
-    def derivatives(self, y, u_act, Q):
+    def derivatives(self, y, u_act, valve, Q_tube):
         """Return dy/dt for state y.
 
         u_act is the actuator input held over the step: the slewed
         velocity reference [m/s] in velocity mode or the force [N] in
-        torque mode. Q [m^3/s] is the liquid outflow.
+        torque mode. valve is the outlet valve's area fraction and Q_tube
+        [m^3/s] the extra flow that fills the tube in the opening scan.
         """
-        x, v, P, n_dis, n_tot, V_l, n_out = y
+        x, v, P, n_dis, n_tot, V_l, n_out, V_out = y
 
         # Absolute pressure, eq. (1)
         P_abs = P + self.Patm                               # [Pa]
+
+        # Outflow through the outlet, eq. (36)
+        Q = self.outflow(P, V_l, valve, Q_tube)             # [m^3/s]
 
         # Gas dissolution toward the Henry's-law equilibrium,
         # eqs. (2) and (3). The equilibrium cannot exceed the gas present.
@@ -165,7 +207,7 @@ class Plant:
         # phase remove volume.
         dP = (self.A * v - Q - self.RT / P_abs * r_dis) / C  # [Pa/s]
 
-        # Liquid and dissolved gas removed by the outflow, eqs. (7)
+        # Saline and dissolved gas removed by the outflow, eqs. (7)
         # and (8). Q is a flow of liquid at pressure P, so the
         # unstressed volume it removes is larger by 1/(1 - P/K).
         if self.liquid_depletes:
@@ -183,6 +225,7 @@ class Plant:
         dydt[iy_ntot] = -r_out
         dydt[iy_Vl] = dV_l
         dydt[iy_nout] = r_out
+        dydt[iy_Vout] = Q
         return dydt
 
     # ----- Discrete actuator logic --------------------------------------
@@ -212,19 +255,23 @@ class Plant:
             # The drive clamps the velocity in torque mode.
             y[iy_v] = max(-self.vmax, min(self.vmax, y[iy_v]))
 
-        # The dissolved gas cannot exceed the gas present, and the
-        # absolute pressure cannot fall below 1 Pa.
+        # The dissolved gas cannot exceed the gas present, the absolute
+        # pressure cannot fall below 1 Pa, and the saline volume cannot
+        # fall below zero.
         y[iy_ndis] = min(y[iy_ndis], y[iy_ntot])
         y[iy_P] = max(y[iy_P], 1.0 - self.Patm)
+        y[iy_Vl] = max(y[iy_Vl], 0.0)
         return y
 
     # ----- Time step ----------------------------------------------------
-    def scan(self, u, Q):
+    def scan(self, u, valve=0.0, Q_tube=0.0):
         """Advance one slave scan with command u held constant.
 
         u is the velocity command [m/s] in velocity mode or the force
-        command [N] in torque mode. Q [m^3/s] is the outflow, also held
-        over the scan. Returns the chamber gauge pressure [Pa].
+        command [N] in torque mode. valve is the outlet valve's area
+        fraction and Q_tube [m^3/s] the flow that fills the tube in the
+        opening scan, both held over the scan. Returns the chamber gauge
+        pressure [Pa].
         """
         for _ in range(self.nsub):
             if self.velocity_mode:
@@ -232,8 +279,9 @@ class Plant:
             else:
                 u_act = u
             self.y = self.step(self.derivatives, self.y, self.dt,
-                               u_act, Q)
+                               u_act, valve, Q_tube)
             self.apply_constraints(self.y)
+        self.Q = self.outflow(self.y[iy_P], self.y[iy_Vl], valve, 0.0)
         return self.y[iy_P]
 
     # ----- Outputs ------------------------------------------------------
@@ -252,9 +300,24 @@ class Plant:
         """[m/s] piston velocity"""
         return self.y[iy_v]
 
+    @property
+    def n_dis(self):
+        """[mol] gas dissolved in the saline"""
+        return self.y[iy_ndis]
+
+    @property
+    def V_l(self):
+        """[m^3] saline volume at zero gauge pressure"""
+        return self.y[iy_Vl]
+
+    @property
+    def V_out(self):
+        """[m^3] saline delivered through the outlet"""
+        return self.y[iy_Vout]
+
     def capacitance(self):
         """[m^3/Pa] chamber capacitance at the present state, eq. (4)"""
-        x, v, P, n_dis, n_tot, V_l, n_out = self.y
+        x, v, P, n_dis, n_tot, V_l, n_out, V_out = self.y
         P_abs = P + self.Patm
         return (n_tot - n_dis) * self.RT / P_abs**2 + V_l / self.K
 
@@ -275,7 +338,7 @@ class Plant:
         gas takes no volume. The result is zero up to the integration
         error when liquid_depletes is set.
         """
-        x, v, P, n_dis, n_tot, V_l, n_out = self.y
+        x, v, P, n_dis, n_tot, V_l, n_out, V_out = self.y
         contents = (V_l * (1 - P / self.K)
                     + (n_tot - n_dis) * self.RT / (P + self.Patm))
         return self.chamber_volume - contents

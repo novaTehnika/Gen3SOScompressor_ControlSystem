@@ -12,7 +12,7 @@ CREATION DATE:
 PURPOSE/DESCRIPTION:
 This script compares pressure loops that command the piston velocity
 with loops that command the piston force, together with the slave's own
-controller, over the compress, stiffstep and discharge scenarios.
+controller, over the compress, deliver and stiffstep scenarios.
 
 For each scenario it prints a table of metrics and writes the traces to
 <scenario>.csv and a plot to <scenario>.png in the output directory.
@@ -44,7 +44,7 @@ from runner import Case, run_cases
 
 
 # %% ===== STUDY DEFINITION ==============================================
-SCENARIOS = ('compress', 'stiffstep', 'discharge')
+SCENARIOS = ('compress', 'deliver', 'stiffstep')
 
 
 def controller_set():
@@ -85,18 +85,18 @@ def sweeps(par, legacy_sensor, workers, seed):
            f'{r["ripple"]:9.4f} {r.cost:9.3f}'
            for k, r in zip(gains, rs)])
 
-    # Velocity-command PI and PID controllers on the discharge
+    # Velocity-command PI and PID controllers on the delivery
     grid = [(kp, ki, kd) for kp in (0.25, 0.5, 1)
             for ki in (0, 0.1, 0.5, 2) for kd in (0, 0.02, 0.05)]
-    rs = run_set('discharge', [L('', 'V', *g) for g in grid])
-    table('sweep V-PI/PID on discharge (Kp, Ki, Kd)',
+    rs = run_set('deliver', [L('', 'V', *g) for g in grid])
+    table('sweep V-PI/PID on deliver (Kp, Ki, Kd)',
           f'{"Kp":>6} {"Ki":>6} {"Kd":>6} {"peak|e|":>9} {"oversh":>9} '
           f'{"ripple":>9} {"cost":>9}',
           [f'{g[0]:6.2f} {g[1]:6.2f} {g[2]:6.3f} {r["peakErr"]:9.3f} '
            f'{r["overshoot"]:9.3f} {r["ripple"]:9.4f} {r.cost:9.3f}'
            for g, r in zip(grid, rs)])
     b = min(zip(grid, rs), key=lambda gr: gr[1].cost)[0]
-    print(f'best V on discharge: Kp {b[0]:.2f} Ki {b[1]:.2f} '
+    print(f'best V on deliver: Kp {b[0]:.2f} Ki {b[1]:.2f} '
           f'Kd {b[2]:.3f}')
 
     # Force-command PID controllers on the stiffness step. Kp and Ki are
@@ -117,12 +117,12 @@ def sweeps(par, legacy_sensor, workers, seed):
     print(f'best T on stiffstep: Kp {b[0]:.2f}A Ki {b[1]:.2f}A '
           f'Kd {b[2]:.0f}')
 
-    # Slave controller gains on the discharge
+    # Slave controller gains on the delivery
     grid = [(kp, ki) for kp in (0.25, 0.5, 1, 2)
             for ki in (0, 0.2, 0.5, 1)]
-    rs = run_set('discharge', [ctl.SlaveController(Kp=kp, Ki=ki)
-                               for kp, ki in grid])
-    table('sweep slave controller on discharge (G_cfgPressureKp, Ki)',
+    rs = run_set('deliver', [ctl.SlaveController(Kp=kp, Ki=ki)
+                             for kp, ki in grid])
+    table('sweep slave controller on deliver (G_cfgPressureKp, Ki)',
           f'{"Kp":>6} {"Ki":>6} {"peak|e|":>9} {"oversh":>9} '
           f'{"ripple":>9} {"cost":>9}',
           [f'{g[0]:6.2f} {g[1]:6.2f} {r["peakErr"]:9.3f} '
@@ -168,7 +168,8 @@ def main(argv=None):
         print(f'\n=== {sc}  (T={s.T:g} s, event at {s.tEvent:g} s)')
         print(f'{"controller":<{width}} {"settle s":>9} {"oversh":>9} '
               f'{"peak|e|":>9} {"rms e":>9} {"ripple":>9} '
-              f'{"cmd act":>12} {"stroke mm":>10}')
+              f'{"P_max":>7} {"margin":>7} {"V_ok mL":>8} '
+              f'{"stroke mm":>10}')
         for r in rs:
             m = r.metrics
             if math.isnan(m['tSettle']):
@@ -177,7 +178,8 @@ def main(argv=None):
                 settle = f'{m["tSettle"]:.2f}'
             print(f'{r.name:<{width}} {settle:>9} {m["overshoot"]:9.3f} '
                   f'{m["peakErr"]:9.3f} {m["rmsErr"]:9.4f} '
-                  f'{m["ripple"]:9.4f} {m["uAct"]:12.4f} '
+                  f'{m["ripple"]:9.4f} {m["P_max"]:7.2f} '
+                  f'{m["degasMargin"]:7.2f} {m.get("V_ok", 0):8.1f} '
                   f'{m["stroke_mm"]:10.1f}')
         # Stiffness at the start and end of the slave controller's run,
         # [Pa/m / 1e9 -> MPa/mm]

@@ -11,21 +11,21 @@ CREATION DATE:
 PURPOSE/DESCRIPTION:
 This module holds the definitions and helper functions for the
 robustness study, study_robust.py: the uncertain parameters and their
-ranges, the requirement limits, the sampler, the evaluation of the
+ranges, the requirements, the sampler, the evaluation of the
 requirements, and a parallel runner.
 
-UNCERTAIN lists the plant and sensor parameters whose values are not yet
-measured, with the range each is varied over and the reason for it.
-THRESH holds every pass/fail limit, and evaluate() applies the limits to
-the metrics of one run.
+UNCERTAIN lists the plant, outlet and sensor parameters whose values are
+not yet measured, with the range each is varied over and the reason for
+it. REQUIREMENTS lists the pass/fail checks and evaluate() applies them
+to the metrics of one run. The requirements are the machine's: the
+pressure stays below the mechanical ceiling, the solution never degasses
+once the target is reached, the loop keeps control to the end of the
+delivery, the compression ends in band, and the stroke fits.
 
 A point is one combination of plant parameter values, scenario, slave
 configuration and noise seed. point_metrics() runs one point and returns
 its metrics. run_points() runs many points in a pool of worker processes
-and returns only the metrics dicts, so thousands of runs stay cheap. The
-metrics are those of metrics.compute() plus two that need the traces,
-dip and maxErrLate, which are computed inside the worker before the
-traces are discarded.
+and returns only the metrics dicts, so thousands of runs stay cheap.
 
 FILE DEPENDENCY:
 ./
@@ -66,69 +66,60 @@ class Uncertain:
 
 # The parameters not listed here are fixed. mr, b, Fc and veps act only
 # in torque mode, which the slave does not use. A, R, T, Patm and kH are
-# geometry or physical constants.
+# geometry or physical constants. The oxygen ratio is a study variable,
+# not an uncertainty.
 UNCERTAIN = [
     Uncertain('K', 0.5e9, 2.5e9, True, 1e-9, 'GPa',
               'water 2.2 GPa; hoses, seals and residual gas lower it'),
     Uncertain('Vl0', 250e-6, 350e-6, False, 1e6, 'mL',
-              'liquid in the chamber, hoses and fittings'),
-    Uncertain('Vg0', 100e-6, 300e-6, False, 1e6, 'mL',
-              'gas at atmosphere in the chamber at the start'),
+              'saline in the chamber, hoses and fittings'),
     Uncertain('tauDiss', 10.0, 100.0, True, 1.0, 's',
               'gas dissolution time constant'),
     Uncertain('tauV', 0.005, 0.05, True, 1e3, 'ms',
               'drive velocity loop lag'),
     Uncertain('noise', 1e3, 20e3, True, 1e-3, 'kPa',
               'transducer plus ADC noise, rms per sample'),
-    Uncertain('Qf', 0.5e-6, 2e-6, False, 1e6, 'mL/s',
-              'discharge flow, final value; used by discharge and valve'),
+    Uncertain('Cd', 0.6, 0.8, False, 1.0, '',
+              'orifice discharge coefficient; sets the outflow'),
+    Uncertain('P_supply', 0.52e6, 1.38e6, False, 1e-6, 'MPa',
+              'oxygen supply, 75 to 200 psi with the cylinder charge'),
 ]
 NAMES = [u.name for u in UNCERTAIN]
 BY_NAME = {u.name: u for u in UNCERTAIN}
 
 
-# %% ===== SCENARIOS AND REQUIREMENT LIMITS ==============================
-SCENARIOS = ('compress', 'stiffstep', 'discharge', 'valve')
-VALVE_TOPEN = 0.3       # [s] valve opening time in the requirements
-# [s] Simulated duration of the valve case. The Params default of 8 s
-# cuts the recovery short at the slowest parameter combinations.
-VALVE_T = 12.0
-DISCHARGE_T = 30.0      # [s] simulated duration of the discharge case
+# %% ===== SCENARIOS AND REQUIREMENTS ====================================
+SCENARIOS = ('compress', 'deliver')
 
 _CFG = slave_config()
+_PAR = Params()
 THRESH = {
     # [MPa] Status band of the slave (G_cfgPressureInBand)
     'inband': _CFG['G_cfgPressureInBand'],
-    # [MPa] Overshoot limits from tests/slavePressureMode.m, which
-    # requires pMax <= 10.5 MPa (compress) and pMax <= 12.6 MPa
-    # (stiffstep)
-    'compress_overshoot': 0.5,
-    'stiffstep_overshoot': 0.6,
-    # [MPa] Standard deviation of P over the last 2 s, set well under
-    # the status band
-    'ripple': _CFG['G_cfgPressureInBand'] / 5,
-    # [MPa] Dip limit, a placeholder; tests/slavePressureMode.m requires
-    # pMin > 11 MPa for a 12 MPa target
-    'dip': 1.0,
+    # [MPa] Mechanical pressure ceiling (Params.P_ceiling)
+    'ceiling': _PAR.P_ceiling / 1e6,
+    # [MPa] Required margin above the saturation pressure
+    # (Params.degas_margin)
+    'degas': _PAR.degas_margin / 1e6,
     # [mm] Stroke limit: the GVL soft limit minus the chamber contact
     # position of 200 mm assumed in the slave simulator
     'stroke_mm': _CFG['G_cfgPosSoftLimitMax'] - 200.0,
+    # [mL] Saline delivered after control is lost, for ranking only; the
+    # requirement is that none is
+    'v_lost': 10.0,
 }
-DIP_LEVELS = (0.25, 0.5, 1.0)   # [MPa] other dip limits reported
 
 # Requirement name -> (scenario, description)
 REQUIREMENTS = {
-    'compress.band': ('compress', 'in band at the end'),
-    'compress.overshoot': ('compress',
-                           'overshoot <= %(compress_overshoot)g MPa'),
-    'compress.ripple': ('compress', 'late ripple <= %(ripple)g MPa'),
-    'stiffstep.overshoot': ('stiffstep',
-                            'overshoot <= %(stiffstep_overshoot)g MPa'),
-    'stiffstep.band': ('stiffstep', 'in band at the end'),
-    'discharge.dip': ('discharge', 'dip <= %(dip)g MPa'),
-    'discharge.band': ('discharge', 'in band at the end'),
-    'valve.dip': ('valve', 'dip <= %(dip)g MPa'),
-    'valve.band': ('valve', 'in band at the end'),
+    'compress.band': ('compress', 'in band at the end of compression'),
+    'compress.ceiling': ('compress', 'P_max <= %(ceiling)g MPa'),
+    'compress.degas': ('compress',
+                       'P - P_sat >= %(degas)g MPa after arrival'),
+    'deliver.ceiling': ('deliver', 'P_max <= %(ceiling)g MPa'),
+    'deliver.degas': ('deliver',
+                      'P - P_sat >= %(degas)g MPa through the delivery'),
+    'deliver.control': ('deliver',
+                        'control kept to the end (V_ok = V_delivered)'),
     'stroke': (None, 'stroke <= %(stroke_mm)g mm, all scenarios'),
 }
 
@@ -138,20 +129,42 @@ def describe(req, th=THRESH):
     return REQUIREMENTS[req][1] % th
 
 
-# (scenario, metric) -> limit, for the metrics ranked in the tornado
-# and scatter plots
-KEY_METRICS = {
-    ('compress', 'overshoot'): THRESH['compress_overshoot'],
-    ('compress', 'maxErrLate'): THRESH['inband'],
-    ('compress', 'ripple'): THRESH['ripple'],
-    ('compress', 'stroke_mm'): THRESH['stroke_mm'],
-    ('stiffstep', 'overshoot'): THRESH['stiffstep_overshoot'],
-    ('stiffstep', 'maxErrLate'): THRESH['inband'],
-    ('discharge', 'dip'): THRESH['dip'],
-    ('discharge', 'maxErrLate'): THRESH['inband'],
-    ('valve', 'dip'): THRESH['dip'],
-    ('valve', 'maxErrLate'): THRESH['inband'],
-}
+@dataclass(frozen=True)
+class KeyMetric:
+    """A metric ranked in the tornado and scatter plots, with the limit
+    it is judged against and the sense of the limit."""
+
+    scenario: str
+    metric: str
+    limit: float
+    upper: bool = True      # True: metric <= limit passes
+
+    @property
+    def key(self):
+        return (self.scenario, self.metric)
+
+    def excess(self, value):
+        """Return a ratio that is 1 at the limit and above 1 when the
+        value fails: value/limit for an upper limit, and 1 plus the
+        shortfall divided by the limit for a lower one. NaN counts as
+        infinite."""
+        if not math.isfinite(value):
+            return math.inf
+        if self.upper:
+            return value / self.limit
+        return 1.0 + (self.limit - value) / abs(self.limit)
+
+
+KEY_METRICS = [
+    KeyMetric('compress', 'P_max', THRESH['ceiling']),
+    KeyMetric('compress', 'maxErrLate', THRESH['inband']),
+    KeyMetric('compress', 'degasMargin', THRESH['degas'], upper=False),
+    KeyMetric('compress', 'stroke_mm', THRESH['stroke_mm']),
+    KeyMetric('deliver', 'P_max', THRESH['ceiling']),
+    KeyMetric('deliver', 'degasMargin', THRESH['degas'], upper=False),
+    KeyMetric('deliver', 'V_lost', THRESH['v_lost']),
+]
+KEY_BY_KEY = {km.key: km for km in KEY_METRICS}
 
 
 # %% ===== SAMPLING ======================================================
@@ -193,49 +206,48 @@ def nominal():
     return {u.name: getattr(base, u.name) for u in UNCERTAIN}
 
 
-def base_params():
-    """Return Params with the settling band set to the slave's status
-    band and the valve case of the requirements."""
+def base_params(ratio=1.0):
+    """Return Params for the study: the settling band set to the slave's
+    status band and the oxygen charge set to ratio."""
     return Params(tol=THRESH['inband'] * 1e6,           # [MPa -> Pa]
-                  Topen=VALVE_TOPEN, valveT=VALVE_T)
+                  ratio=ratio)
 
 
-def make_params(values):
-    """Return base_params() with the sampled values applied."""
-    return base_params().with_(**values)
+def make_params(values, ratio=1.0):
+    """Return base_params(ratio) with the sampled values applied. A
+    'ratio' entry in values overrides the argument."""
+    values = dict(values)
+    ratio = values.pop('ratio', ratio)
+    return base_params(ratio).with_(**values)
 
 
 def make_scenario(name, par, ff_scale=1.0):
-    """Return scenario name for Params par.
-
-    The discharge case takes the sampled flow Qf too, so one parameter
-    sets the flow of both outflow cases. ff_scale sets the error in the
-    feedforward flow.
-    """
-    if name == 'discharge':
-        return scenarios.make(name, par, T=DISCHARGE_T, Qf=par.Qf,
-                              ff_scale=ff_scale)
-    if name == 'valve':
+    """Return scenario name for Params par, with the feedforward scale
+    applied to the delivery."""
+    if name == 'deliver':
         return scenarios.make(name, par, ff_scale=ff_scale)
     return scenarios.make(name, par)
 
 
 # %% ===== METRICS AND REQUIREMENTS ======================================
 def extras(r, scenario):
-    """Return the metrics that need the traces.
-
-      dip         [MPa] Target before the event minus the lowest
-                  pressure after it.
-      maxErrLate  [MPa] Largest |target - P| over the last 2 s.
-    """
-    after_event = r.t >= scenario.tEvent
-    last_2s = r.t > scenario.T - 2
-    dip = r.target[after_event][0] - np.min(r.P[after_event])   # [Pa]
+    """Return the metrics derived from the traces beyond
+    metrics.compute(): maxErrLate [MPa], the largest |target - P| over
+    the last 2 s, and V_lost [mL], the saline delivered after control
+    was lost (V_delivered - V_ok)."""
+    last_2s = r.t > r.t[-1] - 2
     err_late = np.abs(r.target[last_2s] - r.P[last_2s])         # [Pa]
-    return {
-        'dip': float(dip) / 1e6,                        # [Pa -> MPa]
-        'maxErrLate': float(np.max(err_late)) / 1e6,
-    }
+    out = {'maxErrLate': float(np.max(err_late)) / 1e6}
+    m = r.metrics
+    if 'V_delivered' in m:
+        out['V_lost'] = m['V_delivered'] - m['V_ok']
+    return out
+
+
+METRIC_NAMES = ('overshoot', 'tSettle', 'peakErr', 'rmsErr', 'ripple',
+                'uAct', 'stroke_mm', 'P_max', 'P_min', 'degasMargin',
+                'dip', 'V_delivered', 'V_ok', 'V_lost', 't_arrive',
+                'maxErrLate')
 
 
 def finite_or(x, default):
@@ -254,6 +266,7 @@ class ControllerSpec:
     overrides: dict = field(default_factory=dict)
     flow_ff: bool = False
     ff_scale: float = 1.0
+    ratio: float = 1.0      # oxygen charge the arm is run with
 
 
 def point_metrics(point):
@@ -264,21 +277,20 @@ def point_metrics(point):
     metric NaN, which fails every requirement.
     """
     values, scen, spec, seed = point
-    par = make_params(values)
+    par = make_params(values, spec.ratio)
     s = make_scenario(scen, par, spec.ff_scale)
     c = ctl.SlaveController(flow_ff=spec.flow_ff, **spec.overrides)
     try:
         with np.errstate(invalid='raise', over='raise', divide='raise'):
             r = sim.run(par, s, c, seed=seed)
-        m = dict(r.metrics)
+        m = {k: math.nan for k in METRIC_NAMES}
+        m.update(r.metrics)
         m.update(extras(r, s))
         m['diverged'] = not all(math.isfinite(v) for k, v in m.items()
-                                if k != 'tSettle')
+                                if k not in ('tSettle', 't_arrive'))
     except (FloatingPointError, OverflowError, ValueError,
             ZeroDivisionError):
-        m = {k: math.nan for k in ('overshoot', 'tSettle', 'peakErr',
-                                   'rmsErr', 'ripple', 'uAct',
-                                   'stroke_mm', 'dip', 'maxErrLate')}
+        m = {k: math.nan for k in METRIC_NAMES}
         m['diverged'] = True
     return m
 
@@ -288,28 +300,25 @@ def _le(x, limit):
     return bool(x <= limit)
 
 
+def _ge(x, limit):
+    """Return x >= limit; False when x is NaN."""
+    return bool(x >= limit)
+
+
 def evaluate(scen, m, th=THRESH):
     """Return {requirement: passed} for the requirements of scenario scen
-    and its stroke check, from metrics dict m.
-
-    "In band at the end" requires the error to stay within the status
-    band over the last 2 s and the run to have settled.
-    """
+    and its stroke check, from metrics dict m."""
     out = {}
-    band = _le(m['maxErrLate'], th['inband']) and not math.isnan(
-        m['tSettle'])
     if scen == 'compress':
-        out['compress.band'] = band
-        out['compress.overshoot'] = _le(m['overshoot'],
-                                        th['compress_overshoot'])
-        out['compress.ripple'] = _le(m['ripple'], th['ripple'])
-    elif scen == 'stiffstep':
-        out['stiffstep.overshoot'] = _le(m['overshoot'],
-                                         th['stiffstep_overshoot'])
-        out['stiffstep.band'] = band
-    elif scen in ('discharge', 'valve'):
-        out[f'{scen}.dip'] = _le(m['dip'], th['dip'])
-        out[f'{scen}.band'] = band
+        out['compress.band'] = (_le(m['maxErrLate'], th['inband'])
+                                and not math.isnan(m['tSettle']))
+        out['compress.ceiling'] = _le(m['P_max'], th['ceiling'])
+        out['compress.degas'] = _ge(m['degasMargin'], th['degas'])
+    elif scen == 'deliver':
+        out['deliver.ceiling'] = _le(m['P_max'], th['ceiling'])
+        out['deliver.degas'] = _ge(m['degasMargin'], th['degas'])
+        out['deliver.control'] = (_ge(m['V_ok'], m['V_delivered'] - 1e-6)
+                                  and m['V_delivered'] > 0)
     else:
         raise KeyError(scen)
     out['stroke@' + scen] = _le(m['stroke_mm'], th['stroke_mm'])

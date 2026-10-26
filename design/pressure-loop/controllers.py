@@ -99,6 +99,7 @@ class SlaveController:
         self.cfg = {_cfg_name(k, known): v for k, v in overrides.items()}
 
     def reset(self, par, scenario):
+        self.par = par
         self.A = par.A                                          # [m^2]
         self.dt = par.Ts                                        # [s]
         c = par.cfg(**self.cfg)
@@ -143,7 +144,7 @@ class SlaveController:
         # Flow feedforward, eq. (20): the piston velocity that displaces
         # the expected outflow. [m^3/s / m^2 -> m/s, * 1e3 -> mm/s]
         if self.flow_ff:
-            v_ff = scenario.Qff(t) / self.A * 1e3
+            v_ff = scenario.Qff(t, self.par, P_meas) / self.A * 1e3
             v = min(max(v + v_ff, -self.vel_max), self.vel_max)
         return v * 1e-3                                 # [mm/s -> m/s]
 
@@ -197,6 +198,7 @@ class LegacyController:
         self.accel = self.decel = amax
 
     def reset(self, par, scenario):
+        self.par = par
         self.A = par.A                          # [m^2]
         self.Ts = par.Ts                        # [s]
         self.Tf = par.Tf                        # [s] derivative filter
@@ -236,7 +238,7 @@ class LegacyController:
         if self.mode == 'T':
             u_ff = self.A * target                              # [N]
         elif self.vff:
-            u_ff = scenario.Qff(t) / self.A                     # [m/s]
+            u_ff = scenario.Qff(t, self.par, P_meas) / self.A   # [m/s]
         else:
             u_ff = 0.0
 

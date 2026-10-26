@@ -13,15 +13,24 @@ This module defines Params, the set of plant, actuator, sensor and
 simulation parameters used by every study. All values are in SI units
 unless a comment states otherwise.
 
-The parameters describe four parts of the model:
+The parameters describe five parts of the model:
 
-  Chamber     A piston of area A compresses a chamber that holds liquid
+  Chamber     A piston of area A compresses a chamber that holds saline
               of effective bulk modulus K and oxygen gas. The gas is
-              isothermal and dissolves into the liquid according to
+              isothermal and dissolves into the saline according to
               Henry's law with time constant tauDiss. The chamber
-              stiffness dP/dx therefore rises from about 0.002 MPa/mm
-              when the chamber is gas-rich to 10 to 25 MPa/mm once the
-              gas has dissolved.
+              stiffness dP/dx therefore rises from about 0.02 MPa/mm at
+              the start of a run to 10 to 25 MPa/mm once the gas has
+              dissolved.
+  Charge      The oxygen charge is given as the ratio of its STP volume
+              to the saline volume, and is admitted at the supply
+              pressure, where the run starts. The saturation pressure of
+              the dissolved oxygen follows from the charge; the pressure
+              must stay above it or the solution degasses.
+  Outlet      A ball valve, a tube and a plate of micro-orifices. The
+              orifices set the outflow as a function of chamber
+              pressure, and the air in the tube is lost from the chamber
+              as a volume step when the valve opens.
   Actuator    In velocity mode the drive limits the rate of change of the
               commanded velocity, follows it with lag tauV, and stalls
               when the chamber force reaches the torque limit Fcap. In
@@ -71,24 +80,71 @@ class Params:
     # [Pa] Effective bulk modulus of the liquid. Water alone is 2.2 GPa;
     # hose and seal compliance lower the effective value.
     K: float = 1.0e9
-    # [m^3] Liquid volume at the start of a run
+    # [m^3] Saline volume at the start of a run
     Vl0: float = 300e-6
-    # [m^3] Gas volume, measured at atmospheric pressure, in the chamber
-    # at the start of a gas-rich run
-    Vg0: float = 200e-6
-    # [mol/(m^3 Pa)] Henry's-law constant for oxygen in water
-    kH: float = 1.28e-5
+    # [mol/(m^3 Pa)] Henry's-law constant for oxygen in saline: 1.28e-5
+    # for pure water, reduced 5 % by salting out at 0.9 % NaCl
+    kH: float = 1.22e-5
     # [s] Time constant of gas dissolution
     tauDiss: float = 30.0
+    # [kg/m^3] Saline density
+    rho: float = 1000.0
 
-    # ----- Discharge valve -----------------------------------------------
-    # These apply to the valve scenario.
-    # [m^3/s] Outflow once the valve is fully open
-    Qf: float = 1e-6
-    # [s] Valve opening time; 0 opens the valve in one step
-    Topen: float = 0.3
-    # [s] Simulated duration of the valve scenario
-    valveT: float = 8.0
+    # ----- Oxygen charge -------------------------------------------------
+    # [-] Oxygen charge as the ratio of its volume at STP (0 degC, 1 atm)
+    # to the saline volume; 1.0 is the 1:1 recipe
+    ratio: float = 1.0
+    # [Pa] Gauge pressure of the oxygen supply when the charge is admitted.
+    # The chamber starts a run at this pressure. The supply is 75 to
+    # 200 psi (0.52 to 1.38 MPa) depending on the cylinder's state of
+    # charge.
+    P_supply: float = 1.0e6
+
+    # ----- Outlet: ball valve, tube and orifice bank ---------------------
+    # The outlet is a 1/4 in ball valve, a 1 mm bore tube 300 mm long,
+    # and a plate of 32 orifices of 40 um, discharging to atmosphere. The
+    # ball valve's bore is 450 times the orifice area, so once it cracks
+    # the orifices set the flow, eq. (36).
+    # [-] Number of orifices
+    n_orifice: int = 32
+    # [m] Orifice diameter
+    d_orifice: float = 40e-6
+    # [-] Orifice discharge coefficient (sharp-edged, Re 4000 to 6000)
+    Cd: float = 0.7
+    # [m^3] Volume of the tube between the valve and the orifices. It
+    # holds air at atmosphere before the valve opens, so the chamber loses
+    # this volume of liquid in the scan the valve opens, eq. (37).
+    V_tube: float = 0.236e-6
+    # [s] Valve opening time; 0 opens the valve in one scan. The ball
+    # valve is opened rapidly.
+    Topen: float = 0.0
+    # [m^3] Liquid volume at which the chamber counts as empty and the
+    # delivery ends
+    V_empty: float = 2e-6
+
+    # ----- Derived outlet quantities -------------------------------------
+    @property
+    def A_orifice(self):
+        """[m^2] Total orifice area"""
+        return self.n_orifice * math.pi * self.d_orifice**2 / 4
+
+    def Q_orifice(self, P):
+        """[m^3/s] Orifice flow at chamber gauge pressure P [Pa] with the
+        valve fully open, eq. (36): Q = Cd A sqrt(2 P / rho)."""
+        return self.Cd * self.A_orifice * math.sqrt(2 * max(P, 0.0)
+                                                    / self.rho)
+
+    def n_charge(self, ratio=None):
+        """[mol] Oxygen charge for an STP ratio (default self.ratio), by
+        the ideal gas law at 0 degC and 1 atm"""
+        r = self.ratio if ratio is None else ratio
+        return r * self.Vl0 * self.Patm / (self.R * 273.15)
+
+    def P_sat(self, n_dis, V_l):
+        """[Pa] Gauge saturation pressure of n_dis [mol] of oxygen
+        dissolved in V_l [m^3] of saline, eq. (38). Below this pressure
+        the solution degasses."""
+        return n_dis / (self.kH * V_l) - self.Patm
 
     # ----- Simulation ----------------------------------------------------
     # [-] Plant integration steps per slave scan
@@ -121,9 +177,21 @@ class Params:
     # controller
     Tf: float = 0.02
 
-    # ----- Metrics -------------------------------------------------------
+    # ----- Metrics and requirements --------------------------------------
     # [Pa] Half-width of the band used for the settling time
     tol: float = 0.1e6
+    # [Pa] Required margin of the chamber pressure above the saturation
+    # pressure during the hold and delivery (no degassing)
+    degas_margin: float = 0.5e6
+    # [Pa] Highest pressure allowed at any time (mechanical limit)
+    P_ceiling: float = 12e6
+    # [Pa] Largest error tolerated during a delivery once the opening
+    # dip has had t_recover to settle; a larger error counts as loss of
+    # control
+    e_crash: float = 1.0e6
+    # [s] Time after the valve opens allowed for the opening dip to
+    # recover; the dip metric is the lowest pressure in this window
+    t_recover: float = 5.0
 
     # ----- Model options -------------------------------------------------
     # Setting both options to False gives the earlier model: a fixed
