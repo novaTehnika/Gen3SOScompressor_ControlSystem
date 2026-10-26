@@ -80,8 +80,9 @@ class SlaveController:
       name         Label used in tables and plots.
       flow_ff      If True, add the expected outflow divided by the
                    piston area to the velocity after the block, eq. (20).
-                   The slave has no flow feedforward; this is a study
-                   option.
+                   The slave has no flow feedforward and the machine
+                   cannot supply the flow, so this is a bound for the
+                   studies, not a candidate.
       **overrides  Slave settings, by full G_cfg* name or by the name
                    without G_cfg and an optional Pressure or Analog
                    prefix, in the units of the GVL. For example Kp=1.0,

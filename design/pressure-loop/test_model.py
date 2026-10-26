@@ -79,9 +79,9 @@ def check_config():
     assert (q.cfg()['G_cfgPressureKp'] == 2.0 and q.K == 2e9
             and par.cfg()['G_cfgPressureKp'] == 0.5)
     q = Params.from_overrides(['K=2e9', 'nsub=10', 'liquid_depletes=false',
-                               'G_cfgScanTime=0.001', 'solver=heun'])
+                               'G_cfgScanTime=0.001', 'solver=euler'])
     assert (q.K == 2e9 and q.nsub == 10 and q.liquid_depletes is False
-            and q.Ts == 0.001 and q.solver == 'heun')
+            and q.Ts == 0.001 and q.solver == 'euler')
     try:
         Params.from_overrides(['nonsense=1'])
     except ValueError:
@@ -168,9 +168,9 @@ def check_conservation():
 
 
 def check_solver():
-    # Forward Euler and Heun differ by the local error of the first-order
-    # method, so close agreement bounds the integration error at the
-    # chosen step.
+    # Heun and forward Euler differ by about the local error of the
+    # first-order method, so close agreement bounds the integration error
+    # at the chosen step. study_convergence.py gives the full picture.
     worst = {}
     for name in ('compress', 'stiffstep', 'discharge'):
         r = {}
@@ -302,16 +302,16 @@ def check_wiring():
 
 # %% ===== CLOSED LOOP ===================================================
 def check_legacy_reference():
-    # Reference values for this case without noise, computed with the
-    # forward-Euler plant at nsub = 5
+    # Reference values for this case without noise, computed with Heun
+    # at nsub = 5
     par = Params().legacy().with_(noise=0.0)
     c = ctl.LegacyController('ref', 'V', 0.5, 0.2, 0, True, 50e-3)
     r = sim.run(par, scenarios.stiffstep(par), c, legacy_sensor=True)
-    assert (abs(r['overshoot'] - 0.2004) < 1e-4
+    assert (abs(r['overshoot'] - 0.2005) < 1e-4
             and abs(r['tSettle'] - 1.3120) < 1e-3
             and abs(r['peakErr'] - 2.0) < 1e-4), r.metrics
     ok('legacy plant, sensor and controller match the reference values '
-       '(stiffstep overshoot 0.2004 MPa, settle 1.312 s)')
+       '(stiffstep overshoot 0.2005 MPa, settle 1.312 s)')
 
 
 def check_closed_loop():

@@ -22,16 +22,17 @@ here therefore integrate a smooth system over each step.
 
 Two methods are provided:
 
-  euler_step   First-order explicit (forward) Euler, README eq. (34).
-               It evaluates the derivative once per step and is the same
-               update as ode1.m.
-  heun_step    Second-order explicit Heun (improved Euler), eq. (35). It
-               averages the derivative at the start of the step with the
-               derivative at the Euler prediction, so it evaluates the
-               derivative twice per step.
+  heun_step    Second-order explicit Heun (improved Euler), README
+               eq. (35). It averages the derivative at the start of the
+               step with the derivative at the Euler prediction, so it
+               evaluates the derivative twice per step. It is the
+               default.
+  euler_step   First-order explicit (forward) Euler, eq. (34). It
+               evaluates the derivative once per step and is the same
+               update as ode1.m. It is kept for comparison.
 
-Forward Euler is the default. The two methods agree closely at the
-default step (test_model.py), which bounds the integration error.
+study_convergence.py measures the error of both methods against the
+step size; test_model.py checks that they agree at the default step.
 
 FILE DEPENDENCY:
 None.
@@ -59,4 +60,4 @@ def heun_step(f, y, dt, *args):
 
 
 # Methods selectable by name through Params.solver
-METHODS = {'euler': euler_step, 'heun': heun_step}
+METHODS = {'heun': heun_step, 'euler': euler_step}

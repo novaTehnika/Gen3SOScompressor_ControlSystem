@@ -23,6 +23,7 @@ python3 design/pressure-loop/study_compare.py    # three scenarios, seven contro
 python3 design/pressure-loop/study_valve.py      # dip versus valve opening time
 python3 design/pressure-loop/study_linear.py     # margins against chamber stiffness, about 30 s
 python3 design/pressure-loop/study_robust.py     # Monte Carlo over the uncertain parameters, about 5 min on 4 CPUs
+python3 design/pressure-loop/study_convergence.py # integration error against the time step, about 1 min
 python3 design/pressure-loop/test_linear.py      # linear model against the nonlinear simulation
 python3 design/pressure-loop/test_robust.py      # sampler, criteria and parallel runner
 ```
@@ -48,8 +49,9 @@ accept these options:
 | `params.py` | Defines `Params`, the chamber, actuator, sensor and simulation parameters. The values the slave configures are read from the GVL and can be overridden through `slave_cfg`. |
 | `plant.py` | Models the chamber and the actuator, equations (1) to (14). `Plant.derivatives` is the continuous-time model and `Plant.scan` advances one slave scan. |
 | `solver.py` | Holds the fixed-step integration methods, equations (34) and (35). |
+| `study_convergence.py` | Measures the integration error against the time step for both methods. |
 | `sensor.py` | Models the measurement chain: `SlaveSensor` (transducer, shunt, noise and the slave's filter and scaling blocks) and `LegacySensor`. |
-| `controllers.py` | Defines `SlaveController` (the slave's block, with optional flow feedforward) and `LegacyController` (PID with a stiffness-estimating stop law and a torque mode). Both share the `reset` and `step` interface. |
+| `controllers.py` | Defines `SlaveController` (the slave's block, with a flow feedforward option kept only as a bound) and `LegacyController` (PID with a stiffness-estimating stop law and a torque mode). Both share the `reset` and `step` interface. |
 | `scenarios.py` | Defines the operating cases `compress`, `stiffstep`, `discharge` and `valve`. |
 | `sim.py` | Runs one closed-loop simulation: `run(params, scenario, controller)` returns a `Result` with traces and metrics. |
 | `metrics.py` | Computes overshoot, peak error, settling time, RMS error, ripple, command activity and stroke used. |
@@ -332,21 +334,41 @@ gas cannot exceed the gas present, and the absolute pressure cannot fall
 below 1 Pa.
 
 The state is y = [x, v, P, n_dis, n_tot, V_l, n_out], and
-`Plant.derivatives` returns f(y) = dy/dt from equations (1) to (14). The
-default method is forward Euler, the same update as `ode1.m`:
+`Plant.derivatives` returns f(y) = dy/dt from equations (1) to (14).
+Forward Euler (`--set solver=euler`) is the same update as `ode1.m`:
 
     (34) y[i+1] = y[i] + dt f(y[i])
 
-Heun's method (`--set solver=heun`) averages the slope at the start of
+The default method is Heun's, which averages the slope at the start of
 the step and at the Euler prediction:
 
     (35) y_p = y[i] + dt f(y[i]),
          y[i+1] = y[i] + (dt/2) (f(y[i]) + f(y_p))
 
-The two methods agree to within 15 kPa on the compress, stiffstep and
-discharge scenarios (`test_model.py`), so the integration error at this
-step is small against the 0.1 MPa status band. The volume closure,
-eq. (9), holds to within 2e-9 m^3 over 6 s of compression.
+**Convergence.** `study_convergence.py` compares both methods at 1 to 50
+steps per scan with a reference of Heun at 100 steps per scan
+(dt = 0.02 ms). The largest pressure difference from the reference, with
+the slave controller:
+
+| Scenario | Euler, nsub 1 / 5 / 50 | Heun, nsub 1 / 5 / 50 |
+|---|---|---|
+| compress | 65 / 13 / 1.4 kPa | 9.0 / 1.7 / 0.07 kPa |
+| stiffstep | 10.5 / 2.0 / 0.10 kPa | 10.5 / 2.0 / 0.11 kPa |
+| discharge | 0.29 / 0.05 / 0.02 kPa | 0.04 / 0.04 / 0.02 kPa |
+| valve | 0.16 / 0.03 / 0.01 kPa | 0.02 / 0.01 / 0.01 kPa |
+
+Euler converges at first order, halving its error with each halving of
+the step. At the default of five Heun steps per scan (dt = 0.4 ms) the
+largest error is 1.7 kPa, during the gas-rich compression, and the
+metrics change by less than 0.001 MPa of overshoot and 0.002 s of
+settling time between the default and the reference. On stiffstep both
+methods give the same error, because the slew limit, eq. (11), is
+applied once per step and converges at first order whatever the
+integrator; this is the behaviour of the drive's own discrete profile
+generator. Heun at five steps costs about 15 % more than Euler at five
+and is eight times more accurate on compress, which is why it is the
+default. The volume closure, eq. (9), holds to within 2e-9 m^3 over 6 s
+of compression.
 
 ## Linear analysis
 
@@ -408,10 +430,11 @@ requirement.
 The study runs a one-at-a-time sensitivity (tornado), then all corners of
 the four most influential parameters, then a Latin hypercube sample
 (`--n`, default 200) for each configuration. The default configurations
-are the GVL, the GVL with flow feedforward, the 20 ms filter with
-`StopVelMin` 1 mm/s, and that with flow feedforward. Every configuration
-sees the same samples and noise seeds. `--cfg key=value` and `--flow-ff`
-run a single custom configuration instead.
+are the GVL, the GVL with a 20 ms filter, and the 20 ms filter with
+`StopVelMin` 1 mm/s. Every configuration sees the same samples and noise
+seeds. `--cfg key=value` runs a single custom configuration instead, and
+`--flow-ff` adds a flow feedforward to it as a bound; the machine cannot
+supply the flow, so no built-in configuration uses it.
 
 ## Assumptions to replace with bench measurements
 
@@ -429,7 +452,7 @@ Gains are in mm/s per MPa (Kp) and mm/s per MPa s (Ki). "Slave (GVL)" is
 the slave's `FB_PressureController` with the GVL configuration: Kp 0.5,
 Ki 0.2, VelMax 5 mm/s, accel and decel 50 mm/s², stop-law stiffness
 100 MPa/mm, StopVelMin 0.5 mm/s and a 50 ms filter. The time-domain
-results use forward Euler at five steps per scan.
+results use Heun's method at five steps per scan.
 
 **Velocity versus torque command.** Velocity command wins. The drive's
 own velocity loop absorbs the friction and the mass-spring resonance, so
@@ -499,31 +522,34 @@ opening time:
 |---|---|---|---|---|---|
 | PI, Kp 0.25, Ki 0.2 | 0.91 | 0.90 | 0.81 | 0.47 | 0.15 |
 | Slave (GVL), Kp 0.5, Ki 0.2 | 0.57 | 0.56 | 0.49 | 0.35 | 0.14 |
-| PI, Kp 1, Ki 0.5, filter 20 ms | 0.32 | 0.28 | 0.23 | 0.15 | 0.06 |
-| Slave (GVL) plus flow feedforward | 0.08 | 0.04 | 0.01 | 0.004 | 0.002 |
+| PI, Kp 1, Ki 0.5, filter 20 ms | 0.31 | 0.28 | 0.23 | 0.15 | 0.06 |
+| Slave (GVL) plus flow feedforward (bound, not implementable) | 0.08 | 0.04 | 0.01 | 0.004 | 0.002 |
 | Torque feedforward (reference) | 0.25 | 0.25 | 0.25 | 0.25 | 0.25 |
 
 The dip is quasi-static, about Q/(A Kp) by eq. (33), until the opening
 time exceeds the loop's integral time of about one second. Opening the
 valve slowly helps only beyond that. Feedforward of the expected flow
-cuts the dip below 0.1 MPa even for a step, and the master knows that
-flow when it opens the valve.
+would cut the dip below 0.1 MPa even for a step, but the machine cannot
+supply the flow to the slave, so the feedforward rows are a bound on
+what a flow measurement would buy, not a candidate.
 
 **Robustness** (200 Latin hypercube samples; pass rate in percent, about
 ±4 points at 90 %):
 
-| Requirement | GVL | GVL + flow FF | filter 20 ms, StopVelMin 1 | same + flow FF |
-|---|---|---|---|---|
-| compress overshoot ≤ 0.5 MPa | 98 | 98 | 100 | 100 |
-| stiffstep overshoot ≤ 0.6 MPa | 80 | 80 | 98 | 98 |
-| discharge dip ≤ 1 MPa | 76 | 100 | 88 | 100 |
-| valve dip ≤ 1 MPa | 82 | 100 | 94 | 100 |
-| valve ends in band | 81 | 100 | 100 | 100 |
-| all requirements | 61 | 80 | 86 | 98 |
+| Requirement | GVL | filter 20 ms | filter 20 ms, StopVelMin 1 |
+|---|---|---|---|
+| compress overshoot ≤ 0.5 MPa | 98 | 100 | 100 |
+| stiffstep overshoot ≤ 0.6 MPa | 80 | 98 | 98 |
+| discharge dip ≤ 1 MPa | 76 | 88 | 88 |
+| valve dip ≤ 1 MPa | 82 | 94 | 94 |
+| valve ends in band | 81 | 81 | 100 |
+| all requirements | 61 | 76 | 86 |
 
 The other requirements pass in every sample: compress in band and
 ripple, stiffstep in band, discharge in band, and stroke (at most
-88 mm). A second seed gives 63 / 82 / 89 / 100 for "all".
+88 mm). A second seed gives 64 / 78 / 89 for "all". The shorter filter
+buys the stiffstep margin and part of the dip; the higher StopVelMin
+lets the loop end in band under the larger outflows.
 
 The tornado ranks the parameters by influence:
 Qf ≫ K > Vg0 > tauV > Vl0 > tauDiss > noise.
@@ -548,8 +574,9 @@ exploration):
 - Kp 1.0 with the 50 ms filter loses margin at high K.
 
 **Open questions:**
-- What is the range of the discharge flow, and will the master send it
-  for feedforward?
+- What is the range of the discharge flow? A flow feedforward is not
+  practical on this machine, so the loop must hold the outflow by
+  feedback alone.
 - What is the dip limit?
 - What is the stroke budget?
 - Should `G_cfgPressureStopVelMin` rise above the largest Qf/A, and

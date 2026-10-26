@@ -13,8 +13,9 @@ PURPOSE/DESCRIPTION:
 This script finds how far the chamber pressure dips when the discharge
 valve opens, as a function of the valve opening time. It compares
 velocity-command PI and PID controllers, the torque feedforward
-reference, and the slave's own controller with and without an added flow
-feedforward.
+reference, and the slave's own controller. A flow feedforward is not
+practical on this machine; the two feedforward entries are kept as a
+bound on what knowing the flow would buy.
 
 It prints the dip and the recovery time for each controller and opening
 time, and writes valve_dip.csv and valve_dip.png (dip against opening

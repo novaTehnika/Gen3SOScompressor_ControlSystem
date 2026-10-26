@@ -34,7 +34,7 @@ directory.
 
 Usage:
     python3 study_robust.py [--n 200] [--seed 1] [--workers N]
-                            [--out DIR] [--configs GVL,GVL+flowFF,...]
+                            [--out DIR] [--configs GVL,f20,...]
                             [--corner-n 4] [--cfg Kp=0.25 ...]
                             [--flow-ff] [--ff-scale 0.7]
 
@@ -76,15 +76,15 @@ COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
 # %% ===== STUDY ARMS ====================================================
 # Each candidate arm changes one thing from the GVL, so the effect of
 # each change can be attributed.
+# Flow feedforward is not practical on this machine, so no built-in arm
+# uses it; --flow-ff still runs it as a bound on what knowing the flow
+# would buy.
 CONFIGS = {
     'GVL': ControllerSpec('GVL'),
-    'GVL+flowFF': ControllerSpec('GVL+flowFF', flow_ff=True),
+    'f20': ControllerSpec('f20', {'AnalogFilterTimeConst': 0.02}),
     'f20+vmin1': ControllerSpec(
         'f20+vmin1',
         {'AnalogFilterTimeConst': 0.02, 'StopVelMin': 1.0}),
-    'f20+vmin1+flowFF': ControllerSpec(
-        'f20+vmin1+flowFF',
-        {'AnalogFilterTimeConst': 0.02, 'StopVelMin': 1.0}, True),
 }
 
 

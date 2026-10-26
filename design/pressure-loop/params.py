@@ -93,8 +93,8 @@ class Params:
     # ----- Simulation ----------------------------------------------------
     # [-] Plant integration steps per slave scan
     nsub: int = 5
-    # Integration method from solver.METHODS: 'euler' or 'heun'
-    solver: str = 'euler'
+    # Integration method from solver.METHODS: 'heun' or 'euler'
+    solver: str = 'heun'
 
     # ----- Actuator ------------------------------------------------------
     # [s] Time constant of the drive's velocity loop
