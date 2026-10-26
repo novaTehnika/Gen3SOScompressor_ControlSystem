@@ -4,8 +4,9 @@ function frictionRunSim()
 %   drive's torque feedback, and check that frictionFit recovers the model
 %   from the logs: Coulomb, viscous and Stribeck terms and the breakaway
 %   from the unloaded set, the load-proportional term from a gas-charge set
-%   and a delivery, and that the run stops the axis when the pressure
-%   passes its limit.
+%   and a delivery, the drive lag, breakaway and stick from the scan-rate
+%   captures of the step probe, and that the run stops the axis when the
+%   pressure passes its limit.
 %   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
 
@@ -51,6 +52,35 @@ assert(f.breakaway.n == 10 && f.breakaway.F > 0.7 * peak && f.breakaway.F < 1.3 
 assert(numel(f.pairs) == 5 && all(strcmp({f.pairs.check}, 'ok')), 'reversal pairs not symmetric');
 fprintf('ok  unloaded fit: Fc %.0f N, b %.0f N s/m, Fs %.0f N at %.2f mm/s, breakaway %.0f N\n', ...
     st.Fc, st.b * 1000, st.Fs, st.vs, f.breakaway.F);
+
+% --- Step probe: velocity steps and the breakaway at the scan rate ----------
+opts = linkOpts(saveDir);
+truthLag = truth;
+truthLag.tauV = 0.025;
+fakeProbeLink('torqueModel', truthLag);
+fakeProbeLink('slave', @(sl) placeAxis(sl, 100));
+opts.probe = true;
+rs = frictionRun('sim', {{'stepv', 1, 2.2}, {'jog', 0.3, 4}}, opts);
+assert(isempty(rs.abort), rs.abort);
+assert(numel(rs.captures) == 10 && rs.probeFailures == 0, '%d captures, %d failures', ...
+    numel(rs.captures), rs.probeFailures);
+assert(all(cellfun(@(c) exist(c, 'file') == 2, rs.capFiles)));
+sf = stepResponseFit(rs.capFiles, struct('quiet', true));
+tr = sf.transitions;
+mv = tr(~[tr.fromRest]);
+rest = tr([tr.fromRest]);
+assert(numel(mv) == 6 && numel(rest) == 3 && numel(sf.steady) == 1, ...
+    '%d moving, %d from rest, %d steady', numel(mv), numel(rest), numel(sf.steady));
+assert(all(abs([mv.tauV] - truthLag.tauV) < 0.006), 'tauV %s ms', mat2str([mv.tauV] * 1000, 3));
+assert(abs(sf.tauV - truthLag.tauV) < 0.004, 'median tauV %.1f ms', sf.tauV * 1000);
+peak = truth.Fc + truth.dFs;
+assert(all(abs(abs([rest.Fbreak]) - peak) < 0.15 * peak + truth.F0), 'breakaway %s N', ...
+    mat2str([rest.Fbreak], 4));
+assert(all(abs([rest.tStick] - truth.tStick) < 0.06), 'stick %s s', mat2str([rest.tStick], 3));
+assert(abs(sf.steady(1).v - 0.3) < 0.05 && sf.steady(1).Fstd < 600);
+stepResponseFit(rs.capFiles);
+fprintf('ok  step probe: tauV %.1f ms (model %.0f), breakaway %.0f N, stick %.2f s\n', ...
+    sf.tauV * 1000, truthLag.tauV * 1000, sf.Fbreak, sf.tStick);
 
 % --- Gas charge: a soft chamber at about 1 MPa, short strokes ---------------
 opts = linkOpts(saveDir);
@@ -112,9 +142,10 @@ end
 function opts = linkOpts(saveDir)
 clear fakeProbeLink
 fakeProbeLink('init');
-link.read  = @(start, n) fakeProbeLink('read', start, n);
-link.write = @(start, v) fakeProbeLink('write', start, v);
-link.close = @() [];
+link.read     = @(start, n) fakeProbeLink('read', start, n);
+link.write    = @(start, v) fakeProbeLink('write', start, v);
+link.writeOne = @(addr, v) fakeProbeLink('writeOne', addr, v);
+link.close    = @() [];
 opts.link = link;
 opts.now = @() fakeProbeLink('now');
 opts.wait = @(t) fakeProbeLink('wait', t);

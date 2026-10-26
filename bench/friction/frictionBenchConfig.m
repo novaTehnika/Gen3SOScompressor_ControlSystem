@@ -48,6 +48,23 @@ cfg.pMax.delivery = 11.5;     % MPa gauge, under the 12 MPa mechanical ceiling
 cfg.torqueAbort   = 90;       % % of rated, under the slave's 100 % limit
 cfg.exitGuardPos  = 220;      % mm, G_cfgPosCylinderEntry + G_cfgPosExitGuardMargin
 
+% Velocity steps for the drive lag (the 'stepv' step of frictionRun): the
+% reference goes 0, v, 2v, v, 0, -v, -2v, -v, 0, each held stepHold
+% seconds, with a scan-rate capture armed before every change.
+cfg.stepHold = 3;         % s per level; the capture and its readout take about 2 s
+
+% Scan-rate capture by PRG_StepProbe (slave/PRG_StepProbe.st): registers
+% (1-based), length and scales. The four arrays are contiguous from irFirst.
+cfg.probe.hrArm     = 111;      % HR111 G_mbStepArm
+cfg.probe.irState   = 401;      % IR401 state, 402 arm echo, 403 count, 404-405 Pos0 (REAL)
+cfg.probe.irFirst   = 411;      % IR411-910 vCmd, 911-1410 vel, 1411-1910 torque, 1911-2910 position
+cfg.probe.nScan     = 500;      % scans per capture
+cfg.probe.velScale  = 1000;     % counts per mm/s
+cfg.probe.trqScale  = 100;      % counts per % rated
+cfg.probe.posScale  = 1e5;      % counts per mm
+cfg.probe.blockRegs = 125;      % registers per FC04 read, one read per exchange gap
+cfg.probe.timeout   = 4;        % s from arm to ready before the capture is given up
+
 % Fit windows.
 cfg.settle      = 1.0;    % s after the command reaches speed before samples count
 cfg.trim        = 0.2;    % s discarded before the stop

@@ -14,13 +14,17 @@ logs every exchange.
 | `frictionBenchConfig.m` | Torque to force conversion, speed points and durations, limits the run enforces, fit windows |
 | `frictionRun.m` | The master for a run: drives a set of jog steps or a pressure-mode delivery through `masterStep` at the 50 ms exchange and logs position, velocity, torque and pressure to `captures/` |
 | `frictionFit.m` | Reads the logs, checks each step, fits the friction unloaded and loaded, prints the model values |
-| `captures/` | Run logs (gitignored) |
+| `slave/PRG_StepProbe.st` | Optional slave program: on request captures 500 scans of commanded velocity, velocity, torque and position in the probe registers |
+| `stepResponseFit.m` | Reads the captures: the drive's velocity-loop lag from steps taken while moving, the breakaway and stick time from steps from rest, the torque ripple at the lead and motor periods |
+| `captures/` | Run logs and captures (gitignored) |
 
-Nothing changes on the slave or in `master-src`: the run uses the protocol
-registers (`docs/master/ModbusRegisterMap.md`) in the modes the slave
-already has, velocity mode (3) and pressure mode (7). `tests/frictionRunSim`
-runs the script and the fit against the simulated slave with a synthetic
-friction model.
+The friction sets need nothing on the slave beyond `PRG_Main` and nothing
+in `master-src`: the run uses the protocol registers
+(`docs/master/ModbusRegisterMap.md`) in the modes the slave already has,
+velocity mode (3) and pressure mode (7). The step probe (section 4.5) adds
+a bench program beside `PRG_Main`, as the pressure noise bench does.
+`tests/frictionRunSim` runs the scripts and the fits against the simulated
+slave with a synthetic friction model.
 
 ## 1. Conversion and assumptions
 
@@ -215,10 +219,87 @@ charge pressure when the chamber holds gas.
 
 ### 4.4 Custom paths
 
-`frictionRun(label, path)` takes the step grammar of `pressureNoiseRun`:
-`{'jog', mm_per_s, s}`, `{'position', mm, s}`, `{'pressure', MPa, s}`,
+`frictionRun(label, path)` takes the step grammar of `pressureNoiseRun`
+plus the velocity-step type: `{'jog', mm_per_s, s}`,
+`{'stepv', mm_per_s, hold}`, `{'position', mm, s}`, `{'pressure', MPa, s}`,
 `{'idle', s}`. Use it to repeat one speed, or to add 7 mm/s once the
-limits allow it.
+limits allow it. Velocity modes are entered at rest and the velocity is
+sent once the mode runs, so every jog step starts with a command step
+from standing.
+
+### 4.5 Velocity steps at the scan rate
+
+The 50 ms log cannot show the drive's velocity-loop lag (`tauV`, 20 ms in
+the model), a breakaway shorter than one exchange, or the torque ripple
+at the motor turn. `PRG_StepProbe` records 500 consecutive scans (1 s at
+2 ms) of the commanded velocity, the actual velocity, the torque and the
+position into input registers when the run writes its arm register, and
+the run reads the block out in the gaps between exchanges, as the
+pressure noise bench does.
+
+Slave setup, once:
+
+1. Hardware Configuration, online: the Modbus server as in service, with
+   the **FC#04 input register group enlarged to at least 2910 registers**
+   (byte range `%QB73792` to `%QB79611`). Save and cycle power. If the
+   group cannot be made that large, shorten the capture: change the
+   bounds and the count in the program header together, and
+   `cfg.probe.nScan` in `frictionBenchConfig.m`.
+2. Declare the globals in the header of `slave/PRG_StepProbe.st` in the
+   matching groups. The four arrays are located; if the editor refuses an
+   array at a direct address, declare it with a named type
+   (`ARRAY[0..499] OF INT`, `ARRAY[0..499] OF DINT`) from the Data Types
+   worksheet.
+3. Add `PRG_StepProbe` to the project and assign it to the 2 ms cyclic
+   task. It reads `G_sys*` globals only and runs beside `PRG_Main`. Do not
+   load it together with `PRG_PressureProbe` or `PRG_ModbusBench`.
+4. Compile, download, start.
+
+Then, with the piston placed as for the unloaded set:
+
+```matlab
+r = frictionRun('s1', 'steps');                 % stepv at 0.3, 1 and 2.5 mm/s
+r = frictionRun('u1', 'unloaded', struct('probe', true));   % captures in the jog set too
+```
+
+A `stepv` step enters velocity mode at rest and steps the reference
+through 0, v, 2v, v, 0, −v, −2v, −v, 0, holding each level `stepHold`
+seconds (3 s; the capture and its readout take 2 s), with a capture armed
+in the exchange before every change. The steps between v and 2v are
+taken while moving and give the lag; the steps from 0 give the breakaway
+and the stick time. With `opts.probe` on a jog set, every step's command
+from rest is captured, plus one capture a second after it reaches speed
+for the ripple. 2v must stay within the 5 mm/s limit, so v is at most
+2.5 mm/s.
+
+Captures are saved as `captures/<label>_cap_<set>_<n>_<step>_<tag>_<timestamp>.csv`
+with `t` (s from the first scan), `vCmd` and `velocity` (mm/s), `torque`
+(% rated) and `position` (mm); the tag is `t<k>_<v>` for the k-th
+transition to v, or `steady`.
+
+```matlab
+f = stepResponseFit('captures/s1_cap_*.csv');
+```
+
+For each capture taken while moving it fits the response as the command
+slewed at `G_cfgDirectCtrlAccel` (the profile Y_DirectControl generates),
+through a first-order lag `tauV` and a delay, by a grid search on the rms
+velocity error, and also reports the model-free tracking lag at mid-step
+and the overshoot. For each capture from rest it reports the breakaway
+force and the stick time. For each steady capture it reports the ripple
+and its amplitude at the lead period and the motor turn. It ends with
+`tauV` for `params.py`, the median over the moving steps.
+
+Acceptance: the moving steps should give the same `tauV` within a few
+milliseconds up and down and at both speeds; the rms error should be a
+few hundredths of a millimetre per second; a delay above about 10 ms
+or an overshoot above a few percent means the drive's velocity loop is
+not the first-order lag the model assumes, and the captures should go
+to the design model as they are. The breakaway should agree with the
+50 ms log's lower bound and the stick time with the ramp: at 5 mm/s² the
+command reaches 0.1 mm/s in 20 ms, so a stick of several tenths of a
+second is the friction, not the profile. If the measured lag changes
+with the step size, the loop is saturating; repeat at the smaller step.
 
 ## 5. Post-processing
 
@@ -322,14 +403,16 @@ deliveries should lie on one line in `F - P A` against `P A`.
 - 7 mm/s: `G_cfgVelLimitMax` and `masterConfig.jogVelMax` are 5 mm/s. The
   pressure loop's own clamp is 5 mm/s, so the model's operating range is
   covered.
-- The drive's velocity loop lag (`tauV`): the 5 mm/s² slew hides it in
-  these logs. It needs a step in velocity mode logged faster than 50 ms.
-- Breakaway shorter than one exchange, and the torque ripple at the
-  motor turn (69 Hz at 5 mm/s), which the 20 Hz log cannot see. Both need
-  a slave-side capture at the scan rate, as the pressure noise bench has.
+- A velocity step without the 5 mm/s² slew. The lag is identified from
+  the slewed response, which is what the model also sees; a sharper step
+  needs `G_cfgDirectCtrlAccel` raised on the machine for the run, or the
+  SERVOPACK's own trace in SigmaWin+.
+- The pressure force in the captures: `PRG_StepProbe` does not record the
+  pressure, so breakaway from a capture under load includes `P A`. Use the
+  50 ms log, which carries the pressure, for loaded breakaway.
 
 ## 8. Results
 
-| Label | Condition | Fc (N) | b (N s/m) | Fs, vs | mu | Breakaway (N) | Notes |
-|-------|-----------|--------|-----------|--------|----|---------------|-------|
-| | | | | | | | |
+| Label | Condition | Fc (N) | b (N s/m) | Fs, vs | mu | Breakaway (N) | tauV (ms) | Notes |
+|-------|-----------|--------|-----------|--------|----|---------------|-----------|-------|
+| | | | | | | | | |
