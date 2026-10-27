@@ -373,25 +373,25 @@ Stage 2:
 
 ```
 Filter Type: Median (size 3 or 5) feeding a first-order IIR low-pass
-Time Constant: G_cfgAnalogFilterTimeConst (default: T#50MS)
-Cutoff Frequency: ~3.2 Hz (at 50 ms time constant)
+Time Constant: G_cfgAnalogFilterTimeConst (default: T#20MS)
+Cutoff Frequency: ~8 Hz (at 20 ms time constant)
 ```
 
 Transfer function of the low-pass stage:
 ```
 H(s) = 1 / (τs + 1)
-τ = 0.050 s  (default)
+τ = 0.020 s  (default)
 ```
 
 ### Effect on Step Response
 
 | Filter TC | 10% Rise | 90% Rise | Settling (2%) |
 |-----------|----------|----------|---------------|
-| 50 ms (default) | 5.3 ms | 115 ms | 200 ms |
-| 20 ms | 2.1 ms | 46 ms | 80 ms |
+| 50 ms | 5.3 ms | 115 ms | 200 ms |
+| 20 ms (default) | 2.1 ms | 46 ms | 80 ms |
 | 10 ms | 1.1 ms | 23 ms | 40 ms |
 
-**Recommendation**: The default 50 ms is tuned for the master's typical reference bandwidth; reduce only if command tracking lag becomes limiting.
+**Choice of time constant**: the filter sits inside the pressure loop, so its lag adds to the overshoot on a target step. The input noise through the median filter and 20 ms is about 0.001 MPa rms, far below the loop's 0.1 MPa in-band threshold, so a longer time constant buys nothing.
 
 ---
 
