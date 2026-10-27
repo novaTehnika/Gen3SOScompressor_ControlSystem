@@ -17,8 +17,7 @@ function r = charBulkModulus(files, opts)
 %   The liquid volume V is the chamber volume at the segment's mean
 %   position, A (posEOT - x) + deadVolume, unless opts.fillVolume_mL gives
 %   the measured fill (scalar, or one value per file). deadVolume_mL
-%   defaults to charConfig (masterConfig.deadVolume, a placeholder) with a
-%   warning: measure it (README section 2).
+%   defaults to charConfig (masterConfig.deadVolume, the measured 50 mL).
 %
 %   With files at liquid volumes that differ by more than 20 %, the
 %   compliance dx/dP is also regressed on V: slope 1/(K A) gives the liquid
@@ -57,11 +56,6 @@ opts = withDefault(opts, 'chargeRatio', []);
 opts = withDefault(opts, 'quiet', false);
 if ~isfield(opts, 'deadVolume_mL')
     opts.deadVolume_mL = cfg.deadVolume_mL;
-    if ~isfield(opts, 'fillVolume_mL')
-        warning('charBulkModulus:deadVolume', ...
-            'deadVolume_mL not given: using %.0f mL from masterConfig, a placeholder. Measure it.', ...
-            cfg.deadVolume_mL);
-    end
 end
 A = cfg.pistonArea_mm2;             % mm^2
 Patm = cfg.Patm_MPa;

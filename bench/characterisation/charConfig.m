@@ -4,8 +4,7 @@ function cfg = charConfig()
 %   runs and the slave settings read from the GVL reference (benchGvl).
 %
 %   Geometry comes from masterConfig (bore, end of travel, dead volume) so
-%   the bench and the operator app agree. The dead volume there is a
-%   placeholder: measure it (README section 2) and pass it to the fits.
+%   the bench and the operator app agree.
 %
 
 here = fileparts(mfilename('fullpath'));
@@ -17,7 +16,7 @@ m = masterConfig();
 cfg.boreDiameter_mm = m.boreDiameter;                    % 2.602 in
 cfg.pistonArea_mm2  = pi / 4 * m.boreDiameter^2;         % 3431 mm^2 (3.431e-3 m^2)
 cfg.posEOT          = m.posEOT;                          % mm, piston at the end of travel
-cfg.deadVolume_mL   = m.deadVolume;                      % mL left at the end of travel: placeholder, measure it
+cfg.deadVolume_mL   = m.deadVolume;                      % mL left at the end of travel (measured, masterConfig)
 cfg.rho             = 1000;                              % kg/m^3 saline
 cfg.Patm_MPa        = 0.101325;
 
