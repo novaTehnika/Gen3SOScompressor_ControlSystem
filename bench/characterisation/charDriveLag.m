@@ -38,7 +38,8 @@ function r = charDriveLag(files, opts)
 %   opts.minPressureSwing   MPa (default 0.1)
 %   opts.quiet              no printing
 %
-%   r.captures   per capture: file, step size, tauV, Td, residual (fraction
+%   r.captures   per capture: file, x_mm (position at the start, which says
+%                whether the piston was in the bore), step size, tauV, Td, residual (fraction
 %                of the step), t10 and t63 of the feedback from the command,
 %                and tauP, TdP, k_MPa_mm, residualP from the pressure (NaN
 %                when it did not move)
@@ -80,7 +81,7 @@ say('Expected: tauV 5..50 ms (20 ms assumed), dead time a few scans. With a %g m
 say('  1 mm/s step ramps for %.0f ms; the lag shows as the feedback trailing the ramp by tauV.\n', ...
     1000 / opts.accel);
 
-caps = struct('file', {}, 'stepSize', {}, 'tauV', {}, 'Td', {}, 'accelScale', {}, ...
+caps = struct('file', {}, 'x_mm', {}, 'stepSize', {}, 'tauV', {}, 'Td', {}, 'accelScale', {}, ...
     'residual', {}, 't10', {}, 't63', {}, 'tauP', {}, 'TdP', {}, 'k_MPa_mm', {}, 'residualP', {});
 logs = [];
 for f = 1:numel(files)
@@ -96,11 +97,11 @@ for f = 1:numel(files)
 end
 
 if ~isempty(caps)
-    say('\n%-28s %7s %8s %7s %6s %6s %6s %8s %7s %8s %6s\n', 'capture', 'step', 'tauV ms', 'Td ms', ...
+    say('\n%-28s %7s %7s %8s %7s %6s %6s %6s %8s %7s %8s %6s\n', 'capture', 'x mm', 'step', 'tauV ms', 'Td ms', ...
         'res %', 't10 ms', 't63 ms', 'tauP ms', 'TdP ms', 'k MPa/mm', 'resP %');
     for k = 1:numel(caps)
         c = caps(k);
-        say('%-28s %+7.2f %8.1f %7.1f %6.1f %6.0f %6.0f %8s %7s %8s %6s\n', c.file, c.stepSize, ...
+        say('%-28s %7.1f %+7.2f %8.1f %7.1f %6.1f %6.0f %6.0f %8s %7s %8s %6s\n', c.file, c.x_mm, c.stepSize, ...
             c.tauV * 1000, c.Td * 1000, 100 * c.residual, c.t10 * 1000, c.t63 * 1000, ...
             fmt(c.tauP * 1000, '%.1f'), fmt(c.TdP * 1000, '%.1f'), fmt(c.k_MPa_mm, '%.2f'), ...
             fmt(100 * c.residualP, '%.1f'));
@@ -190,6 +191,11 @@ v = d.velocity;
 [~, c.file] = fileparts(d.file);
 if numel(c.file) > 28
     c.file = c.file(1:28);
+end
+if isfield(d, 'position')
+    c.x_mm = d.position(1);              % where the step started: in the bore above G_cfgPosCylinderEntry
+else
+    c.x_mm = NaN;
 end
 dc = diff(cmd);
 j = find(abs(dc) >= opts.minStep, 1);
