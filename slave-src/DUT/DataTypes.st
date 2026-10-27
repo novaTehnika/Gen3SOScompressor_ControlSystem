@@ -359,6 +359,6 @@ TYPE
        ============================================================================ *)
    ARRAY5LREAL : ARRAY[0..4] OF LREAL;
    ARRAY250UINT : ARRAY[0..249] OF UINT;
-	ARRAY500INT : ARRAY[0..499] OF INT;
-	ARRAY500DINT : ARRAY[0..499] OF DINT;
+   ARRAY500INT : ARRAY[0..499] OF INT;
+   ARRAY500DINT : ARRAY[0..499] OF DINT;
 END_TYPE
