@@ -38,8 +38,29 @@ cfg.exchangePeriod  = m.exchangePeriod;
 cfg.dt              = m.dt;
 
 % --- Slave settings from the GVL reference -------------------------------------
+% Parsed from the declarations; a name the parse does not find is taken
+% from the reference values below, with a warning naming the file, so a
+% run is not stopped by a formatting difference.
 cfg.gvlFile = fullfile(root, 'slave-src', 'GVL', 'GlobalVariables_Reference.st');
 g = readGvl(cfg.gvlFile);
+ref = struct('G_cfgScanTime', 0.002, 'G_cfgAnalogFilterTimeConst', 0.020, 'G_cfgAnalogMedianSize', 5, ...
+    'G_cfgDirectCtrlAccel', 5, 'G_cfgDirectCtrlDecel', 5, 'G_cfgVelLimitMax', 5, ...
+    'G_cfgPressureAccel', 50, 'G_cfgPressureDecel', 50, 'G_cfgPressureVelMax', 5, ...
+    'G_cfgTorqueLimitNormal', 100, 'G_cfgPressureTorqueLimit', 100, ...
+    'G_cfgPosSoftLimitMax', 305, 'G_cfgPosSoftLimitMin', -2.5);
+names = fieldnames(ref);
+missing = {};
+for k = 1:numel(names)
+    if ~isfield(g, names{k}) || isnan(g.(names{k}))
+        g.(names{k}) = ref.(names{k});
+        missing{end + 1} = names{k}; %#ok<AGROW>
+    end
+end
+if ~isempty(missing)
+    warning('charConfig:gvl', ['%d of %d G_cfg* settings not parsed from %s (%d declarations read); ' ...
+        'reference values used for: %s. Check that the file is the one on the controller.'], ...
+        numel(missing), numel(names), cfg.gvlFile, numel(fieldnames(g)) - numel(missing), strjoin(missing, ', '));
+end
 cfg.gvl = g;
 cfg.scanTime        = g.G_cfgScanTime;                   % s
 cfg.filterTau       = g.G_cfgAnalogFilterTimeConst;      % s, pressure low-pass
@@ -61,14 +82,20 @@ end
 
 
 function g = readGvl(file)
-% Values of the G_cfg* declarations in the GVL reference. TIME literals are
-% returned in seconds; numbers as doubles.
+% Values of the G_cfg* declarations in the GVL reference, one per line as
+% "name : TYPE := value", whatever follows the value (a comment, a
+% semicolon). TIME literals are returned in seconds; numbers as doubles.
 g = struct();
+if exist(file, 'file') ~= 2
+    warning('charConfig:gvl', 'GVL reference %s not found', file);
+    return;
+end
 txt = fileread(file);
+txt = strrep(txt, char(13), '');
 lines = strsplit(txt, char(10));
 for k = 1:numel(lines)
-    tok = regexp(lines{k}, '^\s*(G_cfg\w+)\s*:\s*(\w+)\s*:=\s*([^(]+?)\s*(\(\*.*)?$', 'tokens', 'once');
-    if isempty(tok)
+    tok = regexp(lines{k}, '(G_cfg\w+)\s*:\s*(\w+)\s*:=\s*(T#\w+|[-+]?[0-9.eE+-]+)', 'tokens', 'once');
+    if isempty(tok) || numel(tok) < 3
         continue;
     end
     name = tok{1};
