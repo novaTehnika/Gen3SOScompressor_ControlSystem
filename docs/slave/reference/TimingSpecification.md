@@ -117,11 +117,11 @@ Hold Secure ______________________|‾‾‾‾‾‾‾‾‾‾‾‾
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | Sample Rate | 500 Hz | Per scan cycle |
-| Filter Time Constant | 50 ms | First-order IIR low-pass (`G_cfgAnalogFilterTimeConst`) |
-| Median Filter Size | 3 samples | `G_cfgAnalogMedianSize` (valid: 3 or 5) |
-| Step Response (10%) | 5.3 ms | Time to 10% of final value (τ = 50 ms) |
-| Step Response (90%) | 115 ms | Time to 90% of final value (τ = 50 ms) |
-| Settling Time (2%) | 200 ms | Time to within 2% of final (τ = 50 ms) |
+| Filter Time Constant | 20 ms | First-order IIR low-pass (`G_cfgAnalogFilterTimeConst`) |
+| Median Filter Size | 5 samples | `G_cfgAnalogMedianSize` (valid: 3 or 5) |
+| Step Response (10%) | 2.1 ms | Time to 10% of final value (τ = 20 ms) |
+| Step Response (90%) | 46 ms | Time to 90% of final value (τ = 20 ms) |
+| Settling Time (2%) | 80 ms | Time to within 2% of final (τ = 20 ms) |
 
 ---
 
@@ -348,7 +348,7 @@ FaultReset   _______________|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 | G_cfgDebounceTimeFault | 20 ms | 5-100 ms | FaultReset debounce |
 | G_cfgDebounceTimeLimitStd | 5 ms | 1-20 ms | Retract limit debounce |
 | G_cfgDebounceTimeLimitHome | 2 ms | 1-10 ms | Home limit debounce |
-| G_cfgAnalogFilterTimeConst | 50 ms | 1-200 ms | Pressure input low-pass time constant |
+| G_cfgAnalogFilterTimeConst | 20 ms | 1-200 ms | Pressure input low-pass time constant |
 | G_cfgHomingTimeout | 30000 ms | 10000-60000 ms | Homing sequence timeout |
 | G_cfgStallDetectTime | 200 ms | 100-500 ms | EOT stall confirmation |
 

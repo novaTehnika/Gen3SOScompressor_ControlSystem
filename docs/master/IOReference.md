@@ -97,7 +97,7 @@ The scaled pressure is `G_sysActualPressure`, published in IR19-20.
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| AI Filter Time Constant | 50 ms | `G_cfgAnalogFilterTimeConst` (IIR low-pass after the median) |
+| AI Filter Time Constant | 20 ms | `G_cfgAnalogFilterTimeConst` (IIR low-pass after the median) |
 | AI Sample Rate | 2 ms | Scan cycle time |
 
 ---

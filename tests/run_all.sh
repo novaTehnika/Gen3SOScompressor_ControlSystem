@@ -12,4 +12,5 @@ octave-cli --quiet --eval "
   closedLoopMasterSlave;
   closedLoopModbusStep;
   slavePressureMode;
+  pressureNoiseRunSim;
 "
