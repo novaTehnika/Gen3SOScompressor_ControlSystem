@@ -24,7 +24,8 @@ it. README equations (26) to (32) give each part.
               pressure with gain k. The product k/(s (tauV s + 1)) is
               discretized with a zero-order hold, because the command is
               constant during a scan: Gd(z), eq. (26).
-  Command     The command computed in scan n acts in scan n + 1: z^-1.
+  Command     The command computed in scan n acts in scan n + 1, and the
+              drive responds a dead time t_dead later: z^-(1 + n_dead).
   Controller  The PI law of FB_PressureController, C(z), eq. (27).
   Sensor      The median of N samples delays a slowly varying signal by
               (N - 1)/2 scans, and the first-order filter is F(z),
@@ -156,6 +157,7 @@ def loop(par, k, delay=None, **cfg_overrides):
       Kp, Ki      [(mm/s)/MPa], [(mm/s)/(MPa s)] controller gains
       Ts          [s] scan time
       delay       [scans] total pure delay, including the command's scan
+                  and the drive's dead time
       k           [Pa/m] stiffness
     """
     cfg = par.cfg(**cfg_overrides)
@@ -163,7 +165,8 @@ def loop(par, k, delay=None, **cfg_overrides):
     Kp = cfg['G_cfgPressureKp']                             # [(mm/s)/MPa]
     Ki = cfg['G_cfgPressureKi']                         # [(mm/s)/(MPa s)]
     d_sensor = sample_delay(cfg) if delay is None else delay
-    d = d_sensor + 1                    # [scans] plus the command's scan
+    n_dead = int(round(par.t_dead / Ts))        # [scans] drive dead time
+    d = d_sensor + 1 + n_dead           # [scans] plus the command's scan
 
     # Plant, eq. (26): zero-order-hold discretization of
     # k / (s (tauV s + 1)). With a_v = exp(-Ts/tauV) and
@@ -197,8 +200,8 @@ def loop(par, k, delay=None, **cfg_overrides):
         return _poly_ratio(F_num, F_den, w, Ts)
     F = TF(F_num, F_den, Ts, F_freq)
 
-    # Open loop, eq. (29): L(z) = C(z) z^-1 Gd(z) z^-d_sensor F(z).
-    # The d scans of delay appear as z^d in the denominator.
+    # Open loop, eq. (29): L(z) = C(z) z^-(1+n_dead) Gd(z) z^-d_sensor
+    # F(z). The d scans of delay appear as z^d in the denominator.
     z_pow_d = np.zeros(d + 1)
     z_pow_d[0] = 1.0                                        # z^d
     L_num = np.polymul(np.polymul(C_num, Gd_num), F_num)
@@ -223,15 +226,16 @@ def loop(par, k, delay=None, **cfg_overrides):
     S = TF(L_den, cl, Ts, S_freq)
     T = TF(L_num, cl, Ts, T_freq)
 
-    # Target to pressure, eq. (31): R = C z^-1 Gd S. The target enters
-    # at the controller, so the sensor path does not act on it.
-    z_pow_dm1 = np.zeros(d)
-    z_pow_dm1[0] = 1.0                                      # z^(d-1)
+    # Target to pressure, eq. (31): R = C z^-(1+n_dead) Gd S. The target
+    # enters at the controller, so the sensor path does not act on it.
+    z_pow_rest = np.zeros(d_sensor + 1)
+    z_pow_rest[0] = 1.0                                     # z^d_sensor
     R_num = np.polymul(np.polymul(np.polymul(C_num, Gd_num), F_den),
-                       z_pow_dm1)
+                       z_pow_rest)
 
     def R_freq(w):
-        return C_freq(w) * Gd_freq(w) * _delay(w, Ts, 1) * S_freq(w)
+        return (C_freq(w) * Gd_freq(w) * _delay(w, Ts, 1 + n_dead)
+                * S_freq(w))
     R = TF(R_num, cl, Ts, R_freq)
 
     # Outflow to pressure, eq. (32): D = -(k Ts / A) / (z - 1) S.

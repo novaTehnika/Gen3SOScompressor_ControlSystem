@@ -36,7 +36,7 @@ directory.
 
 Usage:
     python3 study_robust.py [--n 200] [--seed 1] [--workers N]
-                            [--out DIR] [--ratio 1.0]
+                            [--out DIR] [--ratio 1.0] [--target 10]
                             [--configs GVL,f20,...] [--corner-n 4]
                             [--cfg Kp=0.25 ...] [--flow-ff]
                             [--ff-scale 0.7]
@@ -84,25 +84,25 @@ COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
 # Flow feedforward is not practical on this machine, so no built-in arm
 # uses it; --flow-ff still runs it as a bound on what knowing the flow
 # would buy.
-F20 = {'AnalogFilterTimeConst': 0.02, 'StopVelMin': 2.0}
-# The scheduled arms assume the dead volume at the low end of its range
-# (a lower bound keeps the stiffness estimate an upper bound) and the
-# saline volume and charge as configured for the run.
-SCHED = {'V_dead_cfg': 20e-6}
+# The GVL now carries the 20 ms filter. StopVelMin 2 mm/s lets the
+# stop law pass the 1.4 mm/s the measured outflow needs. The scheduled
+# arms assume the dead volume at the low end of its range (a lower bound
+# keeps the stiffness estimate an upper bound), the bulk modulus at the
+# top of its measured range, and the saline volume and charge as
+# configured for the run.
+VMIN2 = {'StopVelMin': 2.0}
+SCHED = {'V_dead_cfg': 45e-6, 'K_cfg': 1.0e9}
 CONFIGS = {
     'GVL': ControllerSpec('GVL'),
-    'f20+vmin2': ControllerSpec('f20+vmin2', F20),
-    'sched6': ControllerSpec('sched6', F20, sched=dict(wc=6.0, **SCHED)),
-    'sched11': ControllerSpec('sched11', F20,
+    'vmin2': ControllerSpec('vmin2', VMIN2),
+    'sched6': ControllerSpec('sched6', VMIN2,
+                             sched=dict(wc=6.0, **SCHED)),
+    'sched11': ControllerSpec('sched11', VMIN2,
                               sched=dict(wc=11.0, **SCHED)),
-    'sched11+v7a100': ControllerSpec(
-        'sched11+v7a100',
-        {**F20, 'VelMax': 7.0, 'Accel': 100.0, 'Decel': 100.0},
-        sched=dict(wc=11.0, **SCHED)),
-    'sched11+K1.2': ControllerSpec(
-        'sched11+K1.2',
-        {**F20, 'VelMax': 7.0, 'Accel': 100.0, 'Decel': 100.0},
-        sched=dict(wc=11.0, K_cfg=1.2e9, **SCHED)),
+    'sched11+v7': ControllerSpec('sched11+v7', {**VMIN2, 'VelMax': 7.0},
+                                 sched=dict(wc=11.0, **SCHED)),
+    'sched16': ControllerSpec('sched16', VMIN2,
+                              sched=dict(wc=16.0, **SCHED)),
 }
 
 
@@ -535,6 +535,8 @@ def main(argv=None):
                     help='parameters in the corner study')
     ap.add_argument('--ratio', type=float, default=1.0,
                     help='oxygen charge, STP volume per saline volume')
+    ap.add_argument('--target', type=float, default=None,
+                    help='target pressure in MPa (default: Params)')
     ap.add_argument('--no-tornado', action='store_true')
     args = ap.parse_args(argv)
     out = Path(args.out)
@@ -547,7 +549,9 @@ def main(argv=None):
     else:
         names = args.configs.split(',') if args.configs else list(CONFIGS)
         specs = [CONFIGS[n] for n in names]
-    specs = [dataclasses.replace(s, ratio=args.ratio) for s in specs]
+    P_target = None if args.target is None else args.target * 1e6
+    specs = [dataclasses.replace(s, ratio=args.ratio, P_target=P_target)
+             for s in specs]
 
     # Parameter ranges and limits
     t0 = time.time()
@@ -558,7 +562,8 @@ def main(argv=None):
             f'{u.hi * u.scale:<8g}{u.unit:<6}{sampling} {u.why}')
     say('thresholds: ' + ', '.join(f'{k}={v:g}'
                                    for k, v in THRESH.items()))
-    say(f'oxygen charge {args.ratio:g}:1')
+    say(f'oxygen charge {args.ratio:g}:1'
+        + (f', target {args.target:g} MPa' if args.target else ''))
     for spec in specs:
         say(f'arm {spec.name}: {spec.overrides or "GVL"}'
             + (f' scheduled {spec.sched}' if spec.sched else ''))

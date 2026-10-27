@@ -127,22 +127,40 @@ the opening scan, eq. (37). On a liquid-only chamber that is a pressure
 step of K·V_tube/V_l, 0.8 MPa at K = 1 GPa, before the controller can
 act.
 
-**Velocity actuator** (Y_DirectControl in VelocityTLMode). The drive
-limits the rate of change of the commanded velocity. The accel limit
-applies while the command grows in magnitude and the decel limit while it
-shrinks or reverses; the controller supplies both, as
-`G_cfgPressureAccel` and `G_cfgPressureDecel` do on the slave. The
-drive's velocity loop follows the limited command with a first-order lag,
-and the piston stalls when the chamber force reaches the torque limit.
+**Velocity actuator** (Y_DirectControl in VelocityTLMode). The bench
+measured the drive's response to a velocity command on 2026-10-26
+(`bench/friction`, `bench/characterisation`): the motor velocity follows
+the command after a dead time of 12 ms with a first-order lag of 8.7 ms,
+the same for 0.3 to 2.5 mm/s steps in both directions, and **the command
+is not slewed at the configured accel**; the drive accelerates at
+whatever rate the step needs. The model therefore applies the dead time
+in whole scans and the lag, and has the slew limit of eq. (11) only as an
+option (`slew_limited`, off by default). The lag at the piston, behind
+the gearbox and screw, was not resolved by the bench (below 25 ms); the
+robustness study varies the lag from 5 to 25 ms to cover it. The piston
+stalls when the force the drive must supply, the pressure force plus the
+load-dependent, Coulomb and viscous friction, reaches the torque limit,
+eq. (13): about 20 MPa at 100 % rated torque.
+
+**Friction.** The friction bench measured, at the piston: Coulomb
+friction 6.1 kN, viscous friction 2.3 MN s/m (11 kN at 5 mm/s), a
+load-dependent term of 0.45 times the pressure force (a drivetrain
+efficiency of 0.69 pushing), and a breakaway of about 24 kN. In velocity
+mode the drive's own loop absorbs these and they enter the model only
+through the stall; in torque mode they act on the reflected mass.
 
 **Torque actuator** (TorqueVLMode). The commanded force drives the
-reflected mass of the motor and gearbox against the chamber pressure,
-viscous friction and Coulomb friction, and the drive clamps the velocity.
-The controller always adds the feedforward force A times the target.
+reflected mass of the motor and gearbox against the chamber pressure, the
+load-dependent friction and the viscous and Coulomb friction, and the
+drive clamps the velocity. The controller always adds the feedforward
+force A times the target.
 
 **Sensor and timing.** The chamber gauge pressure becomes a 4-20 mA loop
 current over the configured transducer range and a voltage across the
-shunt, plus white noise specified as an RMS pressure. The slave's median
+shunt, plus the transducer's zero error (measured −0.11 MPa with the
+chamber open) and white noise specified as an RMS pressure (measured
+2.0 mV rms on the 434 Ω shunt, 4.6 kPa, broadband; 0.8 mV with a 4.7 µF
+capacitor across the shunt). The slave's median
 and low-pass block filters the voltage, with its coefficient computed as
 `PRG_Main` computes it, and the slave's scaling block converts it to MPa.
 `PRG_Main` reads the filter and scaling outputs at the top of the scan
@@ -257,33 +275,37 @@ Chamber stiffness:
 
 ### Actuator
 
-Velocity command slew limit, applied once per integration step of length
-dt. The accel limit applies while the reference grows in magnitude and
-the decel limit while it shrinks or reverses:
+Velocity command slew limit (option, off by default: the drive does not
+slew), applied once per integration step of length dt. The accel limit
+applies while the reference grows in magnitude and the decel limit while
+it shrinks or reverses:
 
     (11) v_ref <- v_ref + clamp(u - v_ref, -a dt, a dt),
          a = accel if (u - v_ref) v_ref >= 0, else decel
 
-Drive velocity loop:
+Drive velocity loop, with the command u delayed by the dead time t_dead
+in whole scans before it becomes the reference:
 
-    (12) dv/dt = (v_ref - v) / tauV
+    (12) v_ref(t) = u(t - t_dead),   dv/dt = (v_ref - v) / tauV
 
-Stall at the torque limit, applied after each step:
+Stall at the torque limit, applied after each step. The drive must
+supply the pressure force, the load-dependent friction mu P A, the
+Coulomb friction and the viscous friction:
 
-    (13) if P > (Fcap - Fc) / A and v > 0:  v = 0, v_ref = 0
+    (13) if P A (1 + mu) + Fc + b v > Fcap and v > 0:  v = 0, v_ref = 0
 
-Torque mode, with the Coulomb friction smoothed over |v| < veps and the
-velocity clamped to |v| <= vmax after each step:
+Torque mode, with the Coulomb and load-dependent friction smoothed over
+|v| < veps and the velocity clamped to |v| <= vmax after each step:
 
-    (14) mr dv/dt = F - P A - b v - Fc clamp(v / veps, -1, 1)
+    (14) mr dv/dt = F - P A - b v - (Fc + mu P A) clamp(v / veps, -1, 1)
 
 ### Sensor
 
-Shunt voltage sampled each scan, with z a standard normal draw. The range
-P_min to P_max is in MPa, the currents I_zero and I_span in mA and the
-shunt R_shunt in ohms:
+Shunt voltage sampled each scan, with z a standard normal draw and
+P_offset the transducer's zero error. The range P_min to P_max is in
+MPa, the currents I_zero and I_span in mA and the shunt R_shunt in ohms:
 
-    (15) V_in = R_shunt / 1000 (I_zero + I_span (P/1e6 - P_min)
+    (15) V_in = R_shunt / 1000 (I_zero + I_span ((P + P_offset)/1e6 - P_min)
                                 / (P_max - P_min)) + V_noise z,
          V_noise = noise (dV_in/dP)
 
@@ -402,9 +424,10 @@ Sensor filter:
     (28) F(z) = alpha z / (z - (1 - alpha))
 
 Open loop, with d_s = (N - 1)/2 + 2 scans of delay in the sensor path
-(four for N = 5) and one scan for the command:
+(four for N = 5), one scan for the command and n_dead = t_dead / Ts
+scans of drive dead time (six):
 
-    (29) L(z) = C(z) z^-1 Gd(z) z^-d_s F(z)
+    (29) L(z) = C(z) z^-(1 + n_dead) Gd(z) z^-d_s F(z)
 
 Sensitivity and complementary sensitivity:
 
@@ -413,7 +436,7 @@ Sensitivity and complementary sensitivity:
 Target to pressure. The target enters at the controller, so the sensor
 path does not act on it:
 
-    (31) R = C z^-1 Gd S
+    (31) R = C z^-(1 + n_dead) Gd S
 
 Outflow to pressure. The outflow changes the chamber volume directly, so
 it enters at the integrator, after the drive lag:
@@ -484,7 +507,8 @@ to find its stability margins across the chamber stiffness k = dP/dx.
 The open loop is eq. (29):
 
 - `C(z)` is the PI law of `FB_PressureController`, eq. (27).
-- `z^-1` is the scan between computing a command and applying it.
+- `z^-(1+n_dead)` is the scan between computing a command and applying
+  it, plus the drive's six scans of dead time.
 - `Gd(z)` is the drive velocity loop and the chamber integrator,
   eq. (26).
 - `z^-4` is the median of 5 (two scans for a slowly varying signal) and
@@ -508,18 +532,22 @@ given oxygen charge (`--ratio`, default 1:1), and shows which parameters
 drive the failures. `robust.py` holds the parameter table (`UNCERTAIN`),
 the limits (`THRESH`), the requirements and the sampler.
 
-| Parameter | Range | Sampling |
-|---|---|---|
-| K | 0.5–2.5 GPa | log |
-| Vl0 | 250–350 mL | linear |
-| tauDiss | 10–100 s | log |
-| tauV | 5–50 ms | log |
-| sensor noise | 1–20 kPa rms | log |
-| orifice Cd | 0.6–0.8 | linear |
-| supply pressure | 0.52–1.38 MPa | linear |
-| dead volume | 20–30 mL | linear |
+| Parameter | Range | Sampling | Basis |
+|---|---|---|---|
+| K | 0.6–1.0 GPa | log | measured 0.72 (segments 0.67–0.78, gas-corrected 0.81) |
+| Vl0 | 320–360 mL | linear | fill at the 280 mm start, 343 mL from the geometry |
+| dead volume | 45–55 mL | linear | measured 50 mL |
+| tauDiss | 10–100 s | log | not measured |
+| tauV | 5–25 ms | log | 8.7 ms at the motor; below 25 ms at the piston |
+| sensor noise | 1.5–5 kPa rms | log | measured 1.8 (with capacitor) to 4.6 kPa |
+| orifice Cd | 0.8–0.9 | linear | measured 0.84–0.87 |
+| supply pressure | 0.52–1.38 MPa | linear | 75–200 psi with the cylinder's charge |
 
-`mr`, `b` and `Fc` act only in torque mode, so they are not varied. Each
+The ranges are the bench measurements of 2026-10-26 with their spread
+(`bench/characterisation/README.md` section 7, `bench/friction`,
+`bench/pressure`). `mr`, `b`, `Fc` and `mu` act only in torque mode and
+the stall, so they are not varied; the dead time is fixed at its
+measured 12 ms. Each
 sample runs compress and deliver and checks these requirements:
 
 - The pressure never exceeds the ceiling, 12 MPa (`Params.P_ceiling`).
@@ -544,228 +572,201 @@ the ceiling limits the overshoot.
 The study runs a one-at-a-time sensitivity (tornado), then all corners of
 the four most influential parameters, then a Latin hypercube sample
 (`--n`, default 200) for each configuration. The default configurations
-are the GVL; the GVL with the stop law relaxed (20 ms filter,
-`StopVelMin` 2 mm/s); the scheduled controller at wc = 6 and 11 rad/s
-with those settings; the scheduled controller at wc = 11 with the
-drive's limits (VelMax 7 mm/s, accel and decel 100 mm/s²); and the same
-assuming a measured bulk modulus (K_cfg = 1.2 GPa). Every configuration
-sees the same samples and noise seeds.
+are the GVL (which now carries the 20 ms filter); the GVL with
+`StopVelMin` 2 mm/s so the stop law passes the 1.4 mm/s the measured
+outflow needs; the scheduled controller at wc = 6, 11 and 16 rad/s with
+that setting and the measured bounds (K_cfg 1.0 GPa, dead volume
+45 mL); and wc = 11 with VelMax 7 mm/s. Every configuration sees the
+same samples and noise seeds.
 `--cfg key=value` runs a single custom configuration instead, and
 `--flow-ff` adds a flow feedforward to it as a bound; the machine cannot
 supply the flow, so no built-in configuration uses it.
 
-## Assumptions to replace with bench measurements
+## Measured values
 
-| Parameter | Value used | How to measure |
-|---|---|---|
-| Effective liquid bulk modulus K | 1 GPa | Run at 0.1 mm/s in the liquid-only chamber and read dP/dt. |
-| Orifice discharge coefficient Cd | 0.7 (4.0 mL/s at 10 MPa) | Collect the volume discharged per unit time at a known chamber pressure. |
-| Oxygen solubility in the saline | 5 % below water | Hold a known charge at pressure and read the free gas volume from the piston position. |
-| Friction | 5 kN s/m viscous, 500 N Coulomb | Record the torque feedback at 0.1, 0.3, 1, 3 and 7 mm/s in both directions, unloaded and during a delivery. The friction is known to be high and stick-slip at the 1.2 mm/s delivery speed would need a richer drive model. |
-| Sensor noise | 5 kPa rms per sample | Log the raw analog input at rest. |
-| Drive velocity loop lag | 20 ms | Record a step response in velocity mode. |
+The bench tests of 2026-10-26 (`bench/`, branch `bench-tests`) replaced
+the guessed parameters. The values the model now carries, with what was
+assumed before:
 
-## Results with these parameters
+| Parameter | Measured | Assumed before | Where |
+|---|---|---|---|
+| Effective bulk modulus K | 0.72 GPa (0.67–0.78; 0.81 gas-corrected) | 1 GPa | `charBulkModulus`, 3 runs at a 343 mL fill |
+| Saline volume Vl0 | 343 mL at the 280 mm start, including the dead volume | 300 mL | geometry |
+| Dead volume | 50 mL | 20–30 mL (then 10 mL in the master) | 50 g of water fills it |
+| Orifice Cd | 0.85 (0.84–0.87), exponent 0.48; 4.8 mL/s at 10 MPa | 0.7; 4.0 mL/s | `charOrificeFlow`, deliveries at 2, 5 and 10 MPa |
+| Drive response | 12 ms dead time, 8.7 ms lag at the motor, no slew | 20 ms lag, slewed at the configured accel | `stepResponseFit`, 74 step captures |
+| Lag at the piston | below 25 ms (not resolved) | — | repeat with the pressure probe |
+| Coulomb friction Fc | 6.1 kN | 0.5 kN | `frictionFit` |
+| Viscous friction b | 2.3 MN s/m | 5 kN s/m | `frictionFit` |
+| Load-dependent friction mu | 0.45 (efficiency 0.69 pushing) | 0.85 efficiency | `frictionFit` |
+| Breakaway | about 24 kN | — | `frictionFit` |
+| Sensor noise | 2.0 mV rms (4.6 kPa) bare, 0.8 mV (1.8 kPa) with 4.7 µF; broadband | 5 kPa | `pressureNoiseProbe` |
+| Transducer zero | −0.11 MPa with the chamber open | 0 | every log |
 
-Gains are in mm/s per MPa (Kp) and mm/s per MPa·s (Ki). "Slave (GVL)" is
-the slave's `FB_PressureController` with the GVL configuration: Kp 0.5,
-Ki 0.2, VelMax 5 mm/s, accel and decel 50 mm/s², stop-law stiffness
-100 MPa/mm, StopVelMin 0.5 mm/s and a 50 ms filter. These are the gains
-on the machine. The time-domain results use Heun's method at five steps
-per scan.
+Still to measure: the dissolution time constant tauDiss (the hold time
+before delivery depends on it) and the lag at the piston. The GVL on the
+machine now has the 20 ms filter, a median of 5, `G_cfgVelLimitMax`
+7 mm/s and `G_cfgDirectCtrlAccel` 10 mm/s² (which the drive does not
+apply).
 
-**Velocity versus torque command.** Velocity command wins. The drive's
-own velocity loop absorbs the friction and the mass-spring resonance, so
-the pressure loop sees an integrator. In torque command the pressure loop
-sees the reflected mass on the stiff chamber, a lightly damped resonance
-near 5 Hz behind the sensor filter, and a feedback gain above about
-5 percent of A (N per MPa) is unstable. Pure force feedforward holds the
-pressure only within the friction dead band of about 0.25 MPa, and only
-if the force calibration is exact. Torque therefore remains only as a
-force cap inside velocity mode.
+## Results with the measured parameters
 
-**Compression** (1:1 charge from a 1 MPa supply, slave GVL): the piston
-sweeps 9 mm, arrives in band after 7.5 s with 0.35 MPa of overshoot, and
-the chamber stiffness rises from 0.13 to 10 MPa/mm. The legacy
-controllers without the configured stop law overshoot to 13–23 MPa, past
-the ceiling; the configured stop law is what makes the approach safe.
+Gains are in mm/s per MPa (Kp) and mm/s per MPa·s (Ki). "GVL" is the
+slave's `FB_PressureController` as configured on the machine after the
+bench tests: Kp 0.5, Ki 0.2, VelMax 5 mm/s, accel and decel 50 mm/s²
+(which the drive does not apply), stop-law stiffness 100 MPa/mm,
+StopVelMin 0.5 mm/s and the 20 ms filter. The time-domain results use
+Heun's method at five steps per scan and the measured plant: K 0.72 GPa,
+343 mL of saline with 50 mL of dead volume, Cd 0.85, a 12 ms dead time
+and 8.7 ms lag in the drive, and the −0.11 MPa transducer offset, which
+puts the true pressure 0.11 MPa above every target.
+
+**Velocity versus torque command.** Velocity command wins, now more
+clearly. The drive's own velocity loop absorbs the 6 kN of Coulomb and
+2.3 MN s/m of viscous friction and the mass-spring resonance, so the
+pressure loop sees an integrator behind a short lag. In torque command
+the measured friction is a dead band of 6 MPa and more at pressure, so a
+force command cannot place the pressure at all. Torque remains only as
+the stall cap, about 20 MPa at 100 % rated torque.
+
+**Compression** (1:1 charge from a 1 MPa supply): the piston sweeps
+11 mm, and the GVL loop arrives in band after 4.4 s with 0.56 MPa of
+overshoot; the scheduled loop at wc = 11 rad/s arrives in 2.4 s with
+0.11 MPa, which is the transducer offset, not an overshoot of the
+reading. The chamber stiffness rises from 0.11 to 6.5 MPa/mm. The legacy
+controllers without the configured stop law overshoot to 13–20 MPa; the
+stop law is what makes the approach safe.
 
 **Delivery with the gains on the machine.** The orifice bank passes
-4.0 mL/s at 10 MPa, which needs the piston at 1.16 mm/s. The delivery of
-300 mL takes 80 s. With the GVL settings a 1:1 delivery fails in two
-ways:
-
-1. *A steady error of 1.2 MPa.* The tube's air volume drops the pressure
-   0.8 MPa in the opening scan, and the outflow then pulls it down to
-   7.8 MPa at 1.2 s. The loop never recovers: the stop law clamps the
-   velocity to √(2·Decel·|e|/Stiffness), which with 100 MPa/mm and
-   50 mm/s² reaches the 1.16 mm/s the outflow needs only at an error of
-   about 1.2 MPa, and the anti-windup holds the integrator while the
-   output is clamped. The loop therefore sits at 8.8 MPa for the whole
-   delivery. At 1:1 the solution stays 5 MPa above saturation, so it
-   does not degas, but the pressure is not what was asked for.
-2. *Loss of margin as the chamber empties.* The liquid-only stiffness is
-   A·K/V_l, 11 MPa/mm with 300 mL and 110 to 170 MPa/mm at the 20 to
-   30 mL dead volume where the piston reaches the limit switch. The GVL
-   gain is unstable above about 80 MPa/mm with the 50 ms filter. With
-   the stop law relaxed so the steady error goes away, the loop reaches
-   the limit switch at nominal parameters but ends in a 15 kPa limit
-   cycle at the smallest dead volume, and in stiff chambers (K above
-   about 1.5 GPa) it loses control before the end and overshoots the
-   ceiling: 28 % of the robustness samples.
-
-A 2 mm/s StopVelMin with the 20 ms filter removes the steady error (the
-GVL arm delivers 19 mL before the error exceeds 1 MPa; relaxed, it
-delivers all 272 mL at nominal parameters) and passes every requirement
-in 72 % of the 1:1 robustness samples; the failures are the stiff
-chambers. A 20 MPa/mm stop stiffness also removes the steady error but
-overshoots every compression past the 12 MPa ceiling, because the
-filtered reading lags the stiffening chamber on the approach. With the
-gains as configured no sample passes.
+4.8 mL/s at 10 MPa (the bench measured it; the deliveries ran 20 %
+faster than the earlier model), which needs the piston at 1.4 mm/s, and a
+delivery of the 288 mL above the dead volume takes 60 s. With the GVL
+settings the loop sits low for the whole delivery: the tube's air drops
+the pressure 0.5 MPa in the opening scan, the outflow pulls it to
+7.9 MPa, and the stop law, which with 100 MPa/mm and 50 mm/s² admits the
+1.4 mm/s the outflow needs only at an error of about 2 MPa, holds the
+integrator through its anti-windup. The bench saw this: the loop held
+8.1 MPa for a 10 MPa target. Raising `StopVelMin` to 2 mm/s removes it,
+and because the dead volume caps the end stiffness at 49 MPa/mm
+(K 0.72 GPa, 50 mL) the GVL gain keeps 26° of phase margin and 4 dB of
+gain margin at the limit switch, so the whole 288 mL is delivered with
+the pressure in band at nominal parameters.
 
 **Scheduled controller.** `ScheduledSlaveController` (equations (39) to
-(41)) fixes both. Because the loop's crossover is held at or below wc
-whatever the stiffness, the linear margins are the same at every point
-of a run: with the 20 ms filter, 69° of phase margin and 18 dB of gain
-margin at wc = 6 rad/s, and 57° and 13 dB at wc = 11 rad/s, from
-0.1 MPa/mm to 1000 MPa/mm. When the estimate overstates the stiffness
-the crossover falls and the margin grows, so the bound errs safe; when
-the configured bulk modulus is below the true one the crossover rises
-in proportion (K_cfg 1.2 GPa against a true 2.5 GPa gives 23 rad/s at
-wc = 11, still stable with 34° of phase margin). Nominal results, 1:1,
-with the 20 ms filter and StopVelMin 2 mm/s:
+(41)) with the measured bounds (K_cfg 1.0 GPa, dead volume 45 mL) holds
+its margins constant through the run, 69° / 16 dB at wc = 6 rad/s,
+56° / 11 dB at wc = 11 and 44° / 8 dB at wc = 16, and because the
+measured chamber is soft (7.2 MPa/mm against the 11–25 assumed) it can
+use a higher gain at the valve opening than before. Nominal results,
+1:1, all with StopVelMin 2 mm/s:
 
 | Arm | Compress: arrive s / overshoot MPa | Delivery: dip MPa / margin MPa / V_ok mL |
 |---|---|---|
-| GVL (for reference) | 3.7 / 0.35 | 2.16 / 4.3 / 19 (steady error) |
-| GVL, stop law relaxed | 3.7 / 0.35 | 1.96 / 4.5 / 272 (all) |
-| scheduled, wc 6 | 5.5 / 0.03 | 3.38 / 3.1 / 272 (all) |
-| scheduled, wc 11 | 3.5 / 0.01 | 2.18 / 4.3 / 272 (all) |
-| scheduled, wc 11, Ki = Kp | 3.3 / 0.06 | 2.07 / 4.4 / 272 (all) |
-| scheduled, wc 11, VelMax 7, accel/decel 100 | 3.1 / 0.01 | 2.18 / 4.3 / 272 (all) |
-| scheduled, wc 11, K_cfg 1.2 GPa, VelMax 7, accel/decel 100 | 2.0 / 0.00 | 1.51 / 4.9 / 272 (all) |
+| GVL as configured | 4.4 / 0.56 | 2.07 / 4.4 / 22 (steady error) |
+| GVL, StopVelMin 2 | 4.3 / 0.63 | 2.07 / 4.4 / 288 (all) |
+| scheduled, wc 6 | 3.2 / 0.13 | 1.84 / 4.6 / 288 (all) |
+| scheduled, wc 11 | 2.4 / 0.11 | 1.14 / 5.3 / 288 (all) |
+| scheduled, wc 11, Ki = Kp, VelMax 7 | 2.0 / 0.11 | 1.11 / 5.3 / 288 (all) |
+| scheduled, wc 16 | 2.2 / 0.11 | 0.94 / 5.5 / 288 (all) |
+| flow feedforward (bound, not implementable) | — | 0.59 / 5.9 / 288 |
 
-The scheduled arms compress with no measurable overshoot, because the
-stop law brakes for the estimated stiffness and the measurement lag and
-the integrator is held until arrival, and they deliver down to the dead
-volume with the pressure in band and 0.2 kPa of ripple at the end,
-where the relaxed GVL loop rides a 15 kPa limit cycle, because the gain
-falls as the chamber stiffens. The approach is also faster than the GVL's once wc is
-11 rad/s. Raising the drive limits to 7 mm/s and 100 mm/s² shortens the
-compression (3.5 → 3.1 s) but does not change the opening dip, which is
-set by the gain at the moment the valve opens and the integral time, not
-by how fast the piston can accelerate.
+(The 0.11 MPa "overshoot" of the scheduled arms is the transducer
+offset.) The scheduled arms compress twice as fast as the GVL with no
+overshoot of the reading, because the stop law brakes for the estimated
+stiffness and the whole lag (measurement, dead time and drive) and the
+integrator is held until arrival, and they halve the opening dip,
+because the gain at the opening is set by the measured stiffness rather
+than a fixed worst case. VelMax 7 mm/s shortens the compression by
+0.4 s and does not change the dip; the drive does not slew, so accel
+and decel settings do nothing.
 
-**The opening dip is what limits the charge.** With feedback alone the
-dip is close to the quasi-static Q/(A·Kp) of eq. (33) plus part of the
-0.8 MPa tube step: 3.4 MPa at Kp 0.24 (wc 6 against a 2.2 GPa bound),
-2.2 MPa at Kp 0.44 (wc 11), 1.5 MPa at Kp 0.8 (wc 11 against a 1.2 GPa
-bound). A faster integrator (Ki = Kp instead of 0.4 Kp) trims 0.1 MPa.
-The flow-feedforward bound (1.1 MPa) shows what a flow measurement
-would buy and is not available. The charge that can be delivered without
-degassing follows directly: the saturation pressure is about 3.5 MPa
-per unit of ratio, so each megapascal of dip costs about 0.3 in the
-ratio.
+**The opening dip is what limits the charge.** The dip is the 0.5 MPa
+tube step plus the quasi-static Q/(A·Kp) of eq. (33), recovered over the
+integral time: 2.07 MPa at Kp 0.5, 1.14 at wc 11 (Kp 1.5 at 7.2 MPa/mm),
+0.94 at wc 16. The saturation pressure is 3.7 MPa per unit of ratio in
+saline, so each megapascal of dip costs about 0.27 in the ratio, and a
+higher target buys 0.27 per megapascal the other way. Volume delivered
+before a violation at nominal parameters, 0.5 MPa margin:
 
-| Charge | P_sat MPa | GVL | GVL relaxed | sched wc 6 | sched wc 11 | sched wc 11, K_cfg 1.2 |
+| Charge | P_sat MPa | GVL | GVL, StopVelMin 2 | sched wc 6 | sched wc 11 | sched wc 16 |
 |---|---|---|---|---|---|---|
-| 1:1 | 3.6 | 19 mL | 272 | 272 | 272 | 272 |
-| 1.5:1 | 5.4 | 19 | 272 | 272 | 272 | 272 |
-| 2:1 | 7.2 | 19 | 272 (margin 0.8) | 0 (margin −0.6) | 272 (margin 0.6) | 272 (margin 1.3) |
-| 2.5:1 | 9.0 | 0 | 0 | 0 | 0 (margin −1.2) | 0 (margin −0.6) |
-| 3:1 | 10.0 | 0 | 0 | 0 | 0 | 0 |
+| 1:1 | 3.6 | 22 mL | 288 | 288 | 288 | 288 |
+| 2:1 | 7.2 | 22 | 288 (margin 0.7) | 288 (0.9) | 288 (1.6) | 288 (1.8) |
+| 2.5:1 at 10 MPa | 9.0 | 0 | 0 (−1.1) | 0 (−0.9) | 0 (−0.2) | 0 (0.0) |
+| 2.5:1 at 11 MPa | 9.0 | 0 | 0 (−0.2) | 0 (0.0) | 288 (0.8) | 288 (1.0) |
+| 3:1 at 11 MPa | 10.9 | 0 | 0 | 0 | 0 (−1.0) | 0 (−0.9) |
 
-(Volume delivered before a violation, nominal parameters, 0.5 MPa
-margin; 272 mL is the 300 mL of saline less the 25 mL dead volume and
-the tube. At 3:1 the saline is saturated at 10 MPa and the chamber
-holds free gas; no controller can deliver it without bubbles at this
-target.)
+So 2:1 is deliverable at 10 MPa by every arm that clears the stop law,
+2.5:1 needs the scheduled controller and an 11 MPa target (the true
+pressure then peaks at 11.1 MPa, under the 12 MPa ceiling), and 3:1 is
+saturated at 10.9 MPa and out of reach below the ceiling. The target
+is a stronger lever than the gains: `--set P_target=11e6` runs any
+study at another target.
 
-**Robustness** (100 Latin hypercube samples over the table above;
+**Robustness** (100 Latin hypercube samples over the measured ranges;
 pass rate for every requirement, in percent):
 
-| Charge | GVL | stop law relaxed | sched wc 6 | sched wc 11 | sched wc 11, limits 7 / 100 | sched wc 11, K_cfg 1.2 |
+| Charge, target | GVL | GVL, StopVelMin 2 | sched wc 6 | sched wc 11 | sched wc 11, VelMax 7 | sched wc 16 |
 |---|---|---|---|---|---|---|
-| 1:1 | 0 | 72 | 78 | **100** | **100** | **100** |
-| 2:1 | 0 | 65 | 0 | 46 | 46 | 81 |
+| 1:1 at 10 MPa | 0 | **100** | **100** | **100** | **100** | **100** |
+| 2:1 at 10 MPa | 0 | **100** | **100** | **100** | **100** | **100** |
+| 2.5:1 at 10 MPa | 0 | 0 | 0 | 0 | 0 | 0 |
+| 2.5:1 at 11 MPa | 0 | 0 | 0 | 93 | 93 | **100** |
 
-At 1:1 the wc = 11 arms pass every sample: compression in band and
-under the ceiling, no degassing, control to the end of every delivery,
-stroke within limits. The relaxed GVL loop fails the stiff chambers
-(none of the lowest third of K, three quarters of the highest third),
-where the end stiffness of 110 to 170 MPa/mm is past its gain's
-stability limit: it loses control and overshoots the ceiling. The
-wc = 6 arm loses control in 22 % of samples, all at low K with high Cd,
-where its low gain lets the dip linger above 1 MPa for more than 5 s;
-this is slowness, not instability. At 2:1 the margin is thin and the
-failures are driven by K (a stiff chamber gives a deep dip) and the
-saline volume; assuming a measured K ≤ 1.2 GPa raises the pass rate
-from 46 % to 81 %. The relaxed GVL loop's 65 % at 2:1 is the soft
-chambers, where its higher gain gives a smaller dip than the schedule's
-conservative bound allows; a measured K lets the schedule use that gain
-too. The uncertain parameters rank K ≫ Vl0 > tauDiss > P_supply >
-Cd ≈ V_dead > tauV on the key metrics at 1:1.
+The GVL as configured fails every sample on control (the steady error).
+Every other arm passes every sample at 1:1 and 2:1: with the measured
+chamber the range of plausible parameters is narrow enough that nothing
+in it threatens the ceiling, the saturation margin or the end of the
+delivery, and the uncertain parameters rank tauDiss > Vl0 > P_supply >
+V_dead > Cd > K > tauV on the key metrics, all with swings well inside
+the limits. At 2.5:1 the 10 MPa target leaves 1.0 MPa to saturation, less
+than the dip of any arm, and fast dissolution during the hold also takes
+a fifth of the samples inside the 0.5 MPa margin; at 11 MPa the scheduled
+controller at wc = 16 passes every sample and wc = 11 passes 93 %, the
+failures being the stiffest chambers with the noisiest transducer. The
+true pressure peaks at 11.1 MPa, under the ceiling.
 
 **What this means for the machine.**
-- The cheapest change, the 20 ms filter and StopVelMin 2 mm/s on the
-  existing controller, already delivers the whole chamber at nominal
-  parameters, but fails the stiff chambers; it is a reasonable interim
-  setting while K is measured.
-- 1:1 is deliverable with margin to spare under every plausible
-  parameter, with the scheduled controller at wc = 11 rad/s, the 20 ms
-  filter and StopVelMin 2 mm/s.
-- 2:1 is deliverable at nominal parameters and in about half the
-  plausible ones; measuring K decides it, and a K near 1 GPa makes it
-  reliable (81 % with K known below 1.2 GPa, and the remaining failures
-  are at the top of that range).
-- 2.5:1 and above are not deliverable at a 10 MPa target by feedback
-  alone; a higher target (the ceiling permits about 11.5 MPa with the
-  scheduled controller's negligible overshoot) or a smaller tube volume
-  (less of the 0.8 MPa step) are the levers.
-- The drive's limits (7 mm/s, 100 mm/s²) are worth raising for a faster
-  compression but do not change the deliverable charge.
+- Raise `G_cfgPressureStopVelMin` to 2 mm/s. That alone removes the
+  steady error the bench saw (8.1 MPa for a 10 MPa target) and delivers
+  1:1 and 2:1 at 10 MPa in every plausible case with the gains as they
+  are.
+- The scheduled controller halves the opening dip (1.1 MPa at wc = 11
+  against 2.1) and compresses twice as fast with no overshoot; it is
+  what makes 2.5:1 reachable, at an 11 MPa target. Its margin is the
+  same at every point of the run, where the fixed gain's falls to 26°
+  at the limit switch.
+- 3:1 is saturated at 10.9 MPa and cannot be delivered without bubbles
+  below the 12 MPa ceiling by any controller.
+- The drive does not apply the accel and decel settings, so they are not
+  tuning levers; VelMax 7 mm/s shortens the compression only.
 
-**Porting the schedule to the slave** needs four things in
-`FB_PressureController` or `PRG_Main`: configured constants for the
-limit-switch position, the dead volume and the saline volume (lower
-bounds), the charge and the bulk modulus (an upper bound), and the
-target crossover; the stiffness
-bound of eq. (39) computed each scan from `G_sysActualPressure` and the
-actual position; a `Lag` input to the stop law (eq. (41)) in place of
-the fixed one-scan step; and an integrator that accumulates Ki·e (or is
-rescaled when Ki changes) and is held at zero until the first arrival
-within 0.5 MPa of the target.
-
-**Margins against stiffness** (linear model, GVL gains):
+**Margins against stiffness** (linear model, GVL gains, 20 ms filter,
+12 ms dead time):
 
 | Chamber | k (MPa/mm) | Gain margin | Phase margin | Crossover (rad/s) | Max stable Kp |
 |---|---|---|---|---|---|
-| gas-rich | 0.002 | 92 dB | 2.8° | 0.02 | 2.1e4 |
-| liquid, 300 mL, K = 1 GPa | 11.4 | 17.1 dB | 61° | 5.5 | 3.65 |
-| liquid, 300 mL, K = 2.2 GPa | 25.2 | 10.2 dB | 41° | 10.8 | 1.65 |
-| liquid, 25 mL dead volume (K = 1 GPa), or the stop-law stiffness | 100–140 | −1.8 dB at 100 | −7° | 26 | 0.405 |
+| liquid, 343 mL, K = 0.72 GPa | 7.2 | 20.8 dB | 73° | 3.6 | 5.6 |
+| liquid, 120 mL | 20 | 12.0 dB | 59° | 9.8 | 2.0 |
+| liquid, 50 mL dead volume (limit switch) | 49 | 4.2 dB | 26° | 22 | 0.81 |
+| stop-law stiffness | 100 | −2.0 dB | −14° | 37 | 0.40 |
 
-Expressed as a crossover wc = Kp·k (k in MPa/mm, Ki = 0.4 Kp):
-- the stability limit is about 41 rad/s;
-- 45° of phase margin needs about 11 rad/s;
-- 60° of phase margin needs about 6 rad/s.
-
-So a stiffness-scheduled gain is Kp = wc/k with wc of 6 rad/s, and k is
-A·K/V_l during the delivery: Kp 0.24 at 300 mL and 0.02 at the 25 mL
-dead volume for K = 2.2 GPa.
-
-At liquid-only stiffness, the 50 ms filter and the 20 ms drive lag cost
-about the same. The largest stable Kp rises from 3.65 to 8.6 without the
-filter, to 8.2 without the drive lag, and to 11.6 without both.
+The GVL gain is stable to the limit switch but with a quarter of its
+starting margin; a dead volume of 35 mL or a bulk modulus of 1 GPa would
+take it to the edge. The scheduled gain Kp = wc/k holds 56° at wc = 11
+everywhere.
 
 **Open questions:**
 - The mechanical pressure ceiling: 12 MPa is assumed; 15 MPa may break
-  the piston. A higher target is the main lever for a larger charge.
-- The degas margin to design to. It sets where the charge against
-  volume trade-off is read, not whether a configuration works.
-- The measured bulk modulus K, orifice flow (Cd) and drive lag (tauV),
-  which decide whether 2:1 is reliable, and the friction (see the
-  assumptions table).
+  the piston. With the true pressure 0.11 MPa above the reading, an
+  11 MPa target peaks at 11.1 MPa.
+- The transducer zero: correcting the −0.11 MPa in the slave's scaling
+  (`G_cfgPressureRangeMin`) would make the reading true; until then
+  every target is 0.11 MPa conservative for degassing and the same
+  amount optimistic for the ceiling.
+- The lag at the piston (below 25 ms) and the dissolution time constant
+  are the two unmeasured plant parameters; the robustness study covers
+  the first, and the second sets only the hold time.
 - Whether the saline volume and the charge can be given to the slave
   (as configuration or over the protocol), which the schedule's
   stiffness bound needs.

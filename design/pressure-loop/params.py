@@ -31,16 +31,18 @@ The parameters describe five parts of the model:
               orifices set the outflow as a function of chamber
               pressure, and the air in the tube is lost from the chamber
               as a volume step when the valve opens.
-  Actuator    In velocity mode the drive limits the rate of change of the
-              commanded velocity, follows it with lag tauV, and stalls
-              when the chamber force reaches the torque limit Fcap. In
-              torque mode the commanded force drives the reflected mass
-              mr against the chamber force, viscous friction b and
-              Coulomb friction Fc.
+  Actuator    In velocity mode the drive follows the commanded velocity
+              after a dead time t_dead with lag tauV, and stalls when the
+              chamber force plus friction reaches the torque limit Fcap.
+              In torque mode the commanded force drives the reflected
+              mass mr against the chamber force, the load-dependent
+              friction mu P A, viscous friction b and Coulomb friction
+              Fc.
   Sensor      A 4-20 mA pressure transducer drives a current through a
               shunt resistor, and the slave samples the voltage once per
               scan. The noise parameter sets the white noise on each
-              sample, referred to pressure.
+              sample, referred to pressure, and P_offset the
+              transducer's zero error.
   Simulation  The plant takes nsub integration steps per slave scan
               using the method named by solver.
 
@@ -77,12 +79,14 @@ class Params:
     T: float = 293.0
     # [Pa] Atmospheric pressure, the reference for gauge pressure
     Patm: float = 101325.0
-    # [Pa] Effective bulk modulus of the liquid. Water alone is 2.2 GPa;
-    # hose and seal compliance lower the effective value.
-    K: float = 1.0e9
+    # [Pa] Effective bulk modulus of the saline-filled chamber. Water
+    # alone is 2.2 GPa; the seals, hoses and residual gas lower it.
+    # Measured 0.72 GPa (0.67 to 0.78 over the segments, 0.81 with the
+    # gas-like curvature removed) on 2026-10-26, bench/characterisation.
+    K: float = 0.72e9
     # [m^3] Saline volume at the start of a run, including the dead
-    # volume
-    Vl0: float = 300e-6
+    # volume: the fill at the 280 mm start position of the bench runs
+    Vl0: float = 343e-6
     # [mol/(m^3 Pa)] Henry's-law constant for oxygen in saline: 1.28e-5
     # for pure water, reduced 5 % by salting out at 0.9 % NaCl
     kH: float = 1.22e-5
@@ -110,8 +114,9 @@ class Params:
     n_orifice: int = 32
     # [m] Orifice diameter
     d_orifice: float = 40e-6
-    # [-] Orifice discharge coefficient (sharp-edged, Re 4000 to 6000)
-    Cd: float = 0.7
+    # [-] Orifice discharge coefficient. Measured 0.85 (0.84 to 0.87
+    # over 1.6 to 8.3 MPa, exponent 0.48): 4.8 mL/s at 10 MPa.
+    Cd: float = 0.85
     # [m^3] Volume of the tube between the valve and the orifices. It
     # holds air at atmosphere before the valve opens, so the chamber loses
     # this volume of liquid in the scan the valve opens, eq. (37).
@@ -122,9 +127,9 @@ class Params:
     # [m^3] Dead volume: the chamber volume the piston cannot sweep
     # (passages and fittings), left when the piston reaches the limit
     # switch at the end of its stroke. The machine halts there and the
-    # delivery ends; so does the simulation. Known to lie in 20 to
-    # 30 mL.
-    V_dead: float = 25e-6
+    # delivery ends; so does the simulation. Measured: 50 g of water
+    # fills it.
+    V_dead: float = 50e-6
 
     # ----- Derived outlet quantities -------------------------------------
     @property
@@ -157,29 +162,58 @@ class Params:
     solver: str = 'heun'
 
     # ----- Actuator ------------------------------------------------------
+    # The drive's response to a velocity command was measured on
+    # 2026-10-26 (bench/friction, bench/characterisation): the command is
+    # not slewed at the configured accel, and the motor velocity follows
+    # it after a dead time of 12 ms with a first-order lag of 8.7 ms, the
+    # same for 0.3 to 2.5 mm/s steps in both directions. The lag at the
+    # piston (behind the gearbox and screw) was not resolved; it is below
+    # 25 ms.
+    # [s] Dead time between the velocity command and the start of the
+    # response, applied in whole scans
+    t_dead: float = 0.012
     # [s] Time constant of the drive's velocity loop
-    tauV: float = 0.02
-    # [N] Piston force at 100 % rated motor torque. The motor gives
-    # 1.27 N m through a 70:1 gearbox and a ball screw of 5.08 mm lead
-    # at 85 % efficiency:
-    #   Fcap = 1.27 [N m] * 2 pi [rad/rev] * 70 / 5.08e-3 [m/rev] * 0.85
-    Fcap: float = 1.27 * 2 * math.pi * 70 / 5.08e-3 * 0.85
+    tauV: float = 0.0087
+    # True if the drive slews the velocity command at the accel and
+    # decel limits. The drive does not; the option keeps the earlier
+    # model available.
+    slew_limited: bool = False
+    # [N] Piston force at 100 % rated motor torque through a lossless
+    # gearbox and screw: 1.27 N m times 2 pi times 70 over 5.08 mm of
+    # lead. The drivetrain losses are in mu below.
+    Fcap: float = 1.27 * 2 * math.pi * 70 / 5.08e-3
+    # [-] Load-dependent friction: a force mu P A opposes the motion in
+    # addition to the Coulomb and viscous terms, so the efficiency
+    # pushing against the load is 1 / (1 + mu). Measured 0.45.
+    mu: float = 0.45
     # [kg] Motor and gearbox inertia reflected to the piston
     mr: float = 5e4
-    # [N s/m] Viscous friction coefficient
-    b: float = 5e3
-    # [N] Coulomb friction of the seals and screw
-    Fc: float = 500.0
+    # [N s/m] Viscous friction coefficient. Measured 2.3e6 (11 kN at
+    # 5 mm/s).
+    b: float = 2.3e6
+    # [N] Coulomb friction of the seals, screw and gearbox. Measured
+    # 6.1 kN; the breakaway from rest is about 24 kN.
+    Fc: float = 6.1e3
     # [m/s] Velocity over which the Coulomb friction is smoothed from
     # -Fc to +Fc, which avoids a discontinuity at zero velocity
     veps: float = 1e-5
 
     # ----- Sensor --------------------------------------------------------
-    # [Pa] RMS noise per sample, referred to pressure
-    noise: float = 0.005e6
+    # [Pa] RMS noise per sample, referred to pressure. Measured 2.0 mV
+    # rms on the 434 ohm shunt (4.6 kPa) bare and 0.8 mV (1.8 kPa) with
+    # a 4.7 uF capacitor across the shunt; broadband, no lines.
+    noise: float = 4.6e3
+    # [Pa] Transducer zero offset: the reading with the chamber open.
+    # Measured -0.11 MPa. The loop regulates the reading, so the true
+    # pressure sits above the target by this much.
+    P_offset: float = -0.11e6
     # [s] Time constant of the derivative filter in the legacy
     # controller
     Tf: float = 0.02
+
+    # ----- Process -------------------------------------------------------
+    # [Pa] Target pressure for the compression, hold and delivery
+    P_target: float = 10e6
 
     # ----- Metrics and requirements --------------------------------------
     # [Pa] Half-width of the band used for the settling time
@@ -198,11 +232,12 @@ class Params:
     t_recover: float = 5.0
 
     # ----- Model options -------------------------------------------------
-    # Setting both options to False gives the earlier model: a fixed
-    # liquid volume and a single slew limit.
+    # Setting both options to False (with slew_limited True) gives the
+    # earlier model: a fixed liquid volume and a single slew limit.
     # The outflow removes liquid and the gas dissolved in it.
     liquid_depletes: bool = True
-    # The velocity command has separate accel and decel limits.
+    # The velocity command has separate accel and decel limits when it
+    # is slewed.
     slew_asym: bool = True
 
     # ----- Slave configuration overrides ---------------------------------
@@ -267,9 +302,10 @@ class Params:
         return replace(self, **kw)
 
     def legacy(self):
-        """Return a copy with the earlier model: a fixed liquid volume and
-        a single slew limit."""
-        return replace(self, liquid_depletes=False, slew_asym=False)
+        """Return a copy with the earlier model: a fixed liquid volume, a
+        single slew limit on the command, and no dead time."""
+        return replace(self, liquid_depletes=False, slew_asym=False,
+                       slew_limited=True, t_dead=0.0)
 
     @classmethod
     def from_overrides(cls, items, base=None):

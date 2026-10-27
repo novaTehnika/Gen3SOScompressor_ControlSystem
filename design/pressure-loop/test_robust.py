@@ -75,7 +75,7 @@ def check_sampler():
     assert par.K == a[0]['K'] and par.Cd == a[0]['Cd']
     assert par.tol == R.THRESH['inband'] * 1e6 and par.ratio == 2.0
     s = R.make_scenario('deliver', par)
-    assert s.ratio == 2.0 and s.P0 == scenarios.TARGET and s.dissolved
+    assert s.ratio == 2.0 and s.P0 == par.P_target and s.dissolved
     s = R.make_scenario('compress', par)
     assert s.P0 == par.P_supply and s.ratio == 2.0 and not s.dissolved
     ok('sampled Cd and supply pressure and the charge reach the scenarios')
@@ -87,7 +87,8 @@ def hand_result(P, scen, P_sat, V_out, target=10e6):
     saturation pressure P_sat [Pa] and delivered volume V_out [m^3]."""
     t = np.arange(len(P)) * 0.002                           # [s]
     z = np.zeros_like(t)
-    return Result('x', scen.name, 'V', t, np.asarray(P, float), z, z, z, z,
+    P = np.asarray(P, float)                # measured taken as true
+    return Result('x', scen.name, 'V', t, P, P, z, z, z,
                   np.full_like(t, target), z, z, {}, 0.0, 3.4e-3,
                   np.full_like(t, P_sat), np.asarray(V_out, float), z)
 

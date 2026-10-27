@@ -367,7 +367,7 @@ class ScheduledSlaveController(SlaveController):
     Arguments beyond SlaveController's:
       wc         [rad/s] Target crossover of the pressure loop.
       K_cfg      [Pa] Bulk modulus assumed by the estimate, the largest
-                 plausible.
+                 plausible: 1.0 GPa against the measured 0.72.
       V_l_cfg    [m^3] Saline volume assumed by the estimate, a lower
                  bound on the true value. None uses the run's Vl0.
       V_dead_cfg [m^3] Dead volume assumed by the estimate, a lower
@@ -378,15 +378,17 @@ class ScheduledSlaveController(SlaveController):
       ki_ratio   [1/s] Ki / Kp.
       kp_min     [(mm/s)/MPa] Bounds on the scheduled Kp.
       kp_max
-      lag        [s] Measurement lag used by the stop law. None derives
-                 it from the slave configuration.
+      lag        [s] Lag used by the stop law: the measurement chain
+                 plus the drive's dead time and velocity-loop lag. None
+                 derives it from the slave configuration and the plant
+                 parameters, as the slave would hold it configured.
       stop_from_k  If False the block's own stop law is kept as
                  configured.
       e_int      [MPa] Error below which the integrator is first
                  released.
     """
 
-    def __init__(self, name='scheduled', wc=6.0, K_cfg=2.2e9, V_l_cfg=None,
+    def __init__(self, name='scheduled', wc=6.0, K_cfg=1.0e9, V_l_cfg=None,
                  V_dead_cfg=None, ratio_cfg=None, ki_ratio=0.4,
                  kp_min=0.001, kp_max=5.0, lag=None, stop_from_k=True,
                  e_int=0.5, flow_ff=False, **overrides):
@@ -431,12 +433,14 @@ class ScheduledSlaveController(SlaveController):
         self.D_mm = c['G_cfgPressureDecel']                     # [mm/s^2]
         self.v_floor = c['G_cfgPressureStopVelMin']             # [mm/s]
         if self.lag is None:
-            # Filter time constant, median and pipeline scans, and the
-            # scan in which the command takes effect
+            # Filter time constant, median and pipeline scans, the scan
+            # in which the command takes effect, and the drive's dead
+            # time and velocity-loop lag
             Ts = c['G_cfgScanTime']
             n_med = 5 if c['G_cfgAnalogMedianSize'] >= 5 else 3
             self.lag_run = (c['G_cfgAnalogFilterTimeConst']
-                            + ((n_med - 1) // 2 + 2 + 1) * Ts)   # [s]
+                            + ((n_med - 1) // 2 + 2 + 1) * Ts
+                            + par.t_dead + par.tauV)            # [s]
         else:
             self.lag_run = self.lag
         if self.stop_from_k:

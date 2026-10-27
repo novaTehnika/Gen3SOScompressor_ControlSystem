@@ -57,24 +57,24 @@ TRACE_RATIO = 1.0                       # [-] ratio of the plotted traces
 def controller_set():
     """Return the controllers compared.
 
-    The slave arms change one setting each from the GVL. The scheduled
-    arms are ScheduledSlaveController at two crossovers, with the 20 ms
-    filter and StopVelMin 2 mm/s (the outflow needs 1.2 mm/s), and one
-    that assumes a measured bulk modulus. The flow-feedforward arm is a
-    bound; the feedforward is not implementable on the machine.
+    The slave arms are the GVL and the GVL with StopVelMin 2 mm/s (the
+    measured outflow needs 1.4 mm/s). The scheduled arms are
+    ScheduledSlaveController at three crossovers with the measured
+    bounds (K 1.0 GPa, dead volume 45 mL). The flow-feedforward arm is
+    a bound; the feedforward is not implementable on the machine.
     """
     S = ctl.SlaveController
     Sch = ctl.ScheduledSlaveController
-    f20 = dict(AnalogFilterTimeConst=0.02, StopVelMin=2.0)
+    vmin2 = dict(StopVelMin=2.0)
+    sched = dict(V_dead_cfg=45e-6, K_cfg=1.0e9)
     return [
         S('slave (GVL)'),
-        S('slave f20 vmin2', **f20),
-        Sch('sched wc6 f20 vmin2', wc=6.0, **f20),
-        Sch('sched wc11 f20 vmin2', wc=11.0, **f20),
-        Sch('sched wc11 ki1 f20 vmin2 v7 a100', wc=11.0, ki_ratio=1.0,
-            VelMax=7.0, Accel=100.0, Decel=100.0, **f20),
-        Sch('sched wc11 K1.2 f20 vmin2 v7 a100', wc=11.0, K_cfg=1.2e9,
-            VelMax=7.0, Accel=100.0, Decel=100.0, **f20),
+        S('slave vmin2', **vmin2),
+        Sch('sched wc6 vmin2', wc=6.0, **sched, **vmin2),
+        Sch('sched wc11 vmin2', wc=11.0, **sched, **vmin2),
+        Sch('sched wc11 ki1 vmin2 v7', wc=11.0, ki_ratio=1.0, VelMax=7.0,
+            **sched, **vmin2),
+        Sch('sched wc16 vmin2', wc=16.0, **sched, **vmin2),
         S('slave +flowFF (bound)', flow_ff=True),
     ]
 
@@ -109,11 +109,11 @@ def main(argv=None):
     for ratio in ratios:
         q = par.with_(ratio=ratio)
         P_sat = q.P_sat(min(q.n_charge(ratio),
-                            q.kH * (scenarios.TARGET + q.Patm) * q.Vl0),
+                            q.kH * (q.P_target + q.Patm) * q.Vl0),
                         q.Vl0)
         print(f'\n=== deliver, {ratio:g}:1 (P_sat {P_sat / 1e6:.2f} MPa, '
-              f'Q {q.Q_orifice(scenarios.TARGET) * 1e6:.2f} mL/s at '
-              f'{scenarios.TARGET / 1e6:g} MPa, Cd {q.Cd})')
+              f'Q {q.Q_orifice(q.P_target) * 1e6:.2f} mL/s at '
+              f'{q.P_target / 1e6:g} MPa, Cd {q.Cd})')
         print(f'{"controller":<{width}}'
               + ''.join(f'{h:>11}' for h in heads))
         for ci, c in enumerate(cs):

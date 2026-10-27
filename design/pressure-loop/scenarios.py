@@ -16,15 +16,17 @@ flows in m^3/s and times in s.
 
 The process cases follow the machine's cycle. The oxygen charge, given
 by Params.ratio, is admitted at the supply pressure Params.P_supply, the
-piston compresses the contents to the 10 MPa target, the oxygen
-dissolves during a hold, and the ball valve is opened so the saline is
-driven through the orifices until the chamber is empty.
+piston compresses the contents to the target Params.P_target (10 MPa by
+default), the oxygen dissolves during a hold, and the ball valve is
+opened so the saline is driven through the orifices until the piston
+reaches the limit switch.
 
   compress   Start at the supply pressure with the charge as free gas
-             and the saline saturated at that pressure; target 10 MPa.
-  deliver    Start at 10 MPa with the charge dissolved as far as the
-             saturation limit allows, the rest free; the valve opens at
-             1 s and the run continues until the saline is gone.
+             and the saline saturated at that pressure; drive to the
+             target.
+  deliver    Start at the target with the charge dissolved as far as
+             the saturation limit allows, the rest free; the valve opens
+             at 1 s and the run continues to the limit switch.
   cycle      compress, hold, then open the valve, in one run.
   stiffstep  Liquid-only chamber at 10 MPa, target steps to 12 MPa at
              1 s. This is a margin probe, not a process case.
@@ -138,25 +140,23 @@ class Scenario:
 # Each function returns the scenario for Params par, with any field
 # replaced by a keyword argument.
 
-TARGET = 10e6           # [Pa] process target pressure
-
-
 def compress(par, **kw):
+    P = par.P_target
     return Scenario('compress', T=60.0, tEvent=0.0, P0=par.P_supply,
-                    ratio=par.ratio, target0=TARGET,
-                    target1=TARGET).with_(**kw)
+                    ratio=par.ratio, target0=P, target1=P).with_(**kw)
 
 
 def deliver(par, **kw):
-    return Scenario('deliver', T=150.0, tEvent=1.0, P0=TARGET,
-                    ratio=par.ratio, dissolved=True, target0=TARGET,
-                    target1=TARGET, t_open=1.0,
-                    Topen=par.Topen).with_(**kw)
+    P = par.P_target
+    return Scenario('deliver', T=150.0, tEvent=1.0, P0=P,
+                    ratio=par.ratio, dissolved=True, target0=P,
+                    target1=P, t_open=1.0, Topen=par.Topen).with_(**kw)
 
 
 def cycle(par, **kw):
+    P = par.P_target
     return Scenario('cycle', T=210.0, tEvent=60.0, P0=par.P_supply,
-                    ratio=par.ratio, target0=TARGET, target1=TARGET,
+                    ratio=par.ratio, target0=P, target1=P,
                     t_open=60.0, Topen=par.Topen).with_(**kw)
 
 

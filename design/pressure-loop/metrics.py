@@ -10,17 +10,22 @@ CREATION DATE:
 
 PURPOSE/DESCRIPTION:
 This module computes the performance metrics of one simulation run.
-The metrics use the true chamber pressure, not the measurement, and
-those that concern the response to the scenario's event are measured
-from the event time tEvent. With error e = target - P:
+The physical metrics (overshoot, peak error, dip, ceiling, saturation
+margin) use the true chamber pressure. The loop metrics that the slave
+itself judges (settling into the status band, late RMS error) use the
+measured pressure, as the slave does; the transducer's zero error
+therefore shows in the physical metrics and not in those. Metrics that
+concern the response to the scenario's event are measured from the
+event time tEvent. With error e = target - P:
 
   overshoot    [MPa] Largest P - target after the event. It is negative
                if the pressure never reaches the target.
   peakErr      [MPa] Largest |e| after the event.
-  tSettle      [s] Time after the event from which |e| stays below
-               Params.tol. It is 0 if |e| never leaves the band, and NaN
-               if |e| is still outside the band at the end of the run.
-  rmsErr       [MPa] RMS of e over the last 2 s.
+  tSettle      [s] Time after the event from which |e_meas| stays below
+               Params.tol, with e_meas the error of the measured
+               pressure. It is 0 if it never leaves the band, and NaN if
+               it is still outside the band at the end of the run.
+  rmsErr       [MPa] RMS of e_meas over the last 2 s.
   ripple       [MPa] Standard deviation of P over the last 2 s.
   uAct         Command activity: the standard deviation of the change in
                the command from one scan to the next over the last 2 s,
@@ -69,6 +74,7 @@ def compute(r, par, scenario, mode):
     after_event = t >= scenario.tEvent
     last_2s = t > t[-1] - 2
     err = target - P                                        # [Pa]
+    err_meas = target - r.P_meas            # [Pa] what the slave sees
     out = {}
 
     # Overshoot and peak error after the event, [Pa -> MPa]
@@ -76,8 +82,9 @@ def compute(r, par, scenario, mode):
                                     - target[after_event])) / 1e6
     out['peakErr'] = float(np.max(np.abs(err[after_event]))) / 1e6
 
-    # Settling time: the first scan after the last scan outside the band
-    outside = np.flatnonzero((np.abs(err) >= par.tol) & after_event)
+    # Settling time on the measured pressure: the first scan after the
+    # last scan outside the band
+    outside = np.flatnonzero((np.abs(err_meas) >= par.tol) & after_event)
     if outside.size == 0:
         out['tSettle'] = 0.0
     elif outside[-1] == N - 1:
@@ -85,8 +92,8 @@ def compute(r, par, scenario, mode):
     else:
         out['tSettle'] = float(t[outside[-1] + 1] - scenario.tEvent)
 
-    # Error and ripple over the last 2 s, [Pa -> MPa]
-    out['rmsErr'] = float(np.sqrt(np.mean(err[last_2s]**2))) / 1e6
+    # Measured error and true ripple over the last 2 s, [Pa -> MPa]
+    out['rmsErr'] = float(np.sqrt(np.mean(err_meas[last_2s]**2))) / 1e6
     out['ripple'] = float(np.std(P[last_2s], ddof=1)) / 1e6
 
     # Command activity over the last 2 s

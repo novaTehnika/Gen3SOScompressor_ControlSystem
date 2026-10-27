@@ -68,21 +68,25 @@ class Uncertain:
 # in torque mode, which the slave does not use. A, R, T, Patm and kH are
 # geometry or physical constants. The oxygen ratio is a study variable,
 # not an uncertainty.
+# The ranges are the measured values of 2026-10-26 with their spread
+# (bench/characterisation, bench/friction, bench/pressure), except the
+# dissolution time constant and the supply pressure, which are not
+# measured.
 UNCERTAIN = [
-    Uncertain('K', 0.5e9, 2.5e9, True, 1e-9, 'GPa',
-              'water 2.2 GPa; hoses, seals and residual gas lower it'),
-    Uncertain('Vl0', 250e-6, 350e-6, False, 1e6, 'mL',
-              'saline in the chamber, hoses and fittings'),
-    Uncertain('V_dead', 20e-6, 30e-6, False, 1e6, 'mL',
-              'dead volume left at the limit switch'),
+    Uncertain('K', 0.6e9, 1.0e9, True, 1e-9, 'GPa',
+              'measured 0.72, segments 0.67 to 0.78, gas-corrected 0.81'),
+    Uncertain('Vl0', 320e-6, 360e-6, False, 1e6, 'mL',
+              'fill at the 280 mm start, 343 mL from the geometry'),
+    Uncertain('V_dead', 45e-6, 55e-6, False, 1e6, 'mL',
+              'dead volume, measured 50 mL'),
     Uncertain('tauDiss', 10.0, 100.0, True, 1.0, 's',
               'gas dissolution time constant'),
-    Uncertain('tauV', 0.005, 0.05, True, 1e3, 'ms',
-              'drive velocity loop lag'),
-    Uncertain('noise', 1e3, 20e3, True, 1e-3, 'kPa',
-              'transducer plus ADC noise, rms per sample'),
-    Uncertain('Cd', 0.6, 0.8, False, 1.0, '',
-              'orifice discharge coefficient; sets the outflow'),
+    Uncertain('tauV', 0.005, 0.025, True, 1e3, 'ms',
+              'drive lag: 8.7 ms at the motor, below 25 ms at the piston'),
+    Uncertain('noise', 1.5e3, 5e3, True, 1e-3, 'kPa',
+              'transducer plus ADC noise, 1.8 to 4.6 kPa rms per sample'),
+    Uncertain('Cd', 0.8, 0.9, False, 1.0, '',
+              'orifice discharge coefficient, measured 0.84 to 0.87'),
     Uncertain('P_supply', 0.52e6, 1.38e6, False, 1e-6, 'MPa',
               'oxygen supply, 75 to 200 psi with the cylinder charge'),
 ]
@@ -208,19 +212,23 @@ def nominal():
     return {u.name: getattr(base, u.name) for u in UNCERTAIN}
 
 
-def base_params(ratio=1.0):
+def base_params(ratio=1.0, P_target=None):
     """Return Params for the study: the settling band set to the slave's
-    status band and the oxygen charge set to ratio."""
-    return Params(tol=THRESH['inband'] * 1e6,           # [MPa -> Pa]
-                  ratio=ratio)
+    status band, the oxygen charge set to ratio and, if given, the
+    target pressure [Pa]."""
+    par = Params(tol=THRESH['inband'] * 1e6,            # [MPa -> Pa]
+                 ratio=ratio)
+    if P_target is not None:
+        par = par.with_(P_target=P_target)
+    return par
 
 
-def make_params(values, ratio=1.0):
-    """Return base_params(ratio) with the sampled values applied. A
-    'ratio' entry in values overrides the argument."""
+def make_params(values, ratio=1.0, P_target=None):
+    """Return base_params(ratio, P_target) with the sampled values
+    applied. A 'ratio' entry in values overrides the argument."""
     values = dict(values)
     ratio = values.pop('ratio', ratio)
-    return base_params(ratio).with_(**values)
+    return base_params(ratio, P_target).with_(**values)
 
 
 def make_scenario(name, par, ff_scale=1.0):
@@ -234,11 +242,12 @@ def make_scenario(name, par, ff_scale=1.0):
 # %% ===== METRICS AND REQUIREMENTS ======================================
 def extras(r, scenario):
     """Return the metrics derived from the traces beyond
-    metrics.compute(): maxErrLate [MPa], the largest |target - P| over
-    the last 2 s, and V_lost [mL], the saline delivered after control
-    was lost (V_delivered - V_ok)."""
+    metrics.compute(): maxErrLate [MPa], the largest error of the
+    measured pressure over the last 2 s (the slave's in-band status is
+    judged on the measurement), and V_lost [mL], the saline delivered
+    after control was lost (V_delivered - V_ok)."""
     last_2s = r.t > r.t[-1] - 2
-    err_late = np.abs(r.target[last_2s] - r.P[last_2s])         # [Pa]
+    err_late = np.abs(r.target[last_2s] - r.P_meas[last_2s])    # [Pa]
     out = {'maxErrLate': float(np.max(err_late)) / 1e6}
     m = r.metrics
     if 'V_delivered' in m:
@@ -270,6 +279,7 @@ class ControllerSpec:
     ff_scale: float = 1.0
     ratio: float = 1.0      # oxygen charge the arm is run with
     sched: dict = None      # ScheduledSlaveController arguments, or None
+    P_target: float = None  # [Pa] target pressure; None for the default
 
 
 def make_controller(spec):
@@ -290,7 +300,7 @@ def point_metrics(point):
     metric NaN, which fails every requirement.
     """
     values, scen, spec, seed = point
-    par = make_params(values, spec.ratio)
+    par = make_params(values, spec.ratio, spec.P_target)
     s = make_scenario(scen, par, spec.ff_scale)
     c = make_controller(spec)
     try:

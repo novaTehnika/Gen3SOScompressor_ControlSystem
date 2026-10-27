@@ -57,7 +57,10 @@ import sim  # noqa: E402
 from params import Params  # noqa: E402
 
 # %% ===== TEST CONDITIONS ===============================================
-PAR = Params().with_(noise=0.0)
+# No noise and no transducer offset: the linear model is about the
+# response to a step, and the offset would shift the true pressure
+# against which the step is measured.
+PAR = Params().with_(noise=0.0, P_offset=0.0)
 K_LIQ = PAR.A * PAR.K / PAR.Vl0     # [Pa/m] liquid-only chamber stiffness
 CFG = PAR.cfg()
 
@@ -90,9 +93,10 @@ def check_plant_discretisation():
     assert np.allclose(np.trim_zeros(np.ravel(num), 'f'), lp['Gd'].num,
                        rtol=1e-9)
     assert np.allclose(den, lp['Gd'].den, rtol=1e-9)
-    assert lp['delay'] == 5 and lin.sample_delay(CFG) == 4
-    ok('plant ZOH matches scipy cont2discrete; sample delay = median 2 + '
-       'pipeline 2 (+1 command scan)')
+    n_dead = round(PAR.t_dead / PAR.Ts)
+    assert lp['delay'] == 5 + n_dead and lin.sample_delay(CFG) == 4
+    ok(f'plant ZOH matches scipy cont2discrete; delay = median 2 + '
+       f'pipeline 2 + command 1 + drive dead time {n_dead} scans')
 
 
 def check_margins():
@@ -194,7 +198,7 @@ def check_v2_boundary():
         lp = lin.loop(PAR, K_LIQ, G_cfgPressureKp=f * kmax)
         pole = osc_pole(lp)
         r, _ = run(f * kmax, 9.0, target1=10.01e6)
-        rate, w, npk = peaks_and_freq(r, 1.3, 1e3 if f > 1 else 300, 4e4)
+        rate, w, npk = peaks_and_freq(r, 1.3, 1e3 if f > 1 else 300, 1e5)
         # Growth rate and angular frequency of the pole, from z = exp(s Ts)
         pr = np.log(abs(pole)) / PAR.Ts                     # [1/s]
         pw = abs(np.angle(pole)) / PAR.Ts                   # [rad/s]

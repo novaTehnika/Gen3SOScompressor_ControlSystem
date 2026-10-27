@@ -33,12 +33,14 @@ The delivery ends when the piston reaches the limit switch, where the
 chamber volume is down to the dead volume.
 
 The actuator has two forms. In velocity mode, which the slave uses, the
-drive's profile generator limits the rate of change of the commanded
-velocity, the drive's velocity loop follows that reference with a
-first-order lag, and the piston stalls when the chamber force reaches
-the drive's torque limit (equations (11) to (13)). In torque mode, the
-commanded force accelerates the reflected mass of the motor and gearbox
-against the chamber force and friction (equation (14)).
+command reaches the drive after a dead time, the drive's velocity loop
+follows it with a first-order lag, and the piston stalls when the
+chamber force plus the friction reaches the drive's torque limit
+(equations (11) to (13)). The drive was found not to slew the command at
+the configured accel; the slew limit of eq. (11) is kept as an option.
+In torque mode, the commanded force accelerates the reflected mass of
+the motor and gearbox against the chamber force and friction (equation
+(14)), with a load-dependent friction mu P A.
 
 The method derivatives() is the continuous-time model. The method scan()
 advances one slave scan in nsub fixed steps. Before each step it applies
@@ -52,6 +54,7 @@ FILE DEPENDENCY:
 """
 
 import math
+from collections import deque
 
 import solver
 
@@ -112,17 +115,22 @@ class Plant:
         self.V_dead = par.V_dead        # [m^3]
 
         # Velocity actuator parameters
+        self.slew_limited = par.slew_limited
         self.accel = par.amax if accel is None else accel   # [m/s^2]
         if par.slew_asym:
             self.decel = par.dmax if decel is None else decel
         else:
             self.decel = self.accel                         # [m/s^2]
         self.tauV = par.tauV            # [s]
-        # [Pa] Chamber pressure at which the drive force, less the
-        # Coulomb friction, reaches the torque limit
-        self.P_stall = (par.Fcap - par.Fc) / par.A
+        # Command dead time as a queue of whole scans
+        n_dead = int(round(par.t_dead / par.Ts))
+        self.cmd_queue = deque([0.0] * n_dead)
+        # Torque limit, eq. (13): the drive force covers the pressure,
+        # the load-dependent friction and the Coulomb and viscous terms
+        self.Fcap = par.Fcap            # [N]
+        self.mu = par.mu                # [-]
 
-        # Torque actuator parameters
+        # Friction and torque actuator parameters
         self.mr = par.mr                # [kg]
         self.b = par.b                  # [N s/m]
         self.Fc = par.Fc                # [N]
@@ -199,10 +207,11 @@ class Plant:
             dv = (u_act - v) / self.tauV                    # [m/s^2]
         else:
             # Force balance on the reflected mass, eq. (14). The Coulomb
-            # friction is smoothed over |v| < veps.
+            # and load-dependent friction are smoothed over |v| < veps.
             friction_sign = max(-1.0, min(1.0, v / self.veps))
             dv = (u_act - P * self.A - self.b * v
-                  - self.Fc * friction_sign) / self.mr      # [m/s^2]
+                  - (self.Fc + self.mu * max(P, 0.0) * self.A)
+                  * friction_sign) / self.mr                # [m/s^2]
 
         # Chamber pressure from continuity, eq. (5). The piston adds
         # volume flow A v; the outflow Q and the gas leaving the free
@@ -249,8 +258,12 @@ class Plant:
         state y after a step."""
         if self.velocity_mode:
             # The drive cannot push past its torque limit, so the piston
-            # stops and the drive drops its reference, eq. (13).
-            if y[iy_P] > self.P_stall and y[iy_v] > 0:
+            # stops and the drive drops its reference, eq. (13): the
+            # force needed is P A (1 + mu) + Fc + b v.
+            v = y[iy_v]
+            P_stall = ((self.Fcap - self.Fc - self.b * max(v, 0.0))
+                       / (self.A * (1.0 + self.mu)))        # [Pa]
+            if y[iy_P] > P_stall and v > 0:
                 y[iy_v] = 0.0
                 self.v_ref = 0.0
         else:
@@ -275,9 +288,16 @@ class Plant:
         opening scan, both held over the scan. Returns the chamber gauge
         pressure [Pa].
         """
+        if self.velocity_mode and self.cmd_queue:
+            # The command reaches the drive after the dead time
+            self.cmd_queue.append(u)
+            u = self.cmd_queue.popleft()
         for _ in range(self.nsub):
             if self.velocity_mode:
-                u_act = self.slew_command(u)
+                if self.slew_limited:
+                    u_act = self.slew_command(u)
+                else:
+                    u_act = self.v_ref = u
             else:
                 u_act = u
             self.y = self.step(self.derivatives, self.y, self.dt,

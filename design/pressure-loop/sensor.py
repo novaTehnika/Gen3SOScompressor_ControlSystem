@@ -100,6 +100,8 @@ class SlaveSensor:
         self.V_offset = V_zero - P_min * 1e6 * self.V_per_Pa
         # [V] RMS noise per sample, the pressure noise times the gain
         self.noise_V = par.noise * self.V_per_Pa
+        # [V] Transducer zero error, referred to the shunt voltage
+        self.V_err = par.P_offset * self.V_per_Pa
 
         # FB_AnalogInputFilter, configured as PRG_Main configures it
         self.filt = new_FB_AnalogInputFilter()
@@ -138,10 +140,10 @@ class SlaveSensor:
         P_actual = self.inp.PressureMPa                         # [MPa]
         V_filtered = self.filt.FilteredOutput                   # [V]
 
-        # Sample the shunt voltage with noise and run the filter,
-        # eqs. (15) to (17)
+        # Sample the shunt voltage with its zero error and noise and run
+        # the filter, eqs. (15) to (17)
         self.filt.RawInput = (P * self.V_per_Pa + self.V_offset
-                              + self.noise_V * z)                # [V]
+                              + self.V_err + self.noise_V * z)   # [V]
         FB_AnalogInputFilter(self.filt, self.dt)
 
         # Scale the previous filter output to pressure
@@ -164,16 +166,19 @@ class LegacySensor:
         Ts = cfg['G_cfgScanTime']                               # [s]
         self.alpha = Ts / (tau + Ts)            # eq. (16), unrounded
         self.noise = par.noise                  # [Pa] RMS per sample
+        self.P_offset = par.P_offset            # [Pa] zero error
         n = int(cfg['G_cfgAnalogMedianSize'])
-        self.window = deque([P0] * n, maxlen=n)  # [Pa] recent samples
+        # [Pa] recent samples and the filter output, settled at P0 as
+        # the transducer reads it
+        self.window = deque([P0 + self.P_offset] * n, maxlen=n)
         self.i_mid = n // 2                     # index of the median
-        self.P_filt = P0                        # [Pa] filter output
+        self.P_filt = P0 + self.P_offset
         self.fault = False
 
     def read(self, P, z):
         """Sample pressure P [Pa] with noise draw z and return the
         filtered reading [Pa]."""
-        self.window.append(P + self.noise * z)
+        self.window.append(P + self.P_offset + self.noise * z)
         P_median = sorted(self.window)[self.i_mid]
         # First-order low-pass filter, eq. (17)
         self.P_filt += self.alpha * (P_median - self.P_filt)

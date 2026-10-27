@@ -77,7 +77,7 @@ def check_config():
     assert c['G_cfgScanTime'] == 0.002 and c['G_cfgAnalogMedianSize'] == 5
     par = Params()
     assert (par.Ts == 0.002 and par.vmax == 5e-3 and par.medN == 5
-            and par.tauF == 0.05)
+            and par.tauF == 0.02)
     q = par.with_(G_cfgPressureKp=2.0, K=2e9)
     assert (q.cfg()['G_cfgPressureKp'] == 2.0 and q.K == 2e9
             and par.cfg()['G_cfgPressureKp'] == 0.5)
@@ -180,7 +180,7 @@ def check_outlet():
     Q10 = par.Q_orifice(10e6)
     expect = par.Cd * par.n_orifice * math.pi * par.d_orifice**2 / 4 \
         * math.sqrt(2 * 10e6 / par.rho)
-    assert abs(Q10 - expect) < 1e-15 and abs(Q10 * 1e6 - 3.98) < 0.01
+    assert abs(Q10 - expect) < 1e-15 and abs(Q10 * 1e6 - 4.83) < 0.01
     assert abs(par.Q_orifice(2.5e6) / Q10 - 0.5) < 1e-12
     assert par.Q_orifice(-1e5) == 0.0
 
@@ -201,8 +201,14 @@ def check_outlet():
     # reports the volume delivered.
     r = sim.run(par, scenarios.deliver(par, T=300.0),
                 ctl.SlaveController())
-    assert r.t[-1] < 299 and abs(r.V_l[-1] - par.V_dead) < 1e-6
-    assert abs(r['V_delivered'] - (par.Vl0 - par.V_dead) * 1e6) < 3
+    # The chamber volume at the limit is the dead volume; the saline in
+    # it is stressed by P/K, and the delivered volume is measured at
+    # pressure, so both sides carry the factor (1 - P/K).
+    squeeze = 1 - r.P[-1] / par.K          # at the pressure reached
+    assert r.t[-1] < 299
+    assert abs(r.V_l[-1] * squeeze - par.V_dead) < 0.3e-6
+    expect = (par.Vl0 - par.V_dead / squeeze) * squeeze * 1e6      # [mL]
+    assert abs(r['V_delivered'] - expect) < 3, (r['V_delivered'], expect)
     ok(f'delivery ends at the limit switch with {r.V_l[-1] * 1e6:.0f} mL '
        f'of dead volume left: {r["V_delivered"]:.0f} mL in '
        f'{r.t[-1]:.0f} s')
@@ -233,8 +239,9 @@ def check_solver():
 def check_actuators():
     par = Params()
 
-    # Slew limits: 10 mm/s^2 up and 100 mm/s^2 down, with no stall
-    no_stall = par.with_(Fcap=1e9)
+    # Slew limits (when enabled): 10 mm/s^2 up and 100 mm/s^2 down,
+    # with no stall or dead time
+    no_stall = par.with_(Fcap=1e9, slew_limited=True, t_dead=0.0)
     sc = scenarios.stiffstep(par, P0=0.0)
     plant = Plant(no_stall, sc, 'V', accel=0.010, decel=0.100)
     seen = []
@@ -248,29 +255,51 @@ def check_actuators():
     ok(f'velocity command slews at accel {up * 1e3:.1f} mm/s^2 up and '
        f'decel {-dn * 1e3:.1f} mm/s^2 down')
 
-    # Stall at the torque limit
-    plant = Plant(par, sc, 'V', accel=1.0, decel=1.0)
+    # The command reaches the drive after the dead time, then follows
+    # with the velocity-loop lag and no slew
+    plant = Plant(par, sc, 'V')
+    n_dead = round(par.t_dead / par.Ts)
+    seen = []
+    for k in range(40):
+        plant.scan(0.002 if k >= 5 else 0.0)
+        seen.append(plant.v)
+    assert all(v == 0.0 for v in seen[:5 + n_dead])
+    assert seen[5 + n_dead] > 0
+    settle = seen[5 + n_dead + 4]           # 4 scans = 8 ms after start
+    assert 0.5 * 0.002 < settle < 0.8 * 0.002, settle
+    ok(f'velocity command acts after {n_dead} scans of dead time and '
+       f'reaches {settle / 0.002 * 100:.0f} % in 8 ms (tauV '
+       f'{par.tauV * 1e3:.1f} ms)')
+
+    # Stall at the torque limit, eq. (13), with the load-dependent and
+    # Coulomb friction
+    plant = Plant(par, sc, 'V')
     for k in range(600):
-        plant.scan(0.005, 0.0)
-    P_stall = (par.Fcap - par.Fc) / par.A
-    assert abs(plant.P - P_stall) / plant.P < 0.02 and plant.v == 0.0
+        plant.scan(0.005)
+    P_stall = (par.Fcap - par.Fc) / (par.A * (1 + par.mu))
+    assert abs(plant.P - P_stall) / plant.P < 0.03 and plant.v == 0.0
     ok(f'velocity actuator stalls at the torque cap '
        f'({plant.P / 1e6:.1f} MPa)')
 
-    # Torque mode settles where the force balances the pressure
-    plant = Plant(par, sc, 'T', accel=None, decel=None)
+    # Torque mode settles where the force balances the pressure, within
+    # the friction dead band (Fc + mu P A)
+    plant = Plant(par, sc, 'T')
+    F = par.A * 10e6 * (1 + par.mu) + 2000.0
     for k in range(3000):
-        plant.scan(par.A * 10e6 + 2000.0, 0.0)
-    assert (abs(plant.P - 10e6 - 2000.0 / par.A) < 5e3
-            and abs(plant.v) < 1e-6)
-    ok('torque actuator settles at force / A')
+        plant.scan(F)
+    P_balance = (F - 2000.0) / (par.A * (1 + par.mu))
+    band = (par.Fc + par.mu * P_balance * par.A) / par.A
+    assert abs(plant.P - P_balance) < band and abs(plant.v) < 1e-3
+    ok(f'torque actuator settles within the friction dead band '
+       f'({plant.P / 1e6:.1f} MPa for {P_balance / 1e6:.1f} MPa of '
+       f'force)')
 
 
 # %% ===== SENSOR ========================================================
 def check_sensor():
     par = Params().with_(noise=0.0)
     cfg = par.cfg()
-    assert abs(filter_alpha(cfg) - 0.002 / 0.052) < 1e-15
+    assert abs(filter_alpha(cfg) - 0.002 / 0.022) < 1e-15
     assert filter_alpha(par.cfg(G_cfgAnalogFilterTimeConst=0.0)) == 1.0
 
     # Without noise, the slave chain equals the legacy chain two scans
@@ -292,10 +321,11 @@ def check_sensor():
     z = np.random.default_rng(0).standard_normal(4000)
     out = np.array([s2.read(8e6, zk) for zk in z])
     sd = out[10:].std()
-    assert (abs(out[10:].mean() - 8e6) < 2e3
+    assert (abs(out[10:].mean() - 8e6 - par_n.P_offset) < 2e3
             and 0.02 * par_n.noise < sd < 0.4 * par_n.noise), sd
     ok(f'slave sensor chain = legacy chain two scans later (max diff '
-       f'{err:.1e} Pa); noise rms {sd:.0f} Pa after filtering')
+       f'{err:.1e} Pa); reads {par_n.P_offset / 1e6:+.2f} MPa off; noise '
+       f'rms {sd:.0f} Pa after filtering')
 
 
 # %% ===== CONTROLLERS ===================================================
@@ -404,16 +434,16 @@ def check_scheduled():
 
 
 def check_legacy_reference():
-    # Reference values for this case without noise, computed with Heun
-    # at nsub = 5
-    par = Params().legacy().with_(noise=0.0)
+    # Reference values for this case without noise or transducer offset,
+    # computed with Heun at nsub = 5 and the measured plant parameters
+    par = Params().legacy().with_(noise=0.0, P_offset=0.0)
     c = ctl.LegacyController('ref', 'V', 0.5, 0.2, 0, True, 50e-3)
     r = sim.run(par, scenarios.stiffstep(par), c, legacy_sensor=True)
-    assert (abs(r['overshoot'] - 0.2005) < 1e-4
-            and abs(r['tSettle'] - 1.3120) < 1e-3
+    assert (abs(r['overshoot'] - 0.1662) < 1e-4
+            and abs(r['tSettle'] - 2.704) < 1e-3
             and abs(r['peakErr'] - 2.0) < 1e-4), r.metrics
     ok('legacy plant, sensor and controller match the reference values '
-       '(stiffstep overshoot 0.2005 MPa, settle 1.312 s)')
+       '(stiffstep overshoot 0.1662 MPa, settle 2.704 s)')
 
 
 def check_closed_loop():
@@ -423,40 +453,44 @@ def check_closed_loop():
     dt = time.time() - t0
     inband = slave_config()['G_cfgPressureInBand'] * 1e6    # [Pa]
     late = r.t > r.t[-1] - 5
-    err_late = np.abs(r.P[late] - r.target[late])
+    # The slave judges its status band on the measured pressure; the
+    # true pressure sits above it by the transducer's zero error.
+    err_late = np.abs(r.P_meas[late] - r.target[late])
     assert np.all(err_late <= inband), err_late.max()
+    assert abs(np.mean(r.P[late] - r.target[late]) + par.P_offset) < 2e4
     assert (r['P_max'] < par.P_ceiling / 1e6
             and r['stroke_mm'] < slave_config()['G_cfgPosSoftLimitMax'])
     ok(f'compress 1:1 from the supply pressure with the slave controller '
-       f'reaches the in-band status (overshoot {r["overshoot"]:.2f} MPa, '
-       f'stroke {r["stroke_mm"]:.1f} mm, 60 s in {dt:.1f} s)')
+       f'reaches the in-band status, the true pressure '
+       f'{-par.P_offset / 1e6:.2f} MPa above the target (overshoot '
+       f'{r["overshoot"]:.2f} MPa, stroke {r["stroke_mm"]:.1f} mm, 60 s '
+       f'in {dt:.1f} s)')
 
     # With the GVL settings the stop law caps the piston near the speed
     # the outflow needs, so the loop holds a steady error through the
-    # delivery. With the stop law relaxed it holds to the limit switch,
-    # but at the smallest dead volume the end stiffness is past the GVL
-    # gain's stability limit and the loop ends in a bounded limit cycle;
-    # the scheduled controller does not.
+    # delivery.
     r = sim.run(par, scenarios.deliver(par), ctl.SlaveController())
     assert 1.5 < r['dip'] < 3.0, r['dip']
     assert math.isnan(r['tSettle']) and r['V_ok'] < 30, r['V_ok']
     ok(f'delivery 1:1 with the GVL settings: dip {r["dip"]:.2f} MPa, '
        f'never back in band, error above 1 MPa after {r["V_ok"]:.0f} of '
        f'{r["V_delivered"]:.0f} mL')
-    q = par.with_(V_dead=20e-6)
-    relaxed = ctl.SlaveController('r', AnalogFilterTimeConst=0.02,
-                                  StopVelMin=2.0)
-    sched = ctl.ScheduledSlaveController('s', wc=11.0,
-                                         AnalogFilterTimeConst=0.02,
-                                         StopVelMin=2.0)
+    # With StopVelMin raised the GVL loop reaches the limit switch; at
+    # the smallest dead volume its margin there is a quarter of what
+    # the scheduled loop keeps, which shows as late ripple.
+    q = par.with_(V_dead=45e-6)
+    relaxed = ctl.SlaveController('r', StopVelMin=2.0)
+    sched = ctl.ScheduledSlaveController('s', wc=11.0, StopVelMin=2.0,
+                                         V_dead_cfg=45e-6)
     r1 = sim.run(q, scenarios.deliver(q), relaxed)
     r2 = sim.run(q, scenarios.deliver(q), sched)
-    assert r1['V_ok'] == r1['V_delivered'] and r1['ripple'] > 0.01
-    assert r2['V_ok'] == r2['V_delivered'] and r2['ripple'] < 0.001
-    ok(f'delivery to a 20 mL dead volume (end stiffness '
-       f'{r1.stiffness[-1] / 1e9:.0f} MPa/mm): the relaxed GVL loop ends '
-       f'in a {r1["ripple"] * 1e3:.0f} kPa limit cycle, the scheduled '
-       f'loop in {r2["ripple"] * 1e3:.1f} kPa of ripple')
+    assert r1['V_ok'] == r1['V_delivered']
+    assert r2['V_ok'] == r2['V_delivered']
+    assert r1['ripple'] > 2 * r2['ripple'] and r2['ripple'] < 0.001
+    ok(f'delivery to a 45 mL dead volume (end stiffness '
+       f'{r1.stiffness[-1] / 1e9:.0f} MPa/mm): both loops reach the limit '
+       f'switch, late ripple {r1["ripple"] * 1e3:.1f} kPa (GVL) against '
+       f'{r2["ripple"] * 1e3:.1f} kPa (scheduled)')
 
 
 def check_runner():
