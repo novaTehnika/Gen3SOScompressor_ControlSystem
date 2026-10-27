@@ -4,13 +4,13 @@ function r = charRun(label, path, opts)
 %   The script is the master for the run: one Modbus TCP connection carries
 %   the protocol exchange (HR1-6 out, IR1-20 back, every 50 ms, sequenced by
 %   masterStep as in the shell) and, between exchanges, the registers of the
-%   friction bench's step probe (bench/friction/slave/PRG_StepProbe.st),
+%   shared step probe (bench/common/slave/PRG_StepProbe.st),
 %   which captures the velocity command and feedback at the 2 ms scan. The
 %   log and the captures are in frictionRun's formats, so the fits of both
 %   benches read either. The shell model must not be running: a second
 %   client stalls the shell's exchange and the slave raises FAULT_COMM while
 %   motion is commanded. The safety relay is held by
-%   bench/pressure/SafetyHold.slx (buildSafetyHold), started and stopped here.
+%   bench/common/SafetyHold.slx (buildSafetyHold), started and stopped here.
 %
 %   r = charRun(label, path)
 %   r = charRun(label, path, opts)
@@ -51,11 +51,11 @@ function r = charRun(label, path, opts)
 %   opts.probe         true to arm and read the step probe (default false)
 %   opts.safetyModel   model that holds the safety relay ('SafetyHold';
 %                      '' when the relay is held another way)
-%   opts.saveDir       where the CSV files go (default bench/friction/captures)
+%   opts.saveDir       where the CSV files go (default bench/common/captures)
 %   opts.link, opts.now, opts.wait
 %                      transport and clock, replaced by the simulator test
 %
-%   Files, in opts.saveDir, beside the friction bench's logs:
+%   Files, in opts.saveDir, beside the other benches' logs:
 %     <label>_char_<timestamp>.csv   one row per exchange: t, step, status
 %                                    (masterStateMachine code), mode (slave
 %                                    mode of the step), ref (HR5-6 as sent),
@@ -81,12 +81,12 @@ if nargin < 3
     opts = struct();
 end
 here = fileparts(mfilename('fullpath'));
-addpath(fullfile(here, '..', '..', 'master-src', 'logic'), fullfile(here, '..', 'modbus'), ...
-    fullfile(here, '..', 'friction'));
+addpath(fullfile(here, '..', '..', 'master-src', 'logic'), fullfile(here, '..', 'common'));
 ccfg = charConfig();
 cfg = masterConfig();
 map = modbusMap();
-pr = frictionBenchConfig().probe;
+bcfg = benchConfig();
+pr = bcfg.probe;
 pr.nRegs = 6 * pr.nScan;        % three INT arrays, one DINT array, one INT array
 pr.scan = ccfg.scanTime;
 
@@ -94,8 +94,8 @@ opts = withDefault(opts, 'pressureStop', ccfg.pressureStop);
 opts = withDefault(opts, 'posStop', ccfg.posStop);
 opts = withDefault(opts, 'posMin', ccfg.posMin);
 opts = withDefault(opts, 'probe', false);
-opts = withDefault(opts, 'safetyModel', 'SafetyHold');
-opts = withDefault(opts, 'saveDir', fullfile(here, '..', 'friction', 'captures'));
+opts = withDefault(opts, 'safetyModel', bcfg.safetyModel);
+opts = withDefault(opts, 'saveDir', bcfg.captures);
 if ~isfield(opts, 'now')
     t0 = tic;
     opts.now = @() toc(t0);
@@ -104,7 +104,7 @@ if ~isfield(opts, 'wait')
     opts.wait = @(tTarget) waitUntil(opts.now, tTarget);
 end
 if ~isfield(opts, 'link')
-    opts.link = charLink();
+    opts.link = benchLink();
 end
 link = opts.link;
 assert(opts.pressureStop <= ccfg.pressureCeiling, ...
@@ -116,7 +116,7 @@ nSteps = numel(steps);
 
 % --- Safety relay and the stop on exit --------------------------------------
 clear masterStep masterStateMachine
-safety = startSafety(opts.safetyModel, fullfile(here, '..', 'pressure'));
+safety = startSafety(opts.safetyModel, bcfg.safetyDir);
 cleanup = onCleanup(@() shutdown(link, map, safety));
 
 % --- Run state --------------------------------------------------------------
@@ -651,7 +651,7 @@ if isempty(model)
 end
 file = fullfile(dir, [model '.slx']);
 if ~exist(file, 'file')
-    error(['%s not found: run bench/pressure/buildSafetyHold once, or pass ' ...
+    error(['%s not found: run bench/common/buildSafetyHold once, or pass ' ...
         'opts.safetyModel = '''' if the relay is held another way'], file);
 end
 load_system(file);

@@ -5,12 +5,12 @@ function r = frictionRun(label, set, opts)
 %   back, every 50 ms, sequenced by masterStep as in the shell) and every
 %   exchange is logged with the torque feedback, which the shell and the
 %   operator app do not show. With opts.probe the script also takes
-%   scan-rate captures from PRG_StepProbe (slave/PRG_StepProbe.st) in the
+%   scan-rate captures from PRG_StepProbe (bench/common/slave) in the
 %   gaps between exchanges. The shell model must not be running: a second
 %   client on the controller stalls the shell's exchange and the slave
 %   raises FAULT_COMM while motion is commanded. The safety relay is held
-%   by bench/pressure/SafetyHold.slx (buildSafetyHold), started and
-%   stopped by this script.
+%   by bench/common/SafetyHold.slx (buildSafetyHold), started and stopped
+%   by this script.
 %
 %   r = frictionRun(label)                  the 'unloaded' set
 %   r = frictionRun(label, set)
@@ -62,7 +62,7 @@ function r = frictionRun(label, set, opts)
 %   opts.link, opts.now, opts.wait
 %                      transport and clock, replaced by the simulator test
 %
-%   The run is saved as captures/<label>_<set>_<timestamp>.csv with one row
+%   The run is saved as bench/common/captures/<label>_<set>_<timestamp>.csv with one row
 %   per exchange: t (s), step, status (masterStateMachine code), mode
 %   (slave mode code of the step), ref (HR5-6 as sent: mm/s, mm or MPa),
 %   position (mm), velocity (mm/s), torque (% rated), pressure (MPa gauge),
@@ -89,8 +89,8 @@ if nargin < 3
     opts = struct();
 end
 here = fileparts(mfilename('fullpath'));
-addpath(fullfile(here, '..', 'modbus'), fullfile(here, '..', '..', 'master-src', 'logic'));
-bcfg = modbusBenchConfig();
+addpath(fullfile(here, '..', 'common'), fullfile(here, '..', '..', 'master-src', 'logic'));
+bcfg = benchConfig();
 fcfg = frictionBenchConfig();
 cfg = masterConfig();
 map = modbusMap();
@@ -116,8 +116,8 @@ opts = withDefault(opts, 'torqueAbort', fcfg.torqueAbort);
 opts = withDefault(opts, 'xStop', NaN);
 opts = withDefault(opts, 'xMin', NaN);
 opts = withDefault(opts, 'settle', fcfg.settle);
-opts = withDefault(opts, 'safetyModel', 'SafetyHold');
-opts = withDefault(opts, 'saveDir', fullfile(here, 'captures'));
+opts = withDefault(opts, 'safetyModel', bcfg.safetyModel);
+opts = withDefault(opts, 'saveDir', bcfg.captures);
 if ~isfield(opts, 'pMax')
     if isfield(fcfg.pMax, setName)
         opts.pMax = fcfg.pMax.(setName);
@@ -135,7 +135,7 @@ if ~isfield(opts, 'wait')
     opts.wait = @(tTarget) waitUntil(opts.now, tTarget);
 end
 if ~isfield(opts, 'link')
-    opts.link = rawLink(bcfg);
+    opts.link = benchLink();
 end
 link = opts.link;
 
@@ -155,7 +155,7 @@ pr.scan = bcfg.slaveScan;
 
 % --- Safety relay and the stop on exit --------------------------------------
 clear masterStep masterStateMachine
-safety = startSafety(opts.safetyModel, fullfile(here, '..', 'pressure'));
+safety = startSafety(opts.safetyModel, bcfg.safetyDir);
 cleanup = onCleanup(@() shutdown(link, map, safety));
 
 % --- Run state --------------------------------------------------------------
@@ -672,7 +672,7 @@ if isempty(model)
 end
 file = fullfile(dir, [model '.slx']);
 if ~exist(file, 'file')
-    error(['%s not found: run bench/pressure/buildSafetyHold once, or pass ' ...
+    error(['%s not found: run bench/common/buildSafetyHold once, or pass ' ...
         'opts.safetyModel = '''' if the relay is held another way'], file);
 end
 load_system(file);
@@ -734,76 +734,5 @@ if isempty(x)
     v = NaN;
 else
     v = x(max(1, ceil(p / 100 * numel(x))));
-end
-end
-
-
-% ===========================================================================
-% Raw Modbus TCP over tcpclient: FC04 read, FC06 single write, FC16 write.
-% The controller answers in about 4 ms; the modbus object adds some 7 ms
-% per transaction, which the 25 ms gaps cannot spare.
-function link = rawLink(bcfg)
-t = tcpclient(bcfg.address, bcfg.port, 'Timeout', 0.5);
-uid = uint8(bcfg.serverId);
-link.t = t;
-link.read = @(start, n) rawTxn(t, uid, [4, u16(start - 1), u16(n)], 4, n);
-link.write = @(start, vals) rawTxn(t, uid, ...
-    [16, u16(start - 1), u16(numel(vals)), 2 * numel(vals), u16s(vals)], 16, 0);
-link.writeOne = @(addr, val) rawTxn(t, uid, [6, u16(addr - 1), u16(val)], 6, 0);
-link.close = @() delete(t);
-end
-
-
-function regs = rawTxn(t, uid, pdu, fc, nRegs)
-% Send one request and parse its response. Returns the registers of an
-% FC04 read, or [] for a write.
-persistent tid
-if isempty(tid)
-    tid = 0;
-end
-tid = mod(tid + 1, 65536);
-flush(t);
-pdu = uint8(pdu);
-write(t, [u16(tid), uint8([0, 0]), u16(numel(pdu) + 1), uid, pdu]);
-hdr = double(read(t, 7, 'uint8'));
-if numel(hdr) < 7
-    error('no response (%d of 7 header bytes)', numel(hdr));
-end
-len = hdr(5) * 256 + hdr(6);
-body = double(read(t, len - 1, 'uint8'));
-if numel(body) < len - 1
-    error('short response (%d of %d bytes)', numel(body), len - 1);
-end
-if hdr(1) * 256 + hdr(2) ~= tid
-    error('transaction ID %d, expected %d', hdr(1) * 256 + hdr(2), tid);
-end
-if body(1) >= 128
-    error('exception response: function %d, code %d', body(1) - 128, body(2));
-end
-if body(1) ~= fc
-    error('function %d in response, expected %d', body(1), fc);
-end
-if fc == 4
-    if body(2) < 2 * nRegs
-        error('%d bytes of registers, expected %d', body(2), 2 * nRegs);
-    end
-    regs = body(3:2:2 + 2 * nRegs) * 256 + body(4:2:3 + 2 * nRegs);
-else
-    regs = [];
-end
-end
-
-
-function b = u16(v)
-% Big-endian 16-bit value as two bytes.
-v = mod(round(v), 65536);
-b = uint8([floor(v / 256), mod(v, 256)]);
-end
-
-
-function b = u16s(vals)
-b = uint8(zeros(1, 2 * numel(vals)));
-for k = 1:numel(vals)
-    b(2 * k - 1:2 * k) = u16(vals(k));
 end
 end

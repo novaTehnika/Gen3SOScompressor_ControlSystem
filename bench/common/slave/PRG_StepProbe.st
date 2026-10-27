@@ -5,7 +5,8 @@
    Controller: Yaskawa MP2600iec
 
    Description:
-   Serves bench/friction/frictionRun.m and bench/characterisation/charRun.m.
+   Serves bench/friction/frictionRun.m and bench/characterisation/charRun.m
+   (bench/common/benchConfig.m holds its registers).
    On a change of the arm register it records 500 consecutive scans (1 s at
    2 ms) of the commanded velocity, the actual velocity, the actual torque,
    the position and the chamber pressure into the probe registers, so the
@@ -17,9 +18,9 @@
    the same holding register area.
 
    Assign to the 2 ms cyclic task. The FC#04 input register group must
-   extend to IR3410 (see ../README.md). If the group cannot be made that
+   extend to IR3410 (see ../README.md and bench/friction/README.md 4.5). If the group cannot be made that
    large, shorten the capture: change 500 and the array bounds together,
-   and nScan in frictionBenchConfig.m.
+   and nScan in benchConfig.m.
 
    Samples are integers: velocities in 0.001 mm/s, torque in 0.01 % of
    rated, position in 0.01 um from the first sample, whose absolute value

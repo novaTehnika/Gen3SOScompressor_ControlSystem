@@ -1,21 +1,19 @@
-function link = charLink(address, port, serverId)
-%CHARLINK Raw Modbus TCP link over tcpclient for the bench runs: FC04 read,
+function link = benchLink(address, port, serverId)
+%BENCHLINK Raw Modbus TCP link over tcpclient for the bench runs: FC04 read,
 %   FC06 single write, FC16 write. The controller answers in about 4 ms;
 %   the Industrial Communication Toolbox modbus object adds some 7 ms per
 %   transaction, which the 25 ms gaps between master steps cannot spare.
 %
-%   link = charLink()                       address, port and unit from modbusBenchConfig
-%   link = charLink(address, port, serverId)
+%   link = benchLink()                      address, port and unit from benchConfig
+%   link = benchLink(address, port, serverId)
 %
 %   link.read(start, n)        registers start..start+n-1 (1-based) as doubles
 %   link.write(start, vals)    FC16 from register start
 %   link.writeOne(addr, val)   FC06
 %   link.close()
 
-here = fileparts(mfilename('fullpath'));
-addpath(fullfile(here, '..', 'modbus'));
 if nargin < 3
-    bcfg = modbusBenchConfig();
+    bcfg = benchConfig();
     address = bcfg.address;
     port = bcfg.port;
     serverId = bcfg.serverId;

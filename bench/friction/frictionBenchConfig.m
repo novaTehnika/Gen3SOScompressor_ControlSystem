@@ -14,7 +14,7 @@ function cfg = frictionBenchConfig()
 %   loaded set measures, as a friction term proportional to the load.
 
 here = fileparts(mfilename('fullpath'));
-addpath(fullfile(here, '..', '..', 'master-src', 'logic'));
+addpath(fullfile(here, '..', '..', 'master-src', 'logic'), fullfile(here, '..', 'common'));
 master = masterConfig();
 
 % Drivetrain, as configured on the slave (G_cfgGearRatio, G_cfgLeadScrewPitch).
@@ -29,7 +29,8 @@ cfg.etaAssumed    = 0.85;   % efficiency the design model's Fcap assumes, replac
 % The slew to speed (G_cfgDirectCtrlAccel) is added to each step. The
 % times give at least one screw lead of travel at every speed, so the
 % torque ripple at the lead period averages out.
-cfg.accel        = 5;                   % mm/s^2, velocity-mode slew on the slave
+gvl = benchGvl();
+cfg.accel        = gvl.G_cfgDirectCtrlAccel;   % mm/s^2, velocity-mode slew on the slave (GVL)
 cfg.speeds       = [0.1 0.3 1 3 5];     % mm/s; 5 is G_cfgVelLimitMax and masterConfig.jogVelMax
 cfg.tSteady      = [60 40 20 10 10];    % s at speed, unloaded
 cfg.gasStrokeMax = 20;                  % mm per step under a gas charge: bounds the pressure excursion
@@ -53,19 +54,9 @@ cfg.exitGuardPos  = 220;      % mm, G_cfgPosCylinderEntry + G_cfgPosExitGuardMar
 % seconds, with a scan-rate capture armed before every change.
 cfg.stepHold = 3;         % s per level; the capture and its readout take about 2 s
 
-% Scan-rate capture by PRG_StepProbe (slave/PRG_StepProbe.st): registers
-% (1-based), length and scales. The five arrays are contiguous from irFirst:
-% three INT, one DINT and one INT, 6 * nScan registers in all.
-cfg.probe.hrArm     = 111;      % HR111 G_mbStepArm
-cfg.probe.irState   = 401;      % IR401 state, 402 arm echo, 403 count, 404-405 Pos0 (REAL)
-cfg.probe.irFirst   = 411;      % IR411-910 vCmd, 911-1410 vel, 1411-1910 torque, 1911-2910 position, 2911-3410 pressure
-cfg.probe.nScan     = 500;      % scans per capture
-cfg.probe.velScale  = 1000;     % counts per mm/s
-cfg.probe.trqScale  = 100;      % counts per % rated
-cfg.probe.posScale  = 1e5;      % counts per mm
-cfg.probe.presScale = 1000;     % counts per MPa
-cfg.probe.blockRegs = 125;      % registers per FC04 read, one read per exchange gap
-cfg.probe.timeout   = 4;        % s from arm to ready before the capture is given up
+% Scan-rate capture by PRG_StepProbe: registers, length and scales are
+% shared with the other benches (bench/common/benchConfig.m).
+cfg.probe = benchConfig().probe;
 
 % Fit windows.
 cfg.settle      = 1.0;    % s after the command reaches speed before samples count

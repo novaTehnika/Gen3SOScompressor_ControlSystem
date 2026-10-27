@@ -74,7 +74,7 @@ win = struct('file', {}, 'step', {}, 't1', {}, 't2', {}, 'P_MPa', {}, 'Q_mL_s', 
     'v_mm_s', {}, 'Cd', {}, 'dPdt', {}, 'sub', {});
 grav = struct('file', {}, 'collected_mL', {}, 'predicted_mL', {}, 'ratio', {});
 for f = 1:numel(files)
-    d = charReadCsv(files{f});
+    d = benchReadCsv(files{f});
     name = shortName(files{f});
     inP = d.mode == 7 & d.status == 5;
     steps = unique(d.step(inP));

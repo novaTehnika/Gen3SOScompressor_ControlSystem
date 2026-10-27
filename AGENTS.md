@@ -54,6 +54,10 @@ The slave ST is the single source of truth. `tools/st2m.py` translates it into O
 - `SOS_Gen3_Compressor_Interface.m` is the operator app. It writes `RequestedMode` and then increments `CommandSeq` in the shell's Constant blocks. The model acts only on a `CommandSeq` change, except that mode 0 (stop) always acts.
 - `master-src/legacy/` and `SOS_Gen3_Compressor_Master.slx` hold an earlier unfinished Stateflow attempt, kept for reference only.
 
+### Benches (`bench/`)
+
+Each bench (`modbus`, `pressure`, `friction`, `characterisation`) is a directory with its own README, config and fits, run on the lab PC. What they share is in `bench/common/`: the controller connection (`benchConfig.m`), the slave settings parsed from the GVL reference (`benchGvl.m`), the raw Modbus link the run scripts use in place of the shell (`benchLink.m`), the safety-hold model, the step probe program and the `captures/` directory every run logs to. Bench slave programs live beside the bench that owns them and are never part of `slave-src/`.
+
 ### Tests
 
 - `smokeMasterStateMachine`: master state machine against a protocol-level stand-in slave (not the ST sim).

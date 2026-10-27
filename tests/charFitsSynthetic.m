@@ -10,8 +10,7 @@ function charFitsSynthetic()
 %   Run from the repository root:  addpath master-src/logic tests
 
 here = fileparts(mfilename('fullpath'));
-addpath(fullfile(here, '..', 'bench', 'characterisation'), fullfile(here, '..', 'bench', 'friction'), ...
-    fullfile(here, '..', 'bench', 'modbus'));
+addpath(fullfile(here, '..', 'bench', 'characterisation'), fullfile(here, '..', 'bench', 'common'));
 cfg = charConfig();
 A = cfg.pistonArea_mm2;
 Patm = cfg.Patm_MPa;

@@ -85,7 +85,7 @@ caps = struct('file', {}, 'x_mm', {}, 'stepSize', {}, 'tauV', {}, 'Td', {}, 'acc
     'residual', {}, 't10', {}, 't63', {}, 'tauP', {}, 'TdP', {}, 'k_MPa_mm', {}, 'residualP', {});
 logs = [];
 for f = 1:numel(files)
-    d = charReadCsv(files{f});
+    d = benchReadCsv(files{f});
     if isfield(d, 'vCmd')
         caps(end + 1) = fitCapture(d, opts, say); %#ok<AGROW>
     else

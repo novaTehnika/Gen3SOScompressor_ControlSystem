@@ -14,9 +14,11 @@ logs every exchange.
 | `frictionBenchConfig.m` | Torque to force conversion, speed points and durations, limits the run enforces, fit windows |
 | `frictionRun.m` | The master for a run: drives a set of jog steps or a pressure-mode delivery through `masterStep` at the 50 ms exchange and logs position, velocity, torque and pressure to `captures/` |
 | `frictionFit.m` | Reads the logs, checks each step, fits the friction unloaded and loaded, prints the model values |
-| `slave/PRG_StepProbe.st` | Optional slave program: on request captures 500 scans of commanded velocity, velocity, torque, position and pressure in the probe registers |
 | `stepResponseFit.m` | Reads the captures: the drive's velocity-loop lag from steps taken while moving, the breakaway and stick time from steps from rest, the torque ripple at the lead and motor periods |
-| `captures/` | Run logs and captures (gitignored) |
+
+The step probe (`PRG_StepProbe`), the Modbus link, the safety-hold model
+and the `captures/` directory are shared with the other benches and live in
+`bench/common/` (its README has the setup).
 
 The pressure loop's other parameters (bulk modulus, orifice flow, drive lag
 at the piston) have their own bench in `bench/characterisation/`, which
@@ -63,8 +65,9 @@ one.
 ## 2. What the slave allows
 
 The run stays inside the slave's configuration
-(`slave-src/GVL/GlobalVariables_Reference.st`); check the values on the
-machine before the first run.
+(`slave-src/GVL/GlobalVariables_Reference.st`, read by the scripts through
+`bench/common/benchGvl`); keep that file in step with the machine. The
+values below are the ones at the time of writing.
 
 | Setting | Value | Effect on the bench |
 |---------|-------|---------------------|
@@ -85,9 +88,9 @@ Stop the exchange it is passed.
 Slave: `PRG_Main` loaded and running as in service, Modbus server configured
 as in `docs/master/ModbusRegisterMap.md`. No bench program is needed.
 
-Lab PC: `cfg.address` in `bench/modbus/modbusBenchConfig.m` set to the
-controller IP; `SafetyHold.slx` built once with `bench/pressure/buildSafetyHold`
-and set to Connected IO (see `bench/pressure/README.md` section 2). **The
+Lab PC: `cfg.address` in `bench/common/benchConfig.m` set to the
+controller IP; `SafetyHold.slx` built once with `bench/common/buildSafetyHold`
+and set to Connected IO (see `bench/common/README.md`). **The
 shell model must be stopped** for every run: a second Modbus client beside
 it delays the shell's exchange and the slave raises `FAULT_COMM` while
 motion is commanded. Use the operator app to place the axis, then
@@ -102,7 +105,7 @@ r = frictionRun('d10', 'delivery', struct('target', 10, 'xStop', 275));
 
 The run prints each step as it starts, the mean velocity, torque and
 pressure of every step at the end, and saves
-`captures/<label>_<set>_<yyyymmdd_HHMMSS>.csv` with one row per exchange
+`bench/common/captures/<label>_<set>_<yyyymmdd_HHMMSS>.csv` with one row per exchange
 (every 50 ms):
 
 | Column | Unit | Content |
@@ -251,8 +254,8 @@ Slave setup, once:
    (byte range `%QB73792` to `%QB80611`). Save and cycle power. If the
    group cannot be made that large, shorten the capture: change the
    bounds and the count in the program header together, and
-   `cfg.probe.nScan` in `frictionBenchConfig.m`.
-2. Declare the globals in the header of `slave/PRG_StepProbe.st` in the
+   `cfg.probe.nScan` in `bench/common/benchConfig.m`.
+2. Declare the globals in the header of `bench/common/slave/PRG_StepProbe.st` in the
    matching groups. The five arrays are located; if the editor refuses an
    array at a direct address, declare it with a named type
    (`ARRAY[0..499] OF INT`, `ARRAY[0..499] OF DINT`) from the Data Types
@@ -279,13 +282,13 @@ from rest is captured, plus one capture a second after it reaches speed
 for the ripple. 2v must stay within the 5 mm/s limit, so v is at most
 2.5 mm/s.
 
-Captures are saved as `captures/<label>_cap_<set>_<n>_<step>_<tag>_<timestamp>.csv`
+Captures are saved as `bench/common/captures/<label>_cap_<set>_<n>_<step>_<tag>_<timestamp>.csv`
 with `t` (s from the first scan), `vCmd` and `velocity` (mm/s), `torque`
 (% rated), `position` (mm) and `pressure` (MPa gauge); the tag is
 `t<k>_<v>` for the k-th transition to v, or `steady`.
 
 ```matlab
-f = stepResponseFit('captures/s1_cap_*.csv');
+f = stepResponseFit('../common/captures/s1_cap_*.csv');
 ```
 
 For each capture taken while moving it fits the response as the command
@@ -311,9 +314,9 @@ with the step size, the loop is saturating; repeat at the smaller step.
 ## 5. Post-processing
 
 ```matlab
-f = frictionFit('captures/u1_unloaded_*.csv');
-f = frictionFit('captures/u1_unloaded_*.csv', ...
-                {'captures/g1_gas_*.csv', 'captures/d*_delivery_*.csv'});
+f = frictionFit('../common/captures/u1_unloaded_*.csv');
+f = frictionFit('../common/captures/u1_unloaded_*.csv', ...
+                {'../common/captures/g1_gas_*.csv', '../common/captures/d*_delivery_*.csv'});
 ```
 
 The first argument is the unloaded log or logs, the second the loaded

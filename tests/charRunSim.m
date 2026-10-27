@@ -9,8 +9,7 @@ function charRunSim()
 %     addpath master-src/logic slave-sim slave-sim/generated tests
 
 here = fileparts(mfilename('fullpath'));
-addpath(fullfile(here, '..', 'bench', 'characterisation'), fullfile(here, '..', 'bench', 'friction'), ...
-    fullfile(here, '..', 'bench', 'modbus'));
+addpath(fullfile(here, '..', 'bench', 'characterisation'), fullfile(here, '..', 'bench', 'common'));
 saveDir = tempname();
 ccfg = charConfig();
 T = 1; STEP = 2; STATUS = 3; MODE = 4; REF = 5; POS = 6; P = 9;    % log columns

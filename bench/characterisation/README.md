@@ -10,12 +10,12 @@ at the piston (`tauV`). The friction test is a separate bench.
 Everything is measured through the protocol the master already uses: the
 slave reports position, velocity, torque and pressure in IR11-20 every 50 ms
 (`docs/master/ModbusRegisterMap.md`). The drive lag alone needs the 2 ms
-scan, which the friction bench's step probe (`bench/friction/slave/PRG_StepProbe.st`,
+scan, which the shared step probe (`bench/common/slave/PRG_StepProbe.st`,
 already on the controller) provides. Nothing in `slave-src/` changes.
 
 This bench shares the friction bench's conventions: the same Modbus master
-pattern, the same log columns and capture format, the same `captures/`
-directory (`bench/friction/captures`) and the same slave program. Its run
+pattern (`bench/common/`), the same log columns and capture format, the
+same `bench/common/captures/` directory and the same slave program. Its run
 script differs in what the steps can do: ramps that end on a pressure,
 command changes within one mode session without a stop, and pressure and
 position guards.
@@ -24,11 +24,9 @@ position guards.
 |------|----------|
 | `charRun.m` | The master for a run: drives a path of steps through `masterStep` as the shell does, logs every exchange in `frictionRun`'s format, stops the axis when the pressure or the position leaves the envelope, and reads the step probe between exchanges |
 | `charConfig.m` | Chamber and outlet geometry, the pressure limits and the slave settings read from `slave-src/GVL/GlobalVariables_Reference.st` |
-| `charLink.m` | Raw Modbus TCP link over `tcpclient` (FC04, FC06, FC16) |
 | `charBulkModulus.m` | Test 1: K from slow ramps, with a bound on residual gas and, from two fills, the split between liquid and series compliance |
 | `charOrificeFlow.m` | Test 2: Cd and the square-root law from deliveries at held pressure, with the collected-volume check |
 | `charDriveLag.m` | Test 3: tauV and dead time from the step probe captures at the motor and, through their pressure channel, at the piston; the 50 ms log as a coarse check |
-| `charReadCsv.m` | Reader for the logs and captures of either bench |
 
 `tests/charRunSim.m` runs `charRun` and the fits against the simulated slave
 (through the friction bench's `fakeProbeLink`), `tests/charFitsSynthetic.m`
@@ -42,7 +40,7 @@ parameters come out of runs made for it:
 
 | Friction bench run | Gives | Command |
 |---|---|---|
-| `'delivery'` at 10, 5 and 2.5 MPa | Cd and the square-root law (test 2) | `charOrificeFlow({'../friction/captures/d10_delivery_*.csv', ...}, struct('K_Pa', ..., 'collected_mL', [...]))`; leave `collected_mL` out if the discharge was not weighed |
+| `'delivery'` at 10, 5 and 2.5 MPa | Cd and the square-root law (test 2) | `charOrificeFlow({'../common/captures/d10_delivery_*.csv', ...}, struct('K_Pa', ..., 'collected_mL', [...]))`; leave `collected_mL` out if the discharge was not weighed |
 | `'steps'` captures | tauV at the motor (test 3, open chamber) | `stepResponseFit` or `charDriveLag` on the capture files |
 
 What needs a new run: K (section 3, slow ramps in a closed liquid-filled
@@ -56,22 +54,21 @@ the pressure to move). The friction bench's deliveries also serve test 1's purge
 
 ### Lab PC
 
-As for the pressure noise bench (`bench/pressure/README.md` section 2): the
-shell model must be stopped, `cfg.address` in `bench/modbus/modbusBenchConfig.m`
-set to the controller IP, and `SafetyHold.slx` built once with
-`bench/pressure/buildSafetyHold` and set to Connected IO. `charRun` starts it
-before the first command and stops it at the end, which releases the safety
-relay.
+As in `bench/common/README.md`: the shell model must be stopped,
+`cfg.address` in `bench/common/benchConfig.m` set to the controller IP, and
+`SafetyHold.slx` built once with `bench/common/buildSafetyHold` and set to
+Connected IO. `charRun` starts it before the first command and stops it at
+the end, which releases the safety relay.
 
 ```matlab
 cd bench/characterisation
-addpath ../friction ../pressure          % frictionBenchConfig, SafetyHold.slx
+addpath ../common
 r = charRun('label', path);              % see sections 3 to 5 for the paths
 ```
 
 The run ends with the axis stopped, prints a table of the steps and saves
-`../friction/captures/<label>_char_<timestamp>.csv` (columns as in
-`bench/friction/README.md` section 3) and one
+`../common/captures/<label>_char_<timestamp>.csv` (columns as in
+`bench/common/README.md`) and one
 `<label>_cap_<n>_<step>_<timestamp>.csv` per probe capture (columns `t`,
 `vCmd`, `velocity`, `torque`, `position`, as the friction bench's captures).
 Ctrl-C stops the axis the same way. The guards are `charConfig.pressureStop`
@@ -226,8 +223,8 @@ opening from the velocity and the pressure dip). Refill and repeat at 7 and
 4 MPa.
 
 ```matlab
-rq = charOrificeFlow({'../friction/captures/Q4_char_...csv', '../friction/captures/Q7_char_...csv', ...
-    '../friction/captures/Q10_char_...csv'}, ...
+rq = charOrificeFlow({'../common/captures/Q4_char_...csv', '../common/captures/Q7_char_...csv', ...
+    '../common/captures/Q10_char_...csv'}, ...
     struct('K_Pa', rk.K_Pa, 'deadVolume_mL', 25, 'fillVolume_mL', 300, 'collected_mL', [m4 m7 m10] / 1.005));
 ```
 

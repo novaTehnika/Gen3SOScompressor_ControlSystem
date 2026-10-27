@@ -74,7 +74,7 @@ seg = struct('file', {}, 'step', {}, 'dir', {}, 'Pmin', {}, 'Pmax', {}, 'xMean',
     'V_mL', {}, 'dPdx', {}, 'K_lin_GPa', {}, 'K_liq_GPa', {}, 'Vg_mL', {}, ...
     'residual_MPa', {}, 'residual_x_mm', {}, 'n', {}, 'rate_MPa_s', {});
 for f = 1:numel(files)
-    d = charReadCsv(files{f});
+    d = benchReadCsv(files{f});
     if isfield(opts, 'fillVolume_mL')
         fill = opts.fillVolume_mL(min(f, numel(opts.fillVolume_mL))) * 1000;    % mm^3
     else

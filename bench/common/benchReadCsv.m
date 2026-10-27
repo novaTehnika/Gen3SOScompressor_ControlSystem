@@ -1,5 +1,5 @@
-function d = charReadCsv(file)
-%CHARREADCSV Read a bench CSV with a header line into a struct of column
+function d = benchReadCsv(file)
+%BENCHREADCSV Read a bench CSV with a header line into a struct of column
 %   vectors named by the header: a frictionRun log (t, step, status, mode,
 %   ref, position, velocity, torque, pressure, inMotion, inBand,
 %   exchangeMs) or a PRG_StepProbe capture (t, vCmd, velocity, torque,
