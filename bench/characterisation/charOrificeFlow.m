@@ -28,6 +28,9 @@ function r = charOrificeFlow(files, opts)
 %   opts.collectWindow   [t1 t2] run clock per file (rows) for collected_mL
 %   opts.tOpen           valve opening time per file (s on the run clock);
 %                        default detected from the velocity and pressure
+%   opts.pressureOffset  MPa added to the logged pressure before the fit:
+%                        the transducer's reading with the chamber open,
+%                        sign reversed (default 0)
 %   opts.settleRate      MPa/s drift limit for a steady window (default 0.05)
 %   opts.minWindow       s, shortest steady window kept (default 3)
 %   opts.subWindow       s, length of the sub-windows (default 10)
@@ -50,6 +53,7 @@ cfg = charConfig();
 opts = withDefault(opts, 'K_Pa', 1e9);
 opts = withDefault(opts, 'deadVolume_mL', cfg.deadVolume_mL);
 opts = withDefault(opts, 'collected_mL', nan(1, numel(files)));
+opts = withDefault(opts, 'pressureOffset', 0);
 opts = withDefault(opts, 'settleRate', 0.05);
 opts = withDefault(opts, 'minWindow', 3);
 opts = withDefault(opts, 'subWindow', 10);
@@ -62,7 +66,8 @@ K = opts.K_Pa / 1e6;                % MPa
 say = @(varargin) sayIf(~opts.quiet, varargin{:});
 qOf = @(P, Cd) Cd * Ao * sqrt(2 * max(P, 0) * 1e6 / rho) * 1e6;     % mL/s at P MPa
 
-say('\n=== charOrificeFlow: %d file(s), K %.2f GPa for the corrections\n', numel(files), K / 1000);
+say('\n=== charOrificeFlow: %d file(s), K %.2f GPa for the corrections, pressure offset %+.3f MPa\n', ...
+    numel(files), K / 1000, opts.pressureOffset);
 say('Expected (%d orifices of %g um, A_o %.3g m^2):\n', cfg.nOrifice, cfg.dOrifice_um, Ao);
 say('  %7s %12s %12s %12s\n', 'P MPa', 'Q Cd 0.6', 'Q Cd 0.7', 'Q Cd 0.8');
 for P = [4 7 10]
@@ -75,6 +80,7 @@ win = struct('file', {}, 'step', {}, 't1', {}, 't2', {}, 'P_MPa', {}, 'Q_mL_s', 
 grav = struct('file', {}, 'collected_mL', {}, 'predicted_mL', {}, 'ratio', {});
 for f = 1:numel(files)
     d = benchReadCsv(files{f});
+    d.pressure = d.pressure + opts.pressureOffset;
     name = shortName(files{f});
     inP = d.mode == 7 & d.status == 5;
     steps = unique(d.step(inP));
@@ -108,6 +114,7 @@ for f = 1:numel(files)
         after = t >= tOpen;
         dPdt = slopeOver(t, P, 2);
         steady = after & swept > cfg.tubeVolume_mL * 1000 + 500 & abs(dPdt) < opts.settleRate;
+        steady = steady & abs(slopeOver(t, x, 2)) > opts.vOpen;    % the piston moves: the valve is open
         [i1, i2] = longestRun(steady);
         if isempty(i1) || t(i2) - t(i1) < opts.minWindow
             say('    no steady window of %.0f s (drift below %.2f MPa/s)\n', opts.minWindow, opts.settleRate);
@@ -211,8 +218,10 @@ end
 
 % ===========================================================================
 function tOpen = detectOpening(t, v, P, inBand, vOpen)
-% The valve opening: the pressure has been reached (in band, or within
-% 10 % of its later plateau) and the piston then starts to move.
+% The valve opening: the piston starts to move while the pressure falls.
+% A compression toward a new target also moves the piston, but with the
+% pressure rising, so a dip of at least 0.05 MPa within a second of the
+% movement is required (the simulated gas spring dips by 0.08).
 tOpen = NaN;
 reached = find(inBand ~= 0, 1);
 if isempty(reached)
@@ -224,16 +233,16 @@ end
 k = reached;
 while k <= numel(t) - 4
     if all(v(k:k + 4) > vOpen)
-        tOpen = t(k) - 0.05;
-        dip = min(P(k:min(k + 20, end))) - P(max(k - 2, 1));
-        if dip > -0.1
-            warning('charOrificeFlow:opening', ...
-                'piston moved at %.1f s without a pressure dip (%.3f MPa); is this a valve opening?', ...
-                t(k), dip);
+        after = k:min(k + 20, numel(t));
+        dip = min(P(after)) - P(max(k - 2, 1));
+        if dip <= -0.05
+            tOpen = t(k) - 0.05;
+            return;
         end
-        return;
+        k = k + 5;
+    else
+        k = k + 1;
     end
-    k = k + 1;
 end
 end
 

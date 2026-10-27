@@ -355,4 +355,19 @@ and the master's `deadVolume` can be corrected.
 
 ## 7. Results
 
-(none yet)
+Logs of 2026-10-26 (`bench/captures/` on the `bench-tests` branch), fitted
+with the scripts of this bench. Dead volume taken as 25 mL and the fill
+from the geometry; the measured values were not recorded with the runs.
+
+| Parameter | Result | Runs | Notes |
+|---|---|---|---|
+| K (effective, at the piston) | 0.65 GPa, segments 0.62 to 0.72; stiffness 7.0 MPa/mm at 318 mL | `K300_char` x3 at 280 mm | Below the 1 GPa assumed. Up and down agree to 0.2 %, but the curvature gives a gas-like term of 0.2 mL (up) to 0.6 mL (down), 23 % of the compliance, so the liquid-only K is not pinned: the gas-corrected value is 0.70 to 0.76 GPa. A fourth run at 299 mm (251 mL) came out softer, 0.38 GPa, which no liquid chamber does; that fill held more gas. Purge longer (section 2 step 4) and record the fill. |
+| Cd | 0.85 (0.84 to 0.87 over 1.6 to 8.3 MPa), exponent 0.48; Q = 4.8 mL/s at 10 MPa, piston 1.42 mm/s | `d2`, `d5`, `d10` deliveries and `Q10_char` x2 | With the transducer zero of -0.11 MPa corrected (`pressureOffset`). Above the 0.7 assumed: deliveries run 20 % faster than the model. The loop held 8.1 MPa for a 10 MPa target, the steady error the design study predicted. |
+| tauV at the motor | 8.7 +/- 0.5 ms lag after 12 +/- 0.6 ms dead time, the same for 0.3, 1 and 2.5 mm/s steps, up and down | `s1`, `s2` step captures, 74 | **The command is not slewed at `G_cfgDirectCtrlAccel`**: a 2.5 mm/s step is complete in 30 ms, as is a 0.3 mm/s step, so the drive follows the command at whatever rate it needs (36 mm/s^2 for a 1 mm/s step, 90 for 2.5) with a 2 to 5 % overshoot. Fit with `opts.accel` large (1e4); with the GVL slew the model cannot follow and reports a lag near zero. |
+| tauV at the piston | not resolved (below 25 ms) | `lag_wet_char` 50 ms logs, 5 steps at 8.6 to 10 MPa/mm | No captures were taken in these runs (`opts.probe` off, probe without the pressure array). Repeat with the reloaded probe. |
+
+The friction bench's own fits on the same day's runs (`frictionFit`,
+`stepResponseFit`): Coulomb 6.1 kN, viscous 2.3e6 N s/m (11 kN at
+5 mm/s), load term mu 0.45 (efficiency 0.69 pushing), breakaway about
+24 kN; all far above the model's 500 N and 5e3 N s/m. The transducer reads
+-0.11 MPa with the chamber open in every log.
