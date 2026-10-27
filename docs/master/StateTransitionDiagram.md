@@ -433,9 +433,9 @@ Mode Confirm    0___/‾‾‾\_____0__________________________|__0_____
 - Check: Mode code (`G_mbModeCode`) != 0?
 
 ### At Operational State
-- Check: `G_diMotionEnable` falling edge → ST_HOLD_POSITION
+- Check: MotionEnable (`G_mbMotionEnable`) LOW → ST_HOLD_POSITION (a level check, so a drop during drive reset, enable or brake release still stops the mode on its first scan)
 - Check: Fault condition → ST_FAULT
-- Check: Mode bits changed (invalid) → ST_FAULT
+- Check: Mode code changed (invalid) → ST_FAULT
 
 ### At ST_HOLD_POSITION
 - Check: New mode handshake started?

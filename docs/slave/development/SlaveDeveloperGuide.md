@@ -58,7 +58,7 @@ The codebase follows a set of naming conventions to improve readability and main
 | `st` | `STRUCT` | `stCurrentLimits` | A structure instance. |
 | `fb` | Function Block | `fbHandshake` | An instance of a Function Block. |
 | `rTrig` | `R_TRIG` | `rTrigMotionEnable` | A rising-edge trigger. |
-| `fTrig` | `F_TRIG` | `fTrigMotionEnable` | A falling-edge trigger. |
+| `fTrig` | `F_TRIG` | `fTrigSignal` | A falling-edge trigger. |
 
 ### Global Variable Prefixes
 
@@ -166,10 +166,12 @@ Let's say you want to add `MODE_NEW_FEATURE` with a value of `101` (currently un
 
         (* ... continuous logic for the new mode ... *)
 
-        IF fTrigMotionEnable.Q THEN
+        IF NOT bFilteredMotionEnable THEN   (* level, not edge: see below *)
             G_sysCurrentState := ST_HOLD_POSITION;
         END_IF;
     ```
+
+    Leave the state on MotionEnable LOW rather than on its falling edge. The start-up states (drive reset, enable, brake release) do not watch MotionEnable, so a drop there would otherwise be missed and the state never left.
 
 6.  **Handle Transitions:** In `PRG_Main.st`, update the state transitions to allow entry into your new state.
     *   In `ST_BRAKE_RELEASE`, add: `ELSIF eTargetMode = MODE_NEW_FEATURE THEN G_sysCurrentState := ST_NEW_FEATURE;`

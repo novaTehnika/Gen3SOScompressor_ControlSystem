@@ -55,6 +55,27 @@ assert(h.m.statusCode == 3 && abs(h.sl.ax.x - 25) <= cfg.posTolerance);
 assert(abs(h.m.position - h.sl.ax.x) < 0.1);
 fprintf('ok  position move, displayed position %.3f mm\n', h.m.position);
 
+% Go Home with a slow drive start. The link carries no BrakeDisengage, so
+% the master enters the operation tEnableMax after raising MotionEnable,
+% possibly before the axis moves; rest before any motion must not end it.
+% Go Home from home never moves and ends after tGoHomeStartMax.
+h.app.op = 0;
+h = runUntil(h, 5, @(h) h.sl.G.G_sysCurrentState == h.sl.E.E_SystemState.ST_IDLE);
+assert(h.sl.G.G_sysCurrentState == h.sl.E.E_SystemState.ST_IDLE, 'slave did not return to idle');
+powerOnDelay = h.sl.sim.powerOnDelay;
+h.sl.sim.powerOnDelay = 2.5;
+h = command(h, 6);
+h = runUntil(h, 1, []);
+h = runUntil(h, 30, @(h) h.m.state == 1);
+assert(abs(h.sl.ax.x - h.sl.G.G_cfgGoHomePosition) < 0.1, 'Go Home ended before arriving');
+h.sl.sim.powerOnDelay = powerOnDelay;
+t0 = h.tick / 1000;
+h = command(h, 6);
+h = runUntil(h, 1, []);
+h = runUntil(h, 15, @(h) h.m.state == 1);
+assert(h.m.state == 1 && h.tick / 1000 - t0 < cfg.tGoHomeStartMax + 3, 'Go Home from home did not end');
+fprintf('ok  go home with a slow drive start, and from home (%.1f s)\n', h.tick / 1000 - t0);
+
 % Pressure operation: the target goes to the slave in MPa gauge as mode 7,
 % the slave's transducer reading comes back in IR19-20 and is shown in atm
 % absolute. The axis is placed near the chamber once the slave has

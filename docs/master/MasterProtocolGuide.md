@@ -189,7 +189,7 @@ HANDSHAKE_TIMEOUT:
 
 When changing between operational modes (e.g., Position to Velocity):
 
-1. **Drop MotionEnable to 0** - signals mode change request
+1. **Drop MotionEnable to 0** - signals mode change request. The slave checks the level, not the falling edge: MotionEnable at 0 in an operational or homing state stops the mode on the next scan, including when it dropped while the slave was still starting the mode (drive reset, enable, brake release)
 2. **Wait for InMotion (IR6) = 0** - slave performs controlled halt (from Position mode the command is first ramped to rest at `G_cfgPosGateAccelMax`, up to 1.0 s at defaults, before the halt)
 3. **Write the new mode code** - while MotionEnable is still 0
 4. **Wait for confirmation** - slave confirms the new mode in IR3 while MotionEnable is still 0
