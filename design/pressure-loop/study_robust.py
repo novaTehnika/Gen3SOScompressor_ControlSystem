@@ -78,31 +78,25 @@ COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
 
 
 # %% ===== STUDY ARMS ====================================================
-# The arms are the GVL, the GVL with the stop law relaxed (20 ms filter,
-# StopVelMin 2 mm/s), and the scheduled controller at two crossovers,
-# with the drive's limits raised, and assuming a measured bulk modulus.
 # Flow feedforward is not practical on this machine, so no built-in arm
 # uses it; --flow-ff still runs it as a bound on what knowing the flow
 # would buy.
-# The GVL now carries the 20 ms filter. StopVelMin 2 mm/s lets the
-# stop law pass the 1.4 mm/s the measured outflow needs. The scheduled
-# arms assume the dead volume at the low end of its range (a lower bound
-# keeps the stiffness estimate an upper bound), the bulk modulus at the
-# top of its measured range, and the saline volume and charge as
-# configured for the run.
-VMIN2 = {'StopVelMin': 2.0}
+# The GVL carries the 20 ms filter and StopVelMin 2 mm/s, which lets the
+# stop law pass the 1.4 mm/s the measured outflow needs; vmin0.5 is the
+# earlier setting, kept as a reference. The scheduled arms assume the
+# dead volume at the low end of its range (a lower bound keeps the
+# stiffness estimate an upper bound), the bulk modulus at the top of its
+# measured range, and the saline volume and charge as configured for
+# the run.
 SCHED = {'V_dead_cfg': 45e-6, 'K_cfg': 1.0e9}
 CONFIGS = {
     'GVL': ControllerSpec('GVL'),
-    'vmin2': ControllerSpec('vmin2', VMIN2),
-    'sched6': ControllerSpec('sched6', VMIN2,
-                             sched=dict(wc=6.0, **SCHED)),
-    'sched11': ControllerSpec('sched11', VMIN2,
-                              sched=dict(wc=11.0, **SCHED)),
-    'sched11+v7': ControllerSpec('sched11+v7', {**VMIN2, 'VelMax': 7.0},
+    'vmin0.5': ControllerSpec('vmin0.5', {'StopVelMin': 0.5}),
+    'sched6': ControllerSpec('sched6', sched=dict(wc=6.0, **SCHED)),
+    'sched11': ControllerSpec('sched11', sched=dict(wc=11.0, **SCHED)),
+    'sched11+v7': ControllerSpec('sched11+v7', {'VelMax': 7.0},
                                  sched=dict(wc=11.0, **SCHED)),
-    'sched16': ControllerSpec('sched16', VMIN2,
-                              sched=dict(wc=16.0, **SCHED)),
+    'sched16': ControllerSpec('sched16', sched=dict(wc=16.0, **SCHED)),
 }
 
 

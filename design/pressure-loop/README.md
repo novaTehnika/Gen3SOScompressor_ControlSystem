@@ -572,11 +572,11 @@ the ceiling limits the overshoot.
 The study runs a one-at-a-time sensitivity (tornado), then all corners of
 the four most influential parameters, then a Latin hypercube sample
 (`--n`, default 200) for each configuration. The default configurations
-are the GVL (which now carries the 20 ms filter); the GVL with
-`StopVelMin` 2 mm/s so the stop law passes the 1.4 mm/s the measured
-outflow needs; the scheduled controller at wc = 6, 11 and 16 rad/s with
-that setting and the measured bounds (K_cfg 1.0 GPa, dead volume
-45 mL); and wc = 11 with VelMax 7 mm/s. Every configuration sees the
+are the GVL (the 20 ms filter and StopVelMin 2 mm/s, which passes the
+1.4 mm/s the measured outflow needs); the earlier StopVelMin of 0.5 mm/s
+as a reference; the scheduled controller at wc = 6, 11 and 16 rad/s with
+the measured bounds (K_cfg 1.0 GPa, dead volume 45 mL); and wc = 11
+with VelMax 7 mm/s. Every configuration sees the
 same samples and noise seeds.
 `--cfg key=value` runs a single custom configuration instead, and
 `--flow-ff` adds a flow feedforward to it as a bound; the machine cannot
@@ -612,10 +612,11 @@ apply).
 ## Results with the measured parameters
 
 Gains are in mm/s per MPa (Kp) and mm/s per MPa·s (Ki). "GVL" is the
-slave's `FB_PressureController` as configured on the machine after the
-bench tests: Kp 0.5, Ki 0.2, VelMax 5 mm/s, accel and decel 50 mm/s²
-(which the drive does not apply), stop-law stiffness 100 MPa/mm,
-StopVelMin 0.5 mm/s and the 20 ms filter. The time-domain results use
+slave's `FB_PressureController` as now configured: Kp 0.5, Ki 0.2,
+VelMax 5 mm/s, accel and decel 50 mm/s² (which the drive does not
+apply), stop-law stiffness 100 MPa/mm, StopVelMin 2 mm/s and the 20 ms
+filter. StopVelMin was 0.5 mm/s until this study; that setting appears
+below as "StopVelMin 0.5". The time-domain results use
 Heun's method at five steps per scan and the measured plant: K 0.72 GPa,
 343 mL of saline with 50 mL of dead volume, Cd 0.85, a 12 ms dead time
 and 8.7 ms lag in the drive, and the −0.11 MPa transducer offset, which
@@ -637,20 +638,20 @@ reading. The chamber stiffness rises from 0.11 to 6.5 MPa/mm. The legacy
 controllers without the configured stop law overshoot to 13–20 MPa; the
 stop law is what makes the approach safe.
 
-**Delivery with the gains on the machine.** The orifice bank passes
-4.8 mL/s at 10 MPa (the bench measured it; the deliveries ran 20 %
-faster than the earlier model), which needs the piston at 1.4 mm/s, and a
-delivery of the 288 mL above the dead volume takes 60 s. With the GVL
-settings the loop sits low for the whole delivery: the tube's air drops
+**Delivery and the stop-law floor.** The orifice bank passes 4.8 mL/s at
+10 MPa (the bench measured it; the deliveries ran 20 % faster than the
+earlier model), which needs the piston at 1.4 mm/s, and a delivery of
+the 288 mL above the dead volume takes 60 s. With StopVelMin at its
+earlier 0.5 mm/s the loop sat low for the whole delivery: the tube's air drops
 the pressure 0.5 MPa in the opening scan, the outflow pulls it to
 7.9 MPa, and the stop law, which with 100 MPa/mm and 50 mm/s² admits the
 1.4 mm/s the outflow needs only at an error of about 2 MPa, holds the
 integrator through its anti-windup. The bench saw this: the loop held
-8.1 MPa for a 10 MPa target. Raising `StopVelMin` to 2 mm/s removes it,
-and because the dead volume caps the end stiffness at 49 MPa/mm
-(K 0.72 GPa, 50 mL) the GVL gain keeps 26° of phase margin and 4 dB of
-gain margin at the limit switch, so the whole 288 mL is delivered with
-the pressure in band at nominal parameters.
+8.1 MPa for a 10 MPa target. `StopVelMin` of 2 mm/s, now the GVL value,
+removes it, and because the dead volume caps the end stiffness at
+49 MPa/mm (K 0.72 GPa, 50 mL) the GVL gain keeps 26° of phase margin and
+4 dB of gain margin at the limit switch, so the whole 288 mL is
+delivered with the pressure in band at nominal parameters.
 
 **Scheduled controller.** `ScheduledSlaveController` (equations (39) to
 (41)) with the measured bounds (K_cfg 1.0 GPa, dead volume 45 mL) holds
@@ -662,8 +663,8 @@ use a higher gain at the valve opening than before. Nominal results,
 
 | Arm | Compress: arrive s / overshoot MPa | Delivery: dip MPa / margin MPa / V_ok mL |
 |---|---|---|
-| GVL as configured | 4.4 / 0.56 | 2.07 / 4.4 / 22 (steady error) |
-| GVL, StopVelMin 2 | 4.3 / 0.63 | 2.07 / 4.4 / 288 (all) |
+| StopVelMin 0.5 (earlier) | 4.4 / 0.56 | 2.07 / 4.4 / 22 (steady error) |
+| GVL | 4.3 / 0.63 | 2.07 / 4.4 / 288 (all) |
 | scheduled, wc 6 | 3.2 / 0.13 | 1.84 / 4.6 / 288 (all) |
 | scheduled, wc 11 | 2.4 / 0.11 | 1.14 / 5.3 / 288 (all) |
 | scheduled, wc 11, Ki = Kp, VelMax 7 | 2.0 / 0.11 | 1.11 / 5.3 / 288 (all) |
@@ -688,7 +689,7 @@ saline, so each megapascal of dip costs about 0.27 in the ratio, and a
 higher target buys 0.27 per megapascal the other way. Volume delivered
 before a violation at nominal parameters, 0.5 MPa margin:
 
-| Charge | P_sat MPa | GVL | GVL, StopVelMin 2 | sched wc 6 | sched wc 11 | sched wc 16 |
+| Charge | P_sat MPa | StopVelMin 0.5 | GVL | sched wc 6 | sched wc 11 | sched wc 16 |
 |---|---|---|---|---|---|---|
 | 1:1 | 3.6 | 22 mL | 288 | 288 | 288 | 288 |
 | 2:1 | 7.2 | 22 | 288 (margin 0.7) | 288 (0.9) | 288 (1.6) | 288 (1.8) |
@@ -706,14 +707,14 @@ study at another target.
 **Robustness** (100 Latin hypercube samples over the measured ranges;
 pass rate for every requirement, in percent):
 
-| Charge, target | GVL | GVL, StopVelMin 2 | sched wc 6 | sched wc 11 | sched wc 11, VelMax 7 | sched wc 16 |
+| Charge, target | StopVelMin 0.5 | GVL | sched wc 6 | sched wc 11 | sched wc 11, VelMax 7 | sched wc 16 |
 |---|---|---|---|---|---|---|
 | 1:1 at 10 MPa | 0 | **100** | **100** | **100** | **100** | **100** |
 | 2:1 at 10 MPa | 0 | **100** | **100** | **100** | **100** | **100** |
 | 2.5:1 at 10 MPa | 0 | 0 | 0 | 0 | 0 | 0 |
 | 2.5:1 at 11 MPa | 0 | 0 | 0 | 93 | 93 | **100** |
 
-The GVL as configured fails every sample on control (the steady error).
+The earlier StopVelMin fails every sample on control (the steady error).
 Every other arm passes every sample at 1:1 and 2:1: with the measured
 chamber the range of plausible parameters is narrow enough that nothing
 in it threatens the ceiling, the saturation margin or the end of the
@@ -727,7 +728,7 @@ failures being the stiffest chambers with the noisiest transducer. The
 true pressure peaks at 11.1 MPa, under the ceiling.
 
 **What this means for the machine.**
-- Raise `G_cfgPressureStopVelMin` to 2 mm/s. That alone removes the
+- `G_cfgPressureStopVelMin` is now 2 mm/s. That alone removes the
   steady error the bench saw (8.1 MPa for a 10 MPa target) and delivers
   1:1 and 2:1 at 10 MPa in every plausible case with the gains as they
   are.

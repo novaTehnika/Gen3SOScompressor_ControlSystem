@@ -57,24 +57,24 @@ TRACE_RATIO = 1.0                       # [-] ratio of the plotted traces
 def controller_set():
     """Return the controllers compared.
 
-    The slave arms are the GVL and the GVL with StopVelMin 2 mm/s (the
-    measured outflow needs 1.4 mm/s). The scheduled arms are
+    The slave arms are the GVL (StopVelMin 2 mm/s, which passes the
+    1.4 mm/s the measured outflow needs) and the earlier StopVelMin of
+    0.5 mm/s as a reference. The scheduled arms are
     ScheduledSlaveController at three crossovers with the measured
     bounds (K 1.0 GPa, dead volume 45 mL). The flow-feedforward arm is
     a bound; the feedforward is not implementable on the machine.
     """
     S = ctl.SlaveController
     Sch = ctl.ScheduledSlaveController
-    vmin2 = dict(StopVelMin=2.0)
     sched = dict(V_dead_cfg=45e-6, K_cfg=1.0e9)
     return [
         S('slave (GVL)'),
-        S('slave vmin2', **vmin2),
-        Sch('sched wc6 vmin2', wc=6.0, **sched, **vmin2),
-        Sch('sched wc11 vmin2', wc=11.0, **sched, **vmin2),
-        Sch('sched wc11 ki1 vmin2 v7', wc=11.0, ki_ratio=1.0, VelMax=7.0,
-            **sched, **vmin2),
-        Sch('sched wc16 vmin2', wc=16.0, **sched, **vmin2),
+        S('slave vmin0.5 (earlier)', StopVelMin=0.5),
+        Sch('sched wc6', wc=6.0, **sched),
+        Sch('sched wc11', wc=11.0, **sched),
+        Sch('sched wc11 ki1 v7', wc=11.0, ki_ratio=1.0, VelMax=7.0,
+            **sched),
+        Sch('sched wc16', wc=16.0, **sched),
         S('slave +flowFF (bound)', flow_ff=True),
     ]
 

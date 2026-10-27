@@ -77,7 +77,8 @@ def check_config():
     assert c['G_cfgScanTime'] == 0.002 and c['G_cfgAnalogMedianSize'] == 5
     par = Params()
     assert (par.Ts == 0.002 and par.vmax == 5e-3 and par.medN == 5
-            and par.tauF == 0.02)
+            and par.tauF == 0.02
+            and par.cfg()['G_cfgPressureStopVelMin'] == 2.0)
     q = par.with_(G_cfgPressureKp=2.0, K=2e9)
     assert (q.cfg()['G_cfgPressureKp'] == 2.0 and q.K == 2e9
             and par.cfg()['G_cfgPressureKp'] == 0.5)
@@ -393,8 +394,7 @@ def check_scheduled():
             self.k_log.append(self.k_est)
             return u
     for name in ('compress', 'deliver'):
-        c = Logged('s', wc=11.0, K_cfg=par.K, V_l_cfg=par.Vl0,
-                   AnalogFilterTimeConst=0.02, StopVelMin=2.0)
+        c = Logged('s', wc=11.0, K_cfg=par.K, V_l_cfg=par.Vl0)
         r = sim.run(par, scenarios.make(name, par), c)
         ratio = np.array(c.k_log) / r.stiffness
         assert ratio.min() > 0.98, (name, ratio.min())
@@ -466,22 +466,22 @@ def check_closed_loop():
        f'{r["overshoot"]:.2f} MPa, stroke {r["stroke_mm"]:.1f} mm, 60 s '
        f'in {dt:.1f} s)')
 
-    # With the GVL settings the stop law caps the piston near the speed
-    # the outflow needs, so the loop holds a steady error through the
-    # delivery.
-    r = sim.run(par, scenarios.deliver(par), ctl.SlaveController())
+    # With the earlier StopVelMin of 0.5 mm/s the stop law caps the
+    # piston below the speed the outflow needs, so the loop holds a
+    # steady error through the delivery.
+    r = sim.run(par, scenarios.deliver(par),
+                ctl.SlaveController('old', StopVelMin=0.5))
     assert 1.5 < r['dip'] < 3.0, r['dip']
     assert math.isnan(r['tSettle']) and r['V_ok'] < 30, r['V_ok']
-    ok(f'delivery 1:1 with the GVL settings: dip {r["dip"]:.2f} MPa, '
+    ok(f'delivery 1:1 with StopVelMin 0.5 mm/s: dip {r["dip"]:.2f} MPa, '
        f'never back in band, error above 1 MPa after {r["V_ok"]:.0f} of '
        f'{r["V_delivered"]:.0f} mL')
-    # With StopVelMin raised the GVL loop reaches the limit switch; at
-    # the smallest dead volume its margin there is a quarter of what
-    # the scheduled loop keeps, which shows as late ripple.
+    # With the GVL's StopVelMin of 2 mm/s the loop reaches the limit
+    # switch; at the smallest dead volume its margin there is a quarter
+    # of what the scheduled loop keeps, which shows as late ripple.
     q = par.with_(V_dead=45e-6)
-    relaxed = ctl.SlaveController('r', StopVelMin=2.0)
-    sched = ctl.ScheduledSlaveController('s', wc=11.0, StopVelMin=2.0,
-                                         V_dead_cfg=45e-6)
+    relaxed = ctl.SlaveController('r')
+    sched = ctl.ScheduledSlaveController('s', wc=11.0, V_dead_cfg=45e-6)
     r1 = sim.run(q, scenarios.deliver(q), relaxed)
     r2 = sim.run(q, scenarios.deliver(q), sched)
     assert r1['V_ok'] == r1['V_delivered']

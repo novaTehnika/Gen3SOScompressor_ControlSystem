@@ -234,9 +234,12 @@
                                                           velocity is clamped to sqrt(2*Decel*|error|/stiffness).
                                                           Above the liquid-only chamber's ~20 MPa/mm because the
                                                           filtered reading lags the chamber during the approach *)
-     G_cfgPressureStopVelMin     : LREAL := 0.5        (* The stop law never clamps below this (mm/s), so outflow
-                                                          can be balanced at zero error; overshoot from this
-                                                          velocity is at most stiffness*v^2/(2*decel) *)
+     G_cfgPressureStopVelMin     : LREAL := 2.0        (* The stop law never clamps below this (mm/s), so outflow
+                                                          can be balanced at zero error. Must exceed the piston
+                                                          speed the outlet needs (1.4 mm/s at 10 MPa through the
+                                                          orifice bank), or the loop holds a steady error below
+                                                          the target. Overshoot from this velocity is at most
+                                                          stiffness*v^2/(2*decel) *)
      G_cfgPressureTorqueLimit    : LREAL := 100.0      (* Torque limit in pressure mode (% of rated). Caps the piston
                                                           force if the sensor reads low *)
      G_cfgPressureTargetMax      : LREAL := 15.0       (* Highest target accepted from the master (MPa gauge) *)
