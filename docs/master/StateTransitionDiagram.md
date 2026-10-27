@@ -433,7 +433,7 @@ Mode Confirm    000_/‾‾‾\_____000________________________|__000___
 - Check: Mode bits != 000?
 
 ### At Operational State
-- Check: `G_diMotionEnable` falling edge → ST_HOLD_POSITION
+- Check: `G_diMotionEnable` LOW → ST_HOLD_POSITION (a level check, so a drop during drive reset, enable or brake release still stops the mode on its first scan)
 - Check: Fault condition → ST_FAULT
 - Check: Mode bits changed (invalid) → ST_FAULT
 
