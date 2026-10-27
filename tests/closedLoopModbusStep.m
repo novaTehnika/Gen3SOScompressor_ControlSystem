@@ -76,22 +76,23 @@ h = runUntil(h, 15, @(h) h.m.state == 1);
 assert(h.m.state == 1 && h.tick / 1000 - t0 < cfg.tGoHomeStartMax + 3, 'Go Home from home did not end');
 fprintf('ok  go home with a slow drive start, and from home (%.1f s)\n', h.tick / 1000 - t0);
 
-% Pressure operation: the target goes to the slave in MPa as mode 7, the
-% slave's transducer reading comes back in IR19-20 and is shown in atm.
-% The axis is placed near the chamber once the slave has released it.
+% Pressure operation: the target goes to the slave in MPa gauge as mode 7,
+% the slave's transducer reading comes back in IR19-20 and is shown in atm
+% absolute. The axis is placed near the chamber once the slave has
+% released it.
 h = command(h, 0);
 h = runUntil(h, 5, @(h) h.m.state == 1 && ...
     h.sl.G.G_sysCurrentState == h.sl.E.E_SystemState.ST_IDLE);
 h.sl.ax.x = h.sl.sim.chamberContactPos + 40;
-h.app.targetPressure = 20;          % atm gauge
+h.app.targetPressure = 20 + cfg.atmAmbient;     % atm absolute
 h = command(h, 4);
 h = runUntil(h, 10, @(h) h.m.statusCode == 5);
 assert(h.m.statusCode == 5 && h.u.modeCode == 7);
 assert(abs(h.u.reference - 20 / cfg.atmPerMPa) < 1e-3);
 h = runUntil(h, 30, @(h) h.y.performanceStatus == 1);
 assert(h.y.performanceStatus == 1, 'pressure target not reached');
-assert(abs(h.m.pressure - h.sl.ax.P * cfg.atmPerMPa) < 0.5);
-fprintf('ok  pressure operation (%.1f atm shown)\n', h.m.pressure);
+assert(abs(h.m.pressure - (h.sl.ax.P * cfg.atmPerMPa + cfg.atmAmbient)) < 0.5);
+fprintf('ok  pressure operation (%.1f atm absolute shown)\n', h.m.pressure);
 
 % Drive fault: latched, the full code mirrored in the mode register, and
 % cleared by the operator reset.
@@ -177,6 +178,12 @@ h.app.estop = 0;
 h = runUntil(h, 0.5, []);
 assert(h.m.doSafety == 1 && h.m.state == 1);
 fprintf('ok  e-stop\n');
+
+% Displayed volume: dead volume at the end of travel, bore area per mm.
+assert(abs(x2mL(cfg.posEOT, cfg) - cfg.deadVolume) < 1e-9);
+assert(abs(x2mL(cfg.posEOT - 100, cfg) - cfg.deadVolume ...
+           - 100 * pi / 4 * (2.602 * 25.4)^2 / 1000) < 1e-6);
+fprintf('ok  volume scaling (%.3f mL/mm)\n', mLPerMm(cfg));
 
 fprintf('all passed\n');
 end

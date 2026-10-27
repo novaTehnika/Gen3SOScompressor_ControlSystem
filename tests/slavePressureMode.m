@@ -42,7 +42,7 @@ h.u.reference = 12;
 h.pMax = 0;
 h = runUntil(h, 10, @(h) abs(h.sl.ax.P - 12) <= 0.05);
 h = runFor(h, 2);
-assert(abs(h.sl.ax.P - 12) <= G.G_cfgPressureInBand && h.pMax <= 12.6, 'overshoot %.3f MPa', h.pMax - 12);
+assert(abs(h.sl.ax.P - 12) <= G.G_cfgPressureInBand && h.pMax <= 12.3, 'overshoot %.3f MPa', h.pMax - 12);
 fprintf('ok  step to 12 MPa (max %.3f MPa)\n', h.pMax);
 
 % Outflow disturbance: the loop holds the pressure up while liquid leaves

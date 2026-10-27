@@ -84,7 +84,7 @@ These parameters control the software filters applied to raw I/O signals to reje
 | `G_cfgDebounceTimeFault`| T#20MS | ms | Debounce time for the Fault Reset signal. |
 | `G_cfgDebounceTimeLimitStd`| T#5MS | ms | Debounce time for the Retract limit switch. |
 | `G_cfgDebounceTimeLimitHome`| T#2MS | ms | Debounce time for the Home limit switch. This is shorter to increase the precision and repeatability of the Home to Limit sequence. |
-| `G_cfgAnalogFilterTimeConst`| T#50MS | ms | Time constant for the IIR low-pass filter on the analog reference input. **Tuning:** Increase for smoother but delayed response. Decrease for faster but potentially noisier response. |
+| `G_cfgAnalogFilterTimeConst`| T#20MS | ms | Time constant for the IIR low-pass filter on the pressure input, after the median filter. **Tuning:** Its lag adds to the pressure loop's overshoot on a target step; the median filter and the capacitor across the loop shunt leave little noise for it to remove. Increase only if the filtered reading is visibly noisy. |
 | `G_cfgAnalogMedianSize`| 3 | count | The number of samples for the median filter on the analog input (valid: 3 or 5). The median filter is excellent at rejecting large, single-sample spikes. |
 
 ---

@@ -5,16 +5,24 @@ cfg.dt             = 0.025;     % model step (s)
 cfg.exchangePeriod = 0.05;      % Modbus write + read period (s), a multiple of dt
 cfg.commTimeout    = 0.3;       % slave counter unchanged this long = link lost (s): several exchanges, to ride out a slow one
 
-% Pressure: the app works in atm gauge, the slave in MPa gauge.
+% Cylinder geometry. Displayed positions are distances from the end of
+% travel (posEOT) and volume is swept volume from there plus deadVolume.
+cfg.posEOT       = 365;             % mm, position at the end of travel (compression end)
+cfg.boreDiameter = 2.602 * 25.4;    % mm (2.602 in)
+cfg.deadVolume   = 10;              % mL, volume left at the end of travel
+
+% Pressure: the app works in atm absolute, the slave in MPa gauge.
 cfg.atmPerMPa   = 9.869;
+cfg.atmAmbient  = 1;        % atm, added to the slave's gauge reading
 cfg.pressureMax = 15;       % MPa gauge, the slave's G_cfgPressureTargetMax
 
 % Master soft limits, inside the slave's configured travel.
-cfg.posMin = 5;             % mm
-cfg.posMax = 360;           % mm
+cfg.posMin = 0;             % mm
+cfg.posMax = 367;           % mm
 
 % Velocity command limit.
 cfg.jogVelMax = 5;          % mm/s
+cfg.jogSpeeds = [0.1 0.25 0.5 1 2 5];   % mm/s, app presets; the largest is the default
 
 % Position arrival judged from feedback.
 cfg.posTolerance = 0.5;     % mm

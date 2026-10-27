@@ -391,7 +391,7 @@ float voltage_to_position(float voltage) {
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| AI Filter Time Constant | 50 ms | `G_cfgAnalogFilterTimeConst` (IIR low-pass after a 3-sample median) |
+| AI Filter Time Constant | 20 ms | `G_cfgAnalogFilterTimeConst` (IIR low-pass after a 5-sample median) |
 | AO Update Rate | 1 kHz | Position feedback |
 | AI Sample Rate | 1 kHz minimum | For smooth control |
 
