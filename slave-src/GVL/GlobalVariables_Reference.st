@@ -171,8 +171,17 @@
         Velocity/Position; zero values leave the servo unable to move.
         ======================================================================== *)
 
-     G_cfgDirectCtrlAccel      : LREAL := 10.0         (* Accel for Y_DirectControl operating modes (mm/s^2) *)
-     G_cfgDirectCtrlDecel      : LREAL := 10.0         (* Decel for Y_DirectControl operating modes (mm/s^2) *)
+     G_cfgDirectCtrlAccel      : LREAL := 10.0         (* Accel for Y_DirectControl operating modes (mm/s^2). A
+                                                          velocity step on the machine was not slewed at this
+                                                          value in VelocityTLMode (bench/characterisation) *)
+     G_cfgDirectCtrlDecel      : LREAL := 10.0         (* Decel for Y_DirectControl operating modes (mm/s^2);
+                                                          the block has no decel input, so only the stop law
+                                                          uses it *)
+     G_cfgDirectCtrlFilterTime : LREAL := 0.05        (* Y_DirectControl FilterTimeConstant (s): the block's own
+                                                          filter on the command it sends the drive. Wired from
+                                                          G_cmdDirectControl.FilterTimeConstant in the LD POU. A
+                                                          lag inside the pressure loop; tune on the bench with
+                                                          a velocity step (bench/friction 'steps') *)
 
 
      (* ========================================================================

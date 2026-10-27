@@ -838,6 +838,7 @@ G_cmdDirectControl.Velocity := LREAL#0.0;
 G_cmdDirectControl.Torque := LREAL#0.0;
 G_cmdDirectControl.Acceleration := G_cfgDirectCtrlAccel;
 G_cmdDirectControl.Deceleration := G_cfgDirectCtrlDecel;
+G_cmdDirectControl.FilterTimeConstant := G_cfgDirectCtrlFilterTime;
 G_cmdSetPosition.Execute := FALSE;
 G_cmdSetPosition.Position := LREAL#0.0;
 G_cmdSetPosition.Mode := FALSE;
