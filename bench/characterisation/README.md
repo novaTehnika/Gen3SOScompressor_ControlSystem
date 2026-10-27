@@ -43,13 +43,13 @@ parameters come out of runs made for it:
 | Friction bench run | Gives | Command |
 |---|---|---|
 | `'delivery'` at 10, 5 and 2.5 MPa | Cd and the square-root law (test 2) | `charOrificeFlow({'../friction/captures/d10_delivery_*.csv', ...}, struct('K_Pa', ..., 'collected_mL', [...]))`; leave `collected_mL` out if the discharge was not weighed |
-| `'steps'` captures | tauV at the motor (test 3, motor side) | `stepResponseFit` or `charDriveLag` on the capture files |
+| `'steps'` captures | tauV at the motor (test 3, open chamber) | `stepResponseFit` or `charDriveLag` on the capture files |
 
-What needs a new run: K (section 3, slow ramps in a liquid-only chamber,
-which no friction set does) and the piston-side lag (section 5, velocity
-steps in a liquid-only chamber at 3 to 5 MPa with the probe recording the
-pressure; the gas-charge set's chamber is too soft for the pressure to
-move). The friction bench's deliveries also serve test 1's purge, section
+What needs a new run: K (section 3, slow ramps in a closed liquid-filled
+chamber, which no friction set does) and the lag at the piston (section 5,
+velocity steps in a closed liquid-filled chamber at 3 to 5 MPa with the
+probe recording the pressure; the gas-charge set's chamber is too soft for
+the pressure to move). The friction bench's deliveries also serve test 1's purge, section
 2 step 4.
 
 ## 1. Setup
@@ -269,23 +269,30 @@ The slave's velocity feedback (`G_sysActualVelocity`, from
 the motor encoder, differentiated by the drive and scaled through the
 70:1 gearbox and the 5.08 mm lead. It measures the motor, so gearbox lost
 motion and screw compliance are invisible to it. The test therefore has
-two parts: the motor-side lag from the velocity feedback at the scan rate,
-and the piston-side lag from the pressure, which only the piston moves.
+two parts. With the chamber open (drained, or the fill port open) the
+velocity feedback at the scan rate gives the lag at the motor. With the
+chamber closed and full of liquid, only the piston can change the
+pressure, so the pressure gives the lag at the piston.
 
-**Motor side.** The friction bench measures this (`bench/friction/README.md`
-section 4.5): `frictionRun(label, 'steps')` with `PRG_StepProbe` loaded and
-`stepResponseFit` on the captures. `charDriveLag` reads the same captures
-and fits the same model by least squares, so either script gives tauV at
-the motor; they should agree within a millisecond or two. Keep the step
+**Open chamber: the lag at the motor.** Run it with the piston in the
+bore, the service condition; a run with the piston withdrawn is only
+needed if the steps from rest show far more lag than the steps taken
+while moving, which would be the seals' stiction rather than the loop
+(the friction bench measures that). The friction bench measures this lag
+too (`bench/friction/README.md` section 4.5): `frictionRun(label, 'steps')`
+with `PRG_StepProbe` loaded and `stepResponseFit` on the captures.
+`charDriveLag` reads the same captures and fits the same model by least
+squares, so either script gives tauV at the motor; they should agree
+within a millisecond or two. Keep the step
 size at or below 0.2 s times the slew (`G_cfgDirectCtrlAccel`: 1 mm/s at
 5 mm/s^2) so the ramp fits in the capture, and hold each command at least
 3 s so the capture (1 s) and its readout (1 s) finish before the next
 change. Raising the slew to the pressure-mode values (50 mm/s^2) for the
 test separates the lag from the ramp more sharply.
 
-**Piston side** (liquid-only chamber at 3 to 5 MPa, from section 2): small
-steps, because at 11 MPa/mm a 0.2 mm/s step for 0.3 s moves the pressure
-by 0.7 MPa:
+**Closed, liquid-filled chamber: the lag at the piston** (purged, at 3 to
+5 MPa, from section 2): small steps, because at 11 MPa/mm a 0.2 mm/s step
+for 0.3 s moves the pressure by 0.7 MPa:
 
 ```matlab
 opts.probe = true;                                   % PRG_StepProbe loaded
@@ -321,9 +328,10 @@ residual, and the model-free times at which the feedback reaches 10 % and
 50 ms. A Sigma-7 velocity loop tuned for this load is typically 10 to
 30 ms; the dead time between `G_sysCommandedVelocity` and the feedback is
 two to four scans (Mechatrolink out and back, plus the task order) and
-should be below 20 ms. The piston-side value can exceed the motor-side
-lag plus dead time when the chamber is stiff; a difference of more than a
-few milliseconds is worth carrying into the model as tauV. Accept a capture
+should be below 20 ms. The closed-chamber value (at the piston) can exceed
+the open-chamber lag plus dead time when the chamber is stiff; a
+difference of more than a few milliseconds is worth carrying into the
+model as tauV. Accept a capture
 residual below 5 % of the step, a spread of tauV across captures below
 30 %, up and down steps within 20 % of each other.
 
