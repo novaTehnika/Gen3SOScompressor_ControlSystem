@@ -16,7 +16,7 @@ map.hr.reference    = 5;    % REAL: mm, mm/s or % by mode (5-6)
 
 map.ir.heartbeatEcho     = 1;
 map.ir.slaveCounter      = 2;   % slave scan counter, wraps at 65536
-map.ir.confCode          = 3;   % DO0-2: mode confirmation, or 3-bit fault code
+map.ir.confCode          = 3;   % confirmed mode code, 0 outside the handshake
 map.ir.faultCode         = 4;   % full fault code, 0 when none
 map.ir.faultActive       = 5;
 map.ir.inMotion          = 6;

@@ -8,11 +8,11 @@
    Manages the mode entry handshake protocol between master and slave.
 
    Mode Entry Handshake Sequence:
-   1. Master sets mode bits (DI0-2)
+   1. Master writes the mode code (G_mbModeCode)
    2. Slave decodes and validates mode
-   3. Slave sets confirmation bits (DO0-2) to match
-   4. Master sets diMotionEnable HIGH
-   5. Slave verifies mode bits still match -> handshake complete
+   3. Slave publishes ConfirmedMode in the confirmation register (G_mbConfCode)
+   4. Master sets MotionEnable (G_mbMotionEnable) HIGH
+   5. Slave verifies the mode code still matches -> handshake complete
    6. If timeout or mismatch -> handshake failed
 
    NOTE: All inputs should be pre-filtered/debounced by the caller.

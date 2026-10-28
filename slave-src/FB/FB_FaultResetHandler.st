@@ -13,8 +13,8 @@
    - MotionEnable is LOW
    - System is in a fault state
    - Active fault code is not FAULT_NONE
-   - DI0-DI2 bits are stable (no change from previous scan)
-   - Master has mirrored the fault code on DI0-2 (MasterFaultCode matches ActiveFaultCode)
+   - Decoded mode code is stable (no change from previous scan)
+   - Master has mirrored the fault code in G_mbModeCode (MasterFaultCode matches ActiveFaultCode)
 
    NOTE: All inputs should be pre-filtered/debounced by the caller.
 
@@ -24,9 +24,9 @@
        FaultReset       : BOOL             (* Filtered fault reset signal from master
        MotionEnable     : BOOL             (* Filtered motion enable signal
        InFaultState     : BOOL             (* TRUE when system is in a fault state
-       BitsStable       : BOOL             (* DI0-DI2 bits stable (no change from previous scan)
+       CodeStable       : BOOL             (* Decoded mode code stable (no change from previous scan)
        ActiveFaultCode  : E_FaultCode      (* Active fault code for mirroring check
-       MasterFaultCode  : E_FaultCode      (* Fault acknowledgement decoded from DI0-DI2
+       MasterFaultCode  : E_FaultCode      (* Fault acknowledgement decoded from G_mbModeCode
      VAR_OUTPUT:
        FaultResetValid  : BOOL             (* TRUE when all fault reset conditions met
    ============================================================================ *)
@@ -45,11 +45,11 @@ END_IF;
    - MotionEnable is LOW
    - We are in fault state
    - Active fault code is not FAULT_NONE
-   - DI0-DI2 bits are stable
-   - Master has mirrored the fault code on DI0-2 *)
+   - Decoded mode code is stable
+   - Master has mirrored the fault code in G_mbModeCode *)
 FaultResetValid := FaultReset AND
                    (NOT MotionEnable) AND
                    InFaultState AND
                    (ActiveFaultCode <> E_FaultCode#FAULT_NONE) AND
-                   BitsStable AND
+                   CodeStable AND
                    (MasterFaultCode = ActiveFaultCode);

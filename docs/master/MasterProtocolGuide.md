@@ -15,8 +15,8 @@ This document provides step-by-step guidance for implementing the Simulink Deskt
 +-------------------+      Modbus TCP, port 502        +-------------------+
 |                   |  == HR1-6: heartbeat, mode,  ==> |                   |
 |  Simulink DTRT    |     enable, reset, reference     |  MP2600iec Slave  |
-|  Master           |  <= IR1-18: echo, counter, ===== |  (Modbus server)  |
-|                   |     confirm, fault, status, pos  |                   |
+|  Master           |  <= IR1-20: echo, counter, ===== |  (Modbus server)  |
+|                   |  confirm, fault, status, feedback|                   |
 +-------------------+                                  +-------------------+
          |  P0.0 safety relay (DAQ, hardwired)                  ^
          +------------------------------------------------------+
@@ -43,12 +43,12 @@ This document provides step-by-step guidance for implementing the Simulink Deskt
 | HR4 | `G_mbFaultReset` | 1 = FaultReset (level) |
 | HR5-6 | `G_mbReference` | REAL reference: mm, mm/s or % by mode |
 
-`PRG_Input` maps HR2-4 onto `G_diModeBit0..2`, `G_diMotionEnable` and
-`G_diFaultReset`, so the handshake below is unchanged from the discrete
-version. The master DAQ still drives P0.0 (safety control relay enable -
-brake disengage / safe-torque-off) and P0.4 (stir bar motor); these are not
-part of the slave protocol. The slave's discrete inputs for mode, enable and
-reset are no longer read. See [IOReference.md](IOReference.md) for the wiring.
+The slave debounces HR2 (`G_cfgDebounceTimeMode`, 50 ms), HR3
+(`G_cfgDebounceTimeMotion`, 20 ms) and HR4 (`G_cfgDebounceTimeFault`, 20 ms)
+before acting on them. The master DAQ drives P0.0 (safety control relay
+enable - brake disengage / safe-torque-off) and P0.4 (stir bar motor); these
+are not part of the slave protocol. See [IOReference.md](IOReference.md) for
+the wiring.
 
 ### Slave to Master (input registers, one FC04 read)
 
@@ -56,21 +56,21 @@ reset are no longer read. See [IOReference.md](IOReference.md) for the wiring.
 |----------|----------------|-------------|------------|
 | IR1 | `G_mbHeartbeatEcho` | Last HR1 received | |
 | IR2 | `G_mbSlaveCounter` | Scan counter; the master faults if it stops | |
-| IR3 | `G_mbConfCode` | Mode confirmation (DO0-2 value) | 3-bit fault code |
+| IR3 | `G_mbConfCode` | Mode confirmation | 0 |
 | IR4 | `G_mbFaultCode` | 0 | Full fault code |
 | IR5 | `G_mbFaultActive` | 0 | 1 |
 | IR6 | `G_mbInMotion` | Axis moving indicator | |
 | IR7 | `G_mbPerformanceStatus` | Mode-dependent status | |
 | IR8 | `G_mbHomingComplete` | Homing complete (ST_HOME_COMPLETE only) | |
 | IR11-18 | `G_mbActual*`, `G_mbCommandedPosition` | REAL position, velocity, torque, commanded position | |
+| IR19-20 | `G_mbActualPressure` | REAL pressure (MPa gauge) | |
 
 **Note**: The slave's `G_doBrakeDisengage` output drives the brake circuit
 directly and is **not carried by the link**; the master has no brake status
 input. IR3 holds a mode confirmation only while the handshake manager is
 active (ST_IDLE, ST_BRAKE_HOLD, ST_HOLD_POSITION, ST_RECOVERY) - during all
-other (operating/homing) states it reads 0 unless a fault is active. Do not
-treat 0 during operation as loss of mode. The discrete outputs DO0-DO7 are
-still driven with the same values.
+other states, including operating, homing and fault states, it reads 0. Do
+not treat 0 during operation as loss of mode.
 
 ### Link Supervision
 
@@ -92,12 +92,16 @@ outputs to their final values (safety relay off).
 |--------|---------|-----------|-------------|
 | 000 | 0 | Idle | Drive OFF, brake engaged |
 | 001 | 1 | Brake Hold | Drive ON, brake engaged |
-| 010 | 2 | Position Control | Analog input = position command |
-| 011 | 3 | Velocity Control | Analog input = velocity command |
-| 100 | 4 | Torque Control | Analog input = torque command |
+| 010 | 2 | Position Control | Reference = position command (mm) |
+| 011 | 3 | Velocity Control | Reference = velocity command (mm/s) |
+| 100 | 4 | Torque Control | Reference = torque command (% of rated) |
 | 101 | 5 | Go Home | Move to home position (G_cfgGoHomePosition) |
 | 110 | 6 | Home to Limit | Homing via limit switch; re-establishes the zero |
 | 111 | 7 | Pressure Control | Reference = target pressure (MPa gauge); the slave closes the loop on its transducer and commands velocity |
+
+The binary form is used as a mode name in these documents (e.g. "Mode
+110"); the register carries the decimal value. HR2 values above 7 decode
+as Idle.
 
 ---
 
@@ -107,20 +111,20 @@ outputs to their final values (safety relay off).
 
 ```
 Master                                          Slave
-  | (G_diMotionEnable is LOW)                       |
+  | (MotionEnable, HR3, is 0)                     |
   |                                               |
-  |  1. Set mode bits (DI0-DI2)                   |
+  |  1. Write the mode code (HR2)                 |
   |---------------------------------------------->|
   |                                               |
-  |              [Slave sees stable mode bits]    |
+  |              [Slave sees stable mode code]    |
   |                                               |
-  |  2. Confirm bits match (DO0-DO2)              |
+  |  2. Confirmation matches (IR3)                |
   |<----------------------------------------------|
   |                                               |
   |  3. Master verifies confirmation              |
   |     (command == confirmation)                 |
   |                                               |
-  |  4. Set G_diMotionEnable = HIGH                 |
+  |  4. Set MotionEnable = 1 (HR3)                |
   |---------------------------------------------->|
   |                                               |
   |             [Slave sees MotionEnable HIGH     |
@@ -136,7 +140,8 @@ Master                                          Slave
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | Handshake Timeout | 500 ms | Max time for slave to confirm mode |
-| Mode Stable Time | 20 ms | Mode bits must be stable before handshake starts |
+| Mode Code Debounce | 50 ms | HR2 must hold a new value this long before the slave acts on it (`G_cfgDebounceTimeMode`) |
+| Confirmation Stable | 20 ms | The master requires IR3 to match this long (`cfg.tConfirmStable`) |
 | Drive Enable Delay | 100 ms | Time for drive to become ready |
 | Brake Release Delay | 100 ms | Mechanical brake release time |
 
@@ -145,14 +150,14 @@ Master                                          Slave
 ```
 IDLE:
     IF mode_request != current_mode THEN
-        SET mode_bits = mode_request   // G_diMotionEnable stays LOW
+        SET mode_code = mode_request   // MotionEnable stays 0
         START handshake_timer
         GOTO WAIT_CONFIRM
     END_IF
 
 WAIT_CONFIRM:
-    IF confirm_bits == mode_bits THEN
-        SET G_diMotionEnable = TRUE    // only now, after confirmation
+    IF conf_code == mode_code THEN
+        SET MotionEnable = 1           // only now, after confirmation
         STOP handshake_timer
         current_mode = mode_request
         GOTO MODE_ACTIVE
@@ -163,20 +168,20 @@ WAIT_CONFIRM:
 MODE_ACTIVE:
     // Normal operation
     IF want_different_mode THEN
-        SET G_diMotionEnable = FALSE
+        SET MotionEnable = 0
         GOTO WAIT_HOLD
     END_IF
 
 WAIT_HOLD:
     // Slave transitions to ST_HOLD_POSITION
-    IF G_doInMotion == FALSE THEN
+    IF InMotion (IR6) == 0 THEN
         // Slave has halted, ready for new mode
         GOTO IDLE
     END_IF
 
 HANDSHAKE_TIMEOUT:
     // Slave will enter fault state
-    // Wait for G_doFaultActive = TRUE
+    // Wait for FaultActive (IR5) = 1
     GOTO FAULT_HANDLING
 ```
 
@@ -184,13 +189,13 @@ HANDSHAKE_TIMEOUT:
 
 When changing between operational modes (e.g., Position to Velocity):
 
-1. **Drop G_diMotionEnable LOW** - signals mode change request
-2. **Wait for G_doInMotion = FALSE** - slave performs controlled halt (from Position mode the command is first ramped to rest at `G_cfgPosGateAccelMax`, up to 1.0 s at defaults, before the halt)
-3. **Set new mode bits** - while G_diMotionEnable still LOW
-4. **Wait for confirmation** - slave confirms new mode on DO0-DO2 while G_diMotionEnable is still LOW
-5. **Raise G_diMotionEnable HIGH** - only after confirmation, completing the handshake for the new mode
+1. **Drop MotionEnable to 0** - signals mode change request. The slave checks the level, not the falling edge: MotionEnable at 0 in an operational or homing state stops the mode on the next scan, including when it dropped while the slave was still starting the mode (drive reset, enable, brake release)
+2. **Wait for InMotion (IR6) = 0** - slave performs controlled halt (from Position mode the command is first ramped to rest at `G_cfgPosGateAccelMax`, up to 1.0 s at defaults, before the halt)
+3. **Write the new mode code** - while MotionEnable is still 0
+4. **Wait for confirmation** - slave confirms the new mode in IR3 while MotionEnable is still 0
+5. **Raise MotionEnable to 1** - only after confirmation, completing the handshake for the new mode
 
-**WARNING**: Do NOT change mode bits while G_diMotionEnable is HIGH. This will cause handshake timeout fault.
+**WARNING**: Do NOT change the mode code while MotionEnable is 1. This will cause handshake timeout fault.
 
 ---
 
@@ -198,31 +203,30 @@ When changing between operational modes (e.g., Position to Velocity):
 
 ### Detecting Faults
 
-Monitor `G_mbFaultActive` (IR5, also DO4) continuously:
+Monitor `G_mbFaultActive` (IR5) continuously:
 - **0**: Normal operation
 - **1**: Fault condition active
 
 When it goes to 1:
-- IR4 holds the full fault code, IR3 its low three bits
+- IR4 holds the full fault code
 - All motion stops
 - Slave is in ST_FAULT state
 
 ### Fault Code Reading
 
-When `G_mbFaultActive == 1`, read IR4 as the fault code. Codes above 7 are
-carried by the register only:
+When `G_mbFaultActive == 1`, read IR4 as the fault code:
 
-| Binary | Fault | Description | Recovery Action |
-|--------|-------|-------------|-----------------|
-| 000 | None | No fault / cleared | N/A |
-| 001 | Handshake | Timeout or mismatch | Retry handshake |
-| 010 | Drive | Servo amplifier fault | Check drive, reset |
-| 011 | Position | Software limit exceeded | Command safe position; if still out, jog in via ST_RECOVERY |
-| 100 | Comm | Master heartbeat stopped | Restore the link, then reset |
-| 101 | Piston Exit | Safety guard triggered | Reduce force, check pressure |
-| 110 | Limit Switch | Unexpected limit activation | Check mechanics; if still on switch, jog off via ST_RECOVERY |
-| 111 | Encoder | Reserved - encoder alarms arrive as Drive (010) | Re-home (Mode 110) after an encoder alarm |
-| (8) | Pressure Sensor | Transducer loop current out of range during pressure control | Check the transducer loop; reset once IR19-20 reads a plausible pressure |
+| Code | Fault | Description | Recovery Action |
+|------|-------|-------------|-----------------|
+| 0 | None | No fault / cleared | N/A |
+| 1 | Handshake | Timeout or mismatch | Retry handshake |
+| 2 | Drive | Servo amplifier fault | Check drive, reset |
+| 3 | Position | Software limit exceeded | Command safe position; if still out, jog in via ST_RECOVERY |
+| 4 | Comm | Master heartbeat stopped | Restore the link, then reset |
+| 5 | Piston Exit | Safety guard triggered | Reduce force, check pressure |
+| 6 | Limit Switch | Unexpected limit activation | Check mechanics; if still on switch, jog off via ST_RECOVERY |
+| 7 | Encoder | Reserved - encoder alarms arrive as Drive (2) | Re-home (Mode 110) after an encoder alarm |
+| 8 | Pressure Sensor | Transducer loop current out of range during pressure control | Check the transducer loop; reset once IR19-20 reads a plausible pressure |
 
 ### Fault Reset Handshake
 
@@ -265,30 +269,30 @@ Master                                          Slave
 
 ```
 FAULT_DETECTED:
-    fault_code = READ(DO0-DO2)
-    SET G_diMotionEnable = FALSE
-    SET mode_bits = fault_code  // MIRROR the code
+    fault_code = READ(IR4)
+    SET MotionEnable = 0
+    SET mode_code = fault_code  // MIRROR the code in HR2
     WAIT 50ms  // Ensure stable
     GOTO ASSERT_RESET
 
 ASSERT_RESET:
-    SET G_diFaultReset = TRUE (level - hold while conditions remain true)
+    SET FaultReset = 1 (level - hold while conditions remain true)
     START reset_timer
     GOTO WAIT_CLEAR
 
 WAIT_CLEAR:
-    IF G_doFaultActive == FALSE THEN
-        SET G_diFaultReset = FALSE
+    IF FaultActive (IR5) == 0 THEN
+        SET FaultReset = 0
         GOTO FAULT_CLEARED
     ELSIF reset_timer > 1000ms THEN
         // Reset failed - may need operator intervention
-        SET G_diFaultReset = FALSE
+        SET FaultReset = 0
         GOTO FAULT_PERSISTENT
     END_IF
 
 FAULT_CLEARED:
     // Fault resolved, return to idle
-    SET mode_bits = 000  // Idle
+    SET mode_code = 0  // Idle
     GOTO IDLE
 
 FAULT_PERSISTENT:
@@ -340,19 +344,13 @@ requesting the mode.
 
 ### Position Mode: Entry Requirement and Command Shaping
 
-**WARNING**: Before asserting `G_diMotionEnable` for Position mode (010), the master must
-drive its analog position reference (AO, per the two-stage mapping above) to match the
-slave's currently reported actual position (read back via the inverse formulas above). On
-entry to `ST_POSITION_CTRL` the slave seeds its internal command at the actual position and
-then ramps it toward whatever the reference commands, at the configured velocity/acceleration
-limits — it no longer faults on a mismatch at entry, so an unmatched reference will now be
-**executed as a move** rather than rejected.
-
-Recall that the analog position map is **not** centre-zero: 0V corresponds to **133.3mm**
-(-10V -> 0mm, +5V -> 200mm, +10V -> 305mm), which is a position inside the cylinder. A DAC
-resting at 0V with the piston retracted (near 300mm) would therefore command a long
-compression stroke the moment motion is enabled. Match the reference to actual position
-first.
+**WARNING**: Before raising MotionEnable for Position mode (010), the master should set
+the reference (HR5-6) to the position it wants, normally the slave's actual position
+(IR11-12) when no move is intended. On entry to `ST_POSITION_CTRL` the slave seeds its
+internal command at the actual position and then ramps it toward the reference at the
+configured velocity/acceleration limits, so any difference between reference and actual
+position is **executed as a move**. A reference left at 0 mm with the piston retracted
+commands a full stroke the moment motion is enabled.
 
 **Setpoint behavior**: Position setpoints (steps in the reference) are executed as
 trapezoidal-velocity moves at the slave's configured limits — velocity `G_cfgVelLimitNormal`
@@ -365,8 +363,8 @@ a small lag of approximately `v^2 / (2*A)`, where `v` is the reference's rate of
 reached during compression, or the axis is mechanically blocked), the slave holds its
 internal command no more than `G_cfgPosGateMaxDeviation` (2.0mm default) ahead of the actual
 position rather than faulting. Motion resumes automatically once the axis catches up or the
-reference reverses direction. The master should judge arrival using position feedback (AI),
-not elapsed time.
+reference reverses direction. The master should judge arrival using position feedback
+(IR11-12), not elapsed time.
 
 ---
 
@@ -376,19 +374,19 @@ not elapsed time.
 
 ```
 +------------------+     +------------------+     +------------------+
-| Mode Request     |---->| Handshake        |---->| Output Signals   |
-| Subsystem        |     | State Machine    |     | to NI DAQ        |
+| Mode Request     |---->| Handshake        |---->| Holding Registers|
+| Subsystem        |     | State Machine    |     | (Modbus write)   |
 +------------------+     +------------------+     +------------------+
                                ^
                                |
 +------------------+     +------------------+
-| Input Signals    |---->| Fault Handler    |
-| from NI DAQ      |     | Subsystem        |
+| Input Registers  |---->| Fault Handler    |
+| (Modbus read)    |     | Subsystem        |
 +------------------+     +------------------+
                                |
                                v
                         +------------------+
-                        | Analog Reference |
+                        | Reference        |
                         | Generator        |
                         +------------------+
 ```
@@ -401,11 +399,11 @@ not elapsed time.
 - Manages inter-mode transitions via HOLD state
 
 #### 2. Fault Handler
-- Monitors G_doFaultActive continuously
+- Monitors FaultActive (IR5) continuously
 - Implements fault code mirroring
 - Manages fault reset handshake
 
-#### 3. Analog Reference Generator
+#### 3. Reference Generator
 - Mode-dependent reference signal generation
 - Position trajectory planning
 - Velocity/torque command generation
@@ -431,14 +429,15 @@ not elapsed time.
      stored offset keep the coordinate frame, so no homing is needed
 
 2. Initialize Simulink model
-   - Set all outputs LOW initially
-   - mode_bits = 000 (Idle)
-   - G_diMotionEnable = FALSE
-   - G_diFaultReset = FALSE
+   - Safety relay (P0.0) off initially
+   - Mode code = 0 (Idle)
+   - MotionEnable = 0
+   - FaultReset = 0
 
 3. Verify communication
-   - Read G_doFaultActive (should be LOW)
-   - Read confirmation bits (should match 000)
+   - Wait for the slave counter (IR2) to advance
+   - Read FaultActive (IR5, should be 0)
+   - Read the confirmation (IR3, should be 0)
 
 4. Enter operational mode
    - Command desired mode (010, 011, or 100)
@@ -453,24 +452,24 @@ not elapsed time.
 ### Scenario 1: Normal Position Control
 
 ```
-1. Master: Set mode_bits = 010 (G_diMotionEnable stays LOW)
-2. Slave: Sets confirm_bits = 010
-3. Master: Verifies confirm_bits == mode_bits, raises G_diMotionEnable = TRUE
+1. Master: Set mode code = 2 (MotionEnable stays 0)
+2. Slave: Sets confirmation = 2
+3. Master: Verifies confirmation == mode code, raises MotionEnable = 1
 4. Slave: Handshake complete; enables drive, releases brake, enters ST_POSITION_CTRL
-5. Master: Output position reference on AO
-6. Slave: Follows position, outputs feedback
-7. Master: Read position from AI
+5. Master: Writes the position reference (HR5-6, mm)
+6. Slave: Follows position, publishes feedback
+7. Master: Reads position from IR11-12
 ```
 
 ### Scenario 2: Mode Change (Position to Velocity)
 
 ```
-1. Master: Set G_diMotionEnable = FALSE
+1. Master: Set MotionEnable = 0
 2. Slave: Executes MC_Stop, enters ST_HOLD_POSITION
-3. Master: Wait for G_doInMotion = FALSE
-4. Master: Set mode_bits = 011 (Velocity), G_diMotionEnable still LOW
-5. Slave: Confirms mode_bits = 011
-6. Master: Verifies confirmation, raises G_diMotionEnable = TRUE
+3. Master: Wait for InMotion (IR6) = 0
+4. Master: Set mode code = 3 (Velocity), MotionEnable still 0
+5. Slave: Confirms mode 3
+6. Master: Verifies confirmation, raises MotionEnable = 1
 7. Slave: Handshake complete, begin velocity control
 ```
 
@@ -478,35 +477,35 @@ not elapsed time.
 
 ```
 1. [Fault occurs - e.g., position limit exceeded]
-2. Slave: Sets G_doFaultActive = HIGH, fault_code = 011
-3. Master: Detects G_doFaultActive = HIGH
-4. Master: Reads fault_code = 011
-5. Master: Sets G_diMotionEnable = FALSE
-6. Master: Mirrors code: mode_bits = 011
-7. Master: Holds G_diFaultReset HIGH (level-based, not a pulse)
+2. Slave: Sets FaultActive (IR5) = 1, fault code (IR4) = 3
+3. Master: Detects FaultActive = 1
+4. Master: Reads fault code = 3
+5. Master: Sets MotionEnable = 0
+6. Master: Mirrors code: mode code (HR2) = 3
+7. Master: Holds FaultReset = 1 (level-based, not a pulse)
 8. Slave: Validates mirror, clears fault, enters ST_BRAKE_HOLD (drive stays on)
-9. Slave: Sets G_doFaultActive = LOW
-10. Master: Select a mode - e.g. mode_bits = 000 to shut down gracefully to
+9. Slave: Sets FaultActive = 0
+10. Master: Select a mode - e.g. mode code 0 to shut down gracefully to
     IDLE, or resume operation from Brake Hold
 ```
 
 ### Scenario 4: Limit Recovery (switch/soft-limit still active at reset)
 
-For `FAULT_LIMIT_SWITCH` (110) or `FAULT_POSITION` (011), if the limit is still
+For `FAULT_LIMIT_SWITCH` (6) or `FAULT_POSITION` (3), if the limit is still
 active when the reset clears, the slave enters the `ST_RECOVERY` hub instead of
 returning to idle/brake-hold. Jog off the limit, then resume normally:
 
 ```
-1. [Limit fault active] Slave: G_doFaultActive = HIGH, fault_code = 110 (or 011)
-2. Master: G_diMotionEnable = FALSE; mirror code to mode_bits; hold G_diFaultReset HIGH (level-based)
+1. [Limit fault active] Slave: FaultActive = 1, fault code = 6 (or 3)
+2. Master: MotionEnable = 0; mirror the code in HR2; hold FaultReset = 1 (level-based)
 3. Slave: clears fault; limit still active -> enters ST_RECOVERY (drive stays on)
           (if it had timed out to ST_FAULT_IDLE, the drive re-enables first)
-4. Master: set mode_bits = 010 (Position) or 011 (Velocity), G_diMotionEnable still LOW
-5. Master: wait for confirm_bits to match, then raise G_diMotionEnable
-6. Master: drive analog reference AWAY from the limit
+4. Master: set mode code 2 (Position) or 3 (Velocity), MotionEnable still 0
+5. Master: wait for the confirmation to match, then raise MotionEnable
+6. Master: drive the reference AWAY from the limit
           - toward-limit commands are clamped to zero (no re-fault); reverse to proceed
 7. [Switch clears AND position inside soft limits]
-8. Master: drop G_diMotionEnable -> slave goes to ST_HOLD_POSITION (normal branch)
+8. Master: drop MotionEnable -> slave goes to ST_HOLD_POSITION (normal branch)
 9. Master: select any mode and continue (re-home if position is uncertain)
 ```
 
@@ -524,41 +523,39 @@ still active. See the [Fault Code Reference](FaultCodeReference.md#limit-recover
 
 **Possible Causes**:
 - Drive not ready (check drive status)
-- I/O wiring issue
+- Modbus link not exchanging (IR2 not advancing, IR1 not echoing HR1)
 
 **Resolution**:
-1. Check G_doFaultActive - if HIGH, handle fault first
-2. Verify DI/DO wiring connections
-3. Ensure mode bits are stable for 20ms before expecting confirmation
+1. Check FaultActive (IR5) - if 1, handle fault first
+2. Verify the link: IR2 advances and IR1 echoes HR1
+3. Hold the mode code for at least the 50 ms debounce before expecting confirmation
 
 ### Fault Won't Clear
 
-**Symptom**: G_diFaultReset asserted but G_doFaultActive stays HIGH
+**Symptom**: FaultReset asserted but FaultActive (IR5) stays 1
 
 **Possible Causes**:
 - Fault code not mirrored correctly
-- G_diMotionEnable not LOW
+- MotionEnable not 0
 - Underlying condition still present
 
 **Resolution**:
-1. Verify G_diMotionEnable = FALSE
-2. Verify mode_bits exactly matches fault code
+1. Verify MotionEnable = 0
+2. Verify HR2 exactly matches the fault code in IR4
 3. Check if fault condition persists (e.g., still at position limit)
 
 ### Position Feedback Incorrect
 
-**Symptom**: Analog input values don't match expected positions
+**Symptom**: IR11-12 does not match the expected position
 
 **Possible Causes**:
-- Two-stage mapping not applied
-- Analog calibration offset
+- REAL decoded with the wrong word order (the slave sends low word first)
 - Coordinate frame lost (encoder alarm, controller battery failure or
   controller replacement)
 
 **Resolution**:
-1. Apply correct two-stage inverse mapping
-2. Verify analog I/O calibration
-3. Re-home with Mode 110 if the frame was lost
+1. Decode IR11-12 low word first (`modbusUnpack`)
+2. Re-home with Mode 110 if the frame was lost
 
 ---
 
@@ -577,17 +574,17 @@ still active. See the [Fault Code Reference](FaultCodeReference.md#limit-recover
 | Pressure | 111 | 7 |
 
 ### Fault Codes
-| Fault | Binary | Decimal |
-|-------|--------|---------|
-| None | 000 | 0 |
-| Handshake | 001 | 1 |
-| Drive | 010 | 2 |
-| Position | 011 | 3 |
-| Comm | 100 | 4 |
-| Piston Exit | 101 | 5 |
-| Limit Switch | 110 | 6 |
-| Encoder | 111 | 7 |
-| Pressure Sensor | - | 8 |
+| Fault | Code |
+|-------|------|
+| None | 0 |
+| Handshake | 1 |
+| Drive | 2 |
+| Position | 3 |
+| Comm | 4 |
+| Piston Exit | 5 |
+| Limit Switch | 6 |
+| Encoder | 7 |
+| Pressure Sensor | 8 |
 
 ### Critical Timings
 | Parameter | Value |
@@ -596,4 +593,5 @@ still active. See the [Fault Code Reference](FaultCodeReference.md#limit-recover
 | Link timeout (both sides) | 300 ms |
 | Handshake Timeout | 500 ms |
 | Fault Reset Timeout | 1000 ms |
-| Mode Stable Time | 20 ms |
+| Mode Code Debounce (slave) | 50 ms |
+| Confirmation Stable (master) | 20 ms |

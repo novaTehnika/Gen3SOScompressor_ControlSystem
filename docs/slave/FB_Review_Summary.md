@@ -24,27 +24,6 @@ This document summarizes the agent reviews of the function blocks in `slave-src/
 
 ---
 
-## FB_AnalogProcessor.st
-**Status**: Issues found
-
-### Findings:
-1. **HIGH**: Stage boundary comparison at line 107 uses `<=` instead of `<`
-   - Current: `ELSIF rPosActual <= rStage1Max THEN`
-   - Should be: `ELSIF rPosActual < rStage1Max THEN`
-   - This causes boundary value to be processed by both stages
-
-2. **HIGH**: No voltage clamping on output
-   - `rPositionVoltage` could exceed -10V to +10V range if position exceeds limits
-   - Should clamp output to valid DAC range
-
-3. **MEDIUM**: Missing check for `rStage1Max >= rStage2Min` overlap condition
-
-### Recommendations:
-- Fix boundary comparison operator
-- Add output clamping: `rPositionVoltage := LIMIT(-10.0, rPositionVoltage, 10.0);`
-
----
-
 ## FB_DigitalInputFilter.st
 **Status**: Minor issue
 
@@ -68,7 +47,7 @@ This document summarizes the agent reviews of the function blocks in `slave-src/
 
 ### Changes:
 - **Fault reset logic extracted** to `FB_FaultResetHandler` (separate single-responsibility FB)
-- **Mode-to-bits conversion removed** — `ConfirmBit0/1/2` outputs and `fbModeToBits` removed; `FB_OutputMux` now handles conversion internally
+- Confirmed mode is an `E_OperatingMode` output; `PRG_Main` converts it to `G_sysConfirmedModeCode` for IR3 (`G_mbConfCode`)
 - Stripped down to mode handshake only: `ConfirmedMode`, `HandshakeActive`, `HandshakeComplete`, `HandshakeTimeout_Q`
 
 ### Previous Findings (resolved):
@@ -85,12 +64,12 @@ This document summarizes the agent reviews of the function blocks in `slave-src/
 
 ### Description:
 Pure combinational check for fault reset validation. No state machine, no timers.
-Validates: FaultReset HIGH, MotionEnable LOW, InFaultState, BitsStable, and MasterFaultCode matches ActiveFaultCode.
+Validates: FaultReset HIGH, MotionEnable LOW, InFaultState, CodeStable, and MasterFaultCode matches ActiveFaultCode.
 
 ### Findings:
 - Clean single-responsibility implementation
-- Receives pre-decoded `MasterFaultCode : E_FaultCode` via `VAR_INPUT` — `PRG_Main` calls `FB_BitsToFaultCode` against DI0-2 and wires the result in, ensuring type-correct fault-code decoding (bits decoded as `E_FaultCode`, not `E_OperatingMode`)
-- `BitsStable` input guards against transient bit patterns during DI0-2 transitions
+- Receives pre-decoded `MasterFaultCode : E_FaultCode` via `VAR_INPUT` — `PRG_Main` calls `FB_IntToFaultCode` on `G_mbModeCode` (HR2) and wires the result in, so the mirrored code is decoded as `E_FaultCode`, not `E_OperatingMode`
+- `CodeStable` input (from `FB_ModeDecoder.ModeStable`) guards against a mode code that is still changing
 
 ### Recommendations:
 - None required
@@ -112,55 +91,17 @@ Validates: FaultReset HIGH, MotionEnable LOW, InFaultState, BitsStable, and Mast
 
 ---
 
-## FB_OutputMux.st
-**Status**: Refactored
-
-### Changes:
-- **Input changed**: `ModeConfirmBit0/1/2 : BOOL` replaced with `ConfirmedMode : E_OperatingMode`
-- **Added internal conversion**: `fbModeToBits : FB_ModeToBits` — both mode and fault now use consistent enum-to-bits conversion internally
-- Both branches follow the same pattern: enum input → FB converter → bit outputs
-
-### Findings:
-- Clean implementation with proper enable handling
-- Consistent conversion pattern for both modes and faults via `FB_ModeToBits` and `FB_FaultToBits`
-
-### Recommendations:
-- None required
-
----
-
-## FB_PositionOutput.st
-**Status**: Minor issue
-
-### Findings:
-1. **MEDIUM**: Out-of-range position produces misleading status flags
-   - When position is outside both stages, `InStage1` and `InStage2` are both FALSE
-   - `MappedVoltage` behavior undefined in this case
-
-2. **LOW**: No explicit clamping of output voltage
-
-### Recommendations:
-- Consider adding `OutOfRange` status flag
-- Add output voltage clamping for safety
-
----
-
 ## Priority Fixes (Ordered by Severity)
 
 ### CRITICAL:
 1. ~~**FB_HandshakeManager**: Add timer call in HS_WAIT_MOTION_EN state~~ *(FIXED)*
 2. ~~**FB_ModeDecoder**: Fix ModeChanged edge detection logic~~ *(FIXED)*
 
-### HIGH:
-3. **FB_AnalogProcessor**: Fix stage boundary comparison (`<=` to `<`)
-4. **FB_AnalogProcessor**: Add output voltage clamping
-
 ### MEDIUM:
-5. **FB_DigitalInputFilter**: Consider initialization handling
-6. **FB_PositionOutput**: Add out-of-range handling
+3. **FB_DigitalInputFilter**: Consider initialization handling
 
 ### LOW:
-7. Various initialization and cosmetic issues (acceptable as-is)
+4. Various initialization and cosmetic issues (acceptable as-is)
 
 ---
 

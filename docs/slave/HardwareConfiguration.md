@@ -14,7 +14,7 @@ This document provides step-by-step instructions for configuring the hardware in
 | Servo Motor | SGM7J-04A6A6C | 400W with brake and absolute encoder |
 | Actuator | Tolomatic RSA64 | Linear electromechanical actuator |
 | Overtravel Switches | Tolomatic #8100-9092 | Solid State, Normally Closed, PNP (×2: negative & positive overtravel) |
-| Master Interface | NI PCI 6221 + SCB-68a | DAQ for analog/digital I/O |
+| Master Interface | Modbus TCP (built-in server, port 502) | Master ↔ slave protocol registers |
 
 ---
 
@@ -81,36 +81,33 @@ Configure the axis scaling in MotionWorksIEC:
 ### 4.1 Digital Input Addresses
 | Pin | Address | Signal | External Connection |
 |-----|---------|--------|---------------------|
-| DI0 | %IX0.0 | G_diModeBit0 | NI DAQ DIO0 |
-| DI1 | %IX0.1 | G_diModeBit1 | NI DAQ DIO1 |
-| DI2 | %IX0.2 | G_diModeBit2 | NI DAQ DIO2 |
-| DI3 | %IX0.3 | G_diMotionEnable | NI DAQ DIO3 |
-| DI4 | %IX0.4 | G_diOvertravelNeg | Negative Overtravel / Home Reference Switch |
-| DI5 | %IX0.5 | G_diOvertravelPos | Positive Overtravel Switch |
-| DI6 | %IX0.6 | G_diFaultReset | NI DAQ DIO6 |
-| DI7 | %IX0.7 | G_diReserved | (Not connected) |
+| DI0-DI5 | %IX0.0-%IX0.5 | unused | (Not connected) |
+| DI6 | %IX0.6 | G_diOvertravelNeg | Negative Overtravel / Home Reference Switch |
+| DI7 | %IX0.7 | G_diOvertravelPos | Positive Overtravel Switch |
+
+The mode code, MotionEnable and FaultReset arrive in Modbus holding registers HR2-HR4 (`G_mbModeCode`, `G_mbMotionEnable`, `G_mbFaultReset`); see `docs/master/ModbusRegisterMap.md`.
 
 ### 4.2 Digital Output Addresses
 | Pin | Address | Signal | External Connection |
 |-----|---------|--------|---------------------|
-| DO0 | %QX0.0 | G_doModeConfBit0 | NI DAQ DIO (input) |
-| DO1 | %QX0.1 | G_doModeConfBit1 | NI DAQ DIO (input) |
-| DO2 | %QX0.2 | G_doModeConfBit2 | NI DAQ DIO (input) |
-| DO3 | %QX0.3 | G_doBrakeDisengage | Brake Relay |
-| DO4 | %QX0.4 | G_doPerformanceStatus | NI DAQ DIO (input) |
-| DO5 | %QX0.5 | G_doFaultActive | NI DAQ DIO (input) |
-| DO6 | %QX0.6 | G_doInMotion | NI DAQ DIO (input) |
-| DO7 | %QX0.7 | G_doHomingComplete | NI DAQ DIO (input) |
+| DO0-DO2 | %QX0.0-%QX0.2 | unused | (Not connected) |
+| DO3 | %QX0.3 | G_doPerformanceStatus | Not wired to the master (IR7) |
+| DO4 | %QX0.4 | G_doFaultActive | Not wired to the master (IR5) |
+| DO5 | %QX0.5 | G_doHomingComplete | Not wired to the master (IR8) |
+| DO6 | %QX0.6 | G_doInMotion | Not wired to the master (IR6) |
+| DO7 | %QX0.7 | G_doBrakeDisengage | Brake Relay |
+
+The mode confirmation and fault code are published in input registers IR3 and IR4 (`G_mbConfCode`, `G_mbFaultCode`); DO3-DO6 are mirrored in IR5-IR8.
 
 ### 4.3 Overtravel Switch Wiring (PNP, Normally Closed)
 
 Two Tolomatic #8100-9092 switches are mounted as travel limits on the actuator:
 
-- **Negative overtravel (DI4 / `G_diOvertravelNeg`)** — positioned so that the
+- **Negative overtravel (DI6 / `G_diOvertravelNeg`)** — positioned so that the
   piston is still fully retracted but clear of mechanical hard stops. Also used
   as the **home reference** for Mode 110 — Mode 110 drives the ram negative
   into this switch, backs off, and sets the coordinate reference.
-- **Positive overtravel (DI5 / `G_diOvertravelPos`)** — positioned so that the
+- **Positive overtravel (DI7 / `G_diOvertravelPos`)** — positioned so that the
   piston remains safely inside the cylinder with adequate margin against the
   PEEK seal/groove feature. The homing sequence never approaches this switch,
   so any activation is a `FAULT_LIMIT_SWITCH`.
@@ -123,7 +120,7 @@ switch is the expected homing target (negative overtravel inside
 +24V ──────┬──────────────────────────────┐
            │                              │
            │    ┌─────────────────┐       │
-           └────┤ Limit Switch    ├───────┼──── DI4 (or DI5)
+           └────┤ Limit Switch    ├───────┼──── DI6 (or DI7)
                 │ (Tolomatic      │       │
                 │  #8100-9092)    │       │
                 └─────────────────┘       │
@@ -144,14 +141,10 @@ switch is the expected homing target (negative overtravel inside
 |-----|---------|-------|------|--------|
 | AI0 | %IW0 | -10V to +10V | LREAL | G_aiPressure: voltage across the pressure transducer's 4-20 mA loop shunt (`G_cfgPressureShuntOhms`), scaled to MPa gauge by `FB_PressureInput` |
 
-**Scaling**: MotionWorksIEC presents the analog input as an `LREAL` in volts directly (e.g. `-10.0` to `+10.0`). The application code reads and processes the signal as volts; no raw-to-voltage conversion is required in ST. The reference now arrives in engineering units through the Modbus holding registers (see `docs/master/ModbusRegisterMap.md`).
+**Scaling**: MotionWorksIEC presents the analog input as an `LREAL` in volts directly (e.g. `-10.0` to `+10.0`). The application code reads and processes the signal as volts; no raw-to-voltage conversion is required in ST. The master reference arrives in engineering units through the Modbus holding registers (see `docs/master/ModbusRegisterMap.md`).
 
 ### 5.2 Analog Output
-| Pin | Address | Range | Type | Signal |
-|-----|---------|-------|------|--------|
-| AO0 | %QW0 | -10V to +10V | LREAL | unused |
-
-Position feedback is published in the Modbus input registers; the analog output is not written.
+The analog output is not used. Position feedback is published in the Modbus input registers.
 
 ---
 
@@ -163,9 +156,9 @@ Position feedback is published in the Modbus input registers; the analog output 
 - Capacity: Equivalent to motor rated torque
 
 ### 6.2 Brake Control Wiring
-The brake is controlled via DO3 through a relay:
-- **DO3 = LOW (FALSE)**: Relay off → Brake engaged (spring holds)
-- **DO3 = HIGH (TRUE)**: Relay on → Brake released (motion allowed)
+The brake is controlled via DO7 through a relay:
+- **DO7 = LOW (FALSE)**: Relay off → Brake engaged (spring holds)
+- **DO7 = HIGH (TRUE)**: Relay on → Brake released (motion allowed)
 
 ### 6.3 Timing Requirements
 | Transition | Delay | Description |
@@ -214,11 +207,11 @@ The SGM7J-04A6A6C has a 24-bit absolute encoder:
 2. [ ] Verify I/O mapping (digital and analog)
 3. [ ] Test digital inputs with external signals
 4. [ ] Test digital outputs with multimeter
-5. [ ] Verify analog input/output scaling
+5. [ ] Verify pressure input scaling (`G_aiPressure`)
 
 ### 8.4 Motion Testing (Manual Jog)
 1. [ ] Enable drive power (MC_Power)
-2. [ ] Release brake (DO3 = TRUE)
+2. [ ] Release brake (DO7 = TRUE)
 3. [ ] Jog positive direction at low velocity — verify positive overtravel triggers `FAULT_LIMIT_SWITCH` well before any mechanical interference
 4. [ ] Jog negative direction at low velocity — verify negative overtravel triggers `FAULT_LIMIT_SWITCH` when commanded outside homing
 5. [ ] Engage brake and disable drive
@@ -251,5 +244,5 @@ The SGM7J-04A6A6C has a 24-bit absolute encoder:
 
 ### 9.4 Brake Not Releasing
 - Check relay power supply
-- Verify DO3 output state
+- Verify DO7 output state
 - Check relay coil and contacts

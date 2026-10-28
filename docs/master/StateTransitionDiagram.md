@@ -24,7 +24,7 @@
                     | ST_IDLE  |
                     +----------+
                            |
-            (Mode != 000 + G_diMotionEnable)
+            (Mode != 000 + MotionEnable)
                            |
             +--------------+--------------+
             |                             |
@@ -70,7 +70,7 @@
     |        |              |              |         |
     |        +------+-------+------+-------+         |
     |               |              |                 |
-    |      (G_diMotionEnable   (Mode change           |
+    |      (MotionEnable       (Mode change           |
     |       = LOW)            or fault)             |
     |               |              |                 |
     |               v              v                 |
@@ -205,16 +205,16 @@ raises no fault. The master must not command it.
     | ST_FAULT      |
     |               |
     | - G_doFaultActive = HIGH
-    | - Output fault code on DO0-DO2
+    | - Fault code in IR4 (G_mbFaultCode)
     | - MC_Stop (motion stopped)
     +-------+-------+
             |
             +---------------------------+
             |                           |
     (Fast recovery:                (Slow recovery:
-     G_diFaultReset HIGH              G_cfgFaultIdleTimeout
+     FaultReset HIGH                  G_cfgFaultIdleTimeout
      + valid mirrored code          expires)
-     + G_diMotionEnable LOW)              |
+     + MotionEnable LOW)                  |
             |                           v
             v                   +---------------+
     +---------------+           | ST_FAULT_IDLE |
@@ -224,9 +224,9 @@ raises no fault. The master must not command it.
     +---------------+           | - G_doFaultActive = HIGH
                                 +-------+-------+
                                         |
-                                (G_diFaultReset HIGH
+                                (FaultReset HIGH
                                  + valid mirrored code
-                                 + G_diMotionEnable LOW)
+                                 + MotionEnable LOW)
                                         |
                                         v
                                 +---------------+
@@ -247,13 +247,13 @@ routes into the recovery sub-machine instead of the normal targets above:
             (re-enable sequence; carried by bRecoveryPending)
 
    ST_RECOVERY  (drive ON, brake released, position held via MC_Stop)
-        |  select MODE_POSITION (010) / MODE_VELOCITY (011) + G_diMotionEnable
+        |  select MODE_POSITION (010) / MODE_VELOCITY (011) + MotionEnable
         v
    ST_RECOVERY_POSITION / ST_RECOVERY_VELOCITY
         |  jog AWAY from the limit (toward-limit commands are clamped to zero)
         |
-        +-- G_diMotionEnable toggle, limit still active --> ST_RECOVERY (keep jogging)
-        +-- G_diMotionEnable toggle, limit cleared -------> ST_HOLD_POSITION (normal)
+        +-- MotionEnable toggle, limit still active --> ST_RECOVERY (keep jogging)
+        +-- MotionEnable toggle, limit cleared -------> ST_HOLD_POSITION (normal)
 
    ST_RECOVERY --select MODE_BRAKE_HOLD--> ST_BRAKE_HOLD   (manual exit, drive on)
    ST_RECOVERY --select MODE_IDLE-------> ST_BRAKE_ENGAGE  (shutdown)
@@ -285,8 +285,8 @@ the master-side procedure.
 
 | From | To | Condition | Path |
 |------|----|-----------| -----|
-| Any Operational | Different Mode | G_diMotionEnable LOW→HIGH | HOLD_POSITION → DRIVE_ENABLE → New Mode |
-| Any Operational | IDLE (000) | G_diMotionEnable LOW (mode bits 000), or the hold-position watchdog times out | HOLD_POSITION → BRAKE_ENGAGE → DRIVE_DISABLE → IDLE (graceful, no fault) |
+| Any Operational | Different Mode | MotionEnable LOW→HIGH | HOLD_POSITION → DRIVE_ENABLE → New Mode |
+| Any Operational | IDLE (000) | MotionEnable LOW (mode code 0), or the hold-position watchdog times out | HOLD_POSITION → BRAKE_ENGAGE → DRIVE_DISABLE → IDLE (graceful, no fault) |
 | Any Operational | FAULT | Fault detected | Direct transition |
 
 ### Homing Mode Exits
@@ -337,18 +337,18 @@ MASTER STATES
 +----------------------------------------------------------+
 |                                                          |
 |  +--------+                                              |
-|  | INIT   | --> Initialize DAQ, set outputs LOW          |
+|  | INIT   | --> Connect, zero holding registers          |
 |  +----+---+                                              |
 |       |                                                  |
 |       v                                                  |
 |  +--------+                                              |
-|  | IDLE   | <--+  Monitor G_doFaultActive                  |
-|  +----+---+    |  Mode bits = 000                        |
+|  | IDLE   | <--+  Monitor G_mbFaultActive                  |
+|  +----+---+    |  Mode code = 0                          |
 |       |        |                                         |
 |       | (Mode request)                                   |
 |       v        |                                         |
 |  +----------+  |                                         |
-|  | REQUEST  |  |  Set mode bits (G_diMotionEnable stays   |
+|  | REQUEST  |  |  Set mode code (MotionEnable stays       |
 |  | _MODE    |  |  LOW); start handshake timer             |
 |  +----+-----+  |                                         |
 |       |        |                                         |
@@ -356,7 +356,7 @@ MASTER STATES
 |   |       |    |                                         |
 | (Match:  (Timeout)                                       |
 |  raise                                                    |
-|  G_diMotionEnable)                                        |
+|  MotionEnable)                                            |
 |   |       |    |                                         |
 |   v       v    |                                         |
 |  +------+ +----+---+                                     |
@@ -367,12 +367,12 @@ MASTER STATES
 |     | (Mode change)                                      |
 |     v          |                                         |
 |  +--------+    |                                         |
-|  | STOP   |----+  Drop G_diMotionEnable, wait for halt     |
+|  | STOP   |----+  Drop MotionEnable, wait for halt         |
 |  | _MOTION|                                              |
 |  +--------+                                              |
 |                                                          |
 |  +--------+                                              |
-|  | FAULT  | <-- When G_doFaultActive goes HIGH             |
+|  | FAULT  | <-- When G_mbFaultActive goes HIGH             |
 |  | _HANDLE|     Read code, mirror, reset                 |
 |  +----+---+                                              |
 |       |                                                  |
@@ -394,9 +394,9 @@ MASTER STATES
 | Transition | Timing | Notes |
 |------------|--------|-------|
 | Mode request → Confirm | < 500 ms | Handshake timeout |
-| G_diMotionEnable LOW → G_doInMotion LOW | Variable | Deceleration time |
+| MotionEnable LOW → InMotion (IR6) LOW | Variable | Deceleration time |
 | Fault detect → Fault code stable | < 10 ms | Wait before reading |
-| G_diFaultReset asserted → G_doFaultActive LOW | < 1000 ms | Reset timeout (level-based, not edge) |
+| FaultReset asserted → FaultActive (IR5) LOW | < 1000 ms | Reset timeout (level-based, not edge) |
 | Brake engage → Brake hold | 200 ms | Mechanical delay |
 | Brake release → Motion allowed | 100 ms | Mechanical delay |
 
@@ -405,7 +405,7 @@ MASTER STATES
 ```
 Time ------>
 
-G_diMotionEnable  __________/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\___________
+MotionEnable      __________/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\___________
                             ^                        ^
                             |                        |
                          Confirmed ->              Stop
@@ -414,13 +414,13 @@ G_diMotionEnable  __________/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 Slave State     IDLE | ENABLE | RELEASE | OPERATING | HOLD | ENGAGE | IDLE
                      |<-100ms->|<-100ms->|           |      |<-200ms>|
 
-Mode Confirm    000_/‾‾‾\_____000________________________|__000___
+Mode Confirm    0___/‾‾‾\_____0__________________________|__0_____
                     ^   ^
                     |   |
                  Request Confirmed - handshake manager disables as
-                 mode    soon as ST_IDLE is left, so confirm bits
-                 bits    read 000 through OPERATING/HOLD (unless a
-                         fault is active); this is normal, not a
+                 mode    soon as ST_IDLE is left, so IR3 reads 0
+                 code    through OPERATING/HOLD and during a
+                         fault; this is normal, not a
                          loss of mode
 ```
 
@@ -429,18 +429,18 @@ Mode Confirm    000_/‾‾‾\_____000________________________|__000___
 ## 9. Decision Points Summary
 
 ### At ST_IDLE
-- Check: `G_diMotionEnable` rising edge?
-- Check: Mode bits != 000?
+- Check: MotionEnable (`G_mbMotionEnable`) rising edge?
+- Check: Mode code (`G_mbModeCode`) != 0?
 
 ### At Operational State
-- Check: `G_diMotionEnable` LOW → ST_HOLD_POSITION (a level check, so a drop during drive reset, enable or brake release still stops the mode on its first scan)
+- Check: MotionEnable (`G_mbMotionEnable`) LOW → ST_HOLD_POSITION (a level check, so a drop during drive reset, enable or brake release still stops the mode on its first scan)
 - Check: Fault condition → ST_FAULT
-- Check: Mode bits changed (invalid) → ST_FAULT
+- Check: Mode code changed (invalid) → ST_FAULT
 
 ### At ST_HOLD_POSITION
 - Check: New mode handshake started?
 - Check: Handshake timeout → ST_FAULT
-- Check: Mode bits = 000, or hold-position watchdog (`G_cfgHoldPositionTimeout`)
+- Check: Mode code = 0, or hold-position watchdog (`G_cfgHoldPositionTimeout`)
   expires → graceful shutdown to ST_IDLE via ST_BRAKE_ENGAGE → ST_DRIVE_DISABLE
   (no fault, no handshake needed)
 
@@ -453,5 +453,5 @@ Mode Confirm    000_/‾‾‾\_____000________________________|__000___
 ### At ST_RECOVERY (and sub-states)
 - Check: Mode select `MODE_POSITION`/`MODE_VELOCITY` → enter retract sub-state.
 - Check: Commanded direction toward the active limit → clamp command to zero (no fault).
-- Check: `G_diMotionEnable` toggle → limit cleared? `ST_HOLD_POSITION` (normal) : `ST_RECOVERY` (keep jogging).
+- Check: MotionEnable (`G_mbMotionEnable`) toggle → limit cleared? `ST_HOLD_POSITION` (normal) : `ST_RECOVERY` (keep jogging).
 - Check: Mode select `MODE_BRAKE_HOLD`/`MODE_IDLE` → leave recovery.

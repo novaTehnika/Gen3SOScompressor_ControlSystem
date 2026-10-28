@@ -9,8 +9,8 @@
    Contains all enumerations and structures used throughout the codebase.
 
    Contents:
-   - E_OperatingMode: Operating mode enumeration (3-bit encoding)
-   - E_FaultCode: Fault code enumeration (3-bit encoding)
+   - E_OperatingMode: Operating mode enumeration (Modbus mode code)
+   - E_FaultCode: Fault code enumeration (Modbus fault code)
    - E_SystemState: System state machine enumeration
    - ST_AxisLimits: Position, velocity, torque, accel/decel limits
    - ST_HomingParams: Limit-switch homing parameters
@@ -22,22 +22,21 @@ TYPE
    (* ============================================================================
       E_OperatingMode - Operating Mode Enumeration
 
-      Encoding:
-      - Bits come from DI0 (LSB), DI1, DI2 (MSB)
-      - Mode value = DI2*4 + DI1*2 + DI0
+      The integer value is the mode code in the Modbus holding register
+      G_mbModeCode and the confirmation in the input register G_mbConfCode.
       ============================================================================ *)
 
    (* IMPORTANT: Member order defines implicit integer values (0-7).
-      These values map to 3-bit mode encoding on DI0-DI2 and DO0-DO2. Do not reorder.
+      These values are the Modbus mode codes. Do not reorder.
       MODE_PRESSURE closes the slave's pressure loop on the transducer wired to
       the analog input; its reference is the target pressure in MPa gauge. *)
    E_OperatingMode :
    (
       MODE_IDLE,               (* implicit 0 - 000: Idle - Drive OFF, brake engaged *)
       MODE_BRAKE_HOLD,         (* implicit 1 - 001: Brake Hold - Drive ON, brake engaged *)
-      MODE_POSITION,           (* implicit 2 - 010: Position Control - Analog reference *)
-      MODE_VELOCITY,           (* implicit 3 - 011: Velocity Control - Analog reference *)
-      MODE_TORQUE,             (* implicit 4 - 100: Torque Control - Analog reference *)
+      MODE_POSITION,           (* implicit 2 - 010: Position Control - reference in mm *)
+      MODE_VELOCITY,           (* implicit 3 - 011: Velocity Control - reference in mm/s *)
+      MODE_TORQUE,             (* implicit 4 - 100: Torque Control - reference in % rated *)
       MODE_GO_HOME,            (* implicit 5 - 101: Go Home - Move to home position *)
       MODE_HOME_LIMIT,         (* implicit 6 - 110: Home to Negative Overtravel Switch (reference) *)
       MODE_PRESSURE            (* implicit 7 - 111: Pressure Control - reference is target MPa gauge *)
@@ -49,12 +48,7 @@ TYPE
 
       The full integer value is published in the Modbus input register
       G_mbFaultCode and mirrored back by the master in G_mbModeCode during
-      the fault reset handshake. When doFaultActive is HIGH the low three
-      bits are also output on DO0-DO2 instead of mode confirmation.
-
-      Encoding:
-      - DO0 = bit 0 (LSB), DO1 = bit 1, DO2 = bit 2 (MSB)
-      - Fault value = DO2*4 + DO1*2 + DO0
+      the fault reset handshake.
       ============================================================================ *)
 
    (* IMPORTANT: Member order defines implicit integer values. Do not reorder.
