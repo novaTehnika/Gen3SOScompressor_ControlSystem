@@ -98,8 +98,8 @@ Hold Secure ______________________|‾‾‾‾‾‾‾‾‾‾‾‾
 | G_mbModeCode (HR2) | 50 ms | `G_cfgDebounceTimeMode` (code value held this long) |
 | G_mbMotionEnable (HR3) | 20 ms | `G_cfgDebounceTimeMotion` |
 | G_mbFaultReset (HR4) | 20 ms | `G_cfgDebounceTimeFault` |
-| G_diLimitRetract | 5 ms | `G_cfgDebounceTimeLimitStd` |
-| G_diLimitHome | 2 ms | `G_cfgDebounceTimeLimitHome` (shorter for homing precision) |
+| G_diOvertravelNeg | 10 ms | `G_cfgDebounceTimeOvertravelNeg` (negative overtravel / home reference) |
+| G_diOvertravelPos | 10 ms | `G_cfgDebounceTimeOvertravelPos` |
 
 ### Edge Detection
 
@@ -195,24 +195,8 @@ TRUE for up to `V/A` after the drop (1.0 s at `V` = 5 mm/s, `A` = 5 mm/s²) plus
 | Set Reference | 50 ms | 200 ms | `MC_SetPosition` via `G_cmdSetPosition` |
 | **Total** | **7-18 s** | **36 s** | Complete sequence |
 
-### Mode 111 (Home to EOT)
-
-| Phase | Typical | Maximum | Description |
-|-------|---------|---------|-------------|
-| Fast Approach | 3-5 s | 10 s | High-speed move |
-| Slow Approach | 1-3 s | 10 s | Torque-limited approach |
-| Stall Detection | 200-500 ms | 2 s | Confirming stall |
-| Set Reference | 50 ms | 200 ms | Compute `G_posEOTOffset` (no encoder re-zero; preserves Mode 110 reference) |
-| **Total** | **5-9 s** | **22 s** | Complete sequence |
-
-### Stall Detection Timing
-
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| Stall Velocity Threshold | 0.5 mm/s | Below this = stalled |
-| Stall Torque Threshold | 90% | Of torque limit |
-| Stall Confirmation Time | 200 ms | Both conditions must persist |
-| Stall Timeout | 10 s | Max time in slow approach |
+Mode 110 is the only homing sequence. Mode code 111 (7) is `MODE_PRESSURE`, an
+operational mode handled by `FB_PressureController`, not a homing mode.
 
 ---
 
@@ -223,7 +207,7 @@ TRUE for up to `V/A` after the drop (1.0 s at `V` = 5 mm/s, `A` = 5 mm/s²) plus
 | Fault Type | Detection Time | Description |
 |------------|----------------|-------------|
 | Drive Fault | 1 scan (2 ms) | Direct from drive status (includes encoder alarms A.810/A.CC0/A.830) |
-| Limit Switch | 1 scan + 5 ms debounce | Unexpected activation |
+| Overtravel Switch | 1 scan + 10 ms debounce | Unexpected activation |
 | Position Limit | 1 scan | Software limit exceeded |
 | Piston Exit | 1 scan | Guard condition met |
 | Handshake Timeout | 500 ms | No confirmation received |
@@ -346,11 +330,10 @@ FaultReset   _______________|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 | G_cfgDebounceTimeMode | 50 ms | 10-200 ms | Mode code debounce |
 | G_cfgDebounceTimeMotion | 20 ms | 5-100 ms | MotionEnable debounce |
 | G_cfgDebounceTimeFault | 20 ms | 5-100 ms | FaultReset debounce |
-| G_cfgDebounceTimeLimitStd | 5 ms | 1-20 ms | Retract limit debounce |
-| G_cfgDebounceTimeLimitHome | 2 ms | 1-10 ms | Home limit debounce |
+| G_cfgDebounceTimeOvertravelNeg | 10 ms | 1-20 ms | Negative overtravel / home reference debounce |
+| G_cfgDebounceTimeOvertravelPos | 10 ms | 1-20 ms | Positive overtravel debounce |
 | G_cfgAnalogFilterTimeConst | 20 ms | 1-200 ms | Pressure input low-pass time constant |
 | G_cfgHomingTimeout | 30000 ms | 10000-60000 ms | Homing sequence timeout |
-| G_cfgStallDetectTime | 200 ms | 100-500 ms | EOT stall confirmation |
 
 ---
 

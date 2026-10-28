@@ -13,11 +13,13 @@ offset that the controller stores in battery-backed memory (flash on
 Sigma-7Siec) for absolute-encoder axes. Operational modes are accepted
 directly after power-up, and soft limits are enforced from boot.
 
+Mode 110 is the only homing sequence. Mode code 111 (7) is `MODE_PRESSURE`,
+an operational mode (see `docs/master/MasterProtocolGuide.md`).
+
 | Mode | Name | Purpose | When Used |
 |------|------|---------|-----------|
 | 110 | Home to Limit | Establish the coordinate-frame zero using the negative overtravel switch | On demand from the master: after an encoder alarm or encoder reset (reported as `FAULT_DRIVE`), or after a controller SRAM battery failure or controller replacement, which lose the stored offset |
 | 101 | Go Home | Move to the home position (`G_cfgGoHomePosition`) | User convenience |
-| 111 | Reserved | No state handler; the slave stays in its current state | Not used |
 
 ---
 
@@ -140,147 +142,7 @@ MASTER:
 
 ---
 
-## 3. Mode 111: Home to End-of-Travel
-
-### Purpose
-Calibrate the cylinder end-of-travel position by detecting mechanical stall. This ensures the position reference accounts for any mechanical variations or wear.
-
-> **Note on Implementation**
->
-> The sequence below is encapsulated within the `FB_HomeEOT` function block. `PRG_Main` runs a single `ST_HOME_EOT` state; the deprecated sub-state enum members (`ST_HOME_EOT_FAST` / `SLOW` / `DETECT` / `SETREF`) still exist in `E_SystemState` but are unused by the live state machine. The labels below (`HE_FAST_APPROACH`, etc.) are the FB's internal `INT` constants.
->
-> **Command/status routing.** `FB_HomeEOT` emits `CmdMoveVelocity`, `CmdDirectControl`, and `CmdStop` `VAR_OUTPUT` structs, which `PRG_Main` copies into the matching `G_cmd*` globals so the LD POU's `MC_MoveVelocity`, `Y_DirectControl`, and `MC_Stop` instances act on them. Status flows back via `G_sta*` globals wired into `FB_HomeEOT.Sta*` inputs. Unlike Mode 110, this FB **does not** command `MC_SetPosition` — the encoder reference established by Mode 110 is preserved; Mode 111 only calculates a master/slave coordinate offset.
-
-### Sequence Steps
-
-```
-Step 1: FAST APPROACH
-+------------------------------------------+
-| Step: HE_FAST_APPROACH                   |
-| Action: CmdMoveVelocity -> MC_MoveVelocity|
-| Velocity: FastVelocity FB input          |
-|           (= G_cfgHomeEOTFastVel)        |
-|           (default: +50 mm/s)            |
-| Exit: Position within ApproachDist of    |
-|       expected EOT                       |
-|       (G_cfgHomeEOTApproachDist = 20 mm) |
-+------------------------------------------+
-        |
-        v
-Step 2: SLOW APPROACH
-+------------------------------------------+
-| Step: HE_SLOW_APPROACH                   |
-| Action: CmdDirectControl                 |
-|         -> G_cmdDirectControl            |
-|         -> Y_DirectControl (velocity +   |
-|            torque-limit mode)            |
-| Velocity: SlowVelocity FB input          |
-|           (= G_cfgHomeEOTSlowVel)        |
-|           (default: +5 mm/s)             |
-| Torque Limit: G_cfgTorqueHomingLimit     |
-|               (default: 60%)             |
-| Exit: |vel| < 0.5 mm/s AND               |
-|       |torque| >= 0.9 * TorqueThreshold  |
-|       (TorqueThreshold =                 |
-|        G_cfgHomeEOTTorqueThresh = 50%,   |
-|        effective detection at 45% rated) |
-+------------------------------------------+
-        |
-        v
-Step 3: STALL DETECT
-+------------------------------------------+
-| Step: HE_STALL_DETECT                    |
-| Condition 1: |ActualVelocity| < 0.5 mm/s |
-|              (rVelocityThreshold)        |
-| Condition 2: |ActualTorque| >=           |
-|              0.9 * TorqueThreshold       |
-|              (rTorqueMultiplier = 0.9)   |
-| Duration: G_cfgStallDetectTime (200 ms)  |
-| Exit: Conditions held for duration       |
-+------------------------------------------+
-        |
-        v
-Step 4: SET REFERENCE (offset only)
-+------------------------------------------+
-| Step: HE_SETREF                          |
-| Action: Record EOTPosition from          |
-|         ActualPosition input, then       |
-|   EOTOffset := ExpectedEOTPosition       |
-|                - EOTPosition             |
-|   where ExpectedEOTPosition =            |
-|     G_cfgHomeEOTSetPosition (300 mm)     |
-| Note: No MC_SetPosition call —           |
-|       encoder zero from Mode 110 kept.   |
-| PRG_Main writes offset to G_posEOTOffset |
-+------------------------------------------+
-        |
-        v
-Step 5: COMPLETE
-+------------------------------------------+
-| State: ST_HOME_COMPLETE                  |
-| Action: Hold position                    |
-| Output: G_doHomingComplete = TRUE          |
-| Exit: New mode commanded                 |
-+------------------------------------------+
-```
-
-### Stall Detection Algorithm
-
-```
-STALL DETECTION CRITERIA (from FB_HomeEOT):
-  - |ActualVelocity| < rVelocityThreshold         (= 0.5 mm/s, FB constant)
-  - |ActualTorque|   >= TorqueThreshold * 0.9     (TorqueThreshold input =
-                                                   G_cfgHomeEOTTorqueThresh = 50%,
-                                                   detection fires at 45% rated)
-  - Both held for G_cfgStallDetectTime            (= 200 ms)
-
-PSEUDOCODE:
-IF ABS(ActualVelocity) < rVelocityThreshold AND
-   ABS(ActualTorque)   >= TorqueThreshold * rTorqueMultiplier THEN
-    tStallConfirm(IN := TRUE, PT := G_cfgStallDetectTime);
-    IF tStallConfirm.Q THEN
-        (* stall confirmed, proceed to HE_SETREF *)
-    END_IF
-ELSE
-    tStallConfirm(IN := FALSE);    (* resets on any criterion failure *)
-END_IF
-```
-
-### Timing Expectations
-
-| Phase | Typical Duration | Maximum |
-|-------|------------------|---------|
-| Fast Approach | 3-5 seconds | 10 seconds |
-| Slow Approach | 1-3 seconds | 10 seconds |
-| Stall Detect | 200-500 ms | 2 seconds |
-| Set Reference | 50 ms | 200 ms |
-| **Total** | **5-9 seconds** | **22 seconds** |
-
-### Safety Considerations
-
-- Torque limit prevents motor/mechanical damage during stall
-- Slow approach velocity reduces impact energy
-- Stall confirmation time prevents false triggers
-- If stall not detected within timeout, fault is raised
-
-### Master Coordination
-
-```
-MASTER:
-1. Ensure Mode 110 completed (if encoder was invalid)
-2. Command mode 111
-3. Wait for confirmation in IR3 (G_mbConfCode)
-4. Set MotionEnable HIGH (HR3 = 1)
-5. Monitor progress:
-   - IR6 G_mbInMotion = 1 during approach phases
-   - IR6 G_mbInMotion = 0 when stall detected
-6. Wait for IR8 G_mbHomingComplete = 1
-7. Homing complete - full position calibration done
-```
-
----
-
-## 4. Mode 101: Go Home
+## 3. Mode 101: Go Home
 
 ### Purpose
 Move to the home position (`G_cfgGoHomePosition`). Provides convenience for returning to a known position.
@@ -303,7 +165,7 @@ MASTER:
 
 ---
 
-## 5. Homing Configuration Parameters
+## 4. Homing Configuration Parameters
 
 > These parameters are global variables documented in `slave-src/GVL/GlobalVariables_Reference.st` and configured in the MWiec GUI.
 
@@ -318,24 +180,7 @@ MASTER:
 | `G_cfgHomeLimSetPosition` | 0.0 | mm | Position value at the retract endpoint (becomes coord-frame zero) |
 | `G_cfgHomeLimAccel` | 5.0 | mm/s² | Acceleration for all homing moves |
 | `G_cfgHomeLimDecel` | 5.0 | mm/s² | Deceleration for all homing moves |
-| `G_cfgHomingTimeout` | T#30S | — | Overall FB timeout for the entire homing sequence |
-
-### Mode 111 Parameters
-
-| Parameter | Default | Units | Description |
-|-----------|---------|-------|-------------|
-| `G_cfgHomeEOTFastVel` | 50.0 | mm/s | Fast approach velocity |
-| `G_cfgHomeEOTApproachDist` | 20.0 | mm | Distance from expected EOT at which to switch to slow approach |
-| `G_cfgHomeEOTSlowVel` | 5.0 | mm/s | Slow torque-limited approach velocity |
-| `G_cfgTorqueHomingLimit` | 60.0 | % | Torque limit applied during slow approach |
-| `G_cfgHomeEOTTorqueThresh` | 50.0 | % | Stall detection torque threshold (actual trigger at 90% × threshold = 45%) |
-| `G_cfgStallDetectTime` | T#200MS | — | Stall confirmation duration |
-| `G_cfgHomeEOTSetPosition` | 300.0 | mm | Expected master-view position at EOT (used for offset calculation) |
-| `G_cfgHomingTimeout` | T#30S | — | Overall sequence timeout |
-
-Notes:
-- The stall velocity threshold (`0.5 mm/s`) and torque multiplier (`0.9`) are FB-internal constants inside `FB_HomeEOT` (`rVelocityThreshold`, `rTorqueMultiplier`) and are not exposed as configurable globals.
-- See [Stall_Detection_Calculation](../Stall_Detection_Calculation.md) for the full derivation.
+| `G_cfgHomingTimeout` | T#90S | — | Overall FB timeout for the entire homing sequence |
 
 ### Mode 101 Parameters
 
@@ -346,7 +191,7 @@ Notes:
 
 ---
 
-## 6. Startup and Re-Homing
+## 5. Startup and Re-Homing
 
 ### Power-Up
 
@@ -377,7 +222,7 @@ G_doHomingComplete = TRUE (until MotionEnable, HR3, drops)
 
 ---
 
-## 7. Troubleshooting
+## 6. Troubleshooting
 
 ### Homing Timeout
 
@@ -395,22 +240,6 @@ G_doHomingComplete = TRUE (until MotionEnable, HR3, drops)
 3. Check homing velocity parameters
 4. Manually inspect switch position
 
-### Stall Not Detected (Mode 111)
-
-**Symptom**: EOT homing runs but never confirms stall
-
-**Possible Causes**:
-- Torque limit too high (motor doesn't reach threshold)
-- Stall velocity threshold too low
-- Mechanical friction too high
-- Not actually reaching EOT
-
-**Resolution**:
-1. Reduce torque limit parameter
-2. Increase stall velocity threshold slightly
-3. Check mechanical friction
-4. Verify expected EOT position
-
 ### Position Drift After Homing
 
 **Symptom**: Position accuracy degrades over time
@@ -427,7 +256,7 @@ G_doHomingComplete = TRUE (until MotionEnable, HR3, drops)
 
 ---
 
-## 8. Quick Reference
+## 7. Quick Reference
 
 ### Homing Mode Commands
 
@@ -435,7 +264,6 @@ G_doHomingComplete = TRUE (until MotionEnable, HR3, drops)
 |------|--------|--------|
 | 101 | 101 | Go Home |
 | 110 | 110 | Home to Limit Switch (re-establishes the zero) |
-| 111 | 111 | Reserved |
 
 ### When to Home
 
