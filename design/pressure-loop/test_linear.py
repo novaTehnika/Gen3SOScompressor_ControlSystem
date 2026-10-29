@@ -228,9 +228,12 @@ def check_v3_disturbance():
     """Outflow step: dip and recovery."""
     Q = 2e-7                                                # [m^3/s]
     kp = CFG['G_cfgPressureKp']
-    s = scenarios.stiffstep(PAR, T=8.0, target1=10e6, Qf=Q, t_open=1.0,
-                            Topen=0.0, tube=False)
-    r = sim.run(PAR, s, ctl.SlaveController())
+    # The hose is open so that the outlet flows, and without its volume
+    # and compliance so that the linear chamber is the saline alone
+    q = PAR.with_(V_hose=0.0, C_hose=0.0)
+    s = scenarios.stiffstep(q, T=8.0, target1=10e6, Qf=Q, t_open=1.0,
+                            Topen=0.0, tube=False, hose_open0=True)
+    r = sim.run(q, s, ctl.SlaveController())
     n0 = round(s.t_open / PAR.Ts)
     lp = lin.loop(PAR, K_LIQ)
     y = model_trace(lp['D'], len(r.t), n0, Q)               # [Pa]

@@ -77,8 +77,10 @@ UNCERTAIN = [
               'measured 0.72, segments 0.67 to 0.78, gas-corrected 0.81'),
     Uncertain('Vl0', 320e-6, 360e-6, False, 1e6, 'mL',
               'fill at the 280 mm start, 343 mL from the geometry'),
-    Uncertain('V_dead', 45e-6, 55e-6, False, 1e6, 'mL',
-              'dead volume, measured 50 mL'),
+    Uncertain('V_passages', 45e-6, 55e-6, False, 1e6, 'mL',
+              'cylinder-head passages, measured 50 mL with the hose shut'),
+    Uncertain('C_hose', 1.2e-13, 3.6e-13, True, 1e12, 'mL/MPa',
+              'hose compliance, 0.24 mL/MPa by difference of two K runs'),
     Uncertain('tauDiss', 10.0, 100.0, True, 1.0, 's',
               'gas dissolution time constant'),
     Uncertain('tauV', 0.005, 0.025, True, 1e3, 'ms',
@@ -212,23 +214,23 @@ def nominal():
     return {u.name: getattr(base, u.name) for u in UNCERTAIN}
 
 
-def base_params(ratio=1.0, P_target=None):
+def base_params(ratio=1.0, P_target=None, hose_before=False):
     """Return Params for the study: the settling band set to the slave's
-    status band, the oxygen charge set to ratio and, if given, the
-    target pressure [Pa]."""
+    status band, the oxygen charge set to ratio, the hose procedure
+    and, if given, the target pressure [Pa]."""
     par = Params(tol=THRESH['inband'] * 1e6,            # [MPa -> Pa]
-                 ratio=ratio)
+                 ratio=ratio, hose_before=hose_before)
     if P_target is not None:
         par = par.with_(P_target=P_target)
     return par
 
 
-def make_params(values, ratio=1.0, P_target=None):
-    """Return base_params(ratio, P_target) with the sampled values
-    applied. A 'ratio' entry in values overrides the argument."""
+def make_params(values, ratio=1.0, P_target=None, hose_before=False):
+    """Return base_params(ratio, P_target, hose_before) with the sampled
+    values applied. A 'ratio' entry in values overrides the argument."""
     values = dict(values)
     ratio = values.pop('ratio', ratio)
-    return base_params(ratio, P_target).with_(**values)
+    return base_params(ratio, P_target, hose_before).with_(**values)
 
 
 def make_scenario(name, par, ff_scale=1.0):
@@ -257,7 +259,8 @@ def extras(r, scenario):
 
 METRIC_NAMES = ('overshoot', 'tSettle', 'peakErr', 'rmsErr', 'ripple',
                 'uAct', 'stroke_mm', 'P_max', 'P_min', 'degasMargin',
-                'dip', 'V_delivered', 'V_ok', 'V_lost', 't_arrive',
+                'dip', 'dipMax', 'V_delivered', 'V_ok', 'V_lost',
+                't_arrive',
                 'maxErrLate')
 
 
@@ -280,6 +283,7 @@ class ControllerSpec:
     ratio: float = 1.0      # oxygen charge the arm is run with
     sched: dict = None      # ScheduledSlaveController arguments, or None
     P_target: float = None  # [Pa] target pressure; None for the default
+    hose_before: bool = False   # hose opened before the compression
 
 
 def make_controller(spec):
@@ -300,7 +304,7 @@ def point_metrics(point):
     metric NaN, which fails every requirement.
     """
     values, scen, spec, seed = point
-    par = make_params(values, spec.ratio, spec.P_target)
+    par = make_params(values, spec.ratio, spec.P_target, spec.hose_before)
     s = make_scenario(scen, par, spec.ff_scale)
     c = make_controller(spec)
     try:

@@ -88,7 +88,7 @@ COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
 # stiffness estimate an upper bound), the bulk modulus at the top of its
 # measured range, and the saline volume and charge as configured for
 # the run.
-SCHED = {'V_dead_cfg': 45e-6, 'K_cfg': 1.0e9}
+SCHED = {'V_dead_cfg': 74e-6, 'K_cfg': 1.0e9, 'C_hose_cfg': 1.2e-13}
 CONFIGS = {
     'GVL': ControllerSpec('GVL'),
     'vmin0.5': ControllerSpec('vmin0.5', {'StopVelMin': 0.5}),
@@ -531,6 +531,9 @@ def main(argv=None):
                     help='oxygen charge, STP volume per saline volume')
     ap.add_argument('--target', type=float, default=None,
                     help='target pressure in MPa (default: Params)')
+    ap.add_argument('--hose-before', action='store_true',
+                    help='open the proximal valve before the compression '
+                         '(the proposed procedure)')
     ap.add_argument('--no-tornado', action='store_true')
     args = ap.parse_args(argv)
     out = Path(args.out)
@@ -544,7 +547,8 @@ def main(argv=None):
         names = args.configs.split(',') if args.configs else list(CONFIGS)
         specs = [CONFIGS[n] for n in names]
     P_target = None if args.target is None else args.target * 1e6
-    specs = [dataclasses.replace(s, ratio=args.ratio, P_target=P_target)
+    specs = [dataclasses.replace(s, ratio=args.ratio, P_target=P_target,
+                                 hose_before=args.hose_before)
              for s in specs]
 
     # Parameter ranges and limits
@@ -557,7 +561,9 @@ def main(argv=None):
     say('thresholds: ' + ', '.join(f'{k}={v:g}'
                                    for k, v in THRESH.items()))
     say(f'oxygen charge {args.ratio:g}:1'
-        + (f', target {args.target:g} MPa' if args.target else ''))
+        + (f', target {args.target:g} MPa' if args.target else '')
+        + (', hose opened before the compression' if args.hose_before
+           else ', hose opened after mixing'))
     for spec in specs:
         say(f'arm {spec.name}: {spec.overrides or "GVL"}'
             + (f' scheduled {spec.sched}' if spec.sched else ''))

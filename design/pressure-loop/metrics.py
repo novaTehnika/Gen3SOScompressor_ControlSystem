@@ -45,12 +45,14 @@ the delivery.
                reached; negative means the solution degassed.
   dip          [MPa] Target minus the lowest pressure within t_recover
                of the event (the opening dip of a delivery).
-  V_delivered  [mL] Saline delivered through the outlet by the end.
+  V_delivered  [mL] Saline delivered through the outlet by the end,
+               the purged virgin saline included.
+  V_solution   [mL] Solution delivered: V_delivered less the purge.
   V_ok         [mL] Saline delivered before the first violation: P below
                P_sat + degas_margin, P above the ceiling, or |e| above
-               e_crash more than t_recover after the valve opens. It
-               equals V_delivered when nothing is violated and 0 when
-               the opening dip itself degasses the solution.
+               e_crash outside the t_recover window after each valve
+               event. It equals V_delivered when nothing is violated
+               and 0 when an opening itself degasses the solution.
   t_arrive     [s] Time the pressure first comes within tol of the
                target; NaN if it never does.
 
@@ -132,26 +134,38 @@ def process(r, par, scenario):
             margin = P[i0:] - r.P_sat[i0:]                  # [Pa]
             out['degasMargin'] = float(np.min(margin)) / 1e6
 
-    # Dip below the target within t_recover of the event
+    # Dip below the target within t_recover of the event, and the
+    # deepest dip within t_recover of any valve event
     after_event = t >= scenario.tEvent
     window = after_event & (t < scenario.tEvent + par.t_recover)
     out['dip'] = float(target[after_event][0] - np.min(P[window])) / 1e6
+    events = r.events or []
+    dips = []
+    for te in events:
+        w = (t >= te) & (t < te + par.t_recover)
+        if w.any():
+            dips.append(float(target[w][0] - np.min(P[w])) / 1e6)
+    out['dipMax'] = max(dips) if dips else out['dip']
 
     # Delivered volume, [m^3 -> mL]
     if r.V_out is None:
         return out
     out['V_delivered'] = float(r.V_out[-1]) * 1e6
+    out['V_solution'] = out['V_delivered'] - (r.V_purge or 0.0) * 1e6
 
-    # Volume delivered before the first violation. The error check
-    # starts t_recover after the valve opens.
+    # Volume delivered before the first violation. The error check is
+    # suspended for t_recover after each valve event.
     if arrived.size == 0 or r.P_sat is None:
         out['V_ok'] = 0.0
         return out
     i0 = arrived[0]
     bad = ((P < r.P_sat + par.degas_margin) | (P > par.P_ceiling))
     bad[:i0] = False
-    settled = t >= scenario.t_open + par.t_recover
-    bad |= settled & (np.abs(err) > par.e_crash)
+    recovering = np.zeros_like(bad)
+    for te in events:
+        recovering |= (t >= te) & (t < te + par.t_recover)
+    bad |= (~recovering) & (np.abs(err) > par.e_crash)
+    bad[:i0] = False
     i_bad = np.flatnonzero(bad)
     if i_bad.size == 0:
         out['V_ok'] = out['V_delivered']

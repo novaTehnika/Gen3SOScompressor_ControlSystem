@@ -24,13 +24,18 @@ volume change to a pressure change. When the option liquid_depletes is
 set, the outflow removes saline and carries away the gas dissolved in
 it. Equations (1) to (10) of the README give the chamber model.
 
-The outlet is the orifice bank. With the valve open, the outflow is the
+The outlet is a hose, a tube and the orifice bank. The hose holds virgin
+saline at atmosphere behind the proximal valve; opening that valve joins
+the hose to the chamber, and the pressures equalise in one step,
+eq. (43): the chamber's stored compression fills the hose's liquid and
+wall compliance, eq. (42). With the distal valve open, the outflow is the
 orifice flow at the chamber pressure times the valve's area fraction,
-eq. (36), or a prescribed flow when the scenario gives one. The tube
-between the valve and the orifices holds air before the valve opens, so
-in the opening scan the chamber also loses the tube's volume, eq. (37).
-The delivery ends when the piston reaches the limit switch, where the
-chamber volume is down to the dead volume.
+eq. (36), or a prescribed flow when the scenario gives one; the virgin
+saline leaves first, then the solution. The tube between the distal
+valve and the orifices holds air before it first opens, so in that scan
+the chamber also loses the tube's volume, eq. (37). The delivery ends
+when the piston reaches the limit switch, where the cylinder head is
+down to its passages.
 
 The actuator has two forms. In velocity mode, which the slave uses, the
 command reaches the drive after a dead time, the drive's velocity loop
@@ -69,7 +74,8 @@ iy_ntot = 4    # [mol] gas in the chamber, free and dissolved
 iy_Vl = 5      # [m^3] saline volume at zero gauge pressure
 iy_nout = 6    # [mol] dissolved gas carried out by the outflow
 iy_Vout = 7    # [m^3] saline delivered through the outlet
-N_STATES = 8
+iy_Vvir = 8    # [m^3] virgin saline (from the hose) still in the system
+N_STATES = 9
 
 
 # %% ===== PLANT MODEL ===================================================
@@ -112,7 +118,10 @@ class Plant:
         self.Qf = scenario.Qf           # [m^3/s] prescribed flow, or 0
         # [m^3/s per sqrt(Pa)] orifice coefficient Cd A sqrt(2 / rho)
         self.k_orifice = par.Cd * par.A_orifice * math.sqrt(2 / par.rho)
-        self.V_dead = par.V_dead        # [m^3]
+        self.V_passages = par.V_passages    # [m^3]
+        self.V_hose = par.V_hose            # [m^3]
+        self.C_hose = par.C_hose            # [m^3/Pa]
+        self.hose_open = scenario.hose_open0
 
         # Velocity actuator parameters
         self.slew_limited = par.slew_limited
@@ -148,10 +157,18 @@ class Plant:
         self.v_ref = 0.0                        # [m/s] slewed command
         self.Q = 0.0                            # [m^3/s] last outflow
 
-        # [m^3] Chamber volume at x = 0. The contents fill the chamber,
-        # so it equals the stressed liquid plus the free gas (eq. (9)).
+        # [m^3] Cylinder volume at x = 0 (passages and swept volume, not
+        # the hose). The contents fill it, so it equals the stressed
+        # liquid plus the free gas (eq. (9)).
         self.Vch0 = (par.Vl0 * (1 - P0 / par.K)
                      + ng0 * self.RT / (P0 + par.Patm))
+        if self.hose_open:
+            # The hose is already part of the system: its virgin saline
+            # is at the chamber pressure and its wall is dilated, so the
+            # cylinder holds the contents less what the hose holds.
+            # chamber_volume subtracts V_hose, so Vch0 carries it too.
+            y[iy_Vvir] = par.V_hose
+            self.Vch0 += par.V_hose * (1 - P0 / par.K) - par.C_hose * P0
 
     # ----- Outflow ------------------------------------------------------
     def outflow(self, P, V_l, valve, Q_tube):
@@ -171,9 +188,54 @@ class Plant:
 
     @property
     def empty(self):
-        """True once the chamber volume is down to the dead volume, where
+        """True once the cylinder volume is down to its passages, where
         the piston reaches the limit switch and the machine halts."""
-        return self.chamber_volume <= self.V_dead
+        return self.chamber_volume <= self.V_passages
+
+    # ----- Hose ---------------------------------------------------------
+    def liquid_capacitance(self, V_l, V_vir):
+        """[m^3/Pa] Liquid part of the capacitance: the saline and, with
+        the hose open, the hose's compliance, eq. (42)."""
+        C = (V_l + V_vir) / self.K
+        if self.hose_open:
+            C += self.C_hose
+        return C
+
+    def open_hose(self):
+        """Open the proximal valve: join the hose's virgin saline, at
+        atmosphere, and its compliance to the chamber, and equalise the
+        pressure in one step, eq. (43).
+
+        The contents must fill the cylinder and the hose, so the new
+        pressure P1 solves
+          (V_l + V_vir + V_hose)(1 - P1/K) + n_g R T / (P1 + Patm)
+            = V_cyl + V_hose + C_hose P1
+        where V_cyl is the cylinder volume now; it is found by bisection.
+        """
+        if self.hose_open:
+            return
+        y = self.y
+        x, v, P, n_dis, n_tot, V_l, n_out, V_out, V_vir = y
+        n_g = n_tot - n_dis
+        V_liq = V_l + V_vir + self.V_hose
+        V_cyl = self.chamber_volume
+
+        def closure(P1):
+            contents = (V_liq * (1 - P1 / self.K)
+                        + n_g * self.RT / (P1 + self.Patm))
+            return contents - (V_cyl + self.V_hose + self.C_hose * P1)
+        lo, hi = 1.0 - self.Patm, P
+        for _ in range(80):
+            mid = 0.5 * (lo + hi)
+            if closure(mid) > 0:     # too much content: pressure higher
+                lo = mid
+            else:
+                hi = mid
+        y[iy_P] = 0.5 * (lo + hi)
+        y[iy_Vvir] = V_vir + self.V_hose
+        self.hose_open = True
+        # The hose volume now belongs to the system's volume balance
+        self.Vch0 += self.V_hose
 
     # ----- Continuous-time model ----------------------------------------
     def derivatives(self, y, u_act, valve, Q_tube):
@@ -184,13 +246,17 @@ class Plant:
         torque mode. valve is the outlet valve's area fraction and Q_tube
         [m^3/s] the extra flow that fills the tube in the opening scan.
         """
-        x, v, P, n_dis, n_tot, V_l, n_out, V_out = y
+        x, v, P, n_dis, n_tot, V_l, n_out, V_out, V_vir = y
 
         # Absolute pressure, eq. (1)
         P_abs = P + self.Patm                               # [Pa]
 
-        # Outflow through the outlet, eq. (36)
-        Q = self.outflow(P, V_l, valve, Q_tube)             # [m^3/s]
+        # Outflow through the outlet, eq. (36); nothing can leave while
+        # the hose is shut
+        if self.hose_open:
+            Q = self.outflow(P, V_l + V_vir, valve, Q_tube)  # [m^3/s]
+        else:
+            Q = 0.0
 
         # Gas dissolution toward the Henry's-law equilibrium,
         # eqs. (2) and (3). The equilibrium cannot exceed the gas present.
@@ -198,8 +264,10 @@ class Plant:
         r_dis = (n_eq - n_dis) / self.tauDiss               # [mol/s]
 
         # Chamber capacitance [m^3/Pa], the volume change per unit
-        # pressure change of the free gas plus the liquid, eq. (4)
-        C = (n_tot - n_dis) * self.RT / P_abs**2 + V_l / self.K
+        # pressure change of the free gas plus the liquid and, with the
+        # hose open, its compliance, eqs. (4) and (42)
+        C = ((n_tot - n_dis) * self.RT / P_abs**2
+             + self.liquid_capacitance(V_l, V_vir))
 
         # Piston acceleration
         if self.velocity_mode:
@@ -220,10 +288,18 @@ class Plant:
 
         # Saline and dissolved gas removed by the outflow, eqs. (7)
         # and (8). Q is a flow of liquid at pressure P, so the
-        # unstressed volume it removes is larger by 1/(1 - P/K).
+        # unstressed volume it removes is larger by 1/(1 - P/K). The
+        # virgin saline from the hose leaves first and carries no gas.
+        dV_vir = 0.0
         if self.liquid_depletes:
-            dV_l = -Q / (1 - P / self.K)                    # [m^3/s]
-            r_out = -n_dis / V_l * dV_l                     # [mol/s]
+            dV_liq = -Q / (1 - P / self.K)                  # [m^3/s]
+            if V_vir > 0.0:
+                dV_vir = dV_liq
+                dV_l = 0.0
+                r_out = 0.0
+            else:
+                dV_l = dV_liq
+                r_out = -n_dis / V_l * dV_l                 # [mol/s]
         else:
             dV_l = 0.0
             r_out = 0.0
@@ -237,6 +313,7 @@ class Plant:
         dydt[iy_Vl] = dV_l
         dydt[iy_nout] = r_out
         dydt[iy_Vout] = Q
+        dydt[iy_Vvir] = dV_vir
         return dydt
 
     # ----- Discrete actuator logic --------------------------------------
@@ -271,11 +348,12 @@ class Plant:
             y[iy_v] = max(-self.vmax, min(self.vmax, y[iy_v]))
 
         # The dissolved gas cannot exceed the gas present, the absolute
-        # pressure cannot fall below 1 Pa, and the saline volume cannot
+        # pressure cannot fall below 1 Pa, and the saline volumes cannot
         # fall below zero.
         y[iy_ndis] = min(y[iy_ndis], y[iy_ntot])
         y[iy_P] = max(y[iy_P], 1.0 - self.Patm)
         y[iy_Vl] = max(y[iy_Vl], 0.0)
+        y[iy_Vvir] = max(y[iy_Vvir], 0.0)
         return y
 
     # ----- Time step ----------------------------------------------------
@@ -303,7 +381,12 @@ class Plant:
             self.y = self.step(self.derivatives, self.y, self.dt,
                                u_act, valve, Q_tube)
             self.apply_constraints(self.y)
-        self.Q = self.outflow(self.y[iy_P], self.y[iy_Vl], valve, 0.0)
+        if self.hose_open:
+            self.Q = self.outflow(self.y[iy_P],
+                                  self.y[iy_Vl] + self.y[iy_Vvir],
+                                  valve, 0.0)
+        else:
+            self.Q = 0.0
         return self.y[iy_P]
 
     # ----- Outputs ------------------------------------------------------
@@ -337,11 +420,18 @@ class Plant:
         """[m^3] saline delivered through the outlet"""
         return self.y[iy_Vout]
 
+    @property
+    def V_virgin(self):
+        """[m^3] virgin saline from the hose still in the system"""
+        return self.y[iy_Vvir]
+
     def capacitance(self):
-        """[m^3/Pa] chamber capacitance at the present state, eq. (4)"""
-        x, v, P, n_dis, n_tot, V_l, n_out, V_out = self.y
+        """[m^3/Pa] chamber capacitance at the present state, eqs. (4)
+        and (42)"""
+        x, v, P, n_dis, n_tot, V_l, n_out, V_out, V_vir = self.y
         P_abs = P + self.Patm
-        return (n_tot - n_dis) * self.RT / P_abs**2 + V_l / self.K
+        return ((n_tot - n_dis) * self.RT / P_abs**2
+                + self.liquid_capacitance(V_l, V_vir))
 
     @property
     def stiffness(self):
@@ -350,17 +440,25 @@ class Plant:
 
     @property
     def chamber_volume(self):
-        """[m^3] chamber volume from the piston position"""
-        return self.Vch0 - self.A * self.y[iy_x]
+        """[m^3] cylinder volume (passages and swept volume) from the
+        piston position; the hose, when open, is extra"""
+        V = self.Vch0 - self.A * self.y[iy_x]
+        if self.hose_open:
+            V -= self.V_hose
+        return V
 
     def volume_closure(self):
-        """[m^3] Chamber volume minus the volume of its contents, eq. (9).
+        """[m^3] System volume minus the volume of its contents, eq. (9).
 
-        The contents are the stressed liquid and the free gas; dissolved
-        gas takes no volume. The result is zero up to the integration
-        error when liquid_depletes is set.
+        The system is the cylinder plus, with the hose open, the hose
+        and its dilation; the contents are the stressed liquid and the
+        free gas; dissolved gas takes no volume. The result is zero up
+        to the integration error when liquid_depletes is set.
         """
-        x, v, P, n_dis, n_tot, V_l, n_out, V_out = self.y
-        contents = (V_l * (1 - P / self.K)
+        x, v, P, n_dis, n_tot, V_l, n_out, V_out, V_vir = self.y
+        system = self.chamber_volume
+        if self.hose_open:
+            system += self.V_hose + self.C_hose * P
+        contents = ((V_l + V_vir) * (1 - P / self.K)
                     + (n_tot - n_dis) * self.RT / (P + self.Patm))
-        return self.chamber_volume - contents
+        return system - contents

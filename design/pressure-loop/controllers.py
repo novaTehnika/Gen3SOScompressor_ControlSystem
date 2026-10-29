@@ -323,20 +323,23 @@ class ScheduledSlaveController(SlaveController):
     The estimate, eq. (39), is the stiffest chamber consistent with what
     the slave knows. The chamber volume is V_ch = A (x_limit - x) +
     V_dead_cfg, with x_limit the limit-switch position where the piston
-    halts and V_dead_cfg the configured dead volume (a lower bound). The
-    free gas is the least there can be: the configured charge less what
-    the configured saline volume can hold at the highest pressure seen
-    so far (dissolution lags, so the true free gas is never less, and a
-    dip cannot have dissolved more). The saline volume is the configured
-    value, or the chamber volume when that is smaller (as it is late in
-    a delivery). With K_cfg the largest plausible bulk modulus,
+    halts and V_dead_cfg the configured dead volume with the hose open
+    (a lower bound). The free gas is the least there can be: the
+    configured charge less what the configured saline volume can hold
+    at the highest pressure seen so far (dissolution lags, so the true
+    free gas is never less, and a dip cannot have dissolved more). The
+    saline volume is the configured value, or the chamber volume when
+    that is smaller (as it is late in a delivery). With K_cfg the
+    largest plausible bulk modulus and C_hose_cfg the smallest plausible
+    hose compliance (0 when the hose is shut or unknown),
 
       V_gas_est = max(n_cfg - kH P_ref V_l_cfg, 0) R T / P_abs
       C_est = V_gas_est / P_abs + min(V_l_cfg, V_ch) / K_cfg
+              + C_hose_cfg
       k_est = A / C_est
 
     is never below the true stiffness while V_l_cfg is at or below the
-    true saline volume. The gain follows from the chosen crossover wc,
+    true saline volume and the hose is open. The gain follows from the chosen crossover wc,
     eq. (40), Kp = wc / k_est, held within [kp_min, kp_max], with Ki in
     the fixed ratio ki_ratio to Kp.
 
@@ -370,8 +373,11 @@ class ScheduledSlaveController(SlaveController):
                  plausible: 1.0 GPa against the measured 0.72.
       V_l_cfg    [m^3] Saline volume assumed by the estimate, a lower
                  bound on the true value. None uses the run's Vl0.
-      V_dead_cfg [m^3] Dead volume assumed by the estimate, a lower
-                 bound on the true value. None uses the run's V_dead.
+      V_dead_cfg [m^3] Dead volume (passages, hose and tube) assumed
+                 by the estimate, a lower bound on the true value. None
+                 uses the run's V_dead.
+      C_hose_cfg [m^3/Pa] Hose compliance assumed by the estimate, a
+                 lower bound on the true value; 0 leaves it out.
       ratio_cfg  [-] Charge assumed by the estimate. None uses the run's
                  ratio (the recipe is known to the slave); a fixed value
                  stands for a slave that does not know it.
@@ -389,11 +395,12 @@ class ScheduledSlaveController(SlaveController):
     """
 
     def __init__(self, name='scheduled', wc=6.0, K_cfg=1.0e9, V_l_cfg=None,
-                 V_dead_cfg=None, ratio_cfg=None, ki_ratio=0.4,
-                 kp_min=0.001, kp_max=5.0, lag=None, stop_from_k=True,
-                 e_int=0.5, flow_ff=False, **overrides):
+                 V_dead_cfg=None, C_hose_cfg=0.0, ratio_cfg=None,
+                 ki_ratio=0.4, kp_min=0.001, kp_max=5.0, lag=None,
+                 stop_from_k=True, e_int=0.5, flow_ff=False, **overrides):
         super().__init__(name, flow_ff, **overrides)
         self.V_dead_cfg = V_dead_cfg
+        self.C_hose_cfg = C_hose_cfg                            # [m^3/Pa]
         self.e_int = e_int
         self.wc = wc
         self.K_cfg = K_cfg
@@ -417,13 +424,13 @@ class ScheduledSlaveController(SlaveController):
         else:
             ratio = self.ratio_cfg
         self.n_cfg = par.n_charge(ratio)                        # [mol]
-        # Limit-switch position: where the chamber is down to the true
-        # dead volume. The slave knows it from its own position, and the
+        # Limit-switch position: where the cylinder is down to its
+        # passages. The slave knows it from its own position, and the
         # configured dead volume is the lower bound of the range.
         P0, ng0, nd0 = scenario.initial(par)
         Vch0 = (par.Vl0 * (1 - P0 / par.K)
                 + ng0 * self.RT / (P0 + par.Patm))              # [m^3]
-        self.x_limit = (Vch0 - par.V_dead) / par.A              # [m]
+        self.x_limit = (Vch0 - par.V_passages) / par.A          # [m]
         if self.V_dead_cfg is None:
             self.V_dead_run = par.V_dead                        # [m^3]
         else:
@@ -462,7 +469,8 @@ class ScheduledSlaveController(SlaveController):
         n_sat = self.kH * self.P_ref * self.V_l_cfg_run         # [mol]
         n_gas = max(self.n_cfg - n_sat, 0.0)                    # [mol]
         V_gas = n_gas * self.RT / P_abs                         # [m^3]
-        C = V_gas / P_abs + V_l / self.K_cfg                    # [m^3/Pa]
+        C = (V_gas / P_abs + V_l / self.K_cfg
+             + self.C_hose_cfg)                                 # [m^3/Pa]
         return self.A / C
 
     def stop_velocity(self, err_mpa, k_mm):

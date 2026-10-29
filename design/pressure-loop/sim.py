@@ -23,12 +23,16 @@ The simulation steps in slave scans of length Ts. In each scan:
      state the scenario gives for this scan (plant.py and solver.py).
 
 The one-scan delay between steps 2 and 3 reproduces the order in which
-PRG_Main calls its function blocks. In the scan the valve opens, the
-plant also loses the tube's air volume, eq. (37). A run ends early when
-the piston reaches the limit switch (the chamber is down to its dead
-volume). The traces are recorded after the plant step,
-except the measured pressure, which is the reading the controller used
-in that scan.
+PRG_Main calls its function blocks. The simulation sequences the valves:
+the proximal valve opens at the scenario's t_prox (the plant equalises
+the pressure with the hose, eq. (43)); the distal valve opens at t_open
+and, in that scan, the plant also loses the tube's air volume, eq. (37);
+with a purge stage the distal valve closes once the purge volume has
+left and opens again after the pause. The event times are recorded for
+the metrics. A run ends early when the piston reaches the limit switch
+(the cylinder is down to its passages). The traces are recorded after
+the plant step, except the measured pressure, which is the reading the
+controller used in that scan.
 
 FILE DEPENDENCY:
 ./
@@ -74,7 +78,9 @@ class Result:
     A: float = 0.0         # [m^2] piston area, for u_plot()
     P_sat: np.ndarray = None   # [Pa] saturation pressure of the saline
     V_out: np.ndarray = None   # [m^3] saline delivered so far
-    V_l: np.ndarray = None     # [m^3] saline remaining
+    V_l: np.ndarray = None     # [m^3] solution remaining
+    events: list = None    # [s] times of the valve events, in order
+    V_purge: float = 0.0   # [m^3] virgin saline purged before delivery
 
     def __getitem__(self, key):
         return self.metrics[key]
@@ -113,7 +119,6 @@ def run(par, scenario, controller, legacy_sensor=False, seed=1):
     N = round(scenario.T / Ts)                              # [-] scans
     t = np.arange(N) * Ts                                   # [s]
     target = np.array([scenario.target(tk) for tk in t])    # [Pa]
-    valve = np.array([scenario.valve(tk) for tk in t])      # [-]
     if par.noise:
         z = np.random.default_rng(seed).standard_normal(N)
     else:
@@ -129,13 +134,23 @@ def run(par, scenario, controller, legacy_sensor=False, seed=1):
     # flow of V_tube / Ts, eq. (37)
     Q_tube_open = par.V_tube / Ts if scenario.tube else 0.0  # [m^3/s]
     vented = False
+    # Valve sequence: proximal opening, then the distal valve's first
+    # opening (a purge if V_purge > 0), its closing, and its reopening
+    events = []
+    hose_opened = scenario.hose_open0
+    t_from = scenario.t_open                    # [s] distal opening
+    V_out_open = 0.0                            # [m^3] delivered at it
+    purging = scenario.V_purge > 0.0
+    t_closing = float('inf')                    # [s] closing ramp start
+    closed_until = -1.0                         # [s] reopen after this
+    V_purged = 0.0
 
     # Trace storage. Python lists of floats are faster than numpy arrays
     # for element-by-element writes in the loop.
     (P, P_meas, u_trace, v, x, stiffness, Q, P_sat, V_out,
      V_l) = ([0.0] * N for _ in range(10))
     t_list, target_list = t.tolist(), target.tolist()
-    valve_list, z_list = valve.tolist(), z.tolist()
+    z_list = z.tolist()
 
     # Scan loop
     n_run = N
@@ -146,12 +161,37 @@ def run(par, scenario, controller, legacy_sensor=False, seed=1):
         u_next = controller.step(reading, target_list[k], t_list[k],
                                  scenario, plant.x)
         # 3. Plant advance with the previous scan's command and this
-        #    scan's valve state
+        #    scan's valve states
+        tk = t_list[k]
+        if not hose_opened and tk >= scenario.t_prox:
+            plant.open_hose()
+            hose_opened = True
+            events.append(tk)
+        if tk < closed_until:
+            # Closing ramp over Tclose, then shut for the pause
+            a = max(0.0, 1.0 - (tk - t_closing) / scenario.Tclose) \
+                if scenario.Tclose > 0.0 else 0.0
+        else:
+            a = scenario.valve(tk, t_from)
         Q_tube = 0.0
-        if valve_list[k] > 0.0 and not vented:
+        if a > 0.0 and not vented:
             Q_tube = Q_tube_open
             vented = True
-        plant.scan(u_applied, valve_list[k], Q_tube)
+            events.append(tk)
+            V_out_open = plant.V_out
+        plant.scan(u_applied, a, Q_tube)
+        if (purging and a > 0.0
+                and plant.V_out - V_out_open >= scenario.V_purge):
+            # The purge is done: close, and reopen after the pause
+            purging = False
+            V_purged = plant.V_out
+            t_closing = tk
+            closed_until = tk + scenario.Tclose + scenario.t_pause
+            t_from = closed_until
+            events.append(tk)
+            events.append(closed_until)
+            if scenario.tube_refills:
+                vented = False
         u_applied = u_next
 
         P[k] = plant.P
@@ -173,7 +213,7 @@ def run(par, scenario, controller, legacy_sensor=False, seed=1):
     r = Result(controller.name, scenario.name, controller.mode, t[:n_run],
                arr(P), arr(P_meas), arr(u_trace), arr(v), arr(x),
                target[:n_run], arr(stiffness), arr(Q), {}, 0.0, par.A,
-               arr(P_sat), arr(V_out), arr(V_l))
+               arr(P_sat), arr(V_out), arr(V_l), events, V_purged)
     r.metrics = metrics.compute(r, par, scenario, controller.mode)
     r.cost = metrics.loop_cost(r.metrics)
     return r

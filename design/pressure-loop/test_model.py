@@ -59,7 +59,7 @@ from FB_PressureController import (FB_PressureController,  # noqa: E402
                                    new_FB_PressureController)
 from params import Params  # noqa: E402
 from plant import (Plant, iy_ndis, iy_nout, iy_ntot,  # noqa: E402
-                   iy_Vl, iy_Vout)
+                   iy_Vl, iy_Vout, iy_Vvir)
 from runner import Case, run_cases  # noqa: E402
 from sensor import LegacySensor, SlaveSensor, filter_alpha  # noqa: E402
 from slave import slave_config  # noqa: E402
@@ -97,17 +97,19 @@ def check_config():
 
 
 # %% ===== CHAMBER ========================================================
-def liquid_plant(par, P0=10e6, Qf=0.0):
+def liquid_plant(par, P0=10e6, Qf=0.0, hose_open0=True):
     """Return a velocity-mode plant with a liquid-only chamber at P0
     [Pa] and fast slew limits, and its scenario. Qf prescribes the
-    outflow with the valve open."""
-    sc = scenarios.stiffstep(par, P0=P0, Qf=Qf, tube=False)
+    outflow with the valve open; the hose is open unless hose_open0 is
+    False."""
+    sc = scenarios.stiffstep(par, P0=P0, Qf=Qf, tube=False,
+                             hose_open0=hose_open0)
     return Plant(par, sc, 'V', accel=1.0, decel=1.0), sc
 
 
 def check_stiffness():
     par = Params()
-    plant, _ = liquid_plant(par)
+    plant, _ = liquid_plant(par, hose_open0=False)
     for _ in range(100):                    # reach 0.1 mm/s
         plant.scan(1e-4, 0.0)
     P1, x1 = plant.P, plant.x
@@ -142,6 +144,8 @@ def check_conservation():
     # and its dissolved gas leave, and the moles and volume still
     # balance.
     plant, sc = liquid_plant(par, Qf=1e-6)
+    plant.y[iy_Vl] += plant.y[iy_Vvir]   # the hose holds solution
+    plant.y[iy_Vvir] = 0.0
     n0, Vl0 = plant.y[iy_ntot], plant.y[iy_Vl]
     nd0 = plant.y[iy_ndis]
     Q_int = 0.0                             # [m^3] outflow volume
@@ -152,7 +156,7 @@ def check_conservation():
         worst = max(worst, abs(plant.volume_closure()))
     y = plant.y
     removed = Vl0 - y[iy_Vl]                # [m^3] unstressed liquid
-    assert abs((y[iy_ntot] + y[iy_nout]) - n0) < 1e-15, 'gas moles'
+    assert abs((y[iy_ntot] + y[iy_nout]) / n0 - 1) < 1e-12, 'gas moles'
     assert abs(removed / (Q_int / (1 - plant.P / par.K)) - 1) < 0.002, \
         (removed, Q_int)
     assert abs(y[iy_ndis] / y[iy_Vl] / (nd0 / Vl0) - 1) < 2e-3, \
@@ -198,21 +202,40 @@ def check_outlet():
     ok(f'outlet: {Q10 * 1e6:.2f} mL/s at 10 MPa; the tube volume drops '
        f'the pressure {dP_step / 1e6:.2f} MPa in the opening scan')
 
-    # The run ends at the limit switch, with the dead volume left, and
-    # reports the volume delivered.
+    # The run ends at the limit switch, with the passages, the hose and
+    # its dilation full of solution, and reports the volume delivered:
+    # the saline and the hose's virgin saline, less what is left. The
+    # liquid is stressed by P/K and the delivered volume is measured at
+    # pressure, so both carry the factor (1 - P/K).
     r = sim.run(par, scenarios.deliver(par, T=300.0),
                 ctl.SlaveController())
-    # The chamber volume at the limit is the dead volume; the saline in
-    # it is stressed by P/K, and the delivered volume is measured at
-    # pressure, so both sides carry the factor (1 - P/K).
-    squeeze = 1 - r.P[-1] / par.K          # at the pressure reached
-    assert r.t[-1] < 299
-    assert abs(r.V_l[-1] * squeeze - par.V_dead) < 0.3e-6
-    expect = (par.Vl0 - par.V_dead / squeeze) * squeeze * 1e6      # [mL]
+    P_end = r.P[-1]
+    squeeze = 1 - P_end / par.K            # at the pressure reached
+    left = par.V_passages + par.V_hose + par.C_hose * P_end     # [m^3]
+    assert r.t[-1] < 299 and r.events[:2] == [1.0, 6.0]
+    assert abs(r.V_l[-1] * squeeze - left) < 0.3e-6
+    expect = ((par.Vl0 + par.V_hose) * squeeze - left) * 1e6    # [mL]
     assert abs(r['V_delivered'] - expect) < 3, (r['V_delivered'], expect)
+    assert abs(r['V_solution'] - (expect - par.V_hose * 1e6)) < 3
     ok(f'delivery ends at the limit switch with {r.V_l[-1] * 1e6:.0f} mL '
        f'of dead volume left: {r["V_delivered"]:.0f} mL in '
-       f'{r.t[-1]:.0f} s')
+       f'{r.t[-1]:.0f} s, {r["V_solution"]:.0f} mL of it solution')
+
+    # Opening the proximal valve equalises the chamber with the hose's
+    # virgin saline and compliance, eq. (43): the pressure drops to
+    # where the stored compression fills both.
+    plant, sc = liquid_plant(par, hose_open0=False)
+    V_l = plant.V_l
+    plant.open_hose()
+    P1 = plant.P
+    # Linearised: dP = P (V_hose / K + C_hose) / (V_l / K + V_hose / K
+    # + C_hose) less the hose's own atmosphere start
+    C_h = par.V_hose / par.K + par.C_hose
+    dP_lin = 10e6 * C_h / (V_l / par.K + C_h)
+    assert abs((10e6 - P1) / dP_lin - 1) < 0.05, (P1, dP_lin)
+    assert abs(plant.volume_closure()) < 1e-12
+    ok(f'opening the hose drops a liquid-only chamber from 10 to '
+       f'{P1 / 1e6:.2f} MPa (linear estimate {(10e6 - dP_lin) / 1e6:.2f})')
 
 
 def check_solver():
@@ -371,7 +394,7 @@ def check_wiring():
     c.reset(par, sc)
     sc2 = scenarios.deliver(par)
     c.step(10e6, 10e6, 0.0, sc2)
-    v = c.step(10e6, 10e6, 2.0, sc2)
+    v = c.step(10e6, 10e6, sc2.t_open + 1.0, sc2)
     assert abs(v - par.Q_orifice(10e6) / par.A) < 1e-9, v
     ok(f'flow feedforward adds Q/A ({v * 1e3:.3f} mm/s) after the block')
 
@@ -393,15 +416,19 @@ def check_scheduled():
             u = super().step(P, tg, t, sc, x)
             self.k_log.append(self.k_est)
             return u
+    q = par.with_(hose_before=True)     # the hose is open throughout
     for name in ('compress', 'deliver'):
-        c = Logged('s', wc=11.0, K_cfg=par.K, V_l_cfg=par.Vl0)
-        r = sim.run(par, scenarios.make(name, par), c)
+        c = Logged('s', wc=11.0, K_cfg=par.K, V_l_cfg=par.Vl0,
+                   C_hose_cfg=par.C_hose)
+        r = sim.run(q, scenarios.make(name, q), c)
         ratio = np.array(c.k_log) / r.stiffness
         assert ratio.min() > 0.98, (name, ratio.min())
-        assert r['V_ok'] == r['V_delivered'] and r['P_max'] < 10.5
+        assert r['V_ok'] == r['V_delivered']
+        assert r['P_max'] < par.P_ceiling / 1e6, r['P_max']
     ok(f'scheduled controller: k_est >= k_true through compress and '
        f'deliver (lowest ratio {ratio.min():.3f}); the 1:1 delivery '
-       f'runs to the end with control (dip {r["dip"]:.2f} MPa)')
+       f'runs to the end with control (hose-opening dip {r["dip"]:.2f} '
+       f'MPa, peak {r["P_max"]:.2f} MPa at the purge closing)')
 
     # Changing Ki leaves the integral term continuous.
     c = S('s')
@@ -468,29 +495,40 @@ def check_closed_loop():
 
     # With the earlier StopVelMin of 0.5 mm/s the stop law caps the
     # piston below the speed the outflow needs, so the loop holds a
-    # steady error through the delivery.
-    r = sim.run(par, scenarios.deliver(par),
+    # steady error through the delivery. The hose is open from the
+    # start, so the dip is the distal valve's.
+    q = par.with_(hose_before=True)
+    r = sim.run(q, scenarios.deliver(q),
                 ctl.SlaveController('old', StopVelMin=0.5))
-    assert 1.5 < r['dip'] < 3.0, r['dip']
+    assert 1.5 < r['dipMax'] < 3.0, r['dipMax']
     assert math.isnan(r['tSettle']) and r['V_ok'] < 30, r['V_ok']
-    ok(f'delivery 1:1 with StopVelMin 0.5 mm/s: dip {r["dip"]:.2f} MPa, '
-       f'never back in band, error above 1 MPa after {r["V_ok"]:.0f} of '
-       f'{r["V_delivered"]:.0f} mL')
-    # With the GVL's StopVelMin of 2 mm/s the loop reaches the limit
-    # switch; at the smallest dead volume its margin there is a quarter
-    # of what the scheduled loop keeps, which shows as late ripple.
-    q = par.with_(V_dead=45e-6)
+    ok(f'delivery 1:1 with StopVelMin 0.5 mm/s: dip {r["dipMax"]:.2f} '
+       f'MPa, never back in band, error above 1 MPa after '
+       f'{r["V_ok"]:.0f} of {r["V_delivered"]:.0f} mL')
+    # With the GVL's StopVelMin of 2 mm/s both loops reach the limit
+    # switch with the pressure in band. The hose's compliance caps the
+    # end stiffness near 10 MPa/mm even at the smallest dead volume, so
+    # neither loop loses margin there. The GVL gains let the pressure
+    # through the ceiling when the purge closes the valve against the
+    # moving piston; the scheduled loop keeps it below.
+    q = par.with_(hose_before=True, V_passages=45e-6)
     relaxed = ctl.SlaveController('r')
-    sched = ctl.ScheduledSlaveController('s', wc=11.0, V_dead_cfg=45e-6)
+    sched = ctl.ScheduledSlaveController('s', wc=11.0, V_dead_cfg=74e-6,
+                                         C_hose_cfg=1.2e-13)
     r1 = sim.run(q, scenarios.deliver(q), relaxed)
     r2 = sim.run(q, scenarios.deliver(q), sched)
-    assert r1['V_ok'] == r1['V_delivered']
+    k_cap = par.A / ((q.V_dead - q.V_tube) / q.K + q.C_hose)     # [Pa/m]
+    assert abs(r1.stiffness[-1] / k_cap - 1) < 0.05, r1.stiffness[-1]
+    assert r1['P_max'] > par.P_ceiling / 1e6 > r2['P_max'], \
+        (r1['P_max'], r2['P_max'])
     assert r2['V_ok'] == r2['V_delivered']
-    assert r1['ripple'] > 2 * r2['ripple'] and r2['ripple'] < 0.001
-    ok(f'delivery to a 45 mL dead volume (end stiffness '
-       f'{r1.stiffness[-1] / 1e9:.0f} MPa/mm): both loops reach the limit '
-       f'switch, late ripple {r1["ripple"] * 1e3:.1f} kPa (GVL) against '
-       f'{r2["ripple"] * 1e3:.1f} kPa (scheduled)')
+    assert r1['ripple'] < 0.001 and r2['ripple'] < 0.001
+    assert math.isnan(r1['tSettle']) is False and r1['rmsErr'] < 0.01
+    ok(f'delivery to a 74 mL dead volume: the hose compliance caps the '
+       f'end stiffness at {r1.stiffness[-1] / 1e9:.0f} MPa/mm, both '
+       f'loops reach the limit switch in band; the purge closing peaks '
+       f'at {r1["P_max"]:.2f} MPa (GVL) and {r2["P_max"]:.2f} MPa '
+       f'(scheduled)')
 
 
 def check_runner():

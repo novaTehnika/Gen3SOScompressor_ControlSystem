@@ -27,10 +27,14 @@ The parameters describe five parts of the model:
               pressure, where the run starts. The saturation pressure of
               the dissolved oxygen follows from the charge; the pressure
               must stay above it or the solution degasses.
-  Outlet      A ball valve, a tube and a plate of micro-orifices. The
-              orifices set the outflow as a function of chamber
-              pressure, and the air in the tube is lost from the chamber
-              as a volume step when the valve opens.
+  Outlet      A hose with a valve at each end, a tube and a plate of
+              micro-orifices. The hose holds virgin saline and is shut
+              during compression; opening it costs the chamber the
+              volume that pressurises the hose. The orifices set the
+              outflow as a function of chamber pressure, and the air in
+              the tube is lost from the chamber as a volume step when
+              the distal valve opens. The virgin saline is purged
+              through the orifices before the solution is delivered.
   Actuator    In velocity mode the drive follows the commanded velocity
               after a dead time t_dead with lag tauV, and stalls when the
               chamber force plus friction reaches the torque limit Fcap.
@@ -124,14 +128,42 @@ class Params:
     # [s] Valve opening time; 0 opens the valve in one scan. The ball
     # valve is opened rapidly.
     Topen: float = 0.0
-    # [m^3] Dead volume: the chamber volume the piston cannot sweep
-    # (passages and fittings), left when the piston reaches the limit
-    # switch at the end of its stroke. The machine halts there and the
-    # delivery ends; so does the simulation. Measured: 50 g of water
-    # fills it.
-    V_dead: float = 50e-6
+    # [s] Valve closing time at the end of the purge; 0 closes it in
+    # one scan. Set from the hand's speed on the ball valve.
+    Tclose: float = 0.0
+    # True if the proximal valve is opened before the compression, so
+    # the hose is part of the chamber throughout (the proposed
+    # procedure); False if it is opened after mixing, at pressure (the
+    # present procedure), which costs the equalisation drop of eq. (43).
+    hose_before: bool = False
+    # [m^3] Dead volume of the cylinder head: the passages the piston
+    # cannot sweep, left when the piston reaches the limit switch at the
+    # end of its stroke, with the proximal valve shut. The machine halts
+    # there and the delivery ends; so does the simulation. Measured:
+    # 50 g of water drawn from the passages with the hose shut.
+    V_passages: float = 50e-6
+
+    # ----- Hose ----------------------------------------------------------
+    # A 3 ft hose of 1/4 in bore joins the cylinder head to the orifice
+    # tube, with a ball valve at each end. It is prefilled with virgin
+    # saline at atmosphere, the proximal valve is shut while the charge
+    # is compressed and dissolved, and it is opened before the delivery.
+    # Its liquid, its own compliance and the saline it holds then join
+    # the chamber, eqs. (42) and (43).
+    # [m^3] Hose bore volume, 0.914 m of 6.35 mm bore
+    V_hose: float = 29e-6
+    # [m^3/Pa] Hose compliance (wall dilation and any air it traps),
+    # measured by difference between K runs with the hose shut and
+    # open: 0.24 mL per MPa
+    C_hose: float = 2.4e-13
 
     # ----- Derived outlet quantities -------------------------------------
+    @property
+    def V_dead(self):
+        """[m^3] Dead volume with the hose open: passages, hose and
+        tube, about 79 mL"""
+        return self.V_passages + self.V_hose + self.V_tube
+
     @property
     def A_orifice(self):
         """[m^2] Total orifice area"""

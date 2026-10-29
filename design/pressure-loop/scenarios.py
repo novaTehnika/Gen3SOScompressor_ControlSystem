@@ -21,13 +21,18 @@ default), the oxygen dissolves during a hold, and the ball valve is
 opened so the saline is driven through the orifices until the piston
 reaches the limit switch.
 
-  compress   Start at the supply pressure with the charge as free gas
-             and the saline saturated at that pressure; drive to the
-             target.
+  compress   Start at the supply pressure with the charge as free gas,
+             the saline saturated at that pressure and the hose shut;
+             drive to the target.
   deliver    Start at the target with the charge dissolved as far as
-             the saturation limit allows, the rest free; the valve opens
-             at 1 s and the run continues to the limit switch.
-  cycle      compress, hold, then open the valve, in one run.
+             the saturation limit allows, the rest free, and the hose
+             shut. The proximal valve opens at 1 s, the distal valve at
+             6 s to purge the hose's virgin saline, closes when the hose
+             volume has left, and opens again after a 10 s pause; the
+             run continues to the limit switch. With Params.hose_before
+             the hose is open from the start instead, and the distal
+             valve closes over Params.Tclose.
+  cycle      compress, hold, then the same valve sequence, in one run.
   stiffstep  Liquid-only chamber at 10 MPa, target steps to 12 MPa at
              1 s. This is a margin probe, not a process case.
 
@@ -72,12 +77,32 @@ class Scenario:
     target1: float = 10e6
     # [s] Time of the target step
     t_step: float = 1.0
-    # [s] Time the valve starts to open; inf if it never opens
+    # True if the hose (proximal valve) is open from the start; False
+    # if it is shut until t_prox
+    hose_open0: bool = False
+    # [s] Time the proximal valve opens; inf if never. Opening it joins
+    # the hose's liquid and compliance to the chamber, eq. (43).
+    t_prox: float = float('inf')
+    # [s] Time the distal valve starts to open; inf if it never opens
     t_open: float = float('inf')
     # [s] Opening ramp duration; 0 opens the valve in one scan
     Topen: float = 0.0
-    # [s] Time the valve closes
+    # [s] Closing ramp duration at the end of the purge; 0 closes the
+    # valve in one scan
+    Tclose: float = 0.0
+    # [s] Time the valve closes; inf for never (a purge closes it
+    # itself)
     t_close: float = float('inf')
+    # [m^3] Purge: the distal valve closes once this much has left the
+    # outlet (the virgin saline in the hose), and opens again after
+    # t_pause; 0 for no purge stage
+    V_purge: float = 0.0
+    # [s] Pause between the end of the purge and the delivery
+    t_pause: float = 10.0
+    # True if the tube holds air again at the second opening (it
+    # drained while moved to the delivery vessel); False if it keeps
+    # its liquid
+    tube_refills: bool = False
     # [m^3/s] Prescribed outflow with the valve open; 0 selects the
     # orifice flow at the chamber pressure
     Qf: float = 0.0
@@ -95,20 +120,28 @@ class Scenario:
         """[Pa] Pressure target at time t [s]"""
         return self.target1 if t >= self.t_step else self.target0
 
-    def valve(self, t):
-        """[-] Valve area fraction at time t [s]: 0 closed, 1 open, rising
-        linearly over Topen."""
-        if t < self.t_open or t >= self.t_close:
+    def valve(self, t, t_from=None):
+        """[-] Distal valve area fraction at time t [s]: 0 closed, 1 open,
+        rising linearly over Topen from t_from (default t_open). The
+        purge's closing and reopening are sequenced by the simulation."""
+        t_from = self.t_open if t_from is None else t_from
+        if t < t_from or t >= self.t_close:
             return 0.0
         if self.Topen > 0:
-            return min((t - self.t_open) / self.Topen, 1.0)
+            return min((t - t_from) / self.Topen, 1.0)
         return 1.0
 
+    def hose_open(self, t):
+        """True if the proximal valve is open at time t [s]."""
+        return self.hose_open0 or t >= self.t_prox
+
     def Qout(self, t, par, P):
-        """[m^3/s] Outflow at time t [s] and chamber pressure P [Pa]: the
-        valve fraction times the prescribed flow or the orifice flow."""
+        """[m^3/s] Outflow at time t [s] and chamber pressure P [Pa] with
+        the distal valve as first opened: the valve fraction times the
+        prescribed flow or the orifice flow. The feedforward bound uses
+        it; the simulation sequences the valve itself."""
         a = self.valve(t)
-        if a == 0.0:
+        if a == 0.0 or not self.hose_open(t):
             return 0.0
         return a * (self.Qf if self.Qf > 0 else par.Q_orifice(P))
 
@@ -140,24 +173,37 @@ class Scenario:
 # Each function returns the scenario for Params par, with any field
 # replaced by a keyword argument.
 
+def _hose(par):
+    """Return the hose fields for Params par: open throughout if
+    hose_before is set, else opened at the scenario's t_prox."""
+    if par.hose_before:
+        return dict(hose_open0=True, t_prox=float('inf'))
+    return {}
+
+
 def compress(par, **kw):
     P = par.P_target
     return Scenario('compress', T=60.0, tEvent=0.0, P0=par.P_supply,
-                    ratio=par.ratio, target0=P, target1=P).with_(**kw)
+                    ratio=par.ratio, target0=P, target1=P
+                    ).with_(**_hose(par)).with_(**kw)
 
 
 def deliver(par, **kw):
     P = par.P_target
-    return Scenario('deliver', T=150.0, tEvent=1.0, P0=P,
+    return Scenario('deliver', T=200.0, tEvent=1.0, P0=P,
                     ratio=par.ratio, dissolved=True, target0=P,
-                    target1=P, t_open=1.0, Topen=par.Topen).with_(**kw)
+                    target1=P, t_prox=1.0, t_open=6.0, Topen=par.Topen,
+                    Tclose=par.Tclose, V_purge=par.V_hose
+                    ).with_(**_hose(par)).with_(**kw)
 
 
 def cycle(par, **kw):
     P = par.P_target
-    return Scenario('cycle', T=210.0, tEvent=60.0, P0=par.P_supply,
+    return Scenario('cycle', T=260.0, tEvent=60.0, P0=par.P_supply,
                     ratio=par.ratio, target0=P, target1=P,
-                    t_open=60.0, Topen=par.Topen).with_(**kw)
+                    t_prox=60.0, t_open=65.0, Topen=par.Topen,
+                    Tclose=par.Tclose, V_purge=par.V_hose
+                    ).with_(**_hose(par)).with_(**kw)
 
 
 def stiffstep(par, **kw):
