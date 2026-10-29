@@ -365,18 +365,28 @@ from the geometry.
 
 | Parameter | Result | Runs | Notes |
 |---|---|---|---|
-| K, chamber closed off from the hose | 0.72 GPa, segments 0.67 to 0.78; stiffness 7.2 MPa/mm at 343 mL | `K300_char` x3 at 280 mm, 19:26 to 19:30 | Below the 1 GPa assumed. Up and down agree to 0.2 %, but the curvature gives a gas-like term of up to 0.65 mL, 23 % of the compliance, so the liquid-only K is not pinned: the gas-corrected value is 0.81 GPa. Purge longer (section 2 step 4) and weigh the fill. |
-| Discharge hose open (3 ft of 1/4 in R7 hose to the orifice tube) | stiffness 5.2 MPa/mm at 276 mL in the chamber; as an effective K, 0.42 GPa | `K300_char` at 299 mm, 19:36 | The hose adds 0.28 mL/MPa of compliance: 0.04 from its 29 mL of liquid and about 0.24 mL/MPa (2.4 mL per 10 MPa) from its wall and any air it holds, the latter being what the curvature's gas term of up to 1.1 mL in this run points at. This is the chamber the delivery sees. |
+| K, chamber closed off from the hose (proximal valve shut) | stiffness 7.2 MPa/mm; K 0.72 GPa if the 50 mL dead volume is the cylinder passages alone, 0.66 GPa if it was measured through the hose (passages 21 mL) | `K300_char` x3 at 280 mm, 19:26 to 19:30 | Below the 1 GPa assumed. Up and down agree to 0.2 %, but the curvature gives a gas-like term of up to 0.65 mL, 23 % of the compliance, so the liquid-only K is not pinned: gas-corrected, 0.74 to 0.81 GPa. Purge longer (section 2 step 4) and weigh the fill. |
+| Discharge hose open (3 ft of 1/4 in R7 hose, 29 mL, to the orifice tube) | stiffness 5.2 MPa/mm with 276 to 305 mL of liquid; as an effective K, 0.42 to 0.46 GPa | `K300_char` at 299 mm, 19:36 | The hose adds about 0.24 mL/MPa of compliance beyond its own liquid (2.4 mL per 10 MPa, either way the dead volume is read): its wall stretching and any air it holds, the latter being what the curvature's gas term of up to 1.1 mL in this run points at. This is the chamber the delivery sees. |
 | Cd | 0.85 (0.84 to 0.87 over 1.6 to 8.3 MPa), exponent 0.48; Q = 4.8 mL/s at 10 MPa, piston 1.42 mm/s | `d2`, `d5`, `d10` deliveries and `Q10_char` x2 | With the transducer zero of -0.11 MPa corrected (`pressureOffset`). Above the 0.7 assumed: deliveries run 20 % faster than the model. The loop held 8.1 MPa for a 10 MPa target, the steady error the design study predicted. |
 | tauV at the motor | 8.7 +/- 0.5 ms lag after 12 +/- 0.6 ms dead time, the same for 0.3, 1 and 2.5 mm/s steps, up and down | `s1`, `s2` step captures, 74 | **The command is not slewed at `G_cfgDirectCtrlAccel`**: a 2.5 mm/s step is complete in 30 ms, as is a 0.3 mm/s step, so the drive follows the command at whatever rate it needs (36 mm/s^2 for a 1 mm/s step, 90 for 2.5) with a 2 to 5 % overshoot. Fit with `opts.accel` large (1e4); with the GVL slew the model cannot follow and reports a lag near zero. |
 | tauV at the piston | not resolved (below 25 ms) | `lag_wet_char` 50 ms logs, 5 steps at 8.6 to 10 MPa/mm | No captures were taken in these runs (`opts.probe` off, probe without the pressure array). Repeat with the reloaded probe. |
 
+**Two dead volumes.** The proximal valve at the cylinder head is shut
+during compression and mixing and open during the delivery, so the
+chamber has two dead volumes: the cylinder passages alone, and the
+passages plus the hose (29 mL) and the tube (0.24 mL). Which one the
+measured 50 mL is depends on whether the water was added with the hose
+open to the orifices; `masterConfig.deadVolume` (50) is right for the
+delivery readout only if it includes the hose. The hose is prefilled with
+virgin saline, and the delivery's first 29 mL is that purge, which does
+not change Cd but is not solution.
+
 **What the hose means for the model.** A delivery runs with the hose
 open, so the compliance the loop sees is the liquid's plus a constant
-0.28 mL/MPa that does not shrink as the saline leaves. With the closed
-chamber's K, the stiffness during a delivery is 5.0 MPa/mm with 300 mL
-left, 8.3 with 100 mL and 10.8 with 30 mL, against 8.2, 25 and 82 for the
-liquid alone. The model's chamber capacitance, eq. (4), needs that
+0.24 mL/MPa from the hose that does not shrink as the saline leaves. With
+the closed chamber's K, the stiffness during a delivery is about 5 MPa/mm
+with 300 mL left, 8 with 100 mL and 11 with 30 mL, against 8, 25 and 82
+for the liquid alone. The model's chamber capacitance, eq. (4), needs that
 constant term; with it the stiffening at the end of a delivery that the
 design study found destabilising is an eighth of what the liquid-only
 model predicts. The `lag_wet` runs (hose state not recorded, 283 to
