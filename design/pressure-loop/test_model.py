@@ -238,6 +238,75 @@ def check_outlet():
        f'{P1 / 1e6:.2f} MPa (linear estimate {(10e6 - dP_lin) / 1e6:.2f})')
 
 
+def check_throttled_opening():
+    par = Params()
+    # Hose pressure against the volume admitted, eq. (44): the admitted
+    # solution and the hose's saline, stressed, fill the bore and its
+    # dilation.
+    plant, sc = liquid_plant(par, hose_open0=False)
+    for V_in in (0.5e-6, 2e-6):
+        P_h = plant.hose_pressure(V_in)
+        lhs = (par.V_hose + V_in) * (1 - P_h / par.K)
+        rhs = par.V_hose + par.C_hose * P_h
+        assert abs(lhs - rhs) < 1e-15, (lhs, rhs)
+    ok(f'hose pressure: 2 mL admitted raises the hose to '
+       f'{plant.hose_pressure(2e-6) / 1e6:.2f} MPa, eq. (44)')
+
+    # A throttled fill of a liquid-only chamber with the piston still
+    # ends at the same pressure and admitted volume as the one-scan
+    # equalisation, keeps the volume balance, and takes longer through
+    # a smaller bore. Dissolution is frozen, or the gas that leaves the
+    # falling-pressure solution during a slow fill would lift the
+    # pressure above the one-scan result (as it does in the model).
+    frozen = par.with_(tauDiss=1e12)
+    ref, _ = liquid_plant(frozen, hose_open0=False)
+    ref.open_hose()
+    fills = {}
+    for d in (6.35e-3, 0.3e-3, 0.1e-3):
+        q = frozen.with_(d_prox=d, Topen_prox=0.5)
+        s = scenarios.stiffstep(q, P0=10e6, tube=False, t_prox=0.0,
+                                Topen_prox=0.5)
+        p = Plant(q, s, 'V', accel=1.0, decel=1.0)
+        worst, t_join = 0.0, None
+        for k in range(30000):                  # up to 60 s
+            t = k * q.Ts
+            p.scan(0.0, 0.0, 0.0, s.prox(t))
+            worst = max(worst, abs(p.volume_closure()))
+            if p.hose_open:
+                t_join = t
+                break
+        assert t_join is not None, d
+        assert abs(p.P / ref.P - 1) < 2e-3, (d, p.P, ref.P)
+        assert abs(p.V_in_total / ref.V_in_total - 1) < 0.02, d
+        assert worst < 1e-9, worst
+        assert abs(p.volume_closure()) < 1e-9
+        fills[d] = t_join
+    assert fills[6.35e-3] <= 0.5 < fills[0.3e-3] < fills[0.1e-3]
+    ok(f'throttled fill ends where the one-scan equalisation does '
+       f'({p.P / 1e6:.2f} MPa, {p.V_in_total * 1e6:.2f} mL admitted); '
+       f'{fills[0.3e-3]:.1f} s through 0.3 mm, {fills[0.1e-3]:.0f} s '
+       f'through 0.1 mm')
+
+    # Degassed slug: in a closed-loop delivery at 2:1 the solution that
+    # entered while the hose was below the saturation pressure is
+    # P_sat (C_hose + V_hose / K) to first order, whatever the bore, and
+    # it lies right behind the virgin saline; the purge is sized to it.
+    q = par.with_(ratio=2.0, d_prox=0.3e-3, Topen_prox=0.5)
+    r = sim.run(q, scenarios.deliver(q), ctl.ScheduledSlaveController(
+        's', wc=16.0, V_dead_cfg=74e-6, C_hose_cfg=1.2e-13))
+    P_sat = r.P_sat[0]
+    V_expect = P_sat * (q.C_hose + q.V_hose / q.K)          # [m^3]
+    assert abs(r['V_degas'] / (V_expect * 1e6) - 1) < 0.1, \
+        (r['V_degas'], V_expect * 1e6)
+    assert r.lumps[0][0] == 'virgin saline' and r.lumps[1][2] is True
+    assert abs(r.V_purge * 1e6 - r['purgeNeeded']) < 0.5
+    assert r['V_ok'] == r['V_delivered'] and r['t_fill'] > 1.0
+    ok(f'2:1 fill through 0.3 mm: {r["V_degas"]:.2f} mL degassed '
+       f'(P_sat C_h = {V_expect * 1e6:.2f}), behind the virgin saline; '
+       f'purge {r["purgeNeeded"]:.1f} mL, fill {r["t_fill"]:.1f} s, '
+       f'margin {r["degasMargin"]:.2f} MPa')
+
+
 def check_solver():
     # Heun and forward Euler differ by about the local error of the
     # first-order method, so close agreement bounds the integration error
@@ -549,6 +618,7 @@ if __name__ == '__main__':
     check_stiffness()
     check_conservation()
     check_outlet()
+    check_throttled_opening()
     check_solver()
     check_actuators()
     check_sensor()

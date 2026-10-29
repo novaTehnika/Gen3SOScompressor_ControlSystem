@@ -48,6 +48,15 @@ the delivery.
   V_delivered  [mL] Saline delivered through the outlet by the end,
                the purged virgin saline included.
   V_solution   [mL] Solution delivered: V_delivered less the purge.
+  V_in         [mL] Solution admitted into the hose when the proximal
+               valve was opened at pressure.
+  V_degas      [mL] Of that, the solution that met a hose pressure
+               below its saturation pressure and degassed; it sits
+               right behind the virgin saline and leaves in the purge.
+  purgeNeeded  [mL] Purge that carries out the virgin saline and the
+               degassed solution: V_hose + V_degas.
+  t_fill       [s] Time the hose took to fill through the throttled
+               proximal valve; 0 when opened in one scan.
   V_ok         [mL] Saline delivered before the first violation: P below
                P_sat + degas_margin, P above the ceiling, or |e| above
                e_crash outside the t_recover window after each valve
@@ -152,6 +161,10 @@ def process(r, par, scenario):
         return out
     out['V_delivered'] = float(r.V_out[-1]) * 1e6
     out['V_solution'] = out['V_delivered'] - (r.V_purge or 0.0) * 1e6
+    out['V_in'] = (r.V_in or 0.0) * 1e6
+    out['V_degas'] = (r.V_degas or 0.0) * 1e6
+    out['purgeNeeded'] = (par.V_hose + (r.V_degas or 0.0)) * 1e6
+    out['t_fill'] = float(getattr(r, 't_fill', 0.0) or 0.0)
 
     # Volume delivered before the first violation. The error check is
     # suspended for t_recover after each valve event.

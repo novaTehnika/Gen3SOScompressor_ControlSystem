@@ -156,6 +156,18 @@ class Params:
     # measured by difference between K runs with the hose shut and
     # open: 0.24 mL per MPa
     C_hose: float = 2.4e-13
+    # ----- Proximal valve ------------------------------------------------
+    # The proximal valve throttles the solution that fills the hose when
+    # it is opened at pressure, eqs. (44) and (45). Its area rises
+    # linearly over Topen_prox to the bore of a d_prox valve; 0 opens it
+    # in one scan (the equalisation of eq. (43)). A needle valve in its
+    # place is a smaller d_prox.
+    # [m] Bore of the proximal valve: 1/4 in ball valve
+    d_prox: float = 6.35e-3
+    # [-] Discharge coefficient of the proximal valve
+    Cd_prox: float = 0.6
+    # [s] Opening time of the proximal valve; 0 for one scan
+    Topen_prox: float = 0.0
 
     # ----- Derived outlet quantities -------------------------------------
     @property
@@ -163,6 +175,11 @@ class Params:
         """[m^3] Dead volume with the hose open: passages, hose and
         tube, about 79 mL"""
         return self.V_passages + self.V_hose + self.V_tube
+
+    @property
+    def A_prox(self):
+        """[m^2] full area of the proximal valve"""
+        return math.pi * self.d_prox**2 / 4
 
     @property
     def A_orifice(self):

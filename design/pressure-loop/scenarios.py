@@ -26,9 +26,11 @@ reaches the limit switch.
              drive to the target.
   deliver    Start at the target with the charge dissolved as far as
              the saturation limit allows, the rest free, and the hose
-             shut. The proximal valve opens at 1 s, the distal valve at
-             6 s to purge the hose's virgin saline, closes when the hose
-             volume has left, and opens again after a 10 s pause; the
+             shut. The proximal valve opens at 1 s (over
+             Params.Topen_prox), the distal valve 5 s after it is fully
+             open to purge the hose's virgin saline and any solution that
+             degassed entering the hose, closes when that has left, and
+             opens again after a 10 s pause; the
              run continues to the limit switch. With Params.hose_before
              the hose is open from the start instead, and the distal
              valve closes over Params.Tclose.
@@ -80,9 +82,13 @@ class Scenario:
     # True if the hose (proximal valve) is open from the start; False
     # if it is shut until t_prox
     hose_open0: bool = False
-    # [s] Time the proximal valve opens; inf if never. Opening it joins
-    # the hose's liquid and compliance to the chamber, eq. (43).
+    # [s] Time the proximal valve starts to open; inf if never. Opening
+    # it joins the hose's liquid and compliance to the chamber: in one
+    # scan, eq. (43), or through the throttled flow of eq. (45) over
+    # Topen_prox.
     t_prox: float = float('inf')
+    # [s] Opening ramp of the proximal valve; 0 opens it in one scan
+    Topen_prox: float = 0.0
     # [s] Time the distal valve starts to open; inf if it never opens
     t_open: float = float('inf')
     # [s] Opening ramp duration; 0 opens the valve in one scan
@@ -94,8 +100,9 @@ class Scenario:
     # itself)
     t_close: float = float('inf')
     # [m^3] Purge: the distal valve closes once this much has left the
-    # outlet (the virgin saline in the hose), and opens again after
-    # t_pause; 0 for no purge stage
+    # outlet, and opens again after t_pause; 0 for no purge stage.
+    # None purges the hose's virgin saline plus whatever solution
+    # degassed on its way into the hose (the purge the procedure needs).
     V_purge: float = 0.0
     # [s] Pause between the end of the purge and the delivery
     t_pause: float = 10.0
@@ -134,6 +141,17 @@ class Scenario:
     def hose_open(self, t):
         """True if the proximal valve is open at time t [s]."""
         return self.hose_open0 or t >= self.t_prox
+
+    def prox(self, t):
+        """[-] Proximal valve area fraction at time t [s]: 0 shut, rising
+        linearly over Topen_prox from t_prox to 1."""
+        if self.hose_open0:
+            return 1.0
+        if t < self.t_prox:
+            return 0.0
+        if self.Topen_prox > 0:
+            return min((t - self.t_prox) / self.Topen_prox, 1.0)
+        return 1.0
 
     def Qout(self, t, par, P):
         """[m^3/s] Outflow at time t [s] and chamber pressure P [Pa] with
@@ -192,8 +210,9 @@ def deliver(par, **kw):
     P = par.P_target
     return Scenario('deliver', T=200.0, tEvent=1.0, P0=P,
                     ratio=par.ratio, dissolved=True, target0=P,
-                    target1=P, t_prox=1.0, t_open=6.0, Topen=par.Topen,
-                    Tclose=par.Tclose, V_purge=par.V_hose
+                    target1=P, t_prox=1.0, Topen_prox=par.Topen_prox,
+                    t_open=6.0 + par.Topen_prox, Topen=par.Topen,
+                    Tclose=par.Tclose, V_purge=None
                     ).with_(**_hose(par)).with_(**kw)
 
 
@@ -201,8 +220,9 @@ def cycle(par, **kw):
     P = par.P_target
     return Scenario('cycle', T=260.0, tEvent=60.0, P0=par.P_supply,
                     ratio=par.ratio, target0=P, target1=P,
-                    t_prox=60.0, t_open=65.0, Topen=par.Topen,
-                    Tclose=par.Tclose, V_purge=par.V_hose
+                    t_prox=60.0, Topen_prox=par.Topen_prox,
+                    t_open=65.0 + par.Topen_prox, Topen=par.Topen,
+                    Tclose=par.Tclose, V_purge=None
                     ).with_(**_hose(par)).with_(**kw)
 
 

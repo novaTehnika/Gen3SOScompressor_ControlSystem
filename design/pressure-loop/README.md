@@ -47,7 +47,7 @@ accept these options:
 | File | Role |
 |---|---|
 | `params.py` | Defines `Params`: the chamber, oxygen charge, outlet, actuator, sensor and simulation parameters and the requirement limits. The values the slave configures are read from the GVL and can be overridden through `slave_cfg`. |
-| `plant.py` | Models the chamber, the hose, the outlet and the actuator, equations (1) to (14), (36) to (37) and (42) to (43). `Plant.derivatives` is the continuous-time model and `Plant.scan` advances one slave scan. |
+| `plant.py` | Models the chamber, the hose, the outlet and the actuator, equations (1) to (14), (36) to (37) and (42) to (45). `Plant.derivatives` is the continuous-time model and `Plant.scan` advances one slave scan. |
 | `solver.py` | Holds the fixed-step integration methods, equations (34) and (35). |
 | `study_convergence.py` | Measures the integration error against the time step for both methods. |
 | `sensor.py` | Models the measurement chain: `SlaveSensor` (transducer, shunt, noise and the slave's filter and scaling blocks) and `LegacySensor`. |
@@ -58,6 +58,7 @@ accept these options:
 | `runner.py` | Runs many simulation cases in parallel worker processes. |
 | `slave.py` | Puts the translated slave blocks on the import path, regenerating them if stale, and reads the `G_cfg*` defaults from the GVL. |
 | `study_compare.py` | Compares velocity and torque command and the slave controller over three scenarios. |
+| `study_hose_opening.py` | Studies the proximal valve opened at pressure: the chamber floor, the solution admitted into the hose, the part of it that degassed and where it lies, against the valve bore (ball valve to needle valve), per charge and controller. |
 | `study_delivery.py` | Runs the delivery to the empty chamber over a range of oxygen charges and reports the deliverable volume. |
 | `linear.py`, `study_linear.py` | Build the discrete-time linear model of the velocity-command loop, equations (26) to (33), and use it to find the margins, the stability boundary and the frequency and disturbance responses. |
 | `robust.py`, `study_robust.py` | Define the uncertain parameters, requirement limits and sampler, and run the tornado, corner and Monte Carlo studies for each controller configuration. |
@@ -131,9 +132,22 @@ also stress the hose's liquid and dilate its wall, and the pressure
 equalises in one step, eq. (43): on the measured chamber that is a drop
 from 10 to 6.4 MPa, which degasses any charge above 1.8:1 and which no
 controller can prevent, because it happens inside one scan. The
-proposed procedure opens the proximal valve before the compression, so
-the hose is part of the chamber throughout (`Params.hose_before`); the
-model runs either. With the hose open the liquid part of the compliance
+proximal valve is the one valve event whose rate the operator sets, so
+the model also opens it through a restriction: the valve area rises
+over `Params.Topen_prox` to the bore `Params.d_prox` (the ¼" ball
+valve, or a needle valve in its place), the flow into the hose follows
+the orifice law at the pressure difference, eq. (45), and the hose
+pressure rises with the volume admitted, eq. (44), until the two meet
+and the hose joins the chamber. The solution admitted is tracked as
+parcels in the order it entered, each with the hose pressure it met.
+A parcel that met a pressure below the saturation pressure of the
+solution degassed; by plug flow it lies right behind the virgin
+saline, and the purge is sized to carry both out (the scenario's
+`V_purge` of None). Degassing is judged at the hose pressure; the
+lower pressure in the valve throat, which the solution crosses in
+microseconds, is neglected. The proposed alternative opens the
+proximal valve before the compression, so the hose is part of the
+chamber throughout (`Params.hose_before`); the model runs either. With the hose open the liquid part of the compliance
 is the saline, the virgin saline and the wall, eq. (42), and the
 chamber at the start of a delivery is 4.8 MPa/mm instead of 7.2. The
 purge is sequenced by the simulation: the distal valve closes once the
@@ -431,6 +445,28 @@ The virgin saline leaves through the outlet before the solution and
 carries no dissolved gas, so eqs. (7) and (8) act on V_vir, with
 r_out = 0, while V_vir > 0.
 
+Hose pressure while it fills through the proximal valve, with V_in of
+solution admitted (unstressed volume): the hose's saline and the
+admitted solution, stressed, fill the bore and its dilation:
+
+    (44) P_h = V_in / (C_hose + (V_hose + V_in) / K)
+
+Flow through the proximal valve at area fraction a_p(t) into the
+filling hose, the orifice law at the pressure difference, capped at
+the flow that would equalise the two pressures within one scan (so
+that a wide-open valve reproduces eq. (43) without overshoot); the
+admitted volume grows by Q_prox / (1 - P/K) and the chamber loses
+Q_prox from its volume balance, eq. (5). C_cyl is the cylinder's
+capacitance with V_in removed from its liquid and C_h the hose's,
+C_hose + (V_hose + V_in) / K:
+
+    (45) Q_prox = min( a_p(t) Cd_prox A_prox sqrt(2 (P - P_h) / rho),
+                       (P - P_h) / (1/C_cyl + 1/C_h) / Ts )
+
+The solution that enters while P_h is below the saturation pressure
+of eq. (38) degasses; its volume is P_sat C_h to first order,
+whatever the bore.
+
 ### Scheduled slave controller
 
 Stiffness bound from the measured pressure P and piston position x,
@@ -700,15 +736,61 @@ approach safe.
 procedure the proximal valve is opened after mixing, with the chamber
 at 10 MPa and the hose at atmosphere. The stored compression of 343 mL
 of saline must then stress 29 mL more and dilate the hose wall, and
-the pressure falls from 10 to 6.4 MPa inside one scan, eq. (43). It is
-the same for every controller, because the loop can only recover it
-afterwards (the piston must advance 0.5 mm, which takes the scheduled
-loop about a second and the GVL loop longer). A 1:1 charge keeps a
-2.8 MPa margin through it; a 1.5:1 charge keeps 1.0 MPa; a 2:1 charge
-degasses (−0.8 MPa). The remedy is procedural: open the proximal valve
-before the compression, so that the hose's saline is compressed with
-the charge (`Params.hose_before`). Every result below is for that
-procedure unless marked.
+with the ball valve the pressure falls from 10 to 6.4 MPa inside one
+scan, eq. (43). It is the same for every controller, because the loop
+can only recover it afterwards (the piston must advance 0.5 mm, which
+takes the scheduled loop about a second and the GVL loop longer). A
+1:1 charge keeps a 2.8 MPa margin through it; a 1.5:1 charge keeps
+1.0 MPa; a 2:1 charge degasses (−0.8 MPa). Two remedies exist. One is
+procedural: open the proximal valve before the compression, so that
+the hose's saline is compressed with the charge (`Params.hose_before`).
+The other is to open it slowly enough that the chamber keeps up, which
+the next paragraph quantifies. Every result below is for the first
+remedy unless marked.
+
+**Opening the hose through a needle valve.** The opening time of the
+ball valve hardly matters: 1 % of its bore passes tens of mL per
+second at 10 MPa, so the hose fills in the first moments of any ramp
+and the chamber falls almost as if the valve were snapped open. What
+matters is the smallest area the operator can hold, which is a needle
+valve's. `study_hose_opening.py` opens the valve over 0.5 s to a set
+of bores, at pressure, with the slave then purging what the fill
+degassed. The lowest chamber pressure during the fill, in MPa, with
+the time the fill takes:
+
+| Bore | Fill | 2:1 at 10 MPa: GVL / wc 11 / wc 16 | 2.5:1 at 11 MPa: GVL / wc 11 / wc 16 |
+|---|---|---|---|
+| 6.35 mm (ball valve) | 0.5 s | 6.4 / 6.4 / 6.4 | 7.0 / 7.0 / 7.0 |
+| 1.0 mm | 0.5–0.8 s | 6.9 / 7.8 / 8.0 | 7.6 / 8.6 / 8.8 |
+| 0.5 mm | 0.7–1.1 s | 7.7 / 8.8 / 9.2 | 8.5 / 9.7 / 10.0 |
+| 0.3 mm | 1.3–1.8 s | 8.1 / 9.2 / 9.4 | 8.9 / 10.2 / 10.4 |
+| 0.2 mm | 2.4–2.9 s | 8.1 / 9.2 / 9.4 | 8.9 / 10.2 / 10.4 |
+| 0.1 mm | 8.5–9.1 s | 8.1 / 9.2 / 9.4 | 8.9 / 10.2 / 10.4 |
+
+Below a 0.3 mm bore (an effective area of 0.04 mm², a Cv of about
+0.003) the fill is a flow the loop follows, the chamber floor is set
+by the loop's own dip (the same as at the distal opening: 1.9 MPa for
+the GVL gains, 0.8 at wc = 11, 0.6 at wc = 16), and the fill takes one
+to nine seconds. At 2:1 that keeps every arm above saturation with the
+required margin (0.8 MPa for the GVL, 2.0 and 2.2 for the scheduled
+arms); at 2.5:1 and 11 MPa only the scheduled arms clear it. The
+saturation floor plus the 0.5 MPa margin is the dotted line of
+`hose_opening.png`.
+
+The solution that degasses is the part admitted while the hose was
+still below the saturation pressure, P_sat times the hose's compliance:
+1.0 mL at 1:1, 2.0 mL at 2:1, 2.6 mL at 2.5:1, whatever the bore and
+whichever controller. It is the first solution through the valve, so
+by plug flow it lies right behind the virgin saline, in the first
+6 cm of hose at the cylinder end (the 29 mL of virgin saline fill the
+other 92 cm), and about 0.9 mL of sound solution follows it. The purge
+that carries it out is 31 mL at 2:1 and 32 mL at 2.5:1 instead of 29,
+and the scenario sizes it so (`V_purge` of None). Against the
+procedural remedy this costs 2 to 3 mL of solution and needs a
+metering valve; it leaves the compression and mixing as they are now.
+Whether the solution degasses in the valve throat itself, at a
+pressure below the hose's, is not modelled; if it does, all of the
+2.9 to 3.2 mL admitted is affected, and the purge is 32 to 33 mL.
 
 **Delivery and the stop-law floor.** The orifice bank passes 4.8 mL/s at
 10 MPa (the bench measured it), which needs the piston at 1.4 mm/s, and
@@ -883,4 +965,9 @@ Kp = wc/k holds 56° at wc = 11 everywhere.
   is the worst case and changes the peak by 0.1 MPa).
 - Whether the proximal valve can be opened before the compression in
   the protocol (the hose's saline is then compressed and mixed with
-  the charge; its 29 mL leave in the purge as before).
+  the charge; its 29 mL leave in the purge as before), or whether a
+  metering valve of Cv 0.003 or less can take its place and be opened
+  at pressure; and whether the solution crossing that valve's throat
+  degasses there (which would make the whole admitted volume, about
+  3 mL, part of the purge rather than the 2 mL behind the virgin
+  saline).

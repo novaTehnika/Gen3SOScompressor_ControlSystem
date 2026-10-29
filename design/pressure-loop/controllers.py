@@ -339,9 +339,9 @@ class ScheduledSlaveController(SlaveController):
       k_est = A / C_est
 
     is never below the true stiffness while V_l_cfg is at or below the
-    true saline volume and the hose is open. The gain follows from the chosen crossover wc,
-    eq. (40), Kp = wc / k_est, held within [kp_min, kp_max], with Ki in
-    the fixed ratio ki_ratio to Kp.
+    true saline volume and the hose is open. The gain follows from the
+    chosen crossover wc, eq. (40), Kp = wc / k_est, held within
+    [kp_min, kp_max], with Ki in the fixed ratio ki_ratio to Kp.
 
     The integrator is held at zero (through the block's Reset input)
     until the pressure first comes within e_int of the target, because

@@ -24,8 +24,10 @@ The simulation steps in slave scans of length Ts. In each scan:
 
 The one-scan delay between steps 2 and 3 reproduces the order in which
 PRG_Main calls its function blocks. The simulation sequences the valves:
-the proximal valve opens at the scenario's t_prox (the plant equalises
-the pressure with the hose, eq. (43)); the distal valve opens at t_open
+the proximal valve opens at the scenario's t_prox, in one scan (the
+plant equalises the pressure with the hose, eq. (43)) or over
+Topen_prox (the plant throttles the flow into the hose, eq. (45), and
+joins it when the pressures meet); the distal valve opens at t_open
 and, in that scan, the plant also loses the tube's air volume, eq. (37);
 with a purge stage the distal valve closes once the purge volume has
 left and opens again after the pause. The event times are recorded for
@@ -80,7 +82,11 @@ class Result:
     V_out: np.ndarray = None   # [m^3] saline delivered so far
     V_l: np.ndarray = None     # [m^3] solution remaining
     events: list = None    # [s] times of the valve events, in order
-    V_purge: float = 0.0   # [m^3] virgin saline purged before delivery
+    V_purge: float = 0.0   # [m^3] purged before the delivery
+    V_in: float = 0.0      # [m^3] solution admitted into the hose
+    V_degas: float = 0.0   # [m^3] of it that degassed entering the hose
+    lumps: list = None     # hose contents, distal end first (plant)
+    t_fill: float = 0.0    # [s] time the throttled fill of the hose took
 
     def __getitem__(self, key):
         return self.metrics[key]
@@ -138,9 +144,18 @@ def run(par, scenario, controller, legacy_sensor=False, seed=1):
     # opening (a purge if V_purge > 0), its closing, and its reopening
     events = []
     hose_opened = scenario.hose_open0
+    t_fill = 0.0                                # [s] throttled fill time
     t_from = scenario.t_open                    # [s] distal opening
     V_out_open = 0.0                            # [m^3] delivered at it
-    purging = scenario.V_purge > 0.0
+    purging = scenario.V_purge is None or scenario.V_purge > 0.0
+
+    def V_purge_target(plant):
+        """[m^3] Purge volume: the scenario's, or the hose's virgin
+        saline plus the solution that degassed entering the hose."""
+        if scenario.V_purge is None:
+            return par.V_hose + plant.V_degas
+        return scenario.V_purge
+
     t_closing = float('inf')                    # [s] closing ramp start
     closed_until = -1.0                         # [s] reopen after this
     V_purged = 0.0
@@ -163,25 +178,43 @@ def run(par, scenario, controller, legacy_sensor=False, seed=1):
         # 3. Plant advance with the previous scan's command and this
         #    scan's valve states
         tk = t_list[k]
+        prox = 0.0
         if not hose_opened and tk >= scenario.t_prox:
-            plant.open_hose()
-            hose_opened = True
-            events.append(tk)
+            if scenario.Topen_prox > 0.0:
+                prox = scenario.prox(tk)
+                if tk - scenario.t_prox < Ts:
+                    events.append(tk)       # the opening starts
+            else:
+                plant.open_hose()
+                events.append(tk)
+            hose_opened = plant.hose_open
         if tk < closed_until:
             # Closing ramp over Tclose, then shut for the pause
             a = max(0.0, 1.0 - (tk - t_closing) / scenario.Tclose) \
                 if scenario.Tclose > 0.0 else 0.0
         else:
             a = scenario.valve(tk, t_from)
+        if not plant.hose_open:
+            a = 0.0                 # nothing opens before the hose joins
         Q_tube = 0.0
         if a > 0.0 and not vented:
             Q_tube = Q_tube_open
             vented = True
             events.append(tk)
             V_out_open = plant.V_out
-        plant.scan(u_applied, a, Q_tube)
+        plant.scan(u_applied, a, Q_tube, prox)
+        if prox > 0.0 and plant.hose_open:
+            # The hose has joined; a slow fill delays the purge so that
+            # the distal valve opens the same time after the join as
+            # the scenario puts between the two openings
+            hose_opened = True
+            events.append(tk)
+            t_fill = tk - scenario.t_prox
+            gap = scenario.t_open - scenario.t_prox - scenario.Topen_prox
+            if t_from < tk + gap:
+                t_from = tk + gap
         if (purging and a > 0.0
-                and plant.V_out - V_out_open >= scenario.V_purge):
+                and plant.V_out - V_out_open >= V_purge_target(plant)):
             # The purge is done: close, and reopen after the pause
             purging = False
             V_purged = plant.V_out
@@ -213,7 +246,9 @@ def run(par, scenario, controller, legacy_sensor=False, seed=1):
     r = Result(controller.name, scenario.name, controller.mode, t[:n_run],
                arr(P), arr(P_meas), arr(u_trace), arr(v), arr(x),
                target[:n_run], arr(stiffness), arr(Q), {}, 0.0, par.A,
-               arr(P_sat), arr(V_out), arr(V_l), events, V_purged)
+               arr(P_sat), arr(V_out), arr(V_l), events, V_purged,
+               plant.V_in_total, plant.V_degas, plant.hose_lumps(),
+               t_fill)
     r.metrics = metrics.compute(r, par, scenario, controller.mode)
     r.cost = metrics.loop_cost(r.metrics)
     return r
