@@ -47,7 +47,7 @@ The application spans two POUs: `PRG_Main` (Structured Text) contains the state 
 |  |  +-----------------+     +-----------------+     +-----------+  |       |
 |  |  | FB_HandshakeMngr|<-+->|                 |<---+|  Homing   |  |       |
 |  |  +-----------------+   | | IF-ELSIF States |    |   FBs     |  |       |
-|  |                        +>| (State Machine) |<---+ (Go/Lim/EOT)|  |       |
+|  |                        +>| (State Machine) |<---+ (Go/Lim)    |  |       |
 |  |  +-----------------+   | |                 |    +-----------+  |       |
 |  |  | Y_DirectControl |<--+ +-----------------+                   |       |
 |  |  +-----------------+                                           |       |
@@ -76,7 +76,7 @@ The application spans two POUs: `PRG_Main` (Structured Text) contains the state 
 -   **Decoders/Processors:** Function blocks that convert raw, filtered inputs into meaningful data (e.g., `FB_ModeDecoder` debounces the mode code register `G_mbModeCode` and converts it into an `E_OperatingMode`; `FB_PressureInput` scales the pressure transducer voltage to MPa).
 -   **Core Logic (State Machine):** The `IF/ELSIF` chain in `PRG_Main` that orchestrates all system behavior based on the current state (`G_sysCurrentState`). MotionWorks IEC Express does not support enum-valued `CASE` selectors, hence the `IF/ELSIF` pattern.
 -   **Control Blocks (`Y_DirectControl`, `MC_*`):** PLCopen (`MC_`) and Yaskawa-specific (`Y_`) function blocks. These live in the LD POU and are driven from ST through the `G_cmd*` / `G_sta*` globals.
--   **Homing FBs (`FB_HomeLimit`, `FB_HomeEOT`, `FB_GoHome`):** Emit built-in FB commands via `Cmd*` `VAR_OUTPUT` structs and receive built-in FB status via `Sta*` `VAR_INPUT` structs. `PRG_Main` bridges these to the matching globals.
+-   **Homing FBs (`FB_HomeLimit`, `FB_GoHome`):** Emit built-in FB commands via `Cmd*` `VAR_OUTPUT` structs and receive built-in FB status via `Sta*` `VAR_INPUT` structs. `PRG_Main` bridges these to the matching globals.
 -   **Safety Monitor:** A watchdog (`FB_SafetyMonitor`) that runs every cycle to check for fault conditions.
 -   **Output Processors:** `PRG_Output` publishes the confirmed mode code (`G_mbConfCode`, IR3), the fault code (`G_mbFaultCode`, IR4), the status bits and the feedback in the Modbus input registers, and drives the status and brake digital outputs.
 
@@ -122,7 +122,7 @@ The main program orchestrates a number of critical function blocks.
 | `fbPower` | `MC_Power` | **Drive Control:** Enables and disables power to the servo drive. |
 | `fbStop` | `MC_Stop` | **Safe Stop:** Used to execute a controlled stop when changing modes or entering a fault state. `Y_DirectControl` is kept enabled with a zero command until `MC_Stop` has aborted it, which is what returns the SERVOPACK from velocity/torque control to position control (Yaskawa AN.MPIEC.30 §4.1.3). |
 | `fbDirectControl`| `Y_DirectControl`| **Motion Command:** The primary interface for sending real-time position, velocity, or torque commands to the drive during operational states. |
-| `fbHome*` | `FB_HomeLimit`, `FB_HomeEOT` | **Homing Logic:** Encapsulates the complex, multi-step homing sequences. |
+| `fbHome*` | `FB_HomeLimit`, `FB_GoHome` | **Homing Logic:** Encapsulates the multi-step homing sequence and the Go Home move. |
 | `fbSafetyMonitor`| `FB_SafetyMonitor` | **System Watchdog:** The central authority for detecting unsafe conditions and triggering a fault. |
 | `fbCommWatchdog` | `FB_CommWatchdog` | **Link Supervision:** Raises `FAULT_COMM` through the safety monitor when the master heartbeat register stops changing. |
 | `fbIntToFaultCode` | `FB_IntToFaultCode` | **Fault Acknowledgement:** Decodes the full fault code the master mirrors in the mode register for `FB_FaultResetHandler`. |

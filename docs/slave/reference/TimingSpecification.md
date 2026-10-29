@@ -68,7 +68,7 @@ Brake Cmd   ____________/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾�
 Brake Actual ______________|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 Motion OK   __________________/‾‾‾‾‾‾‾‾‾‾‾‾‾‾
                          |<-->|
-                         100ms
+                         500ms
                          disengage delay
 
 Brake Engage Sequence:
@@ -77,14 +77,14 @@ Brake Cmd   ‾‾‾‾‾‾‾‾‾‾‾‾‾\______________________
 Brake Actual ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾|_________________
 Hold Secure ______________________|‾‾‾‾‾‾‾‾‾‾‾‾
                                |<-->|
-                               200ms
+                               500ms
                                engage delay
 ```
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| Brake Disengage Delay | 100 ms | Wait after command before motion allowed |
-| Brake Engage Delay | 200 ms | Wait after command before drive disable |
+| Brake Disengage Delay | 500 ms | Wait after command before motion allowed |
+| Brake Engage Delay | 500 ms | Wait after command before drive disable |
 | Brake Settle Time | 50 ms | Additional settling after mechanical action |
 
 ---
@@ -187,13 +187,17 @@ TRUE for up to `V/A` after the drop (1.0 s at `V` = 5 mm/s, `A` = 5 mm/s²) plus
 
 ### Mode 110 (Home to Limit)
 
-| Phase | Typical | Maximum | Description |
-|-------|---------|---------|-------------|
-| Approach | 5-15 s | 30 s | Moving to limit switch |
-| Detect | 100 ms | 500 ms | Confirming switch trigger |
-| Backoff | 1-2 s | 5 s | Moving off switch |
-| Set Reference | 50 ms | 200 ms | `MC_SetPosition` via `G_cmdSetPosition` |
-| **Total** | **7-18 s** | **36 s** | Complete sequence |
+Durations follow from the `FB_HomeLimit` phases and the GVL defaults
+(fast 5 mm/s, slow 1 mm/s, backoff/retract 5 mm/s, accel 5 mm/s², decel 50 mm/s²).
+
+| Phase | Duration | Description |
+|-------|----------|-------------|
+| Fast Approach | distance / 5 mm/s, up to ≈ 63 s from the positive soft limit (≈ 310 mm) | Jog reverse at `G_cfgHomeLimFastApproachVel` until the negative overtravel switch trips, then wait for the Jog to stop |
+| Inter-Backoff | switch hysteresis / 5 mm/s | Jog forward at `G_cfgHomeLimBackoffVel` until the switch clears |
+| Slow Approach | switch hysteresis / 1 mm/s | Jog reverse at `G_cfgHomeLimSlowApproachVel`; the switch position is captured on trip |
+| Retract | ≈ 1.6 s | `MC_MoveAbsolute` by `G_cfgHomeLimRetractDist` (5 mm) |
+| Set Reference | a few scans | `MC_SetPosition` via `G_cmdSetPosition` until `G_staSetPosition.Done` |
+| **Total** | **≤ 90 s** | Bounded by `G_cfgHomingTimeout`; expiry raises `FAULT_LIMIT_SWITCH` |
 
 Mode 110 is the only homing sequence. Mode code 111 (7) is `MODE_PRESSURE`, an
 operational mode handled by `FB_PressureController`, not a homing mode.
@@ -259,7 +263,7 @@ at its next scan. See `docs/master/ModbusRegisterMap.md`.
 | Mode Handshake | 500 ms | FAULT_HANDSHAKE |
 | Fault Reset | 1000 ms | Fault persists |
 | Drive Ready | 5000 ms | Stuck in DRIVE_ENABLE |
-| Homing | 30000 ms | Homing fault |
+| Homing | 90000 ms | FAULT_LIMIT_SWITCH |
 | Motion Complete | Varies | Mode-dependent |
 
 ---
@@ -324,8 +328,8 @@ FaultReset   _______________|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 |-----------|---------|-------|-------------|
 | G_cfgHandshakeTimeout | 500 ms | 100-2000 ms | Mode confirmation timeout |
 | G_cfgFaultIdleTimeout | 30000 ms | 10000-60000 ms | Fault-to-idle transition timeout |
-| G_cfgBrakeEngageDelay | 200 ms | 100-500 ms | Brake engage wait |
-| G_cfgBrakeDisengageDelay | 100 ms | 50-200 ms | Brake release wait |
+| G_cfgBrakeEngageDelay | 500 ms | 100-1000 ms | Brake engage wait |
+| G_cfgBrakeDisengageDelay | 500 ms | 100-1000 ms | Brake release wait |
 | G_cfgDriveReadyTimeout | 5000 ms | 1000-10000 ms | Drive enable timeout |
 | G_cfgDebounceTimeMode | 50 ms | 10-200 ms | Mode code debounce |
 | G_cfgDebounceTimeMotion | 20 ms | 5-100 ms | MotionEnable debounce |
@@ -333,7 +337,7 @@ FaultReset   _______________|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 | G_cfgDebounceTimeOvertravelNeg | 10 ms | 1-20 ms | Negative overtravel / home reference debounce |
 | G_cfgDebounceTimeOvertravelPos | 10 ms | 1-20 ms | Positive overtravel debounce |
 | G_cfgAnalogFilterTimeConst | 20 ms | 1-200 ms | Pressure input low-pass time constant |
-| G_cfgHomingTimeout | 30000 ms | 10000-60000 ms | Homing sequence timeout |
+| G_cfgHomingTimeout | 90000 ms | 30000-180000 ms | Homing sequence timeout |
 
 ---
 
@@ -345,7 +349,7 @@ FaultReset   _______________|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 |----------|---------|------------------|
 | Handshake | 500 ms | Fault |
 | Drive Ready | 5 s | Stuck/Fault |
-| Homing | 30 s | Fault |
+| Homing | 90 s | Fault |
 | Fault Reset | 1 s | Retry needed |
 
 ### Minimum Wait Times
@@ -353,7 +357,7 @@ FaultReset   _______________|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 | After | Wait | Before |
 |-------|------|--------|
 | Mode code set | 20 ms | MotionEnable (HR3) HIGH |
-| Brake disengage | 100 ms | Motion command |
+| Brake disengage | 500 ms | Motion command |
 | Motion stop | 50 ms | Brake engage |
-| Brake engage | 200 ms | Drive disable |
+| Brake engage | 500 ms | Drive disable |
 | Fault code read | 10 ms | Mirror and reset |

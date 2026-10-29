@@ -179,7 +179,7 @@ MASTER:
 | `G_cfgHomeLimRetractDist` | 5.0 | mm | Distance retracted from precise switch to position 0 |
 | `G_cfgHomeLimSetPosition` | 0.0 | mm | Position value at the retract endpoint (becomes coord-frame zero) |
 | `G_cfgHomeLimAccel` | 5.0 | mm/s² | Acceleration for all homing moves |
-| `G_cfgHomeLimDecel` | 5.0 | mm/s² | Deceleration for all homing moves |
+| `G_cfgHomeLimDecel` | 50.0 | mm/s² | Deceleration for all homing moves |
 | `G_cfgHomingTimeout` | T#90S | — | Overall FB timeout for the entire homing sequence |
 
 ### Mode 101 Parameters
@@ -187,7 +187,7 @@ MASTER:
 | Parameter | Default | Units | Description |
 |-----------|---------|-------|-------------|
 | `G_cfgGoHomePosition` | 0.0 | mm | Target home position |
-| `G_cfgGoHomeVelocity` | 50.0 | mm/s | Movement velocity |
+| `G_cfgGoHomeVelocity` | 5.0 | mm/s | Movement velocity |
 
 ---
 

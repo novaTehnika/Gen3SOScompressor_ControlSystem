@@ -87,16 +87,12 @@ This plan does **not** cover the testing of the Simulink master controller softw
         -   Position feedback is accurate.
 
 ### 3.4 Homing Sequence Verification
--   **Objective:** Verify that all homing modes function correctly and set the position accurately.
+-   **Objective:** Verify that the homing (110) and Go Home (101) modes function correctly and set the position accurately.
 -   **Procedures:**
     -   **Mode 110 (Home to Limit):**
         1.  Start from a position away from the home switch.
         2.  Command Mode 110.
         3.  Verify the axis moves toward the switch, triggers it, backs off, and sets the position to the configured value (`G_cfgHomeLimSetPosition`).
-    -   **Mode 111 (Home to EOT):**
-        1.  Command Mode 111.
-        2.  Verify the fast and slow approach, and confirm that a stall is detected at the hard stop.
-        3.  Verify the `G_posEOTOffset` is calculated correctly.
     -   **Mode 101 (Go Home):**
         1.  Command Mode 101 and verify it moves directly to the home position (`G_cfgGoHomePosition`).
         2.  After a controller and drive power cycle, without homing, command Mode 101 and Mode 010 and verify both are accepted and the position is unchanged.
