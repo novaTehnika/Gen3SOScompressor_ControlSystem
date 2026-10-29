@@ -99,15 +99,15 @@ bench works in MPa gauge throughout, as the slave does.
 ## 2. Volumes: dead volume and fill
 
 Both fits need the liquid volume. The dead volume, what the piston cannot
-sweep, was measured at 50 mL (50 g of distilled water) and is
-`masterConfig.deadVolume`. To measure it again:
-
-1. Jog the piston to the end of travel (the position guard allows up to
-   3 mm inside the soft limit; note the position `x_EOT` reached and compare
-   it with `masterConfig.posEOT`).
-2. With the outlet valve open and the fill port open, fill the chamber from
-   a burette or syringe until liquid appears at the orifices. The volume
-   added is the dead volume `V_dead`.
+sweep, is 50 mL (`masterConfig.deadVolume`), the cylinder passages alone,
+without the discharge hose. Filling the passages from a burette is not
+practical (they are small and convoluted); it was measured by purging the
+air with liquid, running the piston to the soft limit, opening the valves
+and drawing the liquid out of the passages into the chamber, then removing
+the liner and piston from the bottom of the cylinder, catching the liquid,
+and weighing it: 50 g of DI water. The discharge hose (3 ft of 1/4 in,
+29 mL) and the orifice tube (0.24 mL) are on top of this when the proximal
+valve is open.
 
 Then, for every liquid-only run:
 
@@ -365,21 +365,19 @@ from the geometry.
 
 | Parameter | Result | Runs | Notes |
 |---|---|---|---|
-| K, chamber closed off from the hose (proximal valve shut) | stiffness 7.2 MPa/mm; K 0.72 GPa if the 50 mL dead volume is the cylinder passages alone, 0.66 GPa if it was measured through the hose (passages 21 mL) | `K300_char` x3 at 280 mm, 19:26 to 19:30 | Below the 1 GPa assumed. Up and down agree to 0.2 %, but the curvature gives a gas-like term of up to 0.65 mL, 23 % of the compliance, so the liquid-only K is not pinned: gas-corrected, 0.74 to 0.81 GPa. Purge longer (section 2 step 4) and weigh the fill. |
-| Discharge hose open (3 ft of 1/4 in R7 hose, 29 mL, to the orifice tube) | stiffness 5.2 MPa/mm with 276 to 305 mL of liquid; as an effective K, 0.42 to 0.46 GPa | `K300_char` at 299 mm, 19:36 | The hose adds about 0.24 mL/MPa of compliance beyond its own liquid (2.4 mL per 10 MPa, either way the dead volume is read): its wall stretching and any air it holds, the latter being what the curvature's gas term of up to 1.1 mL in this run points at. This is the chamber the delivery sees. |
+| K, chamber closed off from the hose (proximal valve shut) | 0.72 GPa, segments 0.67 to 0.78; stiffness 7.2 MPa/mm at 343 mL | `K300_char` x3 at 280 mm, 19:26 to 19:30 | Below the 1 GPa assumed. Up and down agree to 0.2 %, but the curvature gives a gas-like term of up to 0.65 mL, 23 % of the compliance, so the liquid-only K is not pinned: gas-corrected, 0.81 GPa. Purge longer (section 2 step 4) and weigh the fill. |
+| Discharge hose open (3 ft of 1/4 in R7 hose, 29 mL, to the orifice tube) | stiffness 5.2 MPa/mm with 305 mL of liquid; as an effective K, 0.46 GPa | `K300_char` at 299 mm, 19:36 | The hose adds about 0.24 mL/MPa of compliance beyond its own liquid (2.4 mL per 10 MPa): its wall stretching and any air it holds, the latter being what the curvature's gas term of up to 1.1 mL in this run points at. This is the chamber the delivery sees. |
 | Cd | 0.85 (0.84 to 0.87 over 1.6 to 8.3 MPa), exponent 0.48; Q = 4.8 mL/s at 10 MPa, piston 1.42 mm/s | `d2`, `d5`, `d10` deliveries and `Q10_char` x2 | With the transducer zero of -0.11 MPa corrected (`pressureOffset`). Above the 0.7 assumed: deliveries run 20 % faster than the model. The loop held 8.1 MPa for a 10 MPa target, the steady error the design study predicted. |
 | tauV at the motor | 8.7 +/- 0.5 ms lag after 12 +/- 0.6 ms dead time, the same for 0.3, 1 and 2.5 mm/s steps, up and down | `s1`, `s2` step captures, 74 | **The command is not slewed at `G_cfgDirectCtrlAccel`**: a 2.5 mm/s step is complete in 30 ms, as is a 0.3 mm/s step, so the drive follows the command at whatever rate it needs (36 mm/s^2 for a 1 mm/s step, 90 for 2.5) with a 2 to 5 % overshoot. Fit with `opts.accel` large (1e4); with the GVL slew the model cannot follow and reports a lag near zero. |
 | tauV at the piston | not resolved (below 25 ms) | `lag_wet_char` 50 ms logs, 5 steps at 8.6 to 10 MPa/mm | No captures were taken in these runs (`opts.probe` off, probe without the pressure array). Repeat with the reloaded probe. |
 
 **Two dead volumes.** The proximal valve at the cylinder head is shut
 during compression and mixing and open during the delivery, so the
-chamber has two dead volumes: the cylinder passages alone, and the
-passages plus the hose (29 mL) and the tube (0.24 mL). Which one the
-measured 50 mL is depends on whether the water was added with the hose
-open to the orifices; `masterConfig.deadVolume` (50) is right for the
-delivery readout only if it includes the hose. The hose is prefilled with
-virgin saline, and the delivery's first 29 mL is that purge, which does
-not change Cd but is not solution.
+chamber has two dead volumes: the cylinder passages alone, the measured
+50 mL (`masterConfig.deadVolume`), and the passages plus the hose (29 mL)
+and the tube (0.24 mL), 79 mL, during the delivery. The hose is prefilled
+with virgin saline, and the delivery's first 29 mL is that purge, which
+does not change Cd but is not solution.
 
 **What the hose means for the model.** A delivery runs with the hose
 open, so the compliance the loop sees is the liquid's plus a constant
