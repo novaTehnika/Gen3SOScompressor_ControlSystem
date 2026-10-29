@@ -221,7 +221,6 @@ The SGM7J-04A6A6C has a 24-bit absolute encoder:
 2. [ ] Verify ram drives negative, stops at negative overtravel, backs off, and `MC_SetPosition` sets position to `G_cfgHomeLimSetPosition`
 3. [ ] Verify `G_doHomingComplete` goes TRUE
 4. [ ] Power-cycle the controller and drive — verify the reported position is unchanged and Position mode is accepted without homing
-5. [ ] Command bits `111` (Mode 7) — verify the slave stays in its current state (no state handler exists for the reserved slot)
 
 ---
 

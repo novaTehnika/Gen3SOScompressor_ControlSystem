@@ -271,7 +271,7 @@ and piston-exit faults remain active**.
 
 **Status**: Reserved but not emitted by current firmware.
 
-As of 2026-04, the dedicated encoder-validity path was removed from `FB_SafetyMonitor`. Encoder alarms (A.810 battery backup loss, A.CC0 multi-turn error, A.830 low battery) are detected by the Sigma-7 servo amplifier and surface as `FAULT_DRIVE` (2) through `G_sysDriveFault`.
+`FB_SafetyMonitor` has no encoder-validity path. Encoder alarms (A.810 battery backup loss, A.CC0 multi-turn error, A.830 low battery) are detected by the Sigma-7 servo amplifier and surface as `FAULT_DRIVE` (2) through `G_sysDriveFault`.
 
 A fault reset does not require re-homing: the coordinate frame is held by the absolute encoder and by the `MC_SetPosition` offset the controller stores in battery-backed memory. Re-home with Mode 110 (Home to Limit) only when that frame is lost: after an encoder alarm (reported as `FAULT_DRIVE`), or after a controller SRAM battery failure or controller replacement, which lose the stored offset.
 
@@ -387,12 +387,12 @@ FAULT DETECTED (IR5 G_mbFaultActive = 1)
            |
     +------+------+------+------+------+------+------+
     |      |      |      |      |      |      |      |
-    1      2      3      4      5      6      7
-    |      |      |      |      |      |      |
-    v      v      v      v      v      v      v
- Retry   Check  Move   (res.) Check  STOP   (res.)
- mode    drive  from          press  Invest
-         status limit         ure    igate
+    1      2      3      4      5      6      7      8
+    |      |      |      |      |      |      |      |
+    v      v      v      v      v      v      v      v
+ Retry  Check  Move   Fix    Check  STOP   (res.) Check
+ mode   drive  from   link   press  Invest        sensor
+        status limit         ure    igate         loop
 
 After reset, determine appropriate next action:
 

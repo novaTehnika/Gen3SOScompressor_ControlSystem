@@ -29,9 +29,7 @@
             +--------------+--------------+
             |                             |
      (Homing Modes              (Operational Modes
-      101,110)                   001,010,011,100)
-      [Mode 111 is reserved -
-       no handler, no action]
+      101,110)                   001,010,011,100,111)
             |                             |
             +----------+------------------+
                        |
@@ -46,12 +44,12 @@
               | _RELEASE       |
               +----------------+
                        |
-         +------+------+------+------+------+------+
-         |      |      |      |      |      |      |
-         v      v      v      v      v      v
-       001    010    011    100    101    110
-       BRAKE  POS    VEL    TRQ    GO     HOME
-       HOLD   CTRL   CTRL   CTRL   HOME   LIMIT
+         +------+------+------+------+------+------+------+
+         |      |      |      |      |      |      |      |
+         v      v      v      v      v      v      v
+       001    010    011    100    111    101    110
+       BRAKE  POS    VEL    TRQ    PRES   GO     HOME
+       HOLD   CTRL   CTRL   CTRL   CTRL   HOME   LIMIT
 ```
 
 ---
@@ -88,6 +86,12 @@
     |        +-------------+                         |
     +------------------------------------------------+
 ```
+
+`ST_PRESSURE_CTRL` (mode 111) behaves like `ST_VELOCITY_CTRL`, except that the
+velocity command comes from `FB_PressureController` closing the loop on the
+pressure transducer, with the reference as the target pressure in MPa gauge.
+It applies `G_cfgPressureVelMax` and `G_cfgPressureTorqueLimit` and leaves
+through the same hold-position and fault paths as the other operational modes.
 
 ---
 
@@ -163,12 +167,6 @@
 | _COMPLETE     |  G_doHomingComplete; wait for mode change
 +---------------+
 ```
-
-### Mode 111: Reserved
-
-Mode 111 has no state handler. It is neither an operational nor a homing
-mode, so the slave confirms the handshake but stays in its current state and
-raises no fault. The master must not command it.
 
 ### Mode 101: Go Home
 
@@ -279,7 +277,7 @@ the master-side procedure.
 | 100 (Torque) | Always allowed | DRIVE_ENABLE → BRAKE_RELEASE → TORQUE_CTRL |
 | 101 (Go Home) | Always allowed | DRIVE_ENABLE → BRAKE_RELEASE → GO_HOME |
 | 110 (Home Limit) | Always allowed | DRIVE_ENABLE → BRAKE_RELEASE → HOME_LIMIT |
-| 111 (Reserved) | Never - no state handler | Handshake confirmed, no state change, no fault |
+| 111 (Pressure) | Always allowed | DRIVE_ENABLE → BRAKE_RELEASE → PRESSURE_CTRL |
 
 ### From Operational Modes
 

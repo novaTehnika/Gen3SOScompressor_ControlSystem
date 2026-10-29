@@ -29,8 +29,7 @@ These parameters control the duration of timeouts and delays within the state ma
 | `G_cfgModeTransitionDelay` | T#100MS | ms | A small delay used in some state transitions to ensure stability. Generally should not be changed. |
 | `G_cfgBrakeEngageDelay` | T#200MS | ms | Time to wait after commanding the brake to engage before proceeding. Should be slightly longer than the mechanical brake's specified engagement time. |
 | `G_cfgBrakeDisengageDelay`| T#100MS | ms | Time to wait after commanding the brake to release before proceeding. Should be slightly longer than the mechanical brake's specified release time. |
-| `G_cfgHomingTimeout` | T#30S | s | Maximum time allowed for an entire homing sequence (Mode 110 or 111) to complete. **Tuning:** Increase if the travel distance is long or homing velocities are very slow. |
-| `G_cfgStallDetectTime` | T#200MS | ms | The duration a stall condition (high torque, low velocity) must be met continuously during EOT homing to be considered a valid hard stop. **Tuning:** Increase to prevent false stall detections from friction. Decrease for faster homing, but with higher risk of false detection. |
+| `G_cfgHomingTimeout` | T#90S | s | Maximum time allowed for the Mode 110 homing sequence to complete. **Tuning:** Increase if the travel distance is long or homing velocities are very slow. |
 | `G_cfgDriveReadyTimeout` | T#5S | s | Max time to wait for the servo drive to report "Ready" after being enabled. Should not need adjustment unless the drive has an unusually long power-on sequence. |
 | `G_cfgFaultIdleTimeout` | T#30S | s | When a fault occurs, the system enters a controlled stop. If the master does not acknowledge/reset the fault within this time, the slave will proceed to a safe-idle state (drive off, brake on). |
 
@@ -69,7 +68,6 @@ These parameters control the force applied by the motor.
 |---|---|---|---|
 | `G_cfgTorqueLimitMax` | 300.0 | % | Absolute maximum torque allowed. This is a primary safety limit to prevent mechanical damage. |
 | `G_cfgTorqueLimitNormal`| 100.0 | % | Torque limit used during standard Position and Velocity control modes. |
-| `G_cfgTorqueHomingLimit`| 60.0 | % | Torque limit applied during the final slow approach of EOT Homing (Mode 111). This should be high enough to overcome friction but low enough to avoid damaging the mechanical hard stop. |
 
 ---
 
@@ -82,16 +80,16 @@ These parameters control the software filters applied to raw I/O signals to reje
 | `G_cfgDebounceTimeMode`| T#50MS | ms | Debounce time for the mode code register (`G_mbModeCode`, HR2): the code must hold one value this long before it is decoded. **Tuning:** Increase if mode commands are unstable. Decrease for faster mode changes. |
 | `G_cfgDebounceTimeMotion`| T#20MS | ms | Debounce time for the Motion Enable register (`G_mbMotionEnable`, HR3). Should be relatively short for responsiveness. |
 | `G_cfgDebounceTimeFault`| T#20MS | ms | Debounce time for the Fault Reset register (`G_mbFaultReset`, HR4). |
-| `G_cfgDebounceTimeLimitStd`| T#5MS | ms | Debounce time for the Retract limit switch. |
-| `G_cfgDebounceTimeLimitHome`| T#2MS | ms | Debounce time for the Home limit switch. This is shorter to increase the precision and repeatability of the Home to Limit sequence. |
+| `G_cfgDebounceTimeOvertravelNeg`| T#10MS | ms | Debounce time for the negative overtravel switch (`G_diOvertravelNeg`), which is also the Mode 110 home reference. |
+| `G_cfgDebounceTimeOvertravelPos`| T#10MS | ms | Debounce time for the positive overtravel switch (`G_diOvertravelPos`). |
 | `G_cfgAnalogFilterTimeConst`| T#20MS | ms | Time constant for the IIR low-pass filter on the pressure transducer input (`G_aiPressure`), after the median filter. **Tuning:** Its lag adds to the pressure loop's overshoot on a target step; the median filter and the capacitor across the loop shunt leave little noise for it to remove. Increase only if the filtered reading is visibly noisy. |
-| `G_cfgAnalogMedianSize`| 3 | count | The number of samples for the median filter on the pressure transducer input (valid: 3 or 5). The median filter is excellent at rejecting large, single-sample spikes. |
+| `G_cfgAnalogMedianSize`| 5 | count | The number of samples for the median filter on the pressure transducer input (valid: 3 or 5). The median filter is excellent at rejecting large, single-sample spikes. |
 
 ---
 
 ## 6. Homing Parameters
 
-These parameters define the behavior of the three homing modes.
+These parameters define the behavior of the homing (110) and Go Home (101) modes. Mode code 111 (7) is Pressure Control, not a homing mode.
 
 ### Mode 110: Home to Limit Switch
 | Parameter | Default Value | Units | Description & Tuning Considerations |
@@ -99,15 +97,6 @@ These parameters define the behavior of the three homing modes.
 | `G_cfgHomeLimApproachVel`| 50.0 | mm/s | The velocity used to approach the home limit switch. |
 | `G_cfgHomeLimBackoffDist`| 5.0 | mm | The distance the axis moves away from the switch after triggering it, before setting the final home position. |
 | `G_cfgHomeLimSetPosition`| 0.0 | mm | The absolute position value that will be assigned to the axis once the homing is complete. This defines the origin of the coordinate system. |
-
-### Mode 111: Home to End-of-Travel
-| Parameter | Default Value | Units | Description & Tuning Considerations |
-|---|---|---|---|
-| `G_cfgHomeEOTFastVel` | 50.0 | mm/s | The velocity for the initial fast approach toward the hard stop. |
-| `G_cfgHomeEOTSlowVel` | 5.0 | mm/s | The final, slow velocity for the torque-limited contact with the hard stop. |
-| `G_cfgHomeEOTApproachDist`| 20.0 | mm | The distance from the expected EOT position at which the axis will switch from fast to slow velocity. |
-| `G_cfgHomeEOTTorqueThresh`| 50.0 | % | The torque level (as % of motor rated torque) used to detect stall during EOT homing. The actual detection threshold is `0.9 * G_cfgHomeEOTTorqueThresh` (i.e. 45% by default; see [Stall_Detection_Calculation](../Stall_Detection_Calculation.md)). **Tuning:** Set it high enough to avoid false stalls from friction, but low enough to reliably detect contact with the hard stop. |
-| `G_cfgHomeEOTSetPosition`| 300.0 | mm | The "ideal" master coordinate position at the EOT. The slave calculates an offset so that the master sees this position value when the slave is at the physical EOT. |
 
 ### Mode 101: Go Home
 | Parameter | Default Value | Units | Description & Tuning Considerations |
