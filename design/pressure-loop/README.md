@@ -51,7 +51,7 @@ accept these options:
 | `solver.py` | Holds the fixed-step integration methods, equations (34) and (35). |
 | `study_convergence.py` | Measures the integration error against the time step for both methods. |
 | `sensor.py` | Models the measurement chain: `SlaveSensor` (transducer, shunt, noise and the slave's filter and scaling blocks) and `LegacySensor`. |
-| `controllers.py` | Defines `SlaveController` (the slave's block, with a flow feedforward option kept only as a bound), `ScheduledSlaveController` (the same block with its gains and stop law scheduled on an estimate of the chamber stiffness, equations (39) to (41)) and `LegacyController` (PID with a stiffness-estimating stop law and a torque mode). All share the `reset` and `step` interface. |
+| `controllers.py` | Defines `SlaveController` (the slave's block, with a flow feedforward option kept only as a bound), `ScheduledSlaveController` (the same block with its gains and stop law scheduled on an estimate of the chamber stiffness, equations (39) to (41)), `ScheduledSlaveControllerST` (the ported Structured Text blocks, wired as PRG_Main wires them) and `LegacyController` (PID with a stiffness-estimating stop law and a torque mode). All share the `reset` and `step` interface. |
 | `scenarios.py` | Defines the operating cases `compress`, `deliver`, `cycle` and the `stiffstep` probe, with the hose procedure and the valve timings (proximal opening, purge, pause, delivery). |
 | `sim.py` | Runs one closed-loop simulation: `run(params, scenario, controller)` returns a `Result` with traces, the valve event times and metrics. It sequences the valves: the hose opening, the purge, its closing and the reopening. |
 | `metrics.py` | Computes the loop metrics (overshoot, settling time, ripple, stroke) and the process metrics (pressure ceiling, saturation margin, the deepest dip at a valve event, volume delivered before a violation, solution delivered). |
@@ -991,9 +991,9 @@ Kp = wc/k holds 56° at wc = 11 everywhere.
 - The lag at the piston (below 25 ms) and the dissolution time constant
   are the two unmeasured plant parameters; the robustness study covers
   the first, and the second sets only the hold time.
-- Whether the saline volume and the charge can be given to the slave
-  (as configuration or over the protocol), which the schedule's
-  stiffness bound needs.
+- The saline volume and the charge are GVL settings
+  (`G_cfgPressureSchedSalineVolume`, `G_cfgPressureSchedOxygenRatio`);
+  whether they should come over the protocol per run.
 - The hose: how much of its 0.24 mL/MPa is wall and how much trapped
   air (air would make the proximal opening worse than eq. (43) at low
   pressure); whether the whole 29 mL is purged; how long the pause
@@ -1006,3 +1006,42 @@ Kp = wc/k holds 56° at wc = 11 everywhere.
   the charge; its 29 mL leave in the purge as before), or whether a
   bypass orifice of 0.3 mm or less (Cv 0.003), opened ahead of the
   ball valve, can be fitted and be opened at pressure.
+
+## Porting the schedule
+
+`FB_PressureSchedule` (`slave-src/FB/`) is the port of
+`ScheduledSlaveController`. It is off by default and is selected on
+entry to pressure mode by `G_cfgPressureScheduleEnable`; its settings
+are the `G_cfgPressureSched*` values of the GVL. `FB_PressureController`
+gains an `IntegScale` input, because PRG_Main cannot write the block's
+stored integral.
+
+The reference's arguments map to the settings as follows: `wc` to
+`Crossover`, `K_cfg` to `BulkModulus`, `V_l_cfg` to `SalineVolume`,
+`V_dead_cfg` to `DeadVolume`, `C_hose_cfg` to `HoseCompliance`,
+`ratio_cfg` to `OxygenRatio`, `ki_ratio` to `KiRatio`, `kp_min` and
+`kp_max` to `KpMin` and `KpMax`, and `e_int` to `ArriveBand`. The lag of
+eq. (41) is built from the pressure input filter's time constant, the
+median window, the scan time and the drive's dead time and lag
+(`DriveDeadTime`, `DriveLag`).
+
+The reference's limit-switch position `x_limit` is
+`G_cfgPosSoftLimitMax` on the slave, so `DeadVolume` is the chamber
+volume at the soft limit. The estimate stays an upper bound on the
+stiffness while `DeadVolume` is at or below the true volume there.
+
+When Ki changes, the schedule outputs `IntegScale` = previous Ki / new
+Ki so that Ki times the stored integral is continuous. The integrator is
+held at zero until the first arrival by driving the controller's Reset on
+the held scans and on the arrival scan, which reproduces the reference
+zeroing the integral after each held call.
+
+`check_scheduled_st` in `test_model.py` runs the reference and
+`ScheduledSlaveControllerST` in lockstep through the compression and the
+delivery and requires the commands to agree to 1e-9 m/s on every scan;
+`tests/st2pyParity.py` checks the Python translation against the Octave
+one.
+
+Left for commissioning: the dead volume against the machine's soft
+limit, the hose compliance against the procedure (0 when the hose is
+shut during the compression), and the charge against the recipe.

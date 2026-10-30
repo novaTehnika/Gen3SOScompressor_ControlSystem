@@ -111,3 +111,29 @@ These parameters define the behavior of the homing (110) and Go Home (101) modes
 | `G_cfgGoHomeAccel` | 5.0 | mm/s² | Acceleration for the Go Home move. |
 | `G_cfgGoHomeDecel` | 5.0 | mm/s² | Deceleration for the Go Home move. |
 | `G_cfgGoHomeStopDecel` | 5.0 | mm/s² | Deceleration for `MC_Stop` commands. |
+
+---
+
+## 7. Pressure Loop Gain Schedule
+
+When `G_cfgPressureScheduleEnable` is TRUE on entry to pressure mode, `FB_PressureSchedule` sets the pressure loop's Kp, Ki and stop-law velocity limit every scan from an upper bound on the chamber stiffness, so the loop's crossover stays at or below `G_cfgPressureSchedCrossover`. The choice is latched on entry. If a setting is out of range (`ParamError`), the loop runs on the fixed `G_cfgPressureKp`, `G_cfgPressureKi` and `G_cfgPressureStopStiffness`, which are unchanged and remain the fallback when the schedule is off.
+
+| Parameter | Default Value | Units | Description & Tuning Considerations |
+|---|---|---|---|
+| `G_cfgPressureScheduleEnable` | FALSE | BOOL | Selects the gain schedule. Latched on entry to pressure mode, so changing it during a run changes nothing until the next entry. |
+| `G_cfgPressureSchedCrossover` | 11.0 | rad/s | Target crossover of the pressure loop, wc. The scheduled Kp is `wc / KEst`, bounded by the two Kp limits. |
+| `G_cfgPressureSchedKiRatio` | 0.4 | 1/s | Ki / Kp. |
+| `G_cfgPressureSchedKpMin` | 0.001 | mm/s per MPa | Lower bound on the scheduled Kp. |
+| `G_cfgPressureSchedKpMax` | 5.0 | mm/s per MPa | Upper bound on the scheduled Kp. |
+| `G_cfgPressureSchedPistonArea` | 3431.0 | mm² | Piston area (2.602 in bore). |
+| `G_cfgPressureSchedSalineVolume` | 343.0 | mL | Saline volume of the fill including the dead volume. Must be at or below the true fill: a smaller value makes the bound stiffer (lower gain, safe). |
+| `G_cfgPressureSchedDeadVolume` | 74.0 | mL | Chamber volume with the piston at `G_cfgPosSoftLimitMax` and the hose open. 74 mL is a lower bound on the 79 mL at the end of travel (passages 50 mL + hose 29 mL). With the soft limit short of the end of travel (305 vs 365 mm in the reference file) the bound is stiffer than the chamber, which only lowers the gain; set 74 + 3.431·(365 − `G_cfgPosSoftLimitMax`) mL to remove that. It must never exceed the true volume. |
+| `G_cfgPressureSchedHoseCompliance` | 1.2E-13 | m³/Pa | Hose compliance. Must be at or below the true value. Set 0 when the proximal valve is opened only after mixing, because the hose is then not part of the chamber during the compression. |
+| `G_cfgPressureSchedBulkModulus` | 1.0E9 | Pa | Saline bulk modulus. Must be at or above the true value. |
+| `G_cfgPressureSchedOxygenRatio` | 1.0 | – | Oxygen charge as STP volume per saline volume. Must equal the recipe of the fill (1.0 for 1:1). A lower configured charge makes the bound stiffer (safe, slower); a higher one makes it softer (unsafe). |
+| `G_cfgPressureSchedHenry` | 1.22E-5 | mol/(m³·Pa) | Henry constant of oxygen in 0.9 % saline. |
+| `G_cfgPressureSchedGasTemp` | 293.0 | K | Gas temperature. |
+| `G_cfgPressureSchedPatm` | 101325.0 | Pa | Atmospheric pressure. |
+| `G_cfgPressureSchedArriveBand` | 0.5 | MPa | |error| at which the integrator is first released; it is held at zero until then. |
+| `G_cfgPressureSchedDriveDeadTime` | 0.012 | s | Drive dead time from command to response, measured on the bench (`bench/characterisation`) with `Y_DirectControl`'s FilterTimeConstant as wired. Re-measure if that pin changes. |
+| `G_cfgPressureSchedDriveLag` | 0.0087 | s | Drive velocity-loop time constant, measured as above. |
