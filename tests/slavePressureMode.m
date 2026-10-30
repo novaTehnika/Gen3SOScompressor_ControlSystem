@@ -3,8 +3,10 @@ function slavePressureMode()
 %   slave-src) in pressure mode through its holding registers, standing in
 %   for the master: handshake into mode 7, hold and step the target, ride
 %   through an outflow disturbance, clamp an excessive target, leave the
-%   mode, and fault on a broken transducer loop only while the loop is
-%   closed on it.
+%   mode, fault on a broken transducer loop only while the loop is
+%   closed on it and, with the gain schedule
+%   (G_cfgPressureScheduleEnable), compress to 10 MPa with the gains
+%   following the stiffness bound.
 %   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
 %     addpath slave-sim slave-sim/generated tests
 
@@ -126,6 +128,56 @@ h = runFor(h, 1);
 assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_BRAKE_HOLD && h.sl.ax.v == 0);
 assert(h.y.faultActive == 0 && h.y.brakeDisengage == 0);
 fprintf('ok  sensor fault in pressure mode, mirror and reset\n');
+
+% Gain schedule: with the estimate's settings describing the simulated gas
+% spring (no saline, no dissolution, no hose, its gas as the charge), the
+% stiffness bound is the chamber's stiffness. The gains follow wc / k, the
+% integrator is held until the first arrival, the pressure settles in band
+% without overshoot, and the switch is latched on entry.
+sim = h.sl.sim;
+h.sl.G.G_cfgPressureScheduleEnable = true;
+h.sl.G.G_cfgPressureVelMax = 2;           % mm/s, approach slow enough for the lagged estimate
+h.sl.G.G_cfgPressureSchedSalineVolume = 1.0;          % mL, negligible liquid
+h.sl.G.G_cfgPressureSchedHenry = 0;
+h.sl.G.G_cfgPressureSchedHoseCompliance = 0;
+h.sl.G.G_cfgPressureSchedBulkModulus = 1e12;
+h.sl.G.G_cfgPressureSchedPistonArea = sim.pistonArea;
+h.sl.G.G_cfgPressureSchedPatm = sim.atmMPa * 1e6;
+% Charge whose free gas at Patm and GasTemp is the spring's volume:
+% n R T = ratio * Vl * Patm * T / 273.15 = Patm * V0.
+h.sl.G.G_cfgPressureSchedOxygenRatio = (sim.chamberGasVolume / 1e3) * 273.15 ...
+    / h.sl.G.G_cfgPressureSchedGasTemp / h.sl.G.G_cfgPressureSchedSalineVolume;
+h.sl.ax.x = sim.chamberContactPos + 40;
+h = enterMode(h, MODE_PRESSURE, 10);
+assert(h.sl.s.bPressureSchedActive && h.sl.s.fbPressureSched.IntegHold);
+h.pMax = 0;
+h = runUntil(h, 30, @(h) h.y.performanceStatus == 1);
+assert(h.y.performanceStatus == 1, 'scheduled loop did not reach the band');
+t1 = h.t;
+h = runFor(h, 3);
+sc = h.sl.s.fbPressureSched;
+kTrue = (h.sl.ax.P + sim.atmMPa)^2 * sim.pistonArea / (sim.atmMPa * sim.chamberGasVolume);
+assert(abs(sc.KEst / kTrue - 1) < 0.02, 'k_est %.3f vs %.3f MPa/mm', sc.KEst, kTrue);
+wc = h.sl.G.G_cfgPressureSchedCrossover;
+assert(abs(sc.Kp - min(max(wc / sc.KEst, h.sl.G.G_cfgPressureSchedKpMin), ...
+    h.sl.G.G_cfgPressureSchedKpMax)) < 1e-12);
+assert(h.sl.s.fbPressureCtrl.Kp == sc.Kp && h.sl.s.fbPressureCtrl.Stiffness == sc.Stiffness);
+assert(~sc.IntegHold && ~sc.ParamError);
+assert(abs(h.sl.ax.P - 10) <= G.G_cfgPressureInBand && h.pMax <= 10.5, ...
+    'overshoot %.3f MPa', h.pMax - 10);
+% The switch is latched on entry: turning it off mid-run changes nothing.
+kp = sc.Kp;
+h.sl.G.G_cfgPressureScheduleEnable = false;
+h = runFor(h, 0.5);
+assert(h.sl.s.bPressureSchedActive && abs(h.sl.s.fbPressureCtrl.Kp - kp) < 0.05 * kp);
+h.u.motionEnable = 0;
+h = runFor(h, 1);
+h.u.modeCode = 0;
+h.u.reference = 0;
+h = runUntil(h, 5, @(h) h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE);
+assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE && h.y.faultActive == 0);
+fprintf('ok  scheduled gains: 10 MPa in %.1f s, k_est %.2f MPa/mm (true %.2f), Kp %.3f, max %.3f MPa\n', ...
+    t1, sc.KEst, kTrue, sc.Kp, h.pMax);
 
 fprintf('all passed\n');
 end
