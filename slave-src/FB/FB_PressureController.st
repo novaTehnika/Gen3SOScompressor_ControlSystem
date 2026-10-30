@@ -38,6 +38,11 @@
    produces the proportional term only, so entry is bumpless when the error
    is small.
 
+   Gain changes: the integral term is Ki * rInteg, so a caller that changes
+   Ki between scans passes IntegScale = old Ki / new Ki on that scan and the
+   term stays continuous; otherwise IntegScale is 1. The scaling is applied
+   before Reset clears the integrator.
+
    Variables (define in MWiec GUI):
      VAR_INPUT:
        Enable          : BOOL             (* Run the loop; FALSE holds output at zero
@@ -51,6 +56,7 @@
        Stiffness       : LREAL            (* Chamber stiffness assumed by the stop law (MPa/mm)
        StopVelMin      : LREAL            (* The stop law never clamps below this (mm/s)
        CycleTime       : LREAL            (* Task period (s)
+       IntegScale      : LREAL := 1.0     (* Factor applied to the stored integral at the start of the scan
      VAR_OUTPUT:
        Velocity        : LREAL            (* Commanded velocity (mm/s), within +/-VelLimit
        Error           : LREAL            (* Target - Actual (MPa), for diagnostics
@@ -68,6 +74,8 @@
 ParamError := (VelMax <= LREAL#0.0) OR (DecelMax <= LREAL#0.0) OR
               (Stiffness <= LREAL#0.0) OR (CycleTime <= LREAL#0.0) OR
               (StopVelMin < LREAL#0.0);
+
+rInteg := rInteg * IntegScale;
 
 IF (NOT Enable) OR Reset OR ParamError THEN
     rInteg := LREAL#0.0;
