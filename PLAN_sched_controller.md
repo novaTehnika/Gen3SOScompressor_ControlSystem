@@ -910,7 +910,7 @@ tests/run_all.sh                                     # everything; must end clea
 Baseline on this branch before any change: see the line below, filled in by
 the plan author.
 
-(Baseline pending at first commit; see the next commit.)
+Baseline: `tests/run_all.sh` exits 0 on this branch before any change (Python tests incl. parity and design checks, then 8 MATLAB-language test scripts, about 22 min in the cloud container; 117 `ok` lines). Any failure after a change is therefore the change.
 
 Report the outputs (the `ok` lines of `check_scheduled_st`, parity's line for
 `FB_PressureSchedule`, the new `slavePressureMode` line) to the parent.
