@@ -241,6 +241,32 @@
      G_cfgPressureTargetMax      : LREAL := 15.0       (* Highest target accepted from the master (MPa gauge) *)
      G_cfgPressureInBand         : LREAL := 0.1        (* |actual - target| for the in-band status output (MPa) *)
 
+     (* Gain schedule (FB_PressureSchedule). When enabled, latched on entry to
+        pressure mode, Kp, Ki and the stop law follow an upper bound on the
+        chamber stiffness instead of G_cfgPressureKp/Ki/StopStiffness above,
+        which remain the fallback. *)
+     G_cfgPressureScheduleEnable     : BOOL := FALSE       (* Schedule the pressure-loop gains on the stiffness bound *)
+     G_cfgPressureSchedCrossover     : LREAL := 11.0       (* Target loop crossover wc (rad/s) *)
+     G_cfgPressureSchedKiRatio       : LREAL := 0.4        (* Ki / Kp (1/s) *)
+     G_cfgPressureSchedKpMin         : LREAL := 0.001      (* Lower bound on the scheduled Kp (mm/s per MPa) *)
+     G_cfgPressureSchedKpMax         : LREAL := 5.0        (* Upper bound on the scheduled Kp (mm/s per MPa) *)
+     G_cfgPressureSchedPistonArea    : LREAL := 3431.0     (* Piston area (mm^2), 2.602 in bore *)
+     G_cfgPressureSchedSalineVolume  : LREAL := 343.0      (* Saline volume of the fill including the dead volume (mL);
+                                                              a lower bound on the true fill *)
+     G_cfgPressureSchedDeadVolume    : LREAL := 74.0       (* Chamber volume with the piston at G_cfgPosSoftLimitMax and
+                                                              the hose open (mL); a lower bound. 74 mL is the lower end of
+                                                              the 79 mL measured at the end of travel *)
+     G_cfgPressureSchedHoseCompliance: LREAL := 1.2E-13    (* Hose compliance (m^3/Pa), a lower bound; 0 if the hose
+                                                              is shut during the compression *)
+     G_cfgPressureSchedBulkModulus   : LREAL := 1.0E9      (* Saline bulk modulus (Pa), an upper bound *)
+     G_cfgPressureSchedOxygenRatio   : LREAL := 1.0        (* Oxygen charge as STP volume per saline volume (-) *)
+     G_cfgPressureSchedHenry         : LREAL := 1.22E-5    (* Henry constant of oxygen in 0.9 % saline (mol/(m^3 Pa)) *)
+     G_cfgPressureSchedGasTemp       : LREAL := 293.0      (* Gas temperature (K) *)
+     G_cfgPressureSchedPatm          : LREAL := 101325.0   (* Atmospheric pressure (Pa) *)
+     G_cfgPressureSchedArriveBand    : LREAL := 0.5        (* |error| that first releases the integrator (MPa) *)
+     G_cfgPressureSchedDriveDeadTime : LREAL := 0.012      (* Drive dead time, command to response (s), measured *)
+     G_cfgPressureSchedDriveLag      : LREAL := 0.0087     (* Drive velocity-loop time constant (s), measured *)
+
 
      (* ========================================================================
         TIMING PARAMETERS
