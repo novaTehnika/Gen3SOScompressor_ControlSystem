@@ -23,9 +23,9 @@
 ```
 Signal Timeline:
                     t0        t1           t2          t3
-G_diMotionEnable      _____/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
-mode_bits           XXXX|---- stable mode value ----------
-confirm_bits        0000|_____|‾‾‾‾‾‾‾‾‾ (matches mode)
+MotionEnable (HR3)    _____/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
+mode_code (HR2)     XXXX|---- stable mode value ----------
+conf_code (IR3)        0|_____|‾‾‾‾‾‾‾‾‾ (matches mode)
 
                     |<--->|<---->|
                      20ms  <500ms
@@ -34,7 +34,7 @@ confirm_bits        0000|_____|‾‾‾‾‾‾‾‾‾ (matches mode)
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| Mode Stable Time | 20 ms | Mode bits must be stable before handshake |
+| Mode Stable Time | 20 ms | Mode code must be stable before handshake |
 | Handshake Timeout | 500 ms | Max time for slave to confirm mode |
 | Confirm Stable Time | 10 ms | Confirmation must be stable before accepted |
 
@@ -43,9 +43,9 @@ confirm_bits        0000|_____|‾‾‾‾‾‾‾‾‾ (matches mode)
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | Mirror Stable Time | 20 ms | Fault code must be mirrored stably |
-| Reset Pulse Width | 50 ms min | Minimum G_diFaultReset HIGH duration |
+| Reset Pulse Width | 50 ms min | Minimum FaultReset (HR4) HIGH duration |
 | Reset Timeout | 1000 ms | Max time for fault to clear |
-| Clear Detection | 10 ms | Time after G_doFaultActive LOW before release |
+| Clear Detection | 10 ms | Time after `G_mbFaultActive` (IR5) reads 0 before release |
 
 ---
 
@@ -68,7 +68,7 @@ Brake Cmd   ____________/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾�
 Brake Actual ______________|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 Motion OK   __________________/‾‾‾‾‾‾‾‾‾‾‾‾‾‾
                          |<-->|
-                         100ms
+                         500ms
                          disengage delay
 
 Brake Engage Sequence:
@@ -77,14 +77,14 @@ Brake Cmd   ‾‾‾‾‾‾‾‾‾‾‾‾‾\______________________
 Brake Actual ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾|_________________
 Hold Secure ______________________|‾‾‾‾‾‾‾‾‾‾‾‾
                                |<-->|
-                               200ms
+                               500ms
                                engage delay
 ```
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| Brake Disengage Delay | 100 ms | Wait after command before motion allowed |
-| Brake Engage Delay | 200 ms | Wait after command before drive disable |
+| Brake Disengage Delay | 500 ms | Wait after command before motion allowed |
+| Brake Engage Delay | 500 ms | Wait after command before drive disable |
 | Brake Settle Time | 50 ms | Additional settling after mechanical action |
 
 ---
@@ -95,11 +95,11 @@ Hold Secure ______________________|‾‾‾‾‾‾‾‾‾‾‾‾
 
 | Signal | Debounce Time | Config Parameter |
 |--------|---------------|------------------|
-| G_diModeBit0-2 | 50 ms | `G_cfgDebounceTimeMode` |
-| G_diMotionEnable | 20 ms | `G_cfgDebounceTimeMotion` |
-| G_diFaultReset | 20 ms | `G_cfgDebounceTimeFault` |
-| G_diLimitRetract | 5 ms | `G_cfgDebounceTimeLimitStd` |
-| G_diLimitHome | 2 ms | `G_cfgDebounceTimeLimitHome` (shorter for homing precision) |
+| G_mbModeCode (HR2) | 50 ms | `G_cfgDebounceTimeMode` (code value held this long) |
+| G_mbMotionEnable (HR3) | 20 ms | `G_cfgDebounceTimeMotion` |
+| G_mbFaultReset (HR4) | 20 ms | `G_cfgDebounceTimeFault` |
+| G_diOvertravelNeg | 10 ms | `G_cfgDebounceTimeOvertravelNeg` (negative overtravel / home reference) |
+| G_diOvertravelPos | 10 ms | `G_cfgDebounceTimeOvertravelPos` |
 
 ### Edge Detection
 
@@ -112,7 +112,7 @@ Hold Secure ______________________|‾‾‾‾‾‾‾‾‾‾‾‾
 
 ## 5. Analog Signal Timing
 
-### Analog Input (Reference Command)
+### Analog Input (Pressure Transducer)
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
@@ -122,14 +122,6 @@ Hold Secure ______________________|‾‾‾‾‾‾‾‾‾‾‾‾
 | Step Response (10%) | 2.1 ms | Time to 10% of final value (τ = 20 ms) |
 | Step Response (90%) | 46 ms | Time to 90% of final value (τ = 20 ms) |
 | Settling Time (2%) | 80 ms | Time to within 2% of final (τ = 20 ms) |
-
-### Analog Output (Position Feedback)
-
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| Update Rate | 500 Hz | Per scan cycle |
-| Output Settling | < 1 ms | DAC settling time |
-| Noise Filter | 10 kHz | Hardware output filter |
 
 ---
 
@@ -169,7 +161,7 @@ and expected to be raised once bench testing confirms available torque headroom 
 
 ### Position Mode Exit
 
-When `G_diMotionEnable` drops in position mode, the command is ramped to rest under
+When MotionEnable (HR3) drops in position mode, the command is ramped to rest under
 `G_cfgPosGateAccelMax` before the axis is handed to `MC_Stop`, so `G_doInMotion` stays
 TRUE for up to `V/A` after the drop (1.0 s at `V` = 5 mm/s, `A` = 5 mm/s²) plus the
 `MC_Stop` settling time.
@@ -195,32 +187,20 @@ TRUE for up to `V/A` after the drop (1.0 s at `V` = 5 mm/s, `A` = 5 mm/s²) plus
 
 ### Mode 110 (Home to Limit)
 
-| Phase | Typical | Maximum | Description |
-|-------|---------|---------|-------------|
-| Approach | 5-15 s | 30 s | Moving to limit switch |
-| Detect | 100 ms | 500 ms | Confirming switch trigger |
-| Backoff | 1-2 s | 5 s | Moving off switch |
-| Set Reference | 50 ms | 200 ms | `MC_SetPosition` via `G_cmdSetPosition` |
-| **Total** | **7-18 s** | **36 s** | Complete sequence |
+Durations follow from the `FB_HomeLimit` phases and the GVL defaults
+(fast 5 mm/s, slow 1 mm/s, backoff/retract 5 mm/s, accel 5 mm/s², decel 50 mm/s²).
 
-### Mode 111 (Home to EOT)
+| Phase | Duration | Description |
+|-------|----------|-------------|
+| Fast Approach | distance / 5 mm/s, up to ≈ 63 s from the positive soft limit (≈ 310 mm) | Jog reverse at `G_cfgHomeLimFastApproachVel` until the negative overtravel switch trips, then wait for the Jog to stop |
+| Inter-Backoff | switch hysteresis / 5 mm/s | Jog forward at `G_cfgHomeLimBackoffVel` until the switch clears |
+| Slow Approach | switch hysteresis / 1 mm/s | Jog reverse at `G_cfgHomeLimSlowApproachVel`; the switch position is captured on trip |
+| Retract | ≈ 1.6 s | `MC_MoveAbsolute` by `G_cfgHomeLimRetractDist` (5 mm) |
+| Set Reference | a few scans | `MC_SetPosition` via `G_cmdSetPosition` until `G_staSetPosition.Done` |
+| **Total** | **≤ 90 s** | Bounded by `G_cfgHomingTimeout`; expiry raises `FAULT_LIMIT_SWITCH` |
 
-| Phase | Typical | Maximum | Description |
-|-------|---------|---------|-------------|
-| Fast Approach | 3-5 s | 10 s | High-speed move |
-| Slow Approach | 1-3 s | 10 s | Torque-limited approach |
-| Stall Detection | 200-500 ms | 2 s | Confirming stall |
-| Set Reference | 50 ms | 200 ms | Compute `G_posEOTOffset` (no encoder re-zero; preserves Mode 110 reference) |
-| **Total** | **5-9 s** | **22 s** | Complete sequence |
-
-### Stall Detection Timing
-
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| Stall Velocity Threshold | 0.5 mm/s | Below this = stalled |
-| Stall Torque Threshold | 90% | Of torque limit |
-| Stall Confirmation Time | 200 ms | Both conditions must persist |
-| Stall Timeout | 10 s | Max time in slow approach |
+Mode 110 is the only homing sequence. Mode code 111 (7) is `MODE_PRESSURE`, an
+operational mode handled by `FB_PressureController`, not a homing mode.
 
 ---
 
@@ -231,7 +211,7 @@ TRUE for up to `V/A` after the drop (1.0 s at `V` = 5 mm/s, `A` = 5 mm/s²) plus
 | Fault Type | Detection Time | Description |
 |------------|----------------|-------------|
 | Drive Fault | 1 scan (2 ms) | Direct from drive status (includes encoder alarms A.810/A.CC0/A.830) |
-| Limit Switch | 1 scan + 5 ms debounce | Unexpected activation |
+| Overtravel Switch | 1 scan + 10 ms debounce | Unexpected activation |
 | Position Limit | 1 scan | Software limit exceeded |
 | Piston Exit | 1 scan | Guard condition met |
 | Handshake Timeout | 500 ms | No confirmation received |
@@ -242,8 +222,8 @@ TRUE for up to `V/A` after the drop (1.0 s at `V` = 5 mm/s, `A` = 5 mm/s²) plus
 |-----------|-------|-------------|
 | Fault Latch Time | 1 scan | Fault latched in FB_SafetyMonitor |
 | Motion Stop Initiate | 1 scan | MC_Stop issued |
-| Fault Code Output | 1 scan | DO0-DO2 updated |
-| G_doFaultActive Assert | 1 scan | DO5 goes HIGH |
+| Fault Code Output | 1 scan | `G_mbFaultCode` (IR4) updated |
+| G_doFaultActive Assert | 1 scan | DO4 and `G_mbFaultActive` (IR5) go HIGH |
 
 ---
 
@@ -252,30 +232,27 @@ TRUE for up to `V/A` after the drop (1.0 s at `V` = 5 mm/s, `A` = 5 mm/s²) plus
 ### Master-Slave Synchronization
 
 ```
-Master (1 kHz)     |  |  |  |  |  |  |  |  |  |
-                   v  v  v  v  v  v  v  v  v  v
-NI DAQ I/O         ________________________________
-                   |  |  |  |  |  |  |  |  |  |
-
-MP2600iec (2 ms)   |     |     |     |     |     |
-                   v     v     v     v     v     v
-Internal Scan      ________________________________
+Master step (25 ms)  |        |        |        |        |
+Exchange (50 ms)     | FC16+FC04       | FC16+FC04       |
+                     v                 v
+Modbus service tick  |..|..|..|..|..|..|..|..|..|..|..|..|  (4 ms)
+                     v
+MP2600iec scan       ||||||||||||||||||||||||||||||||||||||  (2 ms)
 ```
+
+The master writes holding registers HR1-HR6 and reads input registers IR1-IR20
+once per exchange. The slave's Modbus server services the connection on its own
+tick, independent of the PLC task; `PRG_Main` sees new holding register values
+at its next scan. See `docs/master/ModbusRegisterMap.md`.
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| Master Sample Rate | 1 kHz | NI DAQ sample rate |
+| Master Step | 25 ms | Simulink Desktop Real-Time step |
+| Exchange Period | 50 ms | One FC16 write + one FC04 read |
+| Modbus Service Tick | 4 ms | One request answered per tick |
+| Transaction Time | 1-8 ms | Request to reply |
 | Slave Scan Rate | 2 ms | PLC task period |
-| I/O Latency | 2-4 ms | Master command to slave response |
-| Round Trip | 4-8 ms | Command to feedback |
-
-### Worst-Case Latency
-
-| Scenario | Latency | Components |
-|----------|---------|------------|
-| Best Case | 2 ms | Aligned samples |
-| Typical | 4 ms | 1 scan each direction |
-| Worst Case | 8 ms | Misaligned + processing |
+| Link Watchdog | 300 ms | Each side faults when the other's counter stops (slave only while motion is commanded) |
 
 ---
 
@@ -286,7 +263,7 @@ Internal Scan      ________________________________
 | Mode Handshake | 500 ms | FAULT_HANDSHAKE |
 | Fault Reset | 1000 ms | Fault persists |
 | Drive Ready | 5000 ms | Stuck in DRIVE_ENABLE |
-| Homing | 30000 ms | Homing fault |
+| Homing | 90000 ms | FAULT_LIMIT_SWITCH |
 | Motion Complete | Varies | Mode-dependent |
 
 ---
@@ -298,11 +275,11 @@ Internal Scan      ________________________________
 ```
 Time (ms)    0    50   100  150  200  250  300  350  400  450  500
              |    |    |    |    |    |    |    |    |    |    |
-Mode Bits    0000 |‾‾‾‾‾‾‾‾‾‾‾‾ 0010 ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
+Mode Code    0    |‾‾‾‾‾‾‾‾‾‾‾‾ 2 ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
                   ^stable
 MotionEnable ____|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
                   ^
-Confirm Bits 0000 |_____________|‾‾‾‾‾‾ 0010 ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
+Conf Code    0    |_____________|‾‾‾‾‾‾ 2 ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
                                ^confirmed (~120ms for enable+brake)
 
 State        IDLE |ENABLE|RELEASE| POSITION_CTRL
@@ -318,7 +295,7 @@ MotionEnable ‾‾‾‾‾\___________________________________/‾‾‾‾
                    ^drop                              ^rise
 InMotion     ‾‾‾‾‾‾‾‾‾‾‾\_______________________________|‾‾‾‾
                          ^halted (~50-100ms decel)
-Mode Bits    0010 |‾‾‾‾‾‾|______ 0011 _______|‾‾‾‾‾ 0011
+Mode Code    2    |‾‾‾‾‾‾|______ 3 __________|‾‾‾‾‾ 3
                          ^new mode set
 
 State        POS_CTRL|HOLD_POSITION  |NEW_HANDSHAKE|VEL_CTRL
@@ -331,11 +308,11 @@ Time (ms)    0   100  200  300  400  500  600  700  800  900 1000
              |    |    |    |    |    |    |    |    |    |    |
 FaultActive  ____|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\_____|___
                  ^fault
-FaultCode    0000|‾‾‾ 0011 ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾|0000
+FaultCode    0   |‾‾‾ 3 ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾|0
                  ^code output
 MotionEnable ‾‾‾‾\_________________________________________|‾‾‾‾
                   ^drop
-ModeBits     0010 |‾‾‾‾ 0011 ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾|0000
+Mode Code    2    |‾‾‾‾ 3 ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾|0
                         ^mirror fault code
 FaultReset   _______________|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\__|____
                             ^assert              ^release
@@ -351,17 +328,16 @@ FaultReset   _______________|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 |-----------|---------|-------|-------------|
 | G_cfgHandshakeTimeout | 500 ms | 100-2000 ms | Mode confirmation timeout |
 | G_cfgFaultIdleTimeout | 30000 ms | 10000-60000 ms | Fault-to-idle transition timeout |
-| G_cfgBrakeEngageDelay | 200 ms | 100-500 ms | Brake engage wait |
-| G_cfgBrakeDisengageDelay | 100 ms | 50-200 ms | Brake release wait |
+| G_cfgBrakeEngageDelay | 500 ms | 100-1000 ms | Brake engage wait |
+| G_cfgBrakeDisengageDelay | 500 ms | 100-1000 ms | Brake release wait |
 | G_cfgDriveReadyTimeout | 5000 ms | 1000-10000 ms | Drive enable timeout |
-| G_cfgDebounceTimeMode | 50 ms | 10-200 ms | Mode bits debounce |
+| G_cfgDebounceTimeMode | 50 ms | 10-200 ms | Mode code debounce |
 | G_cfgDebounceTimeMotion | 20 ms | 5-100 ms | MotionEnable debounce |
 | G_cfgDebounceTimeFault | 20 ms | 5-100 ms | FaultReset debounce |
-| G_cfgDebounceTimeLimitStd | 5 ms | 1-20 ms | Retract limit debounce |
-| G_cfgDebounceTimeLimitHome | 2 ms | 1-10 ms | Home limit debounce |
-| G_cfgAnalogFilterTimeConst | 20 ms | 1-200 ms | Analog low-pass time constant |
-| G_cfgHomingTimeout | 30000 ms | 10000-60000 ms | Homing sequence timeout |
-| G_cfgStallDetectTime | 200 ms | 100-500 ms | EOT stall confirmation |
+| G_cfgDebounceTimeOvertravelNeg | 10 ms | 1-20 ms | Negative overtravel / home reference debounce |
+| G_cfgDebounceTimeOvertravelPos | 10 ms | 1-20 ms | Positive overtravel debounce |
+| G_cfgAnalogFilterTimeConst | 20 ms | 1-200 ms | Pressure input low-pass time constant |
+| G_cfgHomingTimeout | 90000 ms | 30000-180000 ms | Homing sequence timeout |
 
 ---
 
@@ -373,15 +349,15 @@ FaultReset   _______________|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 |----------|---------|------------------|
 | Handshake | 500 ms | Fault |
 | Drive Ready | 5 s | Stuck/Fault |
-| Homing | 30 s | Fault |
+| Homing | 90 s | Fault |
 | Fault Reset | 1 s | Retry needed |
 
 ### Minimum Wait Times
 
 | After | Wait | Before |
 |-------|------|--------|
-| Mode bits set | 20 ms | G_diMotionEnable HIGH |
-| Brake disengage | 100 ms | Motion command |
+| Mode code set | 20 ms | MotionEnable (HR3) HIGH |
+| Brake disengage | 500 ms | Motion command |
 | Motion stop | 50 ms | Brake engage |
-| Brake engage | 200 ms | Drive disable |
+| Brake engage | 500 ms | Drive disable |
 | Fault code read | 10 ms | Mirror and reset |

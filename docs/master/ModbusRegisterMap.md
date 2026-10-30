@@ -19,8 +19,8 @@ measured by the bench test in `bench/modbus`.
 Each exchange is one **Write Multiple Registers (FC16)** of holding registers
 1–6 followed at once by one **Read Input Registers (FC04)** of input registers
 1–18, so both land in the same controller service tick. The exchange period is
-up to 50 ms, a multiple of the master step. Fast signals stay on the digital
-lines; see [EthernetCommsReference.md](EthernetCommsReference.md).
+up to 50 ms, a multiple of the master step; see
+[EthernetCommsReference.md](EthernetCommsReference.md).
 
 ### Addressing
 
@@ -63,7 +63,7 @@ task interval.
 | HR | Address | Type | Global | Content |
 |----|---------|------|--------|---------|
 | 1 | `%MW3.483328` | UINT | `G_mbHeartbeat` | Master step counter, incremented every step, wraps 65535 → 0 |
-| 2 | `%MW3.483330` | UINT | `G_mbModeCode` | Mode code 0–7 (same meaning as DI0–DI2). During fault reset the master mirrors the **full** fault code here. The mode decoder reads the low three bits, so a mirrored code of 8 or above looks like mode 0 to it, which is what mirroring code 0 looks like today; the slave ignores the decoded mode on the fault-acknowledge path |
+| 2 | `%MW3.483330` | UINT | `G_mbModeCode` | Mode code 0–7 (`E_OperatingMode`). During fault reset the master mirrors the **full** fault code here. The mode decoder maps any value above 7 to mode 0; the slave ignores the decoded mode on the fault-acknowledge path |
 | 3 | `%MW3.483332` | UINT | `G_mbMotionEnable` | 1 = MotionEnable |
 | 4 | `%MW3.483334` | UINT | `G_mbFaultReset` | 1 = FaultReset (level) |
 | 5–6 | `%MD3.483336` | REAL | `G_mbReference` | Position mode: mm. Velocity mode: mm/s. Torque mode: % of rated. Pressure mode (code 7): target pressure, MPa gauge |
@@ -78,12 +78,12 @@ task interval.
 |----|---------|------|--------|---------|
 | 1 | `%QW73792` | UINT | `G_mbHeartbeatEcho` | Last `G_mbHeartbeat` received |
 | 2 | `%QW73794` | UINT | `G_mbSlaveCounter` | Incremented every scan, wraps 65535 → 0 |
-| 3 | `%QW73796` | UINT | `G_mbConfCode` | Same value as DO0–DO2: mode confirmation, or the low three bits of the fault code while a fault is active |
+| 3 | `%QW73796` | UINT | `G_mbConfCode` | Mode confirmation: the mode the handshake manager has confirmed, 0 outside the handshake (and so while a fault is active) |
 | 4 | `%QW73798` | UINT | `G_mbFaultCode` | `G_sysActiveFault` as its full integer value, 0 when no fault. May exceed 7 |
-| 5 | `%QW73800` | UINT | `G_mbFaultActive` | 1 = fault active (DO4) |
-| 6 | `%QW73802` | UINT | `G_mbInMotion` | 1 = axis moving (DO6) |
-| 7 | `%QW73804` | UINT | `G_mbPerformanceStatus` | DO3 |
-| 8 | `%QW73806` | UINT | `G_mbHomingComplete` | DO5 |
+| 5 | `%QW73800` | UINT | `G_mbFaultActive` | 1 = fault active (`G_doFaultActive`, also on DO4) |
+| 6 | `%QW73802` | UINT | `G_mbInMotion` | 1 = axis moving (`G_doInMotion`, also on DO6) |
+| 7 | `%QW73804` | UINT | `G_mbPerformanceStatus` | `G_doPerformanceStatus` (also on DO3) |
+| 8 | `%QW73806` | UINT | `G_mbHomingComplete` | `G_doHomingComplete` (also on DO5) |
 | 9–10 | `%QW73808` | UINT | | Reserved |
 | 11–12 | `%QD73812` | REAL | `G_mbActualPosition` | `G_sysActualPosition` (mm) |
 | 13–14 | `%QD73816` | REAL | `G_mbActualVelocity` | `G_sysActualVelocity` (mm/s) |
@@ -118,18 +118,18 @@ reads as a counter frozen at 0.
 
 ## 5. Integration Notes
 
-- `PRG_Input` maps `G_mbModeCode` (low three bits), `G_mbMotionEnable` and
-  `G_mbFaultReset` onto the `G_di*` globals, so the debounce, mode decoder,
-  handshake and fault-reset FBs are unchanged. `G_mbReference` is copied to
-  `G_sysReference`, which `PRG_Main` uses where the analog processor's scaled
-  outputs were used. The full value of `G_mbModeCode` is decoded by
-  `FB_IntToFaultCode` for the fault acknowledgement.
+- `PRG_Main` reads `G_mbModeCode`, `G_mbMotionEnable` and `G_mbFaultReset`
+  directly. `FB_ModeDecoder` debounces the mode code
+  (`G_cfgDebounceTimeMode`) and decodes it with `FB_IntToMode`;
+  MotionEnable and FaultReset pass through `FB_DigitalInputFilter`
+  (`G_cfgDebounceTimeMotion`, `G_cfgDebounceTimeFault`). The full value of
+  `G_mbModeCode` is decoded by `FB_IntToFaultCode` for the fault
+  acknowledgement. `PRG_Input` copies `G_mbReference` to `G_sysReference`.
 - `PRG_Output` fills the input registers from the `G_do*` and `G_sys*`
-  globals. `G_mbSlaveCounter` comes from `G_sysScanCounter` and
-  `G_mbFaultCode` from `G_sysActiveFaultCode`, both maintained by `PRG_Main`.
-- The analog reference and position-output path (`FB_AnalogProcessor`,
-  `FB_PositionOutput`, the two-stage voltage map constants) is removed. The
-  controller's only analog input, `G_aiPressure`, reads the pressure
+  globals. `G_mbConfCode` comes from `G_sysConfirmedModeCode`,
+  `G_mbSlaveCounter` from `G_sysScanCounter` and `G_mbFaultCode` from
+  `G_sysActiveFaultCode`, all maintained by `PRG_Main`.
+- The controller's only analog input, `G_aiPressure`, reads the pressure
   transducer's loop shunt; `FB_PressureInput` scales it to MPa gauge for
   IR19-20 and for the slave's pressure loop (mode 7).
 - On the master, `masterStep` takes the 20-register read vector and returns

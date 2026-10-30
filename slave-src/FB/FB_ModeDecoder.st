@@ -5,18 +5,15 @@
    Controller: Yaskawa MP2600iec
 
    Description:
-   Decodes the 3-bit mode command from digital inputs (DI0, DI1, DI2) into
-   an E_OperatingMode enumeration value.
-
-   NOTE: Input debouncing is handled externally by FB_DigitalInputFilter.
-   This function block expects pre-filtered (debounced) inputs.
+   Debounces the mode code from the Modbus mode register (G_mbModeCode) and
+   decodes it into an E_OperatingMode enumeration value. A new code is
+   accepted once the register has held it for DebounceTime.
 
    Variables (define in MWiec GUI):
      VAR_INPUT:
        Enable          : BOOL             (* Enable the decoder
-       ModeBit0        : BOOL             (* Mode bit 0 - LSB (DI0) - pre-filtered
-       ModeBit1        : BOOL             (* Mode bit 1 (DI1) - pre-filtered
-       ModeBit2        : BOOL             (* Mode bit 2 - MSB (DI2) - pre-filtered
+       ModeCode        : UINT             (* Mode code from the mode register
+       DebounceTime    : TIME := T#50MS   (* Time a new code must be held
      VAR_OUTPUT:
        DecodedMode     : E_OperatingMode  (* Decoded operating mode
        ModeValue       : INT              (* Numeric mode value 0-7
@@ -25,7 +22,13 @@
      VAR:
        nCurrentValue   : INT              (* Current mode value
        nPreviousValue  : INT              (* Previous scan mode value
-       fbBitsToMode    : FB_BitsToMode    (* Bits -> enum helper (was FN_BitsToMode)
+       nFilteredCode   : UINT             (* Debounced mode code
+       nPendingCode    : UINT             (* Code being debounced toward
+       nLastRaw        : UINT             (* Previous scan register value
+       bFirstScan      : BOOL := TRUE     (* Accept the register value on the first scan
+       tDebounce       : TON              (* Debounce timer (single call site)
+       bDebounceIN     : BOOL             (* Latched IN value for tDebounce
+       fbIntToMode     : FB_IntToMode     (* Code -> enum helper
        fbModeToInt     : FB_ModeToInt     (* Enum -> int helper (was FN_ModeToInt)
    ============================================================================ *)
 
@@ -43,9 +46,32 @@ IF NOT Enable THEN
     RETURN;
 END_IF;
 
-(* Decode mode from bits using centralized conversion helper FBs *)
-fbBitsToMode(Bit0 := ModeBit0, Bit1 := ModeBit1, Bit2 := ModeBit2);
-DecodedMode := fbBitsToMode.Mode;
+(* Debounce: a register change restarts the timer, the pending code is
+   accepted when the timer expires *)
+IF bFirstScan THEN
+    bFirstScan := FALSE;
+    nFilteredCode := ModeCode;
+    nPendingCode := ModeCode;
+    nLastRaw := ModeCode;
+    bDebounceIN := FALSE;
+ELSIF ModeCode <> nLastRaw THEN
+    nPendingCode := ModeCode;
+    bDebounceIN := FALSE;  (* One scan at IN=FALSE resets TON before retrigger *)
+ELSE
+    bDebounceIN := (nPendingCode <> nFilteredCode);
+END_IF;
+nLastRaw := ModeCode;
+
+tDebounce(IN := bDebounceIN, PT := DebounceTime);
+
+IF tDebounce.Q THEN
+    nFilteredCode := nPendingCode;
+    bDebounceIN := FALSE;
+END_IF;
+
+(* Decode mode using centralized conversion helper FBs *)
+fbIntToMode(Value := nFilteredCode);
+DecodedMode := fbIntToMode.Mode;
 
 fbModeToInt(Mode := DecodedMode);
 nCurrentValue := fbModeToInt.Value;

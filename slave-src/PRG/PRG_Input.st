@@ -6,20 +6,12 @@
 
    Description:
    Connect default IO variables and the Modbus holding registers written by
-   the master to project specific variables. The mode code, MotionEnable
-   and FaultReset registers map onto the same G_di* variables the discrete
-   lines used, so the debounce, mode decoder and handshake FBs are
-   unchanged. The reference arrives in engineering units (mm, mm/s or % by
-   mode).
+   the master to project specific variables. PRG_Main reads the mode code,
+   MotionEnable and FaultReset registers (G_mbModeCode, G_mbMotionEnable,
+   G_mbFaultReset) directly through its debounce and decoder FBs. The
+   reference arrives in engineering units (mm, mm/s or % by mode).
 
    ============================================================================ *)
-
-(* Mode code register, low three bits *)
-G_diModeBit0 := (G_mbModeCode MOD UINT#2) = UINT#1;
-G_diModeBit1 := (G_mbModeCode MOD UINT#4) >= UINT#2;
-G_diModeBit2 := (G_mbModeCode MOD UINT#8) >= UINT#4;
-G_diMotionEnable := G_mbMotionEnable <> UINT#0;
-G_diFaultReset := G_mbFaultReset <> UINT#0;
 
 (* Mode-dependent reference *)
 G_sysReference := REAL_TO_LREAL(G_mbReference);

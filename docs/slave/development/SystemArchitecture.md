@@ -25,13 +25,15 @@ The application spans two POUs: `PRG_Main` (Structured Text) contains the state 
 |                               PRG_Main Scan Cycle                           |
 +-----------------------------------------------------------------------------+
 |                                                                             |
-|  [Raw Inputs] ----->+-----------------+      +-----------------+             |
-|   (di*, ai*)        |  Digital Input  |----->|  FB_ModeDecoder |-----+       |
-|                     |     Filters     |      +-----------------+     |       |
-|                     +-----------------+                            |       |
+|  [Modbus HR] ------------------------------->+-----------------+             |
+|   (G_mb*)  |                                 |  FB_ModeDecoder |-----+       |
+|            |        +-----------------+      +-----------------+     |       |
+|            +------->|  Digital Input  |                            |       |
+|  [Raw Inputs] ----->|     Filters     |----------------------------+       |
+|   (di*, ai*)        +-----------------+                            |       |
 |                                                                    |       |
 |                     +-----------------+      +-----------------+     |       |
-|                     |  Analog Input   |----->| FB_AnalogProc   |-----+       |
+|                     |  Analog Input   |----->| FB_PressureInput|-----+       |
 |                     |     Filter      |      +-----------------+     |       |
 |                     +-----------------+                            |       |
 |                                                                    |       |
@@ -45,7 +47,7 @@ The application spans two POUs: `PRG_Main` (Structured Text) contains the state 
 |  |  +-----------------+     +-----------------+     +-----------+  |       |
 |  |  | FB_HandshakeMngr|<-+->|                 |<---+|  Homing   |  |       |
 |  |  +-----------------+   | | IF-ELSIF States |    |   FBs     |  |       |
-|  |                        +>| (State Machine) |<---+ (Go/Lim/EOT)|  |       |
+|  |                        +>| (State Machine) |<---+ (Go/Lim)    |  |       |
 |  |  +-----------------+   | |                 |    +-----------+  |       |
 |  |  | Y_DirectControl |<--+ +-----------------+                   |       |
 |  |  +-----------------+                                           |       |
@@ -55,18 +57,14 @@ The application spans two POUs: `PRG_Main` (Structured Text) contains the state 
 |  +----------------------------------+----------------------------------+   |
 |  V                                                                    V   |
 | +--------------------+                                     +-----------------+  |
-| | FB_SafetyMonitor   |                                     |  FB_OutputMux   |  |
+| | FB_SafetyMonitor   |                                     |   PRG_Output    |  |
 | +--------------------+                                     +-----------------+  |
 |           |                                                          |       |
 |           |                                                          |       |
 |           +-----> [To State Machine for FAULT transition]             |       |
 |                                                                      |       |
-|                     +-----------------+      +-----------------+     |       |
-|                     | FB_PositionOut  |<-----| Actual Position |     |       |
-|                     +-----------------+      +-----------------+     |       |
-|                           |                                          |       |
-|  [Raw Outputs] <----------+------------------------------------------+       |
-|   (do*, ao*)                                                                |
+|  [Modbus IR, Raw Outputs] <------------------------------------------+       |
+|   (G_mb*, do*)                                                              |
 |                                                                             |
 +-----------------------------------------------------------------------------+
 
@@ -74,13 +72,13 @@ The application spans two POUs: `PRG_Main` (Structured Text) contains the state 
 
 ### Component Descriptions
 
--   **Input Filters:** A layer of digital (`FB_DigitalInputFilter`) and analog (`FB_AnalogInputFilter`) filters that debounce signals and remove noise from the raw I/O, providing stable values for the rest of the program.
--   **Decoders/Processors:** Function blocks that convert raw, filtered inputs into meaningful data (e.g., `FB_ModeDecoder` converts three booleans into an `E_OperatingMode`).
+-   **Input Filters:** A layer of digital (`FB_DigitalInputFilter`) and analog (`FB_AnalogInputFilter`) filters that debounce the MotionEnable and FaultReset registers (`G_mbMotionEnable`, `G_mbFaultReset`) and the overtravel switches, and remove noise from the pressure input, providing stable values for the rest of the program.
+-   **Decoders/Processors:** Function blocks that convert raw, filtered inputs into meaningful data (e.g., `FB_ModeDecoder` debounces the mode code register `G_mbModeCode` and converts it into an `E_OperatingMode`; `FB_PressureInput` scales the pressure transducer voltage to MPa).
 -   **Core Logic (State Machine):** The `IF/ELSIF` chain in `PRG_Main` that orchestrates all system behavior based on the current state (`G_sysCurrentState`). MotionWorks IEC Express does not support enum-valued `CASE` selectors, hence the `IF/ELSIF` pattern.
 -   **Control Blocks (`Y_DirectControl`, `MC_*`):** PLCopen (`MC_`) and Yaskawa-specific (`Y_`) function blocks. These live in the LD POU and are driven from ST through the `G_cmd*` / `G_sta*` globals.
--   **Homing FBs (`FB_HomeLimit`, `FB_HomeEOT`, `FB_GoHome`):** Emit built-in FB commands via `Cmd*` `VAR_OUTPUT` structs and receive built-in FB status via `Sta*` `VAR_INPUT` structs. `PRG_Main` bridges these to the matching globals.
+-   **Homing FBs (`FB_HomeLimit`, `FB_GoHome`):** Emit built-in FB commands via `Cmd*` `VAR_OUTPUT` structs and receive built-in FB status via `Sta*` `VAR_INPUT` structs. `PRG_Main` bridges these to the matching globals.
 -   **Safety Monitor:** A watchdog (`FB_SafetyMonitor`) that runs every cycle to check for fault conditions.
--   **Output Processors:** `FB_OutputMux` formats the mode confirmation / fault code for the discrete outputs; `PRG_Output` publishes the same data and the feedback in the Modbus input registers.
+-   **Output Processors:** `PRG_Output` publishes the confirmed mode code (`G_mbConfCode`, IR3), the fault code (`G_mbFaultCode`, IR4), the status bits and the feedback in the Modbus input registers, and drives the status and brake digital outputs.
 
 ---
 
@@ -93,7 +91,7 @@ This section describes the path of data during two primary scenarios.
 This flow describes how a position reference from the master controller becomes motion.
 
 1.  **Modbus Input:** The master writes the reference in millimeters to the holding register `G_mbReference` (`AT %MD3.483336 : REAL`), together with the mode code, MotionEnable, FaultReset and its heartbeat.
-2.  **Mapping:** `PRG_Input` copies it to `G_sysReference` (`LREAL`) and decodes the mode code register into the `G_diModeBit*` globals, which go through the digital debounce filters and `FB_ModeDecoder` as before.
+2.  **Mapping:** `PRG_Input` copies it to `G_sysReference` (`LREAL`). `PRG_Main` passes the mode code register `G_mbModeCode` to `FB_ModeDecoder`, which debounces and decodes it.
 3.  **State Machine Execution:** The `ST_POSITION_CTRL` state (and, during fault recovery, `ST_RECOVERY_POSITION`) is active and clamps `G_sysReference` to the active software limits (`stCurrentLimits.PosMin`, `stCurrentLimits.PosMax`), storing the result in a local `rPosTarget`.
 4.  **Command Gate:** `fbPosGate` (`FB_PositionCommandGate`) shapes `rPosTarget` into a per-scan command: it limits command velocity to `stCurrentLimits.VelMax` and acceleration to `G_cfgPosGateAccelMax`, seeds from `G_sysActualPosition` on state entry, and tethers the command to within `G_cfgPosGateMaxDeviation` of actual position so it cannot run away from the real axis if motion stalls. This stage runs in both `ST_POSITION_CTRL` and `ST_RECOVERY_POSITION`; velocity mode and torque mode are unchanged.
 5.  **Route Active FB Command Outputs:** `fbPosGate.CommandedPosition` becomes `G_sysCommandedPosition` and is written into `G_cmdDirectControl.Position`, enabling direct control.
@@ -116,16 +114,15 @@ The main program orchestrates a number of critical function blocks.
 | Instance | FB Type | Role in Architecture |
 |---|---|---|
 | `fbFilter*` | `FB_Digital/AnalogInputFilter` | **Input Conditioning:** Provide clean, stable signals to the core logic. |
-| `fbModeDecoder`| `FB_ModeDecoder` | **Command Interpretation:** Converts the master's 3-bit command into a meaningful `E_OperatingMode` enum. |
+| `fbModeDecoder`| `FB_ModeDecoder` | **Command Interpretation:** Debounces the master's mode code (`G_mbModeCode`, HR2) and converts it into a meaningful `E_OperatingMode` enum. |
 | `fbHandshake`| `FB_HandshakeManager`| **Mode Synchronization:** Manages the mode entry handshake protocol with the master (confirmation, timeout, verification). |
-| `fbFaultReset`| `FB_FaultResetHandler`| **Fault Reset Validation:** Validates fault reset conditions — FaultReset HIGH, MotionEnable LOW, bits stable, and master fault code acknowledgement matches active fault. |
+| `fbFaultReset`| `FB_FaultResetHandler`| **Fault Reset Validation:** Validates fault reset conditions — FaultReset HIGH, MotionEnable LOW, mode code stable, and master fault code acknowledgement matches active fault. |
 | `fbPosGate` | `FB_PositionCommandGate` | **Command Shaping:** In `ST_POSITION_CTRL` and `ST_RECOVERY_POSITION`, limits the position command's velocity (`stCurrentLimits.VelMax`) and acceleration (`G_cfgPosGateAccelMax`), seeds from `G_sysActualPosition` on state entry, and tethers the command to within `G_cfgPosGateMaxDeviation` of actual position. Velocity and torque modes are unchanged. |
 | `fbReadActual*`| `MC_ReadActual*` | **Feedback:** The primary source of feedback from the drive, providing real-time position, velocity, and torque. |
 | `fbPower` | `MC_Power` | **Drive Control:** Enables and disables power to the servo drive. |
 | `fbStop` | `MC_Stop` | **Safe Stop:** Used to execute a controlled stop when changing modes or entering a fault state. `Y_DirectControl` is kept enabled with a zero command until `MC_Stop` has aborted it, which is what returns the SERVOPACK from velocity/torque control to position control (Yaskawa AN.MPIEC.30 §4.1.3). |
 | `fbDirectControl`| `Y_DirectControl`| **Motion Command:** The primary interface for sending real-time position, velocity, or torque commands to the drive during operational states. |
-| `fbHome*` | `FB_HomeLimit`, `FB_HomeEOT` | **Homing Logic:** Encapsulates the complex, multi-step homing sequences. |
+| `fbHome*` | `FB_HomeLimit`, `FB_GoHome` | **Homing Logic:** Encapsulates the multi-step homing sequence and the Go Home move. |
 | `fbSafetyMonitor`| `FB_SafetyMonitor` | **System Watchdog:** The central authority for detecting unsafe conditions and triggering a fault. |
-| `fbOutputMux` | `FB_OutputMux` | **Output Routing:** Switches the meaning of the 3-bit digital outputs between "Mode Confirmation" and "Fault Code". |
 | `fbCommWatchdog` | `FB_CommWatchdog` | **Link Supervision:** Raises `FAULT_COMM` through the safety monitor when the master heartbeat register stops changing. |
 | `fbIntToFaultCode` | `FB_IntToFaultCode` | **Fault Acknowledgement:** Decodes the full fault code the master mirrors in the mode register for `FB_FaultResetHandler`. |
