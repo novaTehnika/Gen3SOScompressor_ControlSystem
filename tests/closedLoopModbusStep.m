@@ -70,6 +70,9 @@ assert(h.m.statusCode == 5 && h.u.modeCode == 7);
 assert(abs(h.u.reference - 20 / cfg.atmPerMPa) < 1e-3);
 h = runUntil(h, 30, @(h) h.y.performanceStatus == 1);
 assert(h.y.performanceStatus == 1, 'pressure target not reached');
+% Let the loop settle, so that the display (filtered on the master and
+% read every 50 ms) is compared with the true pressure at rest
+h = runUntil(h, 2, []);
 assert(abs(h.m.pressure - (h.sl.ax.P * cfg.atmPerMPa + cfg.atmAmbient)) < 0.5);
 fprintf('ok  pressure operation (%.1f atm absolute shown)\n', h.m.pressure);
 

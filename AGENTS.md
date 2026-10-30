@@ -13,11 +13,14 @@ The contract between them is a mode code + MotionEnable + FaultReset + reference
 
 ## Commands
 
-Everything runs headless with `python3` and `octave-cli`. No MATLAB is needed.
+Everything runs headless with `python3` and either `octave-cli` or MATLAB; the MATLAB-language files are written to run in both.
 
 ```sh
 tests/run_all.sh            # regenerate the slave sim from slave-src, run all tests
+tests\run_all.bat           # the same on Windows (MATLAB)
 ```
+
+`run_all.sh` runs the Python tests, then `tests/runAll.m` in Octave or, when `octave-cli` is not on the PATH, in `matlab -batch`. `runAll` regenerates `slave-sim/generated` itself (with `python3`, `python` or `py -3`) unless called as `runAll('nogen')`, so from an open MATLAB or Octave session, `cd tests` and `runAll` runs the MATLAB-language tests alone.
 
 Run a single test (from the repo root, after generating):
 
@@ -26,7 +29,7 @@ python3 tools/st2m.py slave-src slave-sim/generated
 octave-cli --quiet --eval "addpath('master-src/logic','slave-sim','slave-sim/generated','tests'); closedLoopMasterSlave"
 ```
 
-Tests are scripts that print `ok  ...` per scenario and fail on the first `assert`. `closedLoopMasterSlave(t)` takes an optional slave handshake timeout.
+or the same `addpath` and call in MATLAB. Tests are scripts that print `ok  ...` per scenario and fail on the first `assert`. `closedLoopMasterSlave(t)` takes an optional slave handshake timeout.
 
 The Simulink shell and the operator app can only be exercised on the lab PC (`master-src/README.md` has the steps). The ST cannot be compiled here. It is built in MotionWorks IEC.
 
