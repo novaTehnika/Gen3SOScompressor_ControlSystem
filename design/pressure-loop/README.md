@@ -787,10 +787,48 @@ other 92 cm), and about 0.9 mL of sound solution follows it. The purge
 that carries it out is 31 mL at 2:1 and 32 mL at 2.5:1 instead of 29,
 and the scenario sizes it so (`V_purge` of None). Against the
 procedural remedy this costs 2 to 3 mL of solution and needs a
-metering valve; it leaves the compression and mixing as they are now.
-Whether the solution degasses in the valve throat itself, at a
-pressure below the hose's, is not modelled; if it does, all of the
-2.9 to 3.2 mL admitted is affected, and the purge is 32 to 33 mL.
+metering path; it leaves the compression and mixing as they are now.
+
+A proximal valve assembly can do this with no skill from the operator:
+a fixed metering orifice in a bypass around the ball valve, opened
+first to equalise the hose, and the ball valve opened once it has
+(the ball valve then passes nothing, since the pressures are equal).
+The bore sweep above is that orifice: 0.3 mm or less, about 0.04 mm²
+of effective area, passes 6 mL/s at the full 10 MPa difference and
+fills the hose in one to two seconds, the loop keeping the chamber
+within its own dip. A smaller orifice is slower and no safer, since
+the chamber floor is the loop's dip, not the fill's, below 0.3 mm.
+The solution crossing the orifice sees, by Bernoulli, the pressure of
+the hose it enters: the throat velocity is √(2(P − P_h)/ρ), 141 m/s
+at the start of the fill, and the kinetic energy it carries is what
+the pressure difference became, so the throat pressure is P_h (less
+only what the orifice recovers downstream, which a sharp orifice does
+not). The degassing flag at the hose pressure is therefore right to
+first order, and the exposure, 2 µm of orifice at 141 m/s, is too
+short for bubbles to grow in any case.
+
+**A distal transducer gives no usable lead.** A transducer at the
+distal end of the hose would see the distal valve open before the
+chamber transducer does, by the time the pressure wave takes to run
+up the hose. The hose line's compressibility is the saline's plus the
+wall's per unit volume, 1/K + C_hose/V_hose = 9.7e-9 per Pa (an
+effective bulk modulus of 0.1 GPa), so the wave runs at 320 m/s (850
+in rigid saline) and crosses the 0.92 m hose in 2.8 ms, under two
+scans. The loop's own delay from a reading to piston motion is about
+50 ms: the 20 ms filter, the median and pipeline scans, the 12 ms
+drive dead time and the 8.7 ms velocity-loop lag. A lead of 2.8 ms
+cannot be turned into feedforward that acts before the dip; the hose
+would have to be 15 m long. What a transducer downstream of the
+distal valve, in the tube, would give is a measurement of the outflow
+itself, Q = Cd·A_o·√(2P_tube/ρ) by eq. (36), and a valve-state signal.
+That is the flow feedforward the studies carry as a bound, and it is
+limited by the same 50 ms: the dip it leaves is of the order of the
+delivery speed times the delay times the chamber stiffness,
+1.4 mm/s × 0.05 s × 4.8 MPa/mm = 0.3 MPa, against the 0.6 to 0.8 MPa
+the scheduled controller leaves on feedback alone. It would need a
+second analog input and a transducer rated for the tube's pressure
+cycling; the model would take it as the `flow_ff` option with the
+measurement delayed by the sensor chain, which is not yet built.
 
 **Delivery and the stop-law floor.** The orifice bank passes 4.8 mL/s at
 10 MPa (the bench measured it), which needs the piston at 1.4 mm/s, and
@@ -966,8 +1004,5 @@ Kp = wc/k holds 56° at wc = 11 everywhere.
 - Whether the proximal valve can be opened before the compression in
   the protocol (the hose's saline is then compressed and mixed with
   the charge; its 29 mL leave in the purge as before), or whether a
-  metering valve of Cv 0.003 or less can take its place and be opened
-  at pressure; and whether the solution crossing that valve's throat
-  degasses there (which would make the whole admitted volume, about
-  3 mL, part of the purge rather than the 2 mL behind the virgin
-  saline).
+  bypass orifice of 0.3 mm or less (Cv 0.003), opened ahead of the
+  ball valve, can be fitted and be opened at pressure.

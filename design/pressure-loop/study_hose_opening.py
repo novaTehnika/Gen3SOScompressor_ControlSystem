@@ -153,6 +153,15 @@ def main(argv=None):
     print(f'purge needed {r["purgeNeeded"]:.1f} mL; solution delivered '
           f'{r["V_solution"]:.0f} mL')
 
+    # Pressure wave along the hose: the lead a distal transducer could
+    # give over the chamber transducer. The hose line's compressibility
+    # is the saline's plus the wall's per unit volume.
+    beta = 1 / par.K + par.C_hose / par.V_hose          # [1/Pa]
+    c = math.sqrt(1 / (par.rho * beta))                 # [m/s]
+    L = par.V_hose / A_HOSE                             # [m]
+    print(f'pressure wave along the hose: {c:.0f} m/s, {L:.2f} m, '
+          f'{L / c * 1e3:.1f} ms from the distal end to the chamber')
+
     # Save
     with open(out / 'hose_opening.csv', 'w') as f:
         f.write('ratio,P_target_MPa,bore_mm,controller,'
