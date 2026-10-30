@@ -675,7 +675,7 @@ supply the flow, so no built-in configuration uses it.
 
 ## Measured values
 
-The bench tests of 2026-10-26 (`bench/`, branch `bench-tests`) replaced
+The bench tests of 2026-10-26 (`bench/`) replaced
 the guessed parameters. The values the model now carries, with what was
 assumed before:
 

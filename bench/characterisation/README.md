@@ -359,7 +359,7 @@ and the master's `deadVolume` can be corrected.
 
 ## 7. Results
 
-Logs of 2026-10-26 (`bench/captures/` on the `bench-tests` branch), fitted
+Logs of 2026-10-26 (`bench/captures/`), fitted
 with the scripts of this bench. Dead volume 50 mL (measured) and the fill
 from the geometry.
 
