@@ -7,36 +7,34 @@
 
 ## 1. Overview
 
-When `G_mbFaultActive` (IR5, also DO4) is 1, the slave is in fault state. `G_mbFaultCode` (IR4) holds the full fault code and `G_mbConfCode` (IR3, DO0-DO2) its low three bits instead of the mode confirmation. The master must handle fault conditions by:
+When `G_mbFaultActive` (IR5, also DO4) is 1, the slave is in fault state. `G_mbFaultCode` (IR4) holds the full fault code; `G_mbConfCode` (IR3) reads 0 outside the handshake, so also during the fault. The master must handle fault conditions by:
 
 1. Reading the fault code from IR4
 2. Mirroring the full code in `G_mbModeCode` (HR2)
 3. Setting `G_mbFaultReset` with `G_mbMotionEnable` at 0
 4. Waiting for fault to clear
 
-Codes 0-7 fit the three discrete lines; higher codes are carried by the registers only.
-
 ---
 
 ## 2. Fault Code Summary
 
-| Binary | Decimal | Name | Severity | Auto-Recoverable |
-|--------|---------|------|----------|------------------|
-| 000 | 0 | FAULT_NONE | - | - |
-| 001 | 1 | FAULT_HANDSHAKE | Medium | Yes |
-| 010 | 2 | FAULT_DRIVE | High | Sometimes |
-| 011 | 3 | FAULT_POSITION | Medium | Yes |
-| 100 | 4 | FAULT_COMM | High | Yes, once the master link is back |
-| 101 | 5 | FAULT_PISTON_EXIT | High | Conditional |
-| 110 | 6 | FAULT_LIMIT_SWITCH | High | Manual jog-off via ST_RECOVERY (investigate cause) |
-| 111 | 7 | FAULT_ENCODER | High | **Reserved (not emitted by current firmware — encoder alarms surface as FAULT_DRIVE)** |
-| - | 8 | FAULT_PRESSURE_SENSOR | High | Yes, once the transducer loop reads in range |
+| Code | Name | Severity | Auto-Recoverable |
+|------|------|----------|------------------|
+| 0 | FAULT_NONE | - | - |
+| 1 | FAULT_HANDSHAKE | Medium | Yes |
+| 2 | FAULT_DRIVE | High | Sometimes |
+| 3 | FAULT_POSITION | Medium | Yes |
+| 4 | FAULT_COMM | High | Yes, once the master link is back |
+| 5 | FAULT_PISTON_EXIT | High | Conditional |
+| 6 | FAULT_LIMIT_SWITCH | High | Manual jog-off via ST_RECOVERY (investigate cause) |
+| 7 | FAULT_ENCODER | High | **Reserved (not emitted by current firmware — encoder alarms surface as FAULT_DRIVE)** |
+| 8 | FAULT_PRESSURE_SENSOR | High | Yes, once the transducer loop reads in range |
 
 ---
 
 ## 3. Detailed Fault Descriptions
 
-### FAULT_NONE (000)
+### FAULT_NONE (0)
 
 **Description**: No fault condition present.
 
@@ -46,36 +44,36 @@ Codes 0-7 fit the three discrete lines; higher codes are carried by the register
 
 ---
 
-### FAULT_HANDSHAKE (001)
+### FAULT_HANDSHAKE (1)
 
 **Description**: Mode handshake timeout or mismatch.
 
 **Triggered When**:
 - Mode command not confirmed within 500ms timeout
-- Mode bits changed during handshake
+- Mode code changed during handshake
 - Mode confirmation doesn't match command
 
 **Symptoms**:
 - Slave stuck in transition state
-- Mode bits stable but no confirmation
+- Mode code stable but no confirmation
 
 **Master Recovery**:
 ```
-1. Read fault code (001)
-2. Set G_diMotionEnable = FALSE
-3. Mirror code: DI0=1, DI1=0, DI2=0
-4. Pulse G_diFaultReset
+1. Read fault code from IR4 (1)
+2. Set MotionEnable (HR3) = 0
+3. Mirror code: HR2 = 1
+4. Pulse FaultReset (HR4)
 5. After clear: retry mode command
 ```
 
 **Prevention**:
-- Ensure mode bits are stable before handshake
+- Ensure the mode code is stable before handshake
 - Don't change mode during handshake
-- Verify I/O wiring integrity
+- Verify the Modbus link
 
 ---
 
-### FAULT_DRIVE (010)
+### FAULT_DRIVE (2)
 
 **Description**: Servo amplifier reported a fault condition.
 
@@ -93,11 +91,11 @@ Codes 0-7 fit the three discrete lines; higher codes are carried by the register
 
 **Master Recovery**:
 ```
-1. Read fault code (010)
+1. Read fault code from IR4 (2)
 2. Check drive status (if accessible)
-3. Set G_diMotionEnable = FALSE
-4. Mirror code: DI0=0, DI1=1, DI2=0
-5. Hold G_diFaultReset HIGH (level-based, not a pulse)
+3. Set MotionEnable (HR3) = 0
+4. Mirror code: HR2 = 2
+5. Hold FaultReset (HR4) = 1 (level-based, not a pulse)
 6. If persists: may require power cycle
 ```
 
@@ -109,7 +107,7 @@ Codes 0-7 fit the three discrete lines; higher codes are carried by the register
 
 ---
 
-### FAULT_POSITION (011)
+### FAULT_POSITION (3)
 
 **Description**: Position exceeded software limits.
 
@@ -124,11 +122,11 @@ Codes 0-7 fit the three discrete lines; higher codes are carried by the register
 
 **Master Recovery**:
 ```
-1. Read fault code (011)
-2. Note current position from AO0
-3. Set G_diMotionEnable = FALSE
-4. Mirror code: DI0=1, DI1=1, DI2=0
-5. Hold G_diFaultReset HIGH (level-based, not a pulse)
+1. Read fault code from IR4 (3)
+2. Note current position from IR11-12 (G_mbActualPosition)
+3. Set MotionEnable (HR3) = 0
+4. Mirror code: HR2 = 3
+5. Hold FaultReset (HR4) = 1 (level-based, not a pulse)
 6. After clear:
    - If position is back inside the soft limits -> ST_BRAKE_HOLD (normal)
    - If still beyond a soft limit -> slave enters ST_RECOVERY; jog back
@@ -139,7 +137,7 @@ Codes 0-7 fit the three discrete lines; higher codes are carried by the register
 
 ---
 
-### FAULT_COMM (100)
+### FAULT_COMM (4)
 
 **Description**: The master heartbeat register `G_mbHeartbeat` has not changed
 for `G_cfgCommTimeout` (300 ms) while motion is commanded (position,
@@ -162,7 +160,7 @@ clear. If the master itself lost the link it is latched in its own
 
 ---
 
-### FAULT_PISTON_EXIT (101)
+### FAULT_PISTON_EXIT (5)
 
 **Description**: Piston exit prevention guard triggered.
 
@@ -177,11 +175,11 @@ clear. If the master itself lost the link it is latched in its own
 
 **Master Recovery**:
 ```
-1. Read fault code (101)
+1. Read fault code from IR4 (5)
 2. CRITICAL: Check if cylinder is pressurized
-3. Set G_diMotionEnable = FALSE
-4. Mirror code: DI0=1, DI1=0, DI2=1
-5. Hold G_diFaultReset HIGH (level-based, not a pulse)
+3. Set MotionEnable (HR3) = 0
+4. Mirror code: HR2 = 5
+5. Hold FaultReset (HR4) = 1 (level-based, not a pulse)
 6. After clear: command position away from exit
 ```
 
@@ -195,7 +193,7 @@ clear. If the master itself lost the link it is latched in its own
 
 ---
 
-### FAULT_LIMIT_SWITCH (110)
+### FAULT_LIMIT_SWITCH (6)
 
 **Description**: Unexpected limit switch activation during motion.
 
@@ -209,10 +207,10 @@ clear. If the master itself lost the link it is latched in its own
 
 **Master Recovery**:
 ```
-1. Read fault code (110)
+1. Read fault code from IR4 (6)
 2. Stop all operations
-3. Set G_diMotionEnable = FALSE
-4. Mirror code: DI0=0, DI1=1, DI2=1
+3. Set MotionEnable (HR3) = 0
+4. Mirror code: HR2 = 6
 5. DO NOT automatically retry
 6. Requires investigation
 ```
@@ -225,7 +223,7 @@ clear. If the master itself lost the link it is latched in its own
 - Check for position drift or encoder error
 
 **Manual Recovery**:
-1. Clear fault with mirrored code (DI0=0, DI1=1, DI2=1) while `G_diMotionEnable` is LOW
+1. Clear fault with mirrored code (HR2 = 6) while MotionEnable (HR3) is 0
 2. If the switch is still active, the slave enters **`ST_RECOVERY`** — jog off the
    switch via `MODE_POSITION`/`MODE_VELOCITY` (see below). Motion *into* the switch
    is blocked; motion *away* is allowed.
@@ -249,15 +247,15 @@ reset succeeds:
   energized, brake released). From `ST_FAULT` this is immediate; from `ST_FAULT_IDLE`
   (slow path) the drive is re-enabled first and then lands in `ST_RECOVERY`.
 
-**Operating procedure (two-step — during the reset the DI bits carry the fault-ack
-code, so the recovery mode is selected afterward):**
-1. After the reset lands in `ST_RECOVERY`, set the mode bits to `MODE_POSITION` (010)
-   or `MODE_VELOCITY` (011) and raise `G_diMotionEnable` (the normal mode handshake).
-2. Drive the analog reference to retract. Motion **away** from the active limit runs
+**Operating procedure (two-step — during the reset the mode register (HR2) carries
+the fault-ack code, so the recovery mode is selected afterward):**
+1. After the reset lands in `ST_RECOVERY`, set the mode code (HR2) to `MODE_POSITION` (2)
+   or `MODE_VELOCITY` (3) and raise MotionEnable (HR3) (the normal mode handshake).
+2. Drive the reference (HR5-6) to retract. Motion **away** from the active limit runs
    at the normal velocity limit. A command **toward** the active limit is clamped to
    zero — it does **not** re-fault; just reverse the reference.
 3. When the switch clears and position is back inside the soft limits, drop
-   `G_diMotionEnable`: the slave rejoins the normal branch (`ST_HOLD_POSITION`) and you
+   MotionEnable (HR3): the slave rejoins the normal branch (`ST_HOLD_POSITION`) and you
    may select any mode. If a limit is still active when motion-enable drops, it
    returns to the recovery hub so you can keep jogging.
 
@@ -269,15 +267,15 @@ and piston-exit faults remain active**.
 
 ---
 
-### FAULT_ENCODER (111) — RESERVED
+### FAULT_ENCODER (7) — RESERVED
 
 **Status**: Reserved but not emitted by current firmware.
 
-As of 2026-04, the dedicated encoder-validity path was removed from `FB_SafetyMonitor`. Encoder alarms (A.810 battery backup loss, A.CC0 multi-turn error, A.830 low battery) are detected by the Sigma-7 servo amplifier and surface as `FAULT_DRIVE` (010) through `G_sysDriveFault`.
+`FB_SafetyMonitor` has no encoder-validity path. Encoder alarms (A.810 battery backup loss, A.CC0 multi-turn error, A.830 low battery) are detected by the Sigma-7 servo amplifier and surface as `FAULT_DRIVE` (2) through `G_sysDriveFault`.
 
 A fault reset does not require re-homing: the coordinate frame is held by the absolute encoder and by the `MC_SetPosition` offset the controller stores in battery-backed memory. Re-home with Mode 110 (Home to Limit) only when that frame is lost: after an encoder alarm (reported as `FAULT_DRIVE`), or after a controller SRAM battery failure or controller replacement, which lose the stored offset.
 
-The enum value is retained in `E_FaultCode` for wire-protocol stability but is not currently asserted.
+The enum value is retained in `E_FaultCode` for protocol stability but is not currently asserted.
 
 ---
 
@@ -299,7 +297,7 @@ The enum value is retained in `E_FaultCode` for wire-protocol stability but is n
 2. Check the transducer supply, the shunt and the analog input wiring
 3. Reset through the normal handshake once IR19-20 reads a plausible pressure
 
-**Notes**: Outside pressure control a bad reading does not fault; it is visible in IR19-20 and the master should refuse to start pressure control on it. The code has no three-bit form: DO0-DO2 show 000 and IR4 carries 8.
+**Notes**: Outside pressure control a bad reading does not fault; it is visible in IR19-20 and the master should refuse to start pressure control on it.
 
 ---
 
@@ -309,41 +307,39 @@ The enum value is retained in `E_FaultCode` for wire-protocol stability but is n
 
 ```
 DETECT_FAULT:
-    // G_doFaultActive = HIGH
-    fault_code = (DO2 << 2) | (DO1 << 1) | DO0
+    // IR5 G_mbFaultActive = 1
+    fault_code = IR4  // G_mbFaultCode, full value
     log_fault(fault_code)
 
 PREPARE_RESET:
     // Ensure motion disabled
-    SET G_diMotionEnable = FALSE
+    SET HR3 (MotionEnable) = 0
     WAIT 20ms  // Ensure stable
 
-    // Mirror fault code to mode bits
-    DI0 = fault_code & 0x01
-    DI1 = (fault_code >> 1) & 0x01
-    DI2 = (fault_code >> 2) & 0x01
+    // Mirror the full fault code in the mode register
+    SET HR2 (mode code) = fault_code
     WAIT 20ms  // Ensure stable
 
 EXECUTE_RESET:
     // Assert reset (level-based: valid the whole time FaultReset is HIGH
     // and the other conditions hold - not an edge check)
-    SET G_diFaultReset = TRUE
+    SET HR4 (FaultReset) = 1
 
     // Wait for acknowledgment
     START timeout_timer (1000ms)
 
 WAIT_CLEAR:
-    IF G_doFaultActive = FALSE THEN
+    IF IR5 (G_mbFaultActive) = 0 THEN
         // Fault cleared successfully
-        SET G_diFaultReset = FALSE
+        SET HR4 (FaultReset) = 0
         GOTO SUCCESS
     ELSIF timeout_timer expired THEN
-        SET G_diFaultReset = FALSE
+        SET HR4 (FaultReset) = 0
         GOTO RESET_FAILED
 
 SUCCESS:
     // Return to idle state
-    SET mode_bits = 000
+    SET HR2 (mode code) = 0
     // Determine next action based on fault type
 
 RESET_FAILED:
@@ -354,25 +350,25 @@ RESET_FAILED:
 ### Reset Timing Diagram
 
 ```
-G_doFaultActive  ____/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\____
+FaultActive IR5 ____/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\____
                    ^                         ^
                    |                         |
                    Fault                     Cleared
                    detected
 
-G_diMotionEnable ‾‾‾‾\________________________/‾‾‾‾
+MotionEnable HR3 ‾‾‾‾\________________________/‾‾‾‾
                     ^                       ^
                     |                       |
                     Disable                 Re-enable
                     for reset               after clear
 
-mode_bits      XXXX|--- fault_code ---------|0000
+mode_code HR2  XXXX|--- fault_code ---------|0
                    ^                        ^
                    |                        |
                    Mirror                   Return
                    code                     to idle
 
-G_diFaultReset   ____/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\____
+FaultReset HR4   ____/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\____
                    ^                   ^
                    |                   |
                    Asserted            Release
@@ -384,29 +380,30 @@ G_diFaultReset   ____/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\___
 ## 5. Recovery Decision Tree
 
 ```
-FAULT DETECTED (G_doFaultActive = HIGH)
+FAULT DETECTED (IR5 G_mbFaultActive = 1)
            |
            v
     Read fault code
            |
     +------+------+------+------+------+------+------+
     |      |      |      |      |      |      |      |
-   001    010    011    100    101    110    111
-    |      |      |      |      |      |      |
-    v      v      v      v      v      v      v
- Retry   Check  Move   (res.) Check  STOP   (res.)
- mode    drive  from          press  Invest
-         status limit         ure    igate
+    1      2      3      4      5      6      7      8
+    |      |      |      |      |      |      |      |
+    v      v      v      v      v      v      v      v
+ Retry  Check  Move   Fix    Check  STOP   (res.) Check
+ mode   drive  from   link   press  Invest        sensor
+        status limit         ure    igate         loop
 
 After reset, determine appropriate next action:
 
-001 (Handshake) -> Retry previous mode command
-010 (Drive)     -> May need power cycle; re-home (Mode 110) after an encoder alarm
-011 (Position)  -> If still out of limits, jog back in via ST_RECOVERY
-100 (Comm)      -> Restore the link, press Stop on the master, reset
-101 (Piston)    -> Check pressure, move away from exit
-110 (Limit)     -> Investigate; if still on switch, jog off via ST_RECOVERY
-111 (Encoder)   -> Reserved; encoder alarms arrive as 010
+1 (Handshake)   -> Retry previous mode command
+2 (Drive)       -> May need power cycle; re-home (Mode 110) after an encoder alarm
+3 (Position)    -> If still out of limits, jog back in via ST_RECOVERY
+4 (Comm)        -> Restore the link, press Stop on the master, reset
+5 (Piston)      -> Check pressure, move away from exit
+6 (Limit)       -> Investigate; if still on switch, jog off via ST_RECOVERY
+7 (Encoder)     -> Reserved; encoder alarms arrive as 2
+8 (Pressure)    -> Check the transducer loop, reset once IR19-20 is plausible
 ```
 
 ---
@@ -414,9 +411,8 @@ After reset, determine appropriate next action:
 ## 6. Fault Prevention Guidelines
 
 ### Handshake Faults
-- Ensure stable mode bits before raising motion enable
+- Wait for the mode confirmation in IR3 before raising motion enable
 - Don't modify mode during handshake window
-- Use adequate debounce on digital outputs
 
 ### Drive Faults
 - Stay within motor thermal limits
@@ -456,25 +452,25 @@ After reset, determine appropriate next action:
 
 ### Fault Code Table
 
-| Code | Bits | Name | Quick Fix |
-|------|------|------|-----------|
-| 0 | 000 | None | - |
-| 1 | 001 | Handshake | Retry mode |
-| 2 | 010 | Drive | Check drive |
-| 3 | 011 | Position | Jog back in (ST_RECOVERY) |
-| 4 | 100 | Comm | Restore the link, then reset |
-| 5 | 101 | Piston Exit | Check pressure |
-| 6 | 110 | Limit Switch | Investigate; jog off (ST_RECOVERY) |
-| 7 | 111 | Encoder | Reserved (see Drive) |
-| 8 | - | Pressure Sensor | Check the transducer loop and shunt |
+| Code | Name | Quick Fix |
+|------|------|-----------|
+| 0 | None | - |
+| 1 | Handshake | Retry mode |
+| 2 | Drive | Check drive |
+| 3 | Position | Jog back in (ST_RECOVERY) |
+| 4 | Comm | Restore the link, then reset |
+| 5 | Piston Exit | Check pressure |
+| 6 | Limit Switch | Investigate; jog off (ST_RECOVERY) |
+| 7 | Encoder | Reserved (see Drive) |
+| 8 | Pressure Sensor | Check the transducer loop and shunt |
 
 ### Reset Checklist
 
-1. [ ] G_diMotionEnable = FALSE
-2. [ ] Mode bits = fault code (mirror)
+1. [ ] MotionEnable (HR3) = 0
+2. [ ] Mode code (HR2) = fault code (mirror, full value)
 3. [ ] Wait 20ms for stable
-4. [ ] Hold G_diFaultReset HIGH (level-based, not a pulse)
-5. [ ] Wait for G_doFaultActive = FALSE
-6. [ ] Release G_diFaultReset
-7. [ ] Set mode bits = 000
+4. [ ] Hold FaultReset (HR4) = 1 (level-based, not a pulse)
+5. [ ] Wait for IR5 (G_mbFaultActive) = 0
+6. [ ] Release FaultReset (HR4)
+7. [ ] Set mode code (HR2) = 0
 8. [ ] Take corrective action per fault type

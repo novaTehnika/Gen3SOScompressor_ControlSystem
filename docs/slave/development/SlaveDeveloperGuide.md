@@ -20,13 +20,13 @@ The MotionWorks IEC project is organized into several key folders, following sta
 | Folder | Name | Purpose |
 |--------|------|---------|
 | `slave-src/PRG/` | Programs | Contains the main program entry point, `PRG_Main.st` (Structured Text), which houses the core state machine. A separate Ladder Diagram POU owns `G_sysAxis` and every built-in motion FB (`MC_Power`, `MC_Stop`, `MC_Reset`, `MC_MoveAbsolute`, `MC_MoveVelocity`, `MC_SetPosition`, `MC_ReadActual*`, `Y_DirectControl`). |
-| `slave-src/FB/` | Function Blocks | Contains reusable modules of encapsulated logic (e.g., `FB_HandshakeManager`, `FB_HomeEOT`) as well as the enum-conversion helpers (`FB_BitsToMode`, `FB_IsOperationalMode`, etc.). This is where most of the application logic resides. |
+| `slave-src/FB/` | Function Blocks | Contains reusable modules of encapsulated logic (e.g., `FB_HandshakeManager`, `FB_HomeLimit`) as well as the enum-conversion helpers (`FB_IntToMode`, `FB_IsOperationalMode`, etc.). This is where most of the application logic resides. |
 | `slave-src/GVL/` | Global Variable Lists | Contains a single comment-only reference file (`GlobalVariables_Reference.st`). Variables are defined in the MWiec GUI; this file documents their names, types, and defaults. It also documents the `G_cmd*` / `G_sta*` structured globals used to connect ST and LD POUs. |
 | `slave-src/DUT/` | Data Unit Types | Contains all custom data structures (`STRUCT`) and enumerations (`ENUM`) in a single `DataTypes.st` file, including the `ST_Cmd*` / `ST_Sta*` structs that shape the ST↔LD command/status interface. |
 
 ### ST ↔ LD POU Interface
 
-Because `G_sysAxis` and the built-in motion FBs live in the LD POU, `PRG_Main` never calls `MC_Power`, `MC_Stop`, `Y_DirectControl`, etc. directly. Instead it writes command fields into the `G_cmd*` structured globals and reads state from the matching `G_sta*` globals each scan:
+Because `G_sysAxis` and the built-in motion FBs live in the LD POU, `PRG_Main` never calls `MC_Power`, `MC_Stop`, `Y_DirectControl`, etc. directly. The LD POU is not in this repository; its wiring is recorded block by block, with screenshots, in `docs/slave/ld/`, and a change to a `G_cmd*` or `G_sta*` field is complete only when that record and the LD agree. Instead it writes command fields into the `G_cmd*` structured globals and reads state from the matching `G_sta*` globals each scan:
 
 | ST writes (command) | LD owns (FB instance) | LD writes back (status) |
 |---------------------|------------------------|--------------------------|
@@ -38,7 +38,7 @@ Because `G_sysAxis` and the built-in motion FBs live in the LD POU, `PRG_Main` n
 | `G_cmdDirectControl` | `Y_DirectControl` | `G_staDirectControl` |
 | `G_cmdSetPosition` | `MC_SetPosition` | `G_staSetPosition` |
 
-Custom FBs that need to command or observe a built-in motion FB (`FB_HomeLimit`, `FB_HomeEOT`, `FB_GoHome`) follow the same pattern at the FB level: they emit `Cmd*` `VAR_OUTPUT` structs and receive `Sta*` `VAR_INPUT` structs. `PRG_Main` wires those to the matching globals — see §4 below.
+Custom FBs that need to command or observe a built-in motion FB (`FB_HomeLimit`, `FB_GoHome`) follow the same pattern at the FB level: they emit `Cmd*` `VAR_OUTPUT` structs and receive `Sta*` `VAR_INPUT` structs. `PRG_Main` wires those to the matching globals — see §4 below.
 
 ---
 
@@ -58,7 +58,7 @@ The codebase follows a set of naming conventions to improve readability and main
 | `st` | `STRUCT` | `stCurrentLimits` | A structure instance. |
 | `fb` | Function Block | `fbHandshake` | An instance of a Function Block. |
 | `rTrig` | `R_TRIG` | `rTrigMotionEnable` | A rising-edge trigger. |
-| `fTrig` | `F_TRIG` | `fTrigMotionEnable` | A falling-edge trigger. |
+| `fTrig` | `F_TRIG` | `fTrigSignal` | A falling-edge trigger. |
 
 ### Global Variable Prefixes
 
@@ -68,9 +68,10 @@ Global variables defined in a `GVL` use a prefix to indicate their scope.
 |--------|-------|---------|-------------|
 | `cfg` | Configuration | `G_cfgDebounceTimeMode` | A static configuration parameter used for tuning. |
 | `sys` | System | `G_sysCurrentState` | A dynamic system status variable. |
-| `pos` | Position | `G_posEOTOffset` | A position-related value, often calculated during homing. |
-| `di` / `do` | I/O | `G_diModeBit0` | A digital input (`di`) or output (`do`). |
-| `ai` / `ao` | I/O | `G_aiPressure` | An analog input (`ai`) or output (`ao`). |
+| `pos` | Position | `G_posModeEntryPosition` | A position-related value captured or derived at run time. |
+| `di` / `do` | I/O | `G_diOvertravelNeg` | A digital input (`di`) or output (`do`): the overtravel switches, the brake and the status outputs. |
+| `ai` / `ao` | I/O | `G_aiPressure` | An analog input (`ai`) or output (`ao`). The pressure transducer is the only analog input; no `G_ao*` globals exist. |
+| `mb` | Modbus | `G_mbModeCode` | A Modbus holding register (master → slave) or input register (slave → master), see `docs/master/ModbusRegisterMap.md`. |
 
 > All global variables are documented in `slave-src/GVL/GlobalVariables_Reference.st` and defined in the MWiec GUI.
 
@@ -115,7 +116,7 @@ Functions can only have one output. For multiple outputs, use a function block i
 
 **User-Enum Parameters on Functions:**
 
-MotionWorks IEC Express fails native code generation with `E2001: circular assembly references` when a `FUNCTION` POU has a user-defined enum in its signature — as a `VAR_INPUT` type or as the return type. Always implement such conversions as `FUNCTION_BLOCK`s. Precedent: the six enum-helper FBs (`FB_IsOperationalMode`, `FB_IsHomingMode`, `FB_ModeToInt`, `FB_FaultToInt`, `FB_BitsToMode`, `FB_IntToFaultCode`) exist as FBs specifically to work around this defect.
+MotionWorks IEC Express fails native code generation with `E2001: circular assembly references` when a `FUNCTION` POU has a user-defined enum in its signature — as a `VAR_INPUT` type or as the return type. Always implement such conversions as `FUNCTION_BLOCK`s. Precedent: the six enum-helper FBs (`FB_IsOperationalMode`, `FB_IsHomingMode`, `FB_ModeToInt`, `FB_FaultToInt`, `FB_IntToMode`, `FB_IntToFaultCode`) exist as FBs specifically to work around this defect.
 
 ---
 
@@ -128,9 +129,9 @@ The core logic resides in a state machine within `PRG_Main.st`. Understanding th
 - **Initialization (`ST_INIT`)**: The default enum initializer. On the first scan the state machine transitions directly to `ST_IDLE`; no homing is required before operational modes, since the absolute encoder and the controller's stored offset retain the coordinate frame.
 - **Idle (`ST_IDLE`)**: The default safe state. The drive is disabled, and the brake is engaged. It waits here for a valid handshake from the master.
 - **Activation (`ST_DRIVE_ENABLE`, `ST_BRAKE_RELEASE`)**: A transitional sequence to power on the drive and release the brake before entering an operational mode.
-- **Operational States (`ST_POSITION_CTRL`, `ST_VELOCITY_CTRL`, etc.)**: The active motion or control states. Each state writes setpoints into `G_cmdDirectControl` (read by the LD POU's `Y_DirectControl` instance each scan) and checks for a `G_diMotionEnable` drop to exit. The position states (`ST_POSITION_CTRL`, `ST_RECOVERY_POSITION`) feed their target through `fbPosGate` (`FB_PositionCommandGate`), and on a `G_diMotionEnable` drop they first ramp the command to rest under `G_cfgPosGateAccelMax` (`bPosStopping`) before leaving the state.
-- **Homing States (`ST_HOME_LIMIT`, `ST_HOME_EOT`)**: These states execute the encapsulated logic inside `FB_HomeLimit` and `FB_HomeEOT`. Each FB emits `Cmd*` `VAR_OUTPUT` structs (`CmdMoveVelocity`, `CmdStop`, `CmdSetPosition`, `CmdDirectControl`, `CmdMoveAbsolute`) which `PRG_Main` copies into the matching `G_cmd*` globals so the LD POU's motion FBs act on them; status comes back through `G_sta*` globals wired into the FBs' `Sta*` `VAR_INPUT` structs. Deprecated homing sub-state enum members (`ST_HOME_LIM_*`, `ST_HOME_EOT_*`) still exist in `E_SystemState` but are unused by the live state machine.
-- **Transition (`ST_HOLD_POSITION`)**: A critical intermediate state entered when `G_diMotionEnable` drops. It brings the axis to a controlled halt (`MC_Stop`) and waits for a new mode handshake from the master. While `MC_Stop` executes, `Y_DirectControl` is held enabled in its last `ControlMode` with a zero command (`bKeepDirectControl` / `eKeepDirectMode`) until `MC_Stop` reports Busy and `Y_DirectControl.Active` drops; only an *aborted* `Y_DirectControl` returns the SERVOPACK to position control, and mode transitions wait for that hand-off. The same hand-off runs in `ST_FAULT` and `ST_RECOVERY`.
+- **Operational States (`ST_POSITION_CTRL`, `ST_VELOCITY_CTRL`, etc.)**: The active motion or control states. Each state writes setpoints into `G_cmdDirectControl` (read by the LD POU's `Y_DirectControl` instance each scan) and checks for a MotionEnable drop (`G_mbMotionEnable`, debounced) to exit. The position states (`ST_POSITION_CTRL`, `ST_RECOVERY_POSITION`) feed their target through `fbPosGate` (`FB_PositionCommandGate`), and on a MotionEnable drop they first ramp the command to rest under `G_cfgPosGateAccelMax` (`bPosStopping`) before leaving the state.
+- **Homing State (`ST_HOME_LIMIT`)**: This state executes the encapsulated logic inside `FB_HomeLimit`. The FB emits `Cmd*` `VAR_OUTPUT` structs (`CmdMoveVelocity`, `CmdStop`, `CmdSetPosition`, `CmdDirectControl`, `CmdMoveAbsolute`) which `PRG_Main` copies into the matching `G_cmd*` globals so the LD POU's motion FBs act on them; status comes back through `G_sta*` globals wired into the FB's `Sta*` `VAR_INPUT` structs. Deprecated homing sub-state enum members (`ST_HOME_LIM_*`) still exist in `E_SystemState` but are unused by the live state machine.
+- **Transition (`ST_HOLD_POSITION`)**: A critical intermediate state entered when MotionEnable (`G_mbMotionEnable`) drops. It brings the axis to a controlled halt (`MC_Stop`) and waits for a new mode handshake from the master. While `MC_Stop` executes, `Y_DirectControl` is held enabled in its last `ControlMode` with a zero command (`bKeepDirectControl` / `eKeepDirectMode`) until `MC_Stop` reports Busy and `Y_DirectControl.Active` drops; only an *aborted* `Y_DirectControl` returns the SERVOPACK to position control, and mode transitions wait for that hand-off. The same hand-off runs in `ST_FAULT` and `ST_RECOVERY`.
 - **Deactivation (`ST_BRAKE_ENGAGE`, `ST_DRIVE_DISABLE`)**: A transitional sequence to engage the brake and disable the drive before returning to `ST_IDLE`.
 - **Fault Handling (`ST_FAULT`, `ST_FAULT_IDLE`)**:
     - `ST_FAULT`: The active fault state. It performs a controlled `MC_Stop` and waits for a fault reset handshake. It includes logic for a "fast recovery" (to `ST_BRAKE_HOLD`) or a "slow recovery" timeout to `ST_FAULT_IDLE`.
@@ -149,7 +150,7 @@ Let's say you want to add `MODE_NEW_FEATURE` with a value of `101` (currently un
     MODE_NEW_FEATURE, (* Binary 101 - new feature mode *)
     ```
 
-2.  **Update Conversions:** Update the mode helpers in `slave-src/FB/` to handle the new mode: `FB_ModeToInt.st` (add an `ELSIF` branch for the new enum → int value) and `FB_BitsToMode.st` (add an `ELSIF` branch for the new int → enum value). `FB_ModeToBits` delegates to `FB_ModeToInt` and needs no direct change.
+2.  **Update Conversions:** Update the mode helpers in `slave-src/FB/` to handle the new mode: `FB_ModeToInt.st` (add an `ELSIF` branch for the new enum → int value) and `FB_IntToMode.st` (add an `ELSIF` branch for the new int → enum value).
 
 3.  **Update Master Docs:** In `docs/master/MasterProtocolGuide.md` and `docs/master/IOReference.md`, add the new mode to the mode tables so the master developer knows about it.
 
@@ -165,10 +166,12 @@ Let's say you want to add `MODE_NEW_FEATURE` with a value of `101` (currently un
 
         (* ... continuous logic for the new mode ... *)
 
-        IF fTrigMotionEnable.Q THEN
+        IF NOT bFilteredMotionEnable THEN   (* level, not edge: see below *)
             G_sysCurrentState := ST_HOLD_POSITION;
         END_IF;
     ```
+
+    Leave the state on MotionEnable LOW rather than on its falling edge. The start-up states (drive reset, enable, brake release) do not watch MotionEnable, so a drop there would otherwise be missed and the state never left.
 
 6.  **Handle Transitions:** In `PRG_Main.st`, update the state transitions to allow entry into your new state.
     *   In `ST_BRAKE_RELEASE`, add: `ELSIF eTargetMode = MODE_NEW_FEATURE THEN G_sysCurrentState := ST_NEW_FEATURE;`
@@ -178,9 +181,9 @@ Let's say you want to add `MODE_NEW_FEATURE` with a value of `101` (currently un
 
 Let's say you want to add `FAULT_NEW_CONDITION` with a value of `5` (currently `FAULT_PISTON_EXIT`).
 
-1.  **Define Enum:** In `slave-src/DUT/DataTypes.st`, add the new fault to `E_FaultCode`. Note that ordinal position matters for bit encoding.
+1.  **Define Enum:** In `slave-src/DUT/DataTypes.st`, add the new fault to `E_FaultCode`. Note that the ordinal position is the fault code published in `G_mbFaultCode` (IR4).
 
-2.  **Update Conversions:** Update the fault helpers in `slave-src/FB/` to handle the new fault: `FB_FaultToInt.st` (add an `ELSIF` branch for the new enum → int value) and `FB_IntToFaultCode.st` (add an `ELSIF` branch for the new int → enum value). `FB_FaultToBits` delegates to `FB_FaultToInt` and needs no direct change. Codes above 7 are carried by the Modbus registers only; the discrete outputs show the low three bits.
+2.  **Update Conversions:** Update the fault helpers in `slave-src/FB/` to handle the new fault: `FB_FaultToInt.st` (add an `ELSIF` branch for the new enum → int value) and `FB_IntToFaultCode.st` (add an `ELSIF` branch for the new int → enum value).
 
 3.  **Update Master Docs:** Add the new fault to the tables in `docs/master/FaultCodeReference.md` and other relevant guides.
 

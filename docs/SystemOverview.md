@@ -43,7 +43,7 @@ The controller is planned to be programmed as a slave to a Simulink Desktop Real
 The servo controller slave shall implement basic modes of operation at the command of the master.
 The Simulink Desktop Real Time environment as the master enables faster iteration and a familiar interface for the engineering graduate student/researchers, while enabling a rough but workable interface for operators (via dashboard components or, at a later point an app via Simulink's App Designer).
 
-The master controller is interfacing with the system through a National Instruments (NI) PCI 6221 DAQ, accompanied by a NI SCB-68a breakout board.
+The master controller talks to the slave over Modbus TCP on Ethernet. It drives the safety relay (P0.0) and the stir bar motor (P0.4) through a National Instruments (NI) PCI 6221 DAQ, accompanied by a NI SCB-68a breakout board.
 
 We have a MotionWorksIEC Express license for programming the servo controller and drive, which has a smaller feature set than MotionWorksIEC Pro but is adequate this application.
 

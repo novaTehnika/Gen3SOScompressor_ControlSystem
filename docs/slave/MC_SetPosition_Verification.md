@@ -9,10 +9,7 @@ Position reference setting flows through a bare `MC_SetPosition` instance in the
 
 For an absolute-encoder axis (Pn002.2) the controller stores the offset written by `MC_SetPosition` in battery-backed memory (flash on Sigma-7Siec; MotionWorks IEC Toolbox manual, axis parameter 1838), so the reference survives controller and drive power cycles and the slave does not require homing at boot. The offset is lost on a controller SRAM battery failure or controller replacement; Mode 110 is then run again.
 
-The two homing modes set position differently:
-
-- **Mode 110 (Home to Limit Switch)** — `FB_HomeLimit` drives `CmdSetPosition.Execute := TRUE` with the target absolute position (`G_cfgHomeLimSetPosition`, default `0.0 mm`). `PRG_Main` copies this command output into `G_cmdSetPosition`; the LD POU's `MC_SetPosition` performs the position-reference write and reports back via `G_staSetPosition.Done`.
-- **Mode 111 (Home to End-of-Travel)** — `FB_HomeEOT` **does not set position**. Instead, once stall is confirmed it records the encoder position (`EOTPosition := ActualPosition`) and computes a master/slave coordinate offset (`EOTOffset := ExpectedEOTPosition - EOTPosition`). This preserves the encoder zero reference established by Mode 110.
+Mode 110 (Home to Limit Switch) is the only sequence that sets position: `FB_HomeLimit` drives `CmdSetPosition.Execute := TRUE` with the target absolute position (`G_cfgHomeLimSetPosition`, default `0.0 mm`). `PRG_Main` copies this command output into `G_cmdSetPosition`; the LD POU's `MC_SetPosition` performs the position-reference write and reports back via `G_staSetPosition.Done`.
 
 ## Data Flow
 
@@ -36,10 +33,9 @@ G_staSetPosition.Done  -> back into FB_HomeLimit.StaSetPosition
 
 ## Coordinate System After Homing
 
-| Situation                        | Encoder zero   | Master sees                             |
+| Situation                        | Position zero  | Master sees                             |
 |----------------------------------|----------------|------------------------------------------|
-| After Mode 110 only              | At home switch | Master position = encoder position       |
-| After Mode 110 then Mode 111     | At home switch | Master position = encoder position + `G_posEOTOffset` |
+| After Mode 110                   | `G_cfgHomeLimRetractDist` positive of the negative overtravel switch | Master position = axis position |
 
 Position feedback is published to the master in millimeters through the Modbus input registers (`PRG_Output`), and the position reference arrives the same way; no offset is applied on either path.
 
@@ -51,11 +47,3 @@ Position feedback is published to the master in millimeters through the Modbus i
 | Command emission (Mode 110)     | `FB_HomeLimit.st`, state `HL_SETREF`       |
 | Status receipt                  | `FB_HomeLimit` input `StaSetPosition`      |
 | ST ↔ LD bridge                  | `G_cmdSetPosition`, `G_staSetPosition`     |
-| EOT offset calculation          | `FB_HomeEOT.st`, state `HE_SETREF`         |
-
-## Document History
-| Version | Date       | Changes |
-|---------|------------|---------|
-| 1.0     | 2025-12-29 | Initial verification (MC_SetPosition direct call) |
-| 2.0     | 2026-04-17 | Position reference via `AbsolutePositionManager` / `G_cmdEncMngr` |
-| 3.0     | 2026-04-17 | AbsolutePositionManager removed; reverted to direct `MC_SetPosition` via `G_cmdSetPosition` / `G_staSetPosition` |

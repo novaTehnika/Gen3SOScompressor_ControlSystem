@@ -9,7 +9,7 @@ cfg.commTimeout    = 0.3;       % slave counter unchanged this long = link lost 
 % travel (posEOT) and volume is swept volume from there plus deadVolume.
 cfg.posEOT       = 367;             % mm, position at the end of travel (compression end)
 cfg.boreDiameter = 2.602 * 25.4;    % mm (2.602 in)
-cfg.deadVolume   = 10;              % mL, volume left at the end of travel
+cfg.deadVolume   = 50;              % mL, volume left at the end of travel (measured: 50 g of water fills it)
 
 % Pressure: the app works in atm absolute, the slave in MPa gauge.
 cfg.atmPerMPa   = 9.869;
@@ -37,7 +37,8 @@ cfg.tEnableMax     = 1.0;   % proceed without BrakeDisengage after this (slave r
 cfg.tStopMin       = 0.1;   % ignore InMotion this long after dropping MotionEnable
 cfg.tStopMax       = 3.0;   % give up waiting for InMotion low
 cfg.tModeClear     = 0.15;  % mode 0 held before a new request (slave debounce + stable time)
-cfg.tGoHomeDone    = 1.0;   % InMotion low this long ends Go Home
+cfg.tGoHomeDone    = 1.0;   % InMotion low this long, after motion, ends Go Home
+cfg.tGoHomeStartMax = 5.0;  % Go Home with no motion by then ends (axis already home)
 
 % Fault handling times (s).
 cfg.tFaultSettle  = 0.02;   % after FaultActive before reading the code

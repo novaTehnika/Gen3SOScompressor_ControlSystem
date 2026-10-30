@@ -33,9 +33,6 @@
    Variables (define in MWiec GUI):
      VAR:
        (* Function block instances
-       fbFilterModeBit0    : FB_DigitalInputFilter
-       fbFilterModeBit1    : FB_DigitalInputFilter
-       fbFilterModeBit2    : FB_DigitalInputFilter
        fbFilterMotionEnable: FB_DigitalInputFilter
        fbFilterOvertravelNeg : FB_DigitalInputFilter
        fbFilterOvertravelPos : FB_DigitalInputFilter
@@ -46,7 +43,6 @@
        fbModeDecoder       : FB_ModeDecoder
        fbHandshake         : FB_HandshakeManager
        fbFaultReset        : FB_FaultResetHandler
-       fbOutputMux         : FB_OutputMux
        fbSafetyMonitor     : FB_SafetyMonitor
        fbPistonExitGuard   : FB_PistonExitGuard
        fbGoHome            : FB_GoHome
@@ -57,6 +53,7 @@
        fbIsHoming          : FB_IsHomingMode
        fbIntToFaultCode    : FB_IntToFaultCode
        fbFaultToInt        : FB_FaultToInt
+       fbConfModeToInt     : FB_ModeToInt
        fbCommWatchdog      : FB_CommWatchdog
        (* Timers — each has exactly one call site (see end of body)
        tStateTimer         : TON
@@ -71,16 +68,12 @@
        bHoldPositionTimerIN : BOOL
        (* Edge triggers
        rTrigMotionEnable   : R_TRIG
-       fTrigMotionEnable   : F_TRIG
        (* Local variables
        bFirstScan          : BOOL := TRUE
        bEnterState         : BOOL
        eTargetState        : E_SystemState
        eTargetMode         : E_OperatingMode
        stCurrentLimits     : ST_AxisLimits
-       bFilteredModeBit0   : BOOL
-       bFilteredModeBit1   : BOOL
-       bFilteredModeBit2   : BOOL
        bFilteredMotionEnable : BOOL
        bFilteredOvertravelNeg : BOOL
        bFilteredOvertravelPos : BOOL
@@ -141,9 +134,6 @@ END_IF;
    Values reflect previous scan's filter outputs — negligible at 1ms cycle.
    -------------------------------------------------------------------------- *)
 
-bFilteredModeBit0 := fbFilterModeBit0.FilteredOutput;
-bFilteredModeBit1 := fbFilterModeBit1.FilteredOutput;
-bFilteredModeBit2 := fbFilterModeBit2.FilteredOutput;
 bFilteredMotionEnable := fbFilterMotionEnable.FilteredOutput;
 bFilteredOvertravelNeg := fbFilterOvertravelNeg.FilteredOutput;
 bFilteredOvertravelPos := fbFilterOvertravelPos.FilteredOutput;
@@ -154,7 +144,6 @@ G_sysActualPressure := fbPressureInput.PressureMPa;
 G_sysRequestedMode := fbModeDecoder.DecodedMode;
 
 rTrigMotionEnable(CLK := bFilteredMotionEnable);
-fTrigMotionEnable(CLK := bFilteredMotionEnable);
 
 G_sysOvertravelNegActive := NOT bFilteredOvertravelNeg;
 G_sysOvertravelPosActive := NOT bFilteredOvertravelPos;
@@ -325,7 +314,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
             bPosStopping := FALSE;
         END_IF;
 
-        IF fTrigMotionEnable.Q THEN
+        IF NOT bFilteredMotionEnable THEN
             bPosStopping := TRUE;
         END_IF;
 
@@ -365,7 +354,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_VELOCITY_CTRL THEN
 
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
-        IF fTrigMotionEnable.Q THEN
+        IF NOT bFilteredMotionEnable THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
         END_IF;
 
@@ -385,7 +374,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_TORQUE_CTRL THEN
 
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
-        IF fTrigMotionEnable.Q THEN
+        IF NOT bFilteredMotionEnable THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
         END_IF;
 
@@ -423,7 +412,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL THEN
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
         G_doPerformanceStatus := ABS(G_sysActualPressure - rPressureTarget) <= G_cfgPressureInBand;
 
-        IF fTrigMotionEnable.Q THEN
+        IF NOT bFilteredMotionEnable THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
         END_IF;
 
@@ -440,7 +429,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_GO_HOME THEN
             G_sysActiveFault := E_FaultCode#FAULT_DRIVE;
             G_sysCurrentState := E_SystemState#ST_FAULT;
 
-        ELSIF fTrigMotionEnable.Q THEN
+        ELSIF NOT bFilteredMotionEnable THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
 
         ELSIF fbGoHome.Done THEN
@@ -465,7 +454,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_HOME_LIMIT THEN
             G_sysActiveFault := E_FaultCode#FAULT_LIMIT_SWITCH;
             G_sysCurrentState := E_SystemState#ST_FAULT;
 
-        ELSIF fTrigMotionEnable.Q THEN
+        ELSIF NOT bFilteredMotionEnable THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
         END_IF;
 
@@ -485,7 +474,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_HOME_COMPLETE THEN
 
         G_doInMotion := FALSE;
 
-        IF fTrigMotionEnable.Q THEN
+        IF NOT bFilteredMotionEnable THEN
             G_doHomingComplete := FALSE;
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
         END_IF;
@@ -699,7 +688,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
             bPosStopping := FALSE;
         END_IF;
 
-        IF fTrigMotionEnable.Q THEN
+        IF NOT bFilteredMotionEnable THEN
             bPosStopping := TRUE;
         END_IF;
 
@@ -760,7 +749,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_VELOCITY THEN
 
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
-        IF fTrigMotionEnable.Q THEN
+        IF NOT bFilteredMotionEnable THEN
             IF bLimitConditionActive THEN
                 G_sysCurrentState := E_SystemState#ST_RECOVERY;
             ELSE
@@ -838,6 +827,7 @@ G_cmdDirectControl.Velocity := LREAL#0.0;
 G_cmdDirectControl.Torque := LREAL#0.0;
 G_cmdDirectControl.Acceleration := G_cfgDirectCtrlAccel;
 G_cmdDirectControl.Deceleration := G_cfgDirectCtrlDecel;
+G_cmdDirectControl.FilterTimeConstant := G_cfgDirectCtrlFilterTime;
 G_cmdSetPosition.Execute := FALSE;
 G_cmdSetPosition.Position := LREAL#0.0;
 G_cmdSetPosition.Mode := FALSE;
@@ -988,13 +978,10 @@ END_IF;
    -------------------------------------------------------------------------- *)
 
 (* Input filters *)
-fbFilterModeBit0(RawInput := G_diModeBit0, DebounceTime := G_cfgDebounceTimeMode);
-fbFilterModeBit1(RawInput := G_diModeBit1, DebounceTime := G_cfgDebounceTimeMode);
-fbFilterModeBit2(RawInput := G_diModeBit2, DebounceTime := G_cfgDebounceTimeMode);
-fbFilterMotionEnable(RawInput := G_diMotionEnable, DebounceTime := G_cfgDebounceTimeMotion);
+fbFilterMotionEnable(RawInput := G_mbMotionEnable <> UINT#0, DebounceTime := G_cfgDebounceTimeMotion);
 fbFilterOvertravelNeg(RawInput := G_diOvertravelNeg, DebounceTime := G_cfgDebounceTimeOvertravelNeg);
 fbFilterOvertravelPos(RawInput := G_diOvertravelPos, DebounceTime := G_cfgDebounceTimeOvertravelPos);
-fbFilterFaultReset(RawInput := G_diFaultReset, DebounceTime := G_cfgDebounceTimeFault);
+fbFilterFaultReset(RawInput := G_mbFaultReset <> UINT#0, DebounceTime := G_cfgDebounceTimeFault);
 
 fbFilterPressure(
     Enable := TRUE,
@@ -1020,9 +1007,8 @@ fbPressureInput(
 (* Mode decoder *)
 fbModeDecoder(
     Enable := TRUE,
-    ModeBit0 := bFilteredModeBit0,
-    ModeBit1 := bFilteredModeBit1,
-    ModeBit2 := bFilteredModeBit2
+    ModeCode := G_mbModeCode,
+    DebounceTime := G_cfgDebounceTimeMode
 );
 
 (* Handshake manager *)
@@ -1058,7 +1044,7 @@ fbFaultReset(
     FaultReset := bFilteredFaultReset,
     MotionEnable := bFilteredMotionEnable,
     InFaultState := bFaultResetInFaultState,
-    BitsStable := fbModeDecoder.ModeStable,
+    CodeStable := fbModeDecoder.ModeStable,
     ActiveFaultCode := eFaultResetActiveCode,
     MasterFaultCode := fbIntToFaultCode.Fault
 );
@@ -1071,7 +1057,7 @@ fbGoHome(
     HomeVelocity := G_cfgGoHomeVelocity,
     Acceleration := G_cfgGoHomeAccel,
     Deceleration := G_cfgGoHomeDecel,
-    Abort := fTrigMotionEnable.Q,
+    Abort := NOT bFilteredMotionEnable,
     StaMoveAbsolute := G_staMoveAbsolute,
     StaStop := G_staStop
 );
@@ -1090,7 +1076,7 @@ fbHomeLimit(
     Timeout := G_cfgHomingTimeout,
     OvertravelNegActive := G_sysOvertravelNegActive,
     OvertravelPosActive := G_sysOvertravelPosActive,
-    Abort := fTrigMotionEnable.Q,
+    Abort := NOT bFilteredMotionEnable,
     ActualPosition := G_sysActualPosition,
     StaJog := G_staJog,
     StaMoveAbsolute := G_staMoveAbsolute,
@@ -1124,15 +1110,6 @@ fbSafetyMonitor(
     ExitGuardTriggered := fbPistonExitGuard.FaultTriggered,
     CommLost := fbCommWatchdog.Lost,
     PressureSensorFault := fbPressureInput.SensorFault
-);
-
-(* Output multiplexer *)
-fbOutputMux(
-    Enable := TRUE,
-    FaultActive := (G_sysCurrentState = E_SystemState#ST_FAULT) OR
-                   (G_sysCurrentState = E_SystemState#ST_FAULT_IDLE),
-    FaultCode := G_sysActiveFault,
-    ConfirmedMode := fbHandshake.ConfirmedMode
 );
 
 (* Position command gate - shapes rPosTarget into the Y_DirectControl command.
@@ -1215,12 +1192,12 @@ END_IF;
    Update Outputs
    -------------------------------------------------------------------------- *)
 
-G_doModeConfBit0 := fbOutputMux.DO0_Output;
-G_doModeConfBit1 := fbOutputMux.DO1_Output;
-G_doModeConfBit2 := fbOutputMux.DO2_Output;
-G_doFaultActive := fbOutputMux.FaultActiveOutput;
+G_doFaultActive := (G_sysCurrentState = E_SystemState#ST_FAULT) OR
+                   (G_sysCurrentState = E_SystemState#ST_FAULT_IDLE);
 
 (* Values published in the Modbus input registers by PRG_Output *)
+fbConfModeToInt(Mode := fbHandshake.ConfirmedMode);
+G_sysConfirmedModeCode := INT_TO_UINT(fbConfModeToInt.Value);
 fbFaultToInt(Fault := G_sysActiveFault);
 G_sysActiveFaultCode := INT_TO_UINT(fbFaultToInt.Value);
 IF G_sysScanCounter >= UINT#65535 THEN

@@ -36,19 +36,8 @@
         PNP limit switches: TRUE = not triggered, FALSE = triggered (fail-safe)
         ======================================================================== *)
 
-     (* Mode Command from Master (3-bit) *)
-     G_diModeBit0          AT %IX0.0 : BOOL   (* Mode bit 0 - LSB *)
-     G_diModeBit1          AT %IX0.1 : BOOL   (* Mode bit 1 *)
-     G_diModeBit2          AT %IX0.2 : BOOL   (* Mode bit 2 - MSB *)
-
-     (* Motion Control *)
-     G_diMotionEnable      AT %IX0.3 : BOOL   (* Motion enable from master *)
-
-     (* Fault Control *)
-     G_diFaultReset        AT %IX0.4 : BOOL   (* Fault reset command from master *)
-
-     (* Reserved *)
-     (*G_diReserved          AT %IX0.5 : BOOL   (* Reserved for future use *)
+     (* DI0-DI5 are not used: the master's commands arrive in the Modbus
+        holding registers below. *)
 
      (* Overtravel Switches - Tolomatic #8100-9092, Solid State, NC, PNP *)
      (* TRUE = switch NOT triggered (normal), FALSE = triggered or wire broken *)
@@ -61,12 +50,10 @@
         DIGITAL OUTPUTS (8 Available)
         ======================================================================== *)
 
-     (* Mode Confirmation to Master (3-bit) / Fault Code when G_doFaultActive=TRUE *)
-     G_doModeConfBit0      AT %QX0.0 : BOOL   (* Mode confirm bit 0 / Fault code bit 0 *)
-     G_doModeConfBit1      AT %QX0.1 : BOOL   (* Mode confirm bit 1 / Fault code bit 1 *)
-     G_doModeConfBit2      AT %QX0.2 : BOOL   (* Mode confirm bit 2 / Fault code bit 2 *)
+     (* DO0-DO2 are not used: the mode confirmation and fault code are
+        published in the Modbus input registers below. *)
 
-     (* Status Outputs *)
+     (* Status Outputs, also published in the Modbus input registers *)
      G_doPerformanceStatus AT %QX0.3 : BOOL   (* Mode-dependent status indicator *)
      G_doFaultActive       AT %QX0.4 : BOOL   (* Fault indicator: HIGH = fault active *)
      G_doHomingComplete    AT %QX0.5 : BOOL   (* Homing sequence complete *)
@@ -92,12 +79,12 @@
 
      G_mbHeartbeatEcho     AT %QW73792 : UINT  (* IR1: last G_mbHeartbeat received *)
      G_mbSlaveCounter      AT %QW73794 : UINT  (* IR2: scan counter *)
-     G_mbConfCode          AT %QW73796 : UINT  (* IR3: DO0-2 value: mode confirmation or 3-bit fault code *)
+     G_mbConfCode          AT %QW73796 : UINT  (* IR3: confirmed mode code, 0 outside the handshake *)
      G_mbFaultCode         AT %QW73798 : UINT  (* IR4: G_sysActiveFault, full value *)
-     G_mbFaultActive       AT %QW73800 : UINT  (* IR5: DO4 *)
-     G_mbInMotion          AT %QW73802 : UINT  (* IR6: DO6 *)
-     G_mbPerformanceStatus AT %QW73804 : UINT  (* IR7: DO3 *)
-     G_mbHomingComplete    AT %QW73806 : UINT  (* IR8: DO5 *)
+     G_mbFaultActive       AT %QW73800 : UINT  (* IR5: G_doFaultActive *)
+     G_mbInMotion          AT %QW73802 : UINT  (* IR6: G_doInMotion *)
+     G_mbPerformanceStatus AT %QW73804 : UINT  (* IR7: G_doPerformanceStatus *)
+     G_mbHomingComplete    AT %QW73806 : UINT  (* IR8: G_doHomingComplete *)
      G_mbActualPosition    AT %QD73812 : REAL  (* IR11-12: mm *)
      G_mbActualVelocity    AT %QD73816 : REAL  (* IR13-14: mm/s *)
      G_mbActualTorque      AT %QD73820 : REAL  (* IR15-16: % of rated *)
@@ -170,8 +157,17 @@
         Velocity/Position; zero values leave the servo unable to move.
         ======================================================================== *)
 
-     G_cfgDirectCtrlAccel      : LREAL := 10.0         (* Accel for Y_DirectControl operating modes (mm/s^2) *)
-     G_cfgDirectCtrlDecel      : LREAL := 10.0         (* Decel for Y_DirectControl operating modes (mm/s^2) *)
+     G_cfgDirectCtrlAccel      : LREAL := 10.0         (* Accel for Y_DirectControl operating modes (mm/s^2). A
+                                                          velocity step on the machine was not slewed at this
+                                                          value in VelocityTLMode (bench/characterisation) *)
+     G_cfgDirectCtrlDecel      : LREAL := 10.0         (* Decel for Y_DirectControl operating modes (mm/s^2);
+                                                          the block has no decel input, so only the stop law
+                                                          uses it *)
+     G_cfgDirectCtrlFilterTime : LREAL := 0.05        (* Y_DirectControl FilterTimeConstant (s): the block's own
+                                                          filter on the command it sends the drive. Wired from
+                                                          G_cmdDirectControl.FilterTimeConstant in the LD POU. A
+                                                          lag inside the pressure loop; tune on the bench with
+                                                          a velocity step (bench/friction 'steps') *)
 
 
      (* ========================================================================
@@ -233,9 +229,12 @@
                                                           velocity is clamped to sqrt(2*Decel*|error|/stiffness).
                                                           Above the liquid-only chamber's ~20 MPa/mm because the
                                                           filtered reading lags the chamber during the approach *)
-     G_cfgPressureStopVelMin     : LREAL := 0.5        (* The stop law never clamps below this (mm/s), so outflow
-                                                          can be balanced at zero error; overshoot from this
-                                                          velocity is at most stiffness*v^2/(2*decel) *)
+     G_cfgPressureStopVelMin     : LREAL := 2.0        (* The stop law never clamps below this (mm/s), so outflow
+                                                          can be balanced at zero error. Must exceed the piston
+                                                          speed the outlet needs (1.4 mm/s at 10 MPa through the
+                                                          orifice bank), or the loop holds a steady error below
+                                                          the target. Overshoot from this velocity is at most
+                                                          stiffness*v^2/(2*decel) *)
      G_cfgPressureTorqueLimit    : LREAL := 100.0      (* Torque limit in pressure mode (% of rated). Caps the piston
                                                           force if the sensor reads low *)
      G_cfgPressureTargetMax      : LREAL := 15.0       (* Highest target accepted from the master (MPa gauge) *)
@@ -260,7 +259,7 @@
         INPUT FILTERING PARAMETERS
         ======================================================================== *)
 
-     (* Digital input debounce times *)
+     (* Debounce times: Modbus command registers and the overtravel inputs *)
      G_cfgDebounceTimeMode         : TIME := T#50MS   (* Mode code (G_mbModeCode) debounce *)
      G_cfgDebounceTimeMotion       : TIME := T#20MS   (* Motion enable (G_mbMotionEnable) debounce *)
      G_cfgDebounceTimeFault        : TIME := T#20MS   (* Fault reset (G_mbFaultReset) debounce *)
@@ -370,6 +369,7 @@
      G_sysReference            : LREAL := 0.0     (* Reference from master: mm, mm/s or % by mode *)
      G_sysScanCounter          : UINT := UINT#0   (* Incremented every scan, published in G_mbSlaveCounter *)
      G_sysActiveFaultCode      : UINT := UINT#0   (* G_sysActiveFault as an integer, published in G_mbFaultCode *)
+     G_sysConfirmedModeCode    : UINT := UINT#0   (* Handshake confirmed mode as an integer, published in G_mbConfCode *)
      G_sysConfirmedMode        : E_OperatingMode := MODE_IDLE (* Mode confirmed to master *)
      G_sysActiveFault          : E_FaultCode := FAULT_NONE    (* Active fault code *)
 

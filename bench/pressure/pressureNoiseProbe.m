@@ -1,7 +1,7 @@
 function r = pressureNoiseProbe(label, nWindows)
 %PRESSURENOISEPROBE Read the transducer noise statistics and a raw 2 ms
 %   capture from PRG_PressureProbe, report them, and save the capture to
-%   captures/<label>_<yyyymmdd_HHMMSS>.csv. Runs from the MATLAB command
+%   bench/common/captures/<label>_<yyyymmdd_HHMMSS>.csv. Runs from the MATLAB command
 %   line on the lab PC (Industrial Communication Toolbox, no Simulink).
 %
 %   r = pressureNoiseProbe('idle')        5 one-second windows, one capture
@@ -16,7 +16,7 @@ if nargin < 2
     nWindows = 5;
 end
 here = fileparts(mfilename('fullpath'));
-addpath(fullfile(here, '..', 'modbus'));
+addpath(fullfile(here, '..', 'modbus'), fullfile(here, '..', 'common'));
 cfg = modbusBenchConfig();
 
 hrArm      = 101;       % G_mbProbeArm
@@ -78,7 +78,7 @@ volts = counts / countsPerVolt;
 % --- Report and save --------------------------------------------------------
 r = pressureNoiseReport(volts, fs, stats, label);
 
-capDir = fullfile(here, 'captures');
+capDir = benchConfig().captures;
 if ~exist(capDir, 'dir')
     mkdir(capDir);
 end

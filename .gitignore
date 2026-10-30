@@ -1,5 +1,7 @@
 # Generated from slave-src by tools/st2m.py
 slave-sim/generated/
+# Generated from slave-src by tools/st2py.py
+design/generated/
 *.asv
 slprj/
 master-src/shell/SOS_Gen3_Master_Shell.slx
@@ -7,7 +9,8 @@ master-src/shell/SOS_Gen3_Master_Shell.slx
 bench/modbus/ModbusBench.slx
 # Wireshark captures from bench runs
 bench/modbus/captures/
-# Pressure noise captures from bench runs
-bench/pressure/captures/
-bench/pressure/SafetyHold.slx
+# Bench run logs and captures, and the safety-hold model
+bench/common/captures/
+bench/common/SafetyHold.slx
 octave-workspace
+__pycache__/

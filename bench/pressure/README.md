@@ -11,9 +11,10 @@ median and low-pass filters, read every 50 ms.
 | `slave/PRG_PressureProbe.st` | Slave program: one-second statistics of the raw input and a 250-scan capture on request, in the probe registers |
 | `pressureNoiseProbe.m` | Axis at rest: reads the statistics and a capture through the MATLAB `modbus` object, reports them and saves the capture under `captures/` |
 | `pressureNoiseRun.m` | Axis moving: acts as the master for the run, drives a path of steps through `masterStep` and reads the probe registers between exchanges; one capture and the windows per step |
-| `buildSafetyHold.m` | Generates `SafetyHold.slx` (gitignored), the Desktop Real-Time model that holds the safety relay while `pressureNoiseRun` takes the shell's place |
 | `pressureNoiseReport.m` | The report alone: statistics, capture rms and spectrum. Takes the arrays or a saved CSV |
-| `captures/` | Saved captures (gitignored) |
+
+`SafetyHold.slx` (`bench/common/buildSafetyHold`), the Modbus link and the
+`captures/` directory are shared with the other benches in `bench/common/`.
 
 ## 1. Slave setup
 
@@ -37,7 +38,7 @@ low side to the controller's analog ground, `MO1_AI_01` across the shunt.
 
 ## 2. Running
 
-On the lab PC, with `cfg.address` in `bench/modbus/modbusBenchConfig.m` set
+On the lab PC, with `cfg.address` in `bench/common/benchConfig.m` set
 to the controller IP. The shell model must be stopped for either script: a
 second Modbus client beside the shell delays the shell's exchange, and the
 slave raises `FAULT_COMM` while motion is commanded.
@@ -53,8 +54,8 @@ The script prints each window's mean, rms and peak-to-peak in volts and in
 MPa, then arms a capture, waits for it, prints its rms, the rms in three
 bands (below 25 Hz, 25 to 100 Hz, 100 to 250 Hz) and the five largest
 spectral lines, and saves the capture as
-`captures/<label>_<yyyymmdd_HHMMSS>.csv` (time, volts, MPa). A saved
-capture is re-analysed with `pressureNoiseReport('captures/<file>.csv')`.
+`bench/common/captures/<label>_<yyyymmdd_HHMMSS>.csv` (time, volts, MPa). A saved
+capture is re-analysed with `pressureNoiseReport('../common/captures/<file>.csv')`.
 
 ### Axis moving
 
@@ -63,12 +64,13 @@ exchanges the protocol registers every 50 ms with `masterStep` sequencing
 the handshake, the motion and the stop as the shell does, and reads one
 probe register block in each gap. The safety relay (P0.0), which the shell
 normally drives, is held by `SafetyHold.slx`: build it once with
-`buildSafetyHold`, open it, select **Connected IO** on the Desktop
+`bench/common/buildSafetyHold`, open it, select **Connected IO** on the Desktop
 Real-Time tab and save. The run starts the model before the first command
 and stops it at the end, which releases the relay.
 
 ```matlab
 cd bench/pressure
+addpath ../common
 buildSafetyHold                          % once
 r = pressureNoiseRun('noCap');           % jog +2 mm/s for 8 s, then -2 mm/s for 8 s
 r = pressureNoiseRun('noCap', {{'idle', 5}, {'jog', 2, 8}, {'jog', -2, 8}, {'pressure', 2, 10}});
@@ -86,8 +88,8 @@ windows while it runs and takes one capture `opts.settle` seconds (default
 1) after its running status appears, or after arrival for a position step;
 the step ends after its seconds once the capture is in. The windows and the
 captures are reported per step at the end, the captures saved as
-`captures/<label>_<n>_<step>_<timestamp>.csv` and the run as
-`captures/<label>_run_<timestamp>.csv` (time, position, velocity, MPa,
+`bench/common/captures/<label>_<n>_<step>_<timestamp>.csv` and the run as
+`bench/common/captures/<label>_run_<timestamp>.csv` (time, position, velocity, MPa,
 master status, step, exchange time). A window's rms includes any change of
 the pressure itself during that second; the capture's spectrum separates a
 drift (below 25 Hz) from noise.
