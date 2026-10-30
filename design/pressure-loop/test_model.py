@@ -39,7 +39,7 @@ FILE DEPENDENCY:
     controllers.py, params.py, plant.py, runner.py, scenarios.py,
     sensor.py, sim.py, slave.py, solver.py
 ../generated/
-    FB_PressureController.py
+    FB_PressureController.py, FB_PressureSchedule.py
 """
 
 import math
@@ -529,6 +529,81 @@ def check_scheduled():
        "FB_PressureController's")
 
 
+def check_scheduled_st():
+    par = Params()
+    cfg = slave_config()
+    # The reference takes the plant's values where the slave has settings;
+    # they must agree for the two to be compared.
+    assert abs(par.A - cfg['G_cfgPressureSchedPistonArea'] * 1e-6) < 1e-15
+    assert abs(par.Vl0
+               - cfg['G_cfgPressureSchedSalineVolume'] * 1e-6) < 1e-15
+    assert par.t_dead == cfg['G_cfgPressureSchedDriveDeadTime']
+    assert par.tauV == cfg['G_cfgPressureSchedDriveLag']
+    assert (par.kH, par.T, par.Patm) == (cfg['G_cfgPressureSchedHenry'],
+        cfg['G_cfgPressureSchedGasTemp'], cfg['G_cfgPressureSchedPatm'])
+
+    def reference():
+        return ctl.ScheduledSlaveController(
+            'ref', wc=cfg['G_cfgPressureSchedCrossover'],
+            K_cfg=cfg['G_cfgPressureSchedBulkModulus'],
+            V_l_cfg=cfg['G_cfgPressureSchedSalineVolume'] * 1e-6,
+            V_dead_cfg=cfg['G_cfgPressureSchedDeadVolume'] * 1e-6,
+            C_hose_cfg=cfg['G_cfgPressureSchedHoseCompliance'],
+            ratio_cfg=cfg['G_cfgPressureSchedOxygenRatio'],
+            ki_ratio=cfg['G_cfgPressureSchedKiRatio'],
+            kp_min=cfg['G_cfgPressureSchedKpMin'],
+            kp_max=cfg['G_cfgPressureSchedKpMax'],
+            e_int=cfg['G_cfgPressureSchedArriveBand'])
+
+    class Lockstep:
+        """Runs the reference and the port on the same inputs and
+        returns the reference's command."""
+        mode = 'V'
+
+        def __init__(self, ref, port):
+            self.ref, self.port = ref, port
+            self.name = port.name
+            self.cfg = port.cfg
+
+        def reset(self, p, sc):
+            u = self.ref.reset(p, sc)
+            assert self.port.reset(p, sc) == u
+            self.accel, self.decel = self.ref.accel, self.ref.decel
+            self.worst, self.kp = 0.0, []
+            return u
+
+        def step(self, P, tg, t, sc, x=0.0):
+            a = self.ref.step(P, tg, t, sc, x)
+            b = self.port.step(P, tg, t, sc, x)
+            self.worst = max(self.worst, abs(a - b))
+            self.kp.append(self.port.fb.Kp)
+            return a
+
+    q = par.with_(hose_before=True)     # the hose is open throughout
+    for name in ('compress', 'deliver'):
+        L = Lockstep(reference(), ctl.ScheduledSlaveControllerST())
+        r = sim.run(q, scenarios.make(name, q), L)
+        assert L.worst < 1e-9, (name, L.worst)            # [m/s]
+        assert L.port.sched.Enable and not L.port.sched.ParamError
+        assert not L.port.sched.IntegHold                  # arrived
+        assert max(L.kp) > 1.5 * min(L.kp)                 # scheduled
+        ok(f'FB_PressureSchedule (ST) matches ScheduledSlaveController '
+           f'scan for scan through {name} (largest command difference '
+           f'{L.worst:.1e} m/s, Kp {min(L.kp):.3f} to {max(L.kp):.3f})')
+
+    # With the switch off the port is the GVL loop.
+    sc = scenarios.stiffstep(par)
+    a, b = ctl.SlaveController(), ctl.ScheduledSlaveControllerST(
+        ScheduleEnable=False)
+    a.reset(par, sc), b.reset(par, sc)
+    rng = random.Random(2)
+    for k in range(2000):
+        P = 10e6 + 2e6 * math.sin(k / 100.0) + rng.uniform(-1e5, 1e5)
+        assert a.step(P, 10.5e6, k * par.Ts, sc) == \
+            b.step(P, 10.5e6, k * par.Ts, sc)
+    ok('ScheduledSlaveControllerST with the switch off is the GVL loop')
+
+
 def check_legacy_reference():
     # Reference values for this case without noise or transducer offset,
     # computed with Heun at nsub = 5 and the measured plant parameters
@@ -624,6 +699,7 @@ if __name__ == '__main__':
     check_sensor()
     check_wiring()
     check_scheduled()
+    check_scheduled_st()
     check_legacy_reference()
     check_closed_loop()
     check_runner()
