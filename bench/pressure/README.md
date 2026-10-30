@@ -161,3 +161,74 @@ as the anti-alias for the 2 ms sampling. Sensor filter: 20 ms.
 
 Link during the runs (raw frames): exchange median 12.9 ms, p99 22.5 ms;
 longest gap between cycles 108 ms.
+
+## 6. Analog input calibration check
+
+The slave reads the transducer as the voltage across the shunt
+(`FB_PressureInput`: `LoopMa = Volts / ShuntOhms`), so its reading carries
+three errors in series: the transducer's current, the voltage the loop
+develops at the input terminals (the shunt in parallel with the input's own
+impedance, specified above 10 kohm), and the input's conversion of that
+voltage.
+
+**At the transducer's zero** (2026-10-30, transducer vented, wired as in
+service):
+
+| Quantity | Value | Expected | Pressure equivalent |
+|---|---|---|---|
+| Loop current, meter in series | 3.98 mA | 4.00 mA | -0.02 MPa |
+| Shunt resistance | 434 ohm | | |
+| Voltage at the input terminals, meter | 1.695 V | 3.98 mA x 434 ohm = 1.727 V | -0.074 MPa |
+| Voltage in MotionWorks | 1.685 to 1.688 V | 1.695 V (meter) | -0.020 MPa |
+| Pressure the slave reports | -0.11 MPa | 0 | |
+
+The three terms add to the -0.11 MPa the logs show. The largest is the
+terminal voltage: 1.695 V for 3.98 mA is 425.9 ohm, which a 434 ohm shunt
+in parallel with about 23 kohm would give. A load of that kind is a gain
+error, -1.9 % of the loop current at every pressure, not an offset: the
+slave would read 0.27 MPa low at 10 MPa. The meter's own current accuracy
+is of the same order, so a second point at pressure is needed to tell the
+two apart.
+
+**The input against a voltage source.** A bench supply across the input
+pins, read by a multimeter (Klein MM300), an oscilloscope (after its
+self-calibration) and the slave (MotionWorks debug mode):
+
+| Multimeter (V) | Oscilloscope (V) | Slave (V) |
+|---|---|---|
+| 0.365 | 0.364 to 0.367 | 0.362 |
+| 1.028 | 1.04 | 1.021 |
+| 1.978 | 1.99 | 1.966 |
+| 1.676 | 1.68 | 1.665 |
+| 2.38 | 2.40 | 2.385 |
+| 3.08 | 3.11 | 3.078 |
+| 3.93 | 3.94 | 3.926 |
+| 4.38 | 4.42 | 4.377 |
+| 5.14 | 5.19 | 5.133 |
+| 5.71 | 5.74 | 5.696 |
+| 6.18 | 6.23 | 6.168 |
+| 6.68 | 6.72 | 6.669 |
+| 7.40 | 7.44 | 7.379 |
+| 8.74 | 8.80 | 8.708 |
+| 9.44 | 9.45 | 9.409 |
+
+Least squares, slave against multimeter: slave = 0.9971 x meter + 2.0 mV,
+residual 6.3 mV rms, largest 9.8 mV. Against the oscilloscope: 0.9930 x
+scope - 6.1 mV, residual 13 mV rms; the oscilloscope reads 0.4 % above the
+multimeter throughout. Near the zero (1.676 V) the slave reads 11 mV low
+(0.025 MPa). The input's +/-0.1 % of a 20 V range is +/-20 mV, and a
+hand-held meter's DC volts are typically good to 0.5 %, so neither
+instrument resolves an error in the input beyond its specification: the
+conversion contributes about 0.02 MPa and is not the main term.
+
+**Calibrating the chain.** Because the errors are a gain and an offset in
+the current-to-volts chain, the slave's correction is two numbers,
+`G_cfgPressureShuntOhms` (the effective resistance, volts read per mA) and
+`G_cfgPressureZeroMa`. Measure them end to end: hold the loop at two or
+more currents across the span (the transducer at two pressures against a
+reference gauge, or a bench supply through a series resistor in place of
+the transducer, with the meter in series) and fit the slave's volts
+against the current. The slope is the effective resistance; the
+intercept, divided by it, corrects the zero. Read the capacitor across
+the shunt out of the circuit too: an electrolytic's leakage is a current
+the shunt does not see.
