@@ -40,11 +40,11 @@ These define the safe operating envelope of the machine.
 
 | Parameter | Default Value | Units | Description & Tuning Considerations |
 |---|---|---|---|
-| `G_cfgPosSoftLimitMax` | 305.0 | mm | Software-enforced maximum extension position. A `FAULT_POSITION` occurs if exceeded. |
+| `G_cfgPosSoftLimitMax` | 367.0 | mm | Software-enforced maximum extension position. A `FAULT_POSITION` occurs if exceeded. |
 | `G_cfgPosSoftLimitMin` | -2.5 | mm | Software-enforced minimum retraction position. It sits between position 0 (the homed retract endpoint) and the negative overtravel switch at `-G_cfgHomeLimRetractDist`; keep it bracketed by the two if `G_cfgHomeLimRetractDist` changes. A `FAULT_POSITION` occurs if exceeded. |
 | `G_cfgPosExitGuardMargin`| 20.0 | mm | Safety margin for the piston exit guard. The guard's torque/velocity danger-zone monitoring is active below `G_cfgPosCylinderEntry + G_cfgPosExitGuardMargin`. |
-| `G_cfgVelLimitMax` | 5.0 | mm/s | Absolute maximum velocity allowed in any mode. |
-| `G_cfgVelLimitNormal` | 5.0 | mm/s | The velocity limit used during standard Position Control mode. |
+| `G_cfgVelLimitMax` | 7.0 | mm/s | Absolute maximum velocity allowed in any mode. |
+| `G_cfgVelLimitNormal` | 6.0 | mm/s | The velocity limit used during standard Position Control mode. |
 | `G_cfgInMotionVelThreshold`| 0.1 | mm/s | The velocity above which the `G_doInMotion` output is considered active. **Tuning:** Increase if motor vibration at rest causes the flag to flicker. |
 
 ### Position Command Gate
@@ -54,7 +54,7 @@ Parameters for `fbPosGate` (`FB_PositionCommandGate`), which shapes the direct-c
 | Parameter | Default Value | Units | Description & Tuning Considerations |
 |---|---|---|---|
 | `G_cfgScanTime` | 0.002 | s | Cyclic task period (`LREAL`), used as `dt` by the position command gate and as the basis for the analog input filter's time-constant alpha. **Must equal the cyclic task interval set in the MotionWorks IEC task configuration** (2 ms is the MP2600iec minimum); a mismatch scales every commanded velocity and the filter time constant by the same ratio. |
-| `G_cfgPosGateAccelMax` | 5.0 | mm/s² | Acceleration limit applied to the gated position command. Conservative starting value — raise during commissioning once bench testing shows torque headroom. **Tuning:** This is the transparency knob for an incidental master ramp: the gate lags a ramp at velocity `v` by `v²/(2·A)`, e.g. 0.9 mm at 3 mm/s with `A` = 5 mm/s², vs. 0.09 mm with `A` = 50 mm/s². |
+| `G_cfgPosGateAccelMax` | 10.0 | mm/s² | Acceleration limit applied to the gated position command. Conservative starting value — raise during commissioning once bench testing shows torque headroom. **Tuning:** This is the transparency knob for an incidental master ramp: the gate lags a ramp at velocity `v` by `v²/(2·A)`, e.g. 0.9 mm at 3 mm/s with `A` = 5 mm/s², vs. 0.09 mm with `A` = 50 mm/s². |
 | `G_cfgDirectCtrlAccel` / `G_cfgDirectCtrlDecel` | 10.0 | mm/s² | Written to `Y_DirectControl`'s `Acceleration` input (the block has no decel input) in every direct-control state except pressure mode, which uses `G_cfgPressureAccel`. A velocity-step test on the machine (`bench/characterisation/README.md` section 7) found the velocity reference followed within 30 ms whatever the step, so in VelocityTLMode this value does not slew the command; confirm by repeating a step at 1 and at 100 mm/s². |
 | `G_cfgDirectCtrlFilterTime` | 0.05 | s | `Y_DirectControl`'s `FilterTimeConstant`, the block's own filter on the command it sends the drive, wired from `G_cmdDirectControl.FilterTimeConstant` (`docs/slave/ld/`). It is a lag inside the pressure loop, so it belongs with the loop's tuning; the same step test found no 50 ms lag in the velocity response, so which modes it acts on is to be established on the bench. |
 | `G_cfgPosGateMaxDeviation` | 2.0 | mm | Tether window: once the gated command leads `G_sysActualPosition` by this much in the direction of travel, the command holds until the axis catches up or the target reverses. **Tuning:** Must sit comfortably below the drive's `Pn520` excessive-deviation level so the tether acts first, and comfortably above normal following error. |
@@ -95,7 +95,7 @@ These parameters define the behavior of the homing (110) and Go Home (101) modes
 ### Mode 110: Home to Limit Switch
 | Parameter | Default Value | Units | Description & Tuning Considerations |
 |---|---|---|---|
-| `G_cfgHomeLimFastApproachVel` | 5.0 | mm/s | Coarse approach toward the negative overtravel switch. |
+| `G_cfgHomeLimFastApproachVel` | 6.0 | mm/s | Coarse approach toward the negative overtravel switch. |
 | `G_cfgHomeLimSlowApproachVel` | 1.0 | mm/s | Slow re-approach that captures the precise switch position. |
 | `G_cfgHomeLimBackoffVel` | 5.0 | mm/s | Velocity for the backoff between approaches and for the final retract. |
 | `G_cfgHomeLimRetractDist` | 5.0 | mm | Distance retracted from the precise switch position to the retract endpoint. The switch lands at `-G_cfgHomeLimRetractDist` in the homed frame. |
