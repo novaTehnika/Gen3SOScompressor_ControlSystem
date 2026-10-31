@@ -232,3 +232,69 @@ against the current. The slope is the effective resistance; the
 intercept, divided by it, corrects the zero. Read the capacitor across
 the shunt out of the circuit too: an electrolytic's leakage is a current
 the shunt does not see.
+
+**The chain against a current source** (2026-10-31). A bench supply as a
+current source in place of the transducer, the multimeter (Klein MM300)
+in series in the loop, the oscilloscope across the input pins, and the
+slave's volts in MotionWorks debug mode, shunt and capacitor in place:
+
+| Current (mA) | Oscilloscope (V) | Slave (V) |
+|---|---|---|
+| 0.136 | 0.061 to 0.065 | 0.063 |
+| 1.24 | 0.512 | 0.523 |
+| 2.66 | 1.12 | 1.128 |
+| 4.08 | 1.74 | 1.727 |
+| 5.50 | 2.33 | 2.326 |
+| 6.59 | 2.80 | 2.787 |
+| 7.87 | 3.36 | 3.328 |
+| 9.12 | 3.86 | 3.856 |
+| 10.74 | 4.56 | 4.538 |
+| 12.09 | 5.14 | 5.103 |
+| 13.79 | 5.88 | 5.822 |
+| 14.52 | 6.17 | 6.125 |
+| 15.61 | 6.64 | 6.582 |
+| 16.69 | 7.11 | 7.036 |
+| 17.78 | 7.60 | 7.494 |
+| 19.05 | 8.15 | 8.029 |
+| 19.61 | 8.33 | 8.262 |
+| 20.7 | 8.88 | 8.823 |
+| 21.0 | 9.04 | 8.980 |
+| 22.5 | 9.66 | 9.601 |
+| 23.1 | 9.90 | 9.840 |
+| 15.43 | 6.57 | 6.503 |
+| 9.09 | 3.84 | 3.836 |
+| 3.86 | 1.66 | 1.633 |
+| 2.05 | 0.877 | 0.870 |
+| 1.91 | 0.802 | 0.809 |
+| 1.51 | 0.640 | 0.643 |
+| 0.97 | 0.400 | 0.4153 |
+| 0.50 | 0.214 | 0.2120 |
+| 0.17 | 0.080 | 0.0786 |
+| 0.1574 | 0.071 | 0.06425 |
+| 0.0395 | 0.160 | 0.0144 |
+| 0.0016 | 0.002 | -0.0008 |
+
+Least squares over the 29 points below 20 mA: slave volts = 421.4 ohm x
+current + 5.0 mV, residual 4.3 mV rms (0.010 MPa), largest 7.7 mV. Up and
+down sweeps agree. The four points above 20 mA sit 5 ohm higher (1.2 %)
+with 0.1 mA resolution: the meter changed range there, so they are left
+out, and the step between ranges is a measure of the meter's own current
+accuracy. The effective resistance falls from 423 ohm at 4 mA to 421.3
+ohm at 19.6 mA (curvature of about 0.4 % over the span, 2.6 mV rms with a
+quadratic term), small beside that. The oscilloscope reads about 1 %
+above the slave and is not used.
+
+So the input sees 421.4 ohm per mA, not 434: 2.9 % low, consistent with
+the shunt in parallel with about 15 kohm (the input's impedance,
+specified above 10 kohm, and the capacitor's leakage together). With
+`G_cfgPressureShuntOhms` at 434 the slave reads
+
+  P_read = 0.971 x P_true - 0.104 MPa,
+
+that is, -0.10 MPa at zero, -0.40 MPa at 10 MPa and -0.57 MPa at 16 MPa,
+and the zero agrees with the vented transducer above (1.6865 V is
+4.002 mA on this line, against 3.98 mA on the meter). Setting
+`G_cfgPressureShuntOhms` to 421.4 with `G_cfgPressureZeroMa` at 4.0
+leaves +0.012 MPa from the intercept at every pressure, inside the
+meter's accuracy. The calibration is only as good as the meter's mA
+range; a loop calibrator would tighten it.
