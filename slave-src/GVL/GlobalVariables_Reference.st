@@ -211,7 +211,7 @@
         assumed chamber stiffness.
         ======================================================================== *)
 
-     G_cfgPressureShuntOhms      : LREAL := 434.0      (* Shunt across the loop (ohm) *)
+     G_cfgPressureShuntOhms      : LREAL := 421.4      (* Shunt across the loop (ohm) *)
      G_cfgPressureZeroMa         : LREAL := 4.0        (* Loop current at RangeMin (mA) *)
      G_cfgPressureSpanMa         : LREAL := 16.0       (* Loop current span (mA) *)
      G_cfgPressureRangeMin       : LREAL := 0.0        (* Pressure at ZeroMa (MPa gauge) *)
@@ -295,10 +295,10 @@
 
      (* Mode 101 - Go Home *)
      G_cfgGoHomePosition       : LREAL := 0.0         (* Target position for Go Home *)
-     G_cfgGoHomeVelocity       : LREAL := 5.0         (* Velocity for Go Home move *)
+     G_cfgGoHomeVelocity       : LREAL := 6.0         (* Velocity for Go Home move *)
      G_cfgGoHomeAccel          : LREAL := 5.0         (* Acceleration for Go Home move (mm/s²) *)
-     G_cfgGoHomeDecel          : LREAL := 5.0         (* Deceleration for Go Home move (mm/s²) *)
-     G_cfgGoHomeStopDecel      : LREAL := 5.0         (* Deceleration for MC_Stop commands (mm/s²) *)
+     G_cfgGoHomeDecel          : LREAL := 10.0         (* Deceleration for Go Home move (mm/s²) *)
+     G_cfgGoHomeStopDecel      : LREAL := 10.0         (* Deceleration for MC_Stop commands (mm/s²) *)
    END_VAR
 
 
