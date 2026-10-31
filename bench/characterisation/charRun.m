@@ -290,9 +290,12 @@ end
 fprintf('%d captures, exchange failures %d, probe failures %d, exchange p99 %.1f ms\n', ...
     numel(captures), exchangeFailures, probe.failures, prctileOf(runLog(:, 12), 99));
 readMs = runLog(:, 12) - writeMsLog(1:size(runLog, 1))';
-fprintf('exchange: write median %.1f ms, p99 %.1f; read median %.1f ms, p99 %.1f (the controller answers in 1 to 8 ms)\n', ...
-    median(writeMsLog, 'omitnan'), prctileOf(writeMsLog(~isnan(writeMsLog)), 99), ...
-    median(readMs, 'omitnan'), prctileOf(readMs(~isnan(readMs)), 99));
+w = writeMsLog(~isnan(writeMsLog));
+rd = readMs(~isnan(readMs));
+if ~isempty(w) && ~isempty(rd)
+    fprintf(['exchange: write median %.1f ms, p99 %.1f; read median %.1f ms, p99 %.1f ' ...
+        '(the controller answers in 1 to 8 ms)\n'], median(w), prctileOf(w, 99), median(rd), prctileOf(rd, 99));
+end
 fprintf('saved %s\n', fname);
 end
 
