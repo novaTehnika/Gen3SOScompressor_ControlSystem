@@ -71,6 +71,13 @@ addpath ../common
 r = charRun('label', path);              % see sections 3 to 5 for the paths
 ```
 
+A fault still latched from an earlier run is cleared by `charRun` with the
+operator reset before its first step. The protocol exchange takes 20 to
+100 ms on this link (the run prints any exchange over 150 ms and skips the
+probe transaction in that cycle); the slave's watchdog faults the run with
+`FAULT_COMM` (code 4) if the heartbeat stops for 300 ms, so a PC that
+stalls for that long, or a second Modbus client, ends the run.
+
 The run ends with the axis stopped, prints a table of the steps and saves
 `../common/captures/<label>_char_<timestamp>.csv` (columns as in
 `bench/common/README.md`) and one

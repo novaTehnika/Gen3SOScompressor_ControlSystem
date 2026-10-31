@@ -43,6 +43,13 @@ function r = charRun(label, path, opts)
 %   A velocity session is entered at rest and its first command sent once
 %   the mode runs, so the log shows every command as a step.
 %
+%   A fault latched on the slave when the run starts (the master reports
+%   status 10) is cleared once with the operator reset before the first
+%   step, as the app's Reset button would; a fault during the run stops
+%   it. An exchange slower than 150 ms is reported (the first three), and
+%   the probe is not polled in a cycle whose exchange was that slow, so
+%   that the heartbeat stays well inside the slave's 300 ms watchdog.
+%
 %   Guards, every master step: the run stops (MotionEnable low, mode 0) when
 %   the pressure exceeds opts.pressureStop, the position leaves
 %   [opts.posMin, opts.posStop], or the master reports a fault, link loss or
@@ -140,7 +147,10 @@ seq.tSub = 0;
 seq.armPending = false; % reference change waits one cycle for the probe arm
 seq.firstPending = false; % a velocity session's first command waits for the mode to run
 seq.xStart = NaN;       % position when a move step's command went out
+seq.resetSent = false;  % operator reset sent for a fault latched at the start
+seq.tFaultSeen = NaN;   % when that fault was first reported
 seq.abort = '';
+slowExchanges = 0;
 
 probe.enabled = opts.probe;
 probe.next = 'poll';
@@ -178,6 +188,12 @@ while true
         end
     end
     exchangeMs = toc(tx) * 1000;
+    if exchangeMs > 150
+        slowExchanges = slowExchanges + 1;
+        if slowExchanges <= 3
+            fprintf('  exchange took %.0f ms at %.2f s\n', exchangeMs, tNow);
+        end
+    end
     ref = modbusUnpack(mbWrite(map.hr.reference), mbWrite(map.hr.reference + 1));   % as sent this exchange
     [mbWrite, m] = stepMaster(mbRead, app, map, cfg);
 
@@ -205,7 +221,9 @@ while true
 
     % --- One probe transaction in the gap ----------------------------------
     if probe.enabled
-        [probe, captures] = probeSlot(probe, link, pr, captures, tNow);
+        if probe.enabled && exchangeMs <= 150
+            [probe, captures] = probeSlot(probe, link, pr, captures, tNow);
+        end
     end
 
     % --- Second master step of the cycle, registers held -------------------
@@ -303,6 +321,8 @@ function C = codes()
 C.OP_STOP = 0; C.OP_POSITION = 2; C.OP_JOG = 3; C.OP_PRESSURE = 4;
 C.STATUS_IDLE = 0; C.STATUS_POS_AT_TARGET = 3; C.STATUS_JOG = 4; C.STATUS_PRESSURE = 5;
 C.STATUS_LINK_WAIT = 35;
+C.STATUS_FAULT = 10;
+C.OP_RESET = 5;
 C.abortStatus = [10 30 32 33 34];       % fault, no confirm, reset failed, stop timeout, link lost
 C.ST_IDLE = 1;
 end
@@ -338,6 +358,25 @@ function [seq, app] = sequence(seq, app, m, steps, tNow, probe, C, cfg)
 seq.armRequest = false;
 inPhase = tNow - seq.tPhase;
 
+if strcmp(seq.phase, 'wait') && m.statusCode == C.STATUS_FAULT && ~seq.resetSent
+    % A fault latched before the run: clear it as the operator would. The
+    % master acts on the reset only once the slave has mirrored the fault
+    % code for tMirrorStable, so the command waits for the mirror.
+    if isnan(seq.tFaultSeen)
+        seq.tFaultSeen = tNow;
+        fprintf('  fault %d latched on the slave: sending the operator reset\n', m.faultCode);
+    elseif tNow - seq.tFaultSeen >= cfg.tMirrorStable + 0.3
+        app.op = C.OP_RESET;
+        app.cmdSeq = app.cmdSeq + 1;
+        seq.resetSent = true;
+        seq.tPhase = tNow;
+    end
+    return;
+end
+if strcmp(seq.phase, 'wait') && seq.resetSent && m.statusCode == C.STATUS_FAULT && ...
+        inPhase <= cfg.tResetMax + 1
+    return;                     % the reset is under way
+end
 if any(m.statusCode == C.abortStatus) && ~strcmp(seq.phase, 'finish')
     seq.abort = sprintf('master status %d during step %d, phase %s', ...
         m.statusCode, seq.idx, seq.phase);

@@ -70,6 +70,15 @@ end
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'common'));
 cfg = charConfig();
+known = {'levels_MPa', 'speeds', 'budget_MPa', 'rampSpeed', 'hold_s', 'pause_s', 'T0_s', ...
+    'D_mm_s2', 'minRun_mm', 'fillVolume_mL', 'chargeRatio', 'K_Pa', 'C_hose_m3_Pa', ...
+    'stiffness', 'pressureStop', 'deadVolume_mL', 'posStop', 'quiet'};
+given = fieldnames(opts);
+unknown = given(~ismember(given, known));
+if ~isempty(unknown)
+    error('charStopPath:option', 'unknown option %s (the names are case-sensitive: %s)', ...
+        strjoin(unknown, ', '), strjoin(known, ', '));
+end
 opts = withDefault(opts, 'levels_MPa', [2 4 6 8 10]);
 opts = withDefault(opts, 'speeds', [1 2 5 7]);
 opts = withDefault(opts, 'budget_MPa', []);

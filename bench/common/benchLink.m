@@ -18,7 +18,11 @@ if nargin < 3
     port = bcfg.port;
     serverId = bcfg.serverId;
 end
-t = tcpclient(address, port, 'Timeout', 0.5);
+% Without a transfer delay each request leaves at once; with Nagle's
+% algorithm on, a request can wait for the acknowledgement of the one
+% before it, which on this link showed as tens of milliseconds a
+% transaction.
+t = tcpclient(address, port, 'Timeout', 0.5, 'EnableTransferDelay', false);
 uid = uint8(serverId);
 link.t = t;
 link.read = @(start, n) rawTxn(t, uid, [4, u16(start - 1), u16(n)], 4, n);

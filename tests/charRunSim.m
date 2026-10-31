@@ -183,6 +183,19 @@ S = fakeProbeLink('state');
 assert(S.sl.ax.x < opts.posStop + 1 && S.sl.ax.v == 0);
 fprintf('ok  pressure and position guards stop the run\n');
 
+% A fault latched before the run is cleared with the operator reset and
+% the run goes on; the drive's own fault is gone before the master is up.
+opts = linkOpts(saveDir, 240);
+fakeProbeLink('faultAt', 0.02, 0.08);
+r = charRun('simlatched', {{'jog', 1, 3}}, opts);
+assert(isempty(r.abort), 'latched fault not cleared: %s', r.abort);
+L = r.runLog;
+assert(any(L(:, STATUS) == 10) && any(L(:, STATUS) == 9) && any(L(:, STEP) == 1 & L(:, STATUS) == 4), ...
+    'reset not seen in the log');
+S = fakeProbeLink('state');
+assert(S.sl.ax.x > 241, 'jog did not run after the reset');
+fprintf('ok  latched fault cleared by the operator reset before the run\n');
+
 % A drive fault ends the run with the stop sent.
 opts = linkOpts(saveDir, 240);
 fakeProbeLink('faultAt', 4);
