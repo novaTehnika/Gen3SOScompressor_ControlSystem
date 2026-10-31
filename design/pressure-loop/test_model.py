@@ -77,9 +77,9 @@ def check_config():
     c = slave_config()
     assert c['G_cfgPressureSensorFaultTime'] == 0.1, \
         c['G_cfgPressureSensorFaultTime']
-    assert c['G_cfgScanTime'] == 0.002 and c['G_cfgAnalogMedianSize'] == 5
+    assert c['G_cfgScanTime'] == 0.004 and c['G_cfgAnalogMedianSize'] == 5
     par = Params()
-    assert (par.Ts == 0.002 and par.vmax == 5e-3 and par.medN == 5
+    assert (par.Ts == 0.004 and par.vmax == 5e-3 and par.medN == 5
             and par.tauF == 0.02
             and par.cfg()['G_cfgPressureStopVelMin'] == 2.0)
     q = par.with_(G_cfgPressureKp=2.0, K=2e9)
@@ -135,7 +135,7 @@ def check_conservation():
     plant = Plant(par, sc, 'V', accel=1.0, decel=1.0)
     n0 = plant.y[iy_ntot]
     worst = 0.0
-    for k in range(3000):                   # 6 s at 3 mm/s
+    for k in range(round(6 / par.Ts)):      # 6 s at 3 mm/s
         plant.scan(3e-3, 0.0)
         worst = max(worst, abs(plant.volume_closure()))
     assert worst < 1e-8, worst
@@ -153,7 +153,7 @@ def check_conservation():
     nd0 = plant.y[iy_ndis]
     Q_int = 0.0                             # [m^3] outflow volume
     worst = 0.0
-    for k in range(2000):                   # 4 s of 1 mL/s outflow
+    for k in range(round(4 / par.Ts)):      # 4 s of 1 mL/s outflow
         plant.scan(1e-6 / par.A, valve=1.0)  # piston follows the flow
         Q_int += 1e-6 * par.Ts
         worst = max(worst, abs(plant.volume_closure()))
@@ -174,7 +174,7 @@ def check_conservation():
     # not close under outflow.
     q = par.legacy()
     plant, _ = liquid_plant(q, Qf=1e-6)
-    for k in range(2000):
+    for k in range(round(4 / par.Ts)):      # 4 s
         plant.scan(1e-3, valve=1.0)
     assert (plant.y[iy_Vl] == q.Vl0
             and abs(plant.volume_closure()) > 1e-6 * 0.5)
@@ -271,7 +271,7 @@ def check_throttled_opening():
                                 Topen_prox=0.5)
         p = Plant(q, s, 'V', accel=1.0, decel=1.0)
         worst, t_join = 0.0, None
-        for k in range(30000):                  # up to 60 s
+        for k in range(round(60 / q.Ts)):       # up to 60 s
             t = k * q.Ts
             p.scan(0.0, 0.0, 0.0, s.prox(t))
             worst = max(worst, abs(p.volume_closure()))
@@ -323,7 +323,7 @@ def check_solver():
                                 ctl.SlaveController())
         # The delivery is compared only while the loop holds; the
         # emptying chamber takes the GVL loop unstable near the end.
-        n = min(len(r['euler'].P), len(r['heun'].P), round(40 / 0.002))
+        n = min(len(r['euler'].P), len(r['heun'].P), round(40 / par.Ts))
         dP = np.abs(r['euler'].P[:n] - r['heun'].P[:n]).max()  # [Pa]
         worst[name] = dP
         assert dP < 0.05e6, (name, dP)
@@ -346,7 +346,9 @@ def check_actuators():
         seen.append(plant.v_ref)
     seen = np.array(seen)
     up = (seen[100] - seen[50]) / (50 * par.Ts)             # [m/s^2]
-    dn = (seen[520] - seen[510]) / (10 * par.Ts)            # [m/s^2]
+    # The 5 mm/s drop at 100 mm/s^2 lasts 50 ms, 12.5 scans: the
+    # window stays inside it
+    dn = (seen[508] - seen[502]) / (6 * par.Ts)             # [m/s^2]
     assert abs(up - 0.010) < 1e-4 and abs(dn + 0.100) < 1e-3, (up, dn)
     ok(f'velocity command slews at accel {up * 1e3:.1f} mm/s^2 up and '
        f'decel {-dn * 1e3:.1f} mm/s^2 down')
@@ -361,16 +363,16 @@ def check_actuators():
         seen.append(plant.v)
     assert all(v == 0.0 for v in seen[:5 + n_dead])
     assert seen[5 + n_dead] > 0
-    settle = seen[5 + n_dead + 4]           # 4 scans = 8 ms after start
+    settle = seen[5 + n_dead + 4]           # 4 scans = 16 ms after start
     assert 0.5 * 0.002 < settle < 0.8 * 0.002, settle
     ok(f'velocity command acts after {n_dead} scans of dead time and '
-       f'reaches {settle / 0.002 * 100:.0f} % in 8 ms (tauV '
+       f'reaches {settle / 0.002 * 100:.0f} % in 16 ms (tauV '
        f'{par.tauV * 1e3:.1f} ms)')
 
     # Stall at the torque limit, eq. (13), with the load-dependent and
     # Coulomb friction
     plant = Plant(par, sc, 'V')
-    for k in range(600):
+    for k in range(round(1.2 / par.Ts)):    # 1.2 s
         plant.scan(0.005)
     P_stall = (par.Fcap - par.Fc) / (par.A * (1 + par.mu))
     assert abs(plant.P - P_stall) / plant.P < 0.03 and plant.v == 0.0
@@ -381,7 +383,7 @@ def check_actuators():
     # the friction dead band (Fc + mu P A)
     plant = Plant(par, sc, 'T')
     F = par.A * 10e6 * (1 + par.mu) + 2000.0
-    for k in range(3000):
+    for k in range(round(6 / par.Ts)):      # 6 s
         plant.scan(F)
     P_balance = (F - 2000.0) / (par.A * (1 + par.mu))
     band = (par.Fc + par.mu * P_balance * par.A) / par.A
@@ -395,7 +397,7 @@ def check_actuators():
 def check_sensor():
     par = Params().with_(noise=0.0)
     cfg = par.cfg()
-    assert abs(filter_alpha(cfg) - 0.002 / 0.022) < 1e-15
+    assert abs(filter_alpha(cfg) - 0.004 / 0.024) < 1e-15
     assert filter_alpha(par.cfg(G_cfgAnalogFilterTimeConst=0.0)) == 1.0
 
     # Without noise, the slave chain equals the legacy chain two scans
@@ -534,8 +536,10 @@ def check_scheduled():
 
 def check_legacy_reference():
     # Reference values for this case without noise or transducer offset,
-    # computed with Heun at nsub = 5 and the measured plant parameters
-    par = Params().legacy().with_(noise=0.0, P_offset=0.0)
+    # computed with Heun at nsub = 5, a 2 ms scan and a drive lag of
+    # 8.7 ms; the case pins both so that it guards the earlier model
+    par = Params().legacy().with_(noise=0.0, P_offset=0.0,
+                                  G_cfgScanTime=0.002, tauV=0.0087)
     c = ctl.LegacyController('ref', 'V', 0.5, 0.2, 0, True, 50e-3)
     r = sim.run(par, scenarios.stiffstep(par), c, legacy_sensor=True)
     assert (abs(r['overshoot'] - 0.1662) < 1e-4

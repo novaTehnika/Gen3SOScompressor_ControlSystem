@@ -161,7 +161,7 @@ fill loop by a copy of the whole window in one scan, and keep any new probe
 channel inside the record, whose layout is defined only in `FB_Probe.st`
 (the master decoder is `benchProbe.m`).
 
-The block is written so that `tools/st2m.py` and `tools/st2py.py` translate it
+The block is written so that `tools/st_translate.py` translates it for the m and py targets
 and the simulator runs the source: it reads no `G_*` variable (the caller
 passes the channels and the probe's holding registers as inputs). It fills
 the window in its own output array `Stage`, which `PRG_Main` copies to

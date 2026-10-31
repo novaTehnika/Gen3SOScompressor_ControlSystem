@@ -237,14 +237,14 @@ from standing.
 
 ### 4.5 Velocity steps at the scan rate
 
-The 50 ms log cannot show the drive's velocity-loop lag (`tauV`, 20 ms in
+The 50 ms log cannot show the drive's velocity-loop lag (`tauV`, 18 ms in
 the model), a breakaway shorter than one exchange, or the torque ripple
 at the motor turn. The slave's step probe (`FB_Probe`, part of the main
-program) records every scan (2 ms) into a ring of 8192 records of the
+program) records every scan (4 ms) into a ring of 8192 records of the
 commanded velocity, the actual velocity, the torque, the position, the
 chamber pressure, the raw pressure input and a status word. The run writes an arm
 register before each change it wants to see, `benchProbe` takes the
-500 records from the arm's mark (1 s at 2 ms) through a 13-record window
+500 records from the arm's mark (2 s at 4 ms) through a 13-record window
 in the gaps between exchanges, and the rest are read after the last step
 (`bench/common/README.md`, "The step probe"). The pressure channel serves
 the characterisation bench, which reads the lag at the piston from it
@@ -430,6 +430,18 @@ deliveries should lie on one line in `F - P A` against `P A`.
   breakaway, which removes it, for loaded starts.
 
 ## 8. Results
+
+Velocity steps of 26 October (`s1_cap_steps_*`, `s2_cap_steps_*`, 74
+captures, 55 of them taken while moving), fitted with
+`stepResponseFit(files, struct('accel', 1e4, 'decel', 1e4))`. The files
+carry a `t` column written at 2 ms per row; the scan was 4 ms, and
+`stepResponseFit` takes the row spacing from `G_cfgScanTime`
+(`opts.rowPeriod_s` overrides it). The grid search gives tauV 16.0 ms
+after a 28 ms delay (4 ms grid) and the model-free tracking lag at
+mid-step is 40 ms. `charDriveLag` on the same files, by least squares
+from several starting delays, gives 18.2 ms after 22.8 ms; the two agree
+on the sum to within the delay grid (44 and 41 ms). With the time column
+as written the same files fit to half these values.
 
 | Label | Condition | Fc (N) | b (N s/m) | Fs, vs | mu | Breakaway (N) | tauV (ms) | Notes |
 |-------|-----------|--------|-----------|--------|----|---------------|-----------|-------|

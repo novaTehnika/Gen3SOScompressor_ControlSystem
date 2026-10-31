@@ -2,7 +2,7 @@ function runAll(varargin)
 %RUNALL  Regenerate the simulated slave and run every MATLAB/Octave test.
 %
 %   runAll            regenerates slave-sim/generated from slave-src with
-%                     tools/st2m.py, then runs each test in order and
+%                     tools/st_translate.py, then runs each test in order and
 %                     stops at the first failure.
 %   runAll('nogen')   skips the regeneration (the generated files must
 %                     already exist).
@@ -15,7 +15,7 @@ function runAll(varargin)
 %
 %   or, in an open MATLAB session, cd to tests and type runAll.
 %
-%   The Python tests (st2pyParity and design/pressure-loop) are run by
+%   The Python tests (stTargetParity and design/pressure-loop) are run by
 %   tests/run_all.sh, which calls this function for the MATLAB side.
 
 root = fileparts(fileparts(mfilename('fullpath')));
@@ -42,14 +42,14 @@ end
 
 
 function generate(root)
-% Run tools/st2m.py with the first Python interpreter found: python3 on
+% Run tools/st_translate.py with the first Python interpreter found: python3 on
 % Linux and macOS, python or the py launcher on Windows.
 cmds = {'python3', 'python', 'py -3'};
-script = fullfile(root, 'tools', 'st2m.py');
+script = fullfile(root, 'tools', 'st_translate.py');
 src = fullfile(root, 'slave-src');
 dst = fullfile(root, 'slave-sim', 'generated');
 for k = 1:numel(cmds)
-    cmd = sprintf('%s "%s" "%s" "%s"', cmds{k}, script, src, dst);
+    cmd = sprintf('%s "%s" --target m "%s" "%s"', cmds{k}, script, src, dst);
     [status, out] = system(cmd);
     if status == 0
         fprintf('%s', out);
@@ -57,7 +57,7 @@ for k = 1:numel(cmds)
     end
 end
 error('runAll:generate', ...
-      ['could not run tools/st2m.py with python3, python or py; ' ...
+      ['could not run tools/st_translate.py with python3, python or py; ' ...
        'install Python 3 or call runAll(''nogen'') with the generated ' ...
        'files in place']);
 end

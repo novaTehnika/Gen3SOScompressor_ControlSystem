@@ -54,7 +54,7 @@ Source: [Real-Time Execution in Connected IO Mode](https://www.mathworks.com/hel
 The MP2600iec has **two 100 Mbps Ethernet ports** supporting Modbus/TCP,
 EtherNet/IP and OPC
 ([Yaskawa MP2600iec](https://www.yaskawa.com/products/motion/machine-controllers/mpiec-series/mp2600iec)).
-The application runs in a 2 ms cyclic task (see
+The application runs in a 4 ms cyclic task (see
 [HardwareConfiguration.md](../slave/HardwareConfiguration.md)).
 
 ### Physical link
@@ -82,8 +82,8 @@ p. 305, `docs/external/MotionWorks_IEC_Toolbox_Manual.pdf`):
    slave (server).
 2. Optionally check *use %M for bidirectional Holding Registers*.
 3. Select **Set all outputs off when PLC stops**.
-4. **IO Task Assignment**: assign the four server blocks to the task that runs
-   `PRG_Main`, so the data updates in step with the scan. MotionWorks IEC 3
+4. **IO Task Assignment**: assign the four server blocks to the 4 ms task that
+   runs `PRG_Main`, so the data updates in step with the scan. MotionWorks IEC 3
    Express has only that one task, so there is no slower task to assign
    them to.
 5. Save the configuration and cycle power. Four Modbus groups are created in the
@@ -186,8 +186,8 @@ Limits and known issues (MotionWorks IEC 2.1.0 release notes, RN.MWIEC.14):
   - The manual recommends running communication function blocks in slower tasks
     (about 4–50 ms, or the DEFAULT task) to avoid the PLC watchdog. MotionWorks
     IEC 3 Express has a single task, so they would run in the control task
-    and its scan time.
-- Socket code would sit in a POU that `tools/st2m.py` does not translate, and
+    and its 4 ms scan time.
+- Socket code would sit in a POU that `tools/st_translate.py` does not translate, and
   exchange data with `PRG_Main` through global structs, in the same way as the
   Ladder Diagram motion POU.
 

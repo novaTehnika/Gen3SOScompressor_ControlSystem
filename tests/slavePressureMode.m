@@ -5,7 +5,7 @@ function slavePressureMode()
 %   through an outflow disturbance, clamp an excessive target, leave the
 %   mode, and fault on a broken transducer loop only while the loop is
 %   closed on it.
-%   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
+%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
 %     addpath slave-sim slave-sim/generated tests
 %   Depends on: slave-src slave-sim tools
 
@@ -170,7 +170,7 @@ end
 
 
 function h = runUntil(h, T, done)
-% The master's heartbeat advances every 25 ms; the slave scans every 2 ms.
+% The master's heartbeat advances every 25 ms; the slave scans every 4 ms.
 dt = h.sl.G.G_cfgScanTime;
 for k = 1:round(T / dt)
     h.t = h.t + dt;

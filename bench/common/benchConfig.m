@@ -12,7 +12,7 @@ here = fileparts(mfilename('fullpath'));
 cfg.address   = '192.168.1.1';
 cfg.port      = 502;
 cfg.serverId  = 1;
-cfg.slaveScan = 0.002;            % s, cyclic task interval (G_cfgScanTime)
+cfg.slaveScan = 0.004;            % s, cyclic task interval (G_cfgScanTime)
 
 % Where the run scripts write their logs and captures (gitignored), and
 % the Desktop Real-Time model that holds the safety relay while a script
@@ -46,7 +46,7 @@ cfg.probe.off.xfer      = 122;  % E_ProbeXferState code, IR522
 cfg.probe.off.faultMark = 123;  % FaultMark (2 words), IR523-524
 cfg.probe.nWindowWords = 104;   % registers of the window (13 records of 8 words)
 cfg.probe.nWords    = 8;        % words per record the decoder knows: vCmd vel torque posLo posHi pressure raw status
-cfg.probe.nScan     = 500;      % records per capture by default (1 s at the 2 ms scan)
+cfg.probe.nScan     = 500;      % records per capture by default (2 s at the 4 ms scan)
 cfg.probe.nPre      = 0;        % records taken before the arm's mark
 cfg.probe.velScale  = 1000;     % counts per mm/s
 cfg.probe.trqScale  = 100;      % counts per % rated

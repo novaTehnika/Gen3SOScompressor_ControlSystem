@@ -32,7 +32,7 @@ tests/pressureNoiseRunSim.m
 tests/benchProbeSim.m
 design/pressure-loop/test_model.py
 design/pressure-loop/test_robust.py
-tests/st2pyParity.py
+tests/stTargetParity.py
 design/pressure-loop/test_linear.py
 tests/smokeMasterStateMachine.m
 "
@@ -82,8 +82,8 @@ else
     done
 fi
 
-python3 tools/st2m.py slave-src slave-sim/generated
-python3 tools/st2py.py slave-src design/generated
+python3 tools/st_translate.py --target m slave-src slave-sim/generated
+python3 tools/st_translate.py --target py slave-src design/generated
 mkdir -p "$CACHE"
 
 # Hash of a test's inputs. Generated directories are left out: they are

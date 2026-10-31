@@ -103,6 +103,6 @@ E-STOP (`StatusCode` 20); pressing it then releases E-STOP.
 ## Testing without MATLAB
 
 `tests/run_all.sh` (repository root) needs `python3` and `octave-cli`. It
-translates `slave-src` into a simulated slave with `tools/st2m.py` and runs the
+translates `slave-src` into a simulated slave with `tools/st_translate.py` and runs the
 master logic against it in closed loop. The Simulink shell and the app are not
 covered; they can only be exercised on the lab PC.

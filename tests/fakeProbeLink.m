@@ -115,7 +115,7 @@ switch cmd
             elseif S.tick / 1000 >= S.faultUntil
                 S.sl.hook.driveFault = false;
             end
-            if mod(S.tick, 2) == 0
+            if mod(S.tick, round(1000 * S.sl.G.G_cfgScanTime)) == 0
                 if ~isempty(S.torque)
                     S = torqueScan(S);
                 end

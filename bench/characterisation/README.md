@@ -12,7 +12,7 @@ but test 4 below gives friction points under load from the same run.
 
 Everything is measured through the protocol the master already uses: the
 slave reports position, velocity, torque and pressure in IR11-20 every 50 ms
-(`docs/master/ModbusRegisterMap.md`). The drive lag alone needs the 2 ms
+(`docs/master/ModbusRegisterMap.md`). The drive lag alone needs the 4 ms
 scan, which the slave's step probe (`slave-src/FB/FB_Probe.st`, read by
 `bench/common/benchProbe.m`) provides. Nothing in `slave-src/` changes for
 the bench: the probe is part of the main program.
@@ -337,7 +337,7 @@ change) and passed through the slave's median filter (two scans for a
 smooth signal), the low-pass (`G_cfgAnalogFilterTimeConst`, 20 ms on the
 machine, 50 ms earlier) and the two-scan pipeline, eqs. 16 to 18. The
 filter constant must be the one loaded. The result is the lag at the
-piston plus its dead time, at the 2 ms scan: behind the sensor chain the
+piston plus its dead time, at the 4 ms scan: behind the sensor chain the
 two trade against each other, so the fit determines their sum, which is
 also the value a model without a dead time needs. The 50 ms log is fitted
 the same way as a check, to about 25 ms; the `ramp` starts of test 1 are
@@ -354,8 +354,8 @@ residual, and the model-free times at which the feedback reaches 10 % and
 **Expected values.** The design study assumed 20 ms and studied 5 to
 50 ms. A Sigma-7 velocity loop tuned for this load is typically 10 to
 30 ms; the dead time between `G_sysCommandedVelocity` and the feedback is
-two to four scans (Mechatrolink out and back, plus the task order) and
-should be below 20 ms. The closed-chamber value (at the piston) can exceed
+two to eight scans of 4 ms (Mechatrolink out and back, plus the task order)
+and should be below 30 ms. The closed-chamber value (at the piston) can exceed
 the open-chamber lag plus dead time when the chamber is stiff; a
 difference of more than a few milliseconds is worth carrying into the
 model as tauV. Accept a capture
@@ -450,7 +450,7 @@ per level with T0 held, which shows the load dependence. Every stop is
 compared with the slave's allowance at the configured D and lag; the law
 is conservative where the measured travel is below it.
 
-**Expected values.** With the drive following the command in about 30 ms
+**Expected values.** With the drive following the command in about 60 ms
 (test 3), a stop from 5 mm/s should take 0.1 to 0.2 mm in compression,
 where the pressure force helps, and more on the return, where the drive
 brakes against it with the torque left after holding the load (34 kN at
@@ -490,6 +490,14 @@ and the master's `deadVolume` can be corrected.
 
 ## 8. Results
 
+**The scan was 4 ms, not 2**, on the 26th and since: the task was set to 2 ms but
+the program takes about 2.5 ms a scan, so it ran on every second motion cycle
+(the probe captures show 4.00 ms per row from the position advance against the
+velocity, and the slave's scan counter advances 250 times a second). The capture
+files of the 26th carry a 2 ms time column, which the fits replace by the scan
+(`opts.rowPeriod_s`, default `G_cfgScanTime`). The task and `G_cfgScanTime` are
+now 4 ms on the controller and in the reference.
+
 Logs of 2026-10-26 (`bench/captures/`), fitted with the scripts of this
 bench, with a dead volume of 50 mL (the passages with the fittings of
 those runs) and the fill from the geometry. The logs were recorded with `G_cfgPressureShuntOhms`
@@ -508,9 +516,9 @@ values as fitted until the tests are repeated with the calibrated input.
 | K, chamber closed off from the hose (proximal valve shut) | 0.72 GPa, segments 0.67 to 0.78; stiffness 7.2 MPa/mm at 343 mL | `K300_char` x3 at 280 mm, 19:26 to 19:30 | Below the 1 GPa assumed. Up and down agree to 0.2 %, but the curvature gives a gas-like term of up to 0.65 mL, 23 % of the compliance, so the liquid-only K is not pinned: gas-corrected, 0.81 GPa. Purge longer (section 2 step 4) and weigh the fill. |
 | Discharge hose open (3 ft of 1/4 in R7 hose, 29 mL, to the orifice tube) | stiffness 5.2 MPa/mm with 305 mL of liquid; as an effective K, 0.46 GPa | `K300_char` at 299 mm, 19:36 | The hose adds about 0.24 mL/MPa of compliance beyond its own liquid (2.4 mL per 10 MPa): its wall stretching and any air it holds, the latter being what the curvature's gas term of up to 1.1 mL in this run points at. This is the chamber the delivery sees. |
 | Cd | 0.85 (0.84 to 0.87 over 1.6 to 8.3 MPa), exponent 0.48; Q = 4.8 mL/s at 10 MPa, piston 1.42 mm/s | `d2`, `d5`, `d10` deliveries and `Q10_char` x2 | With the transducer zero of -0.11 MPa corrected (`pressureOffset`). Above the 0.7 assumed: deliveries run 20 % faster than the model. The loop held 8.1 MPa for a 10 MPa target, the steady error the design study predicted. |
-| tauV at the motor | 8.7 +/- 0.5 ms lag after 12 +/- 0.6 ms dead time, the same for 0.3, 1 and 2.5 mm/s steps, up and down | `s1`, `s2` step captures, 74 | **The command is not slewed at `G_cfgDirectCtrlAccel`**: a 2.5 mm/s step is complete in 30 ms, as is a 0.3 mm/s step, so the drive follows the command at whatever rate it needs (36 mm/s^2 for a 1 mm/s step, 90 for 2.5) with a 2 to 5 % overshoot. Fit with `opts.accel` large (1e4); with the GVL slew the model cannot follow and reports a lag near zero. |
+| tauV at the motor | 18.2 +/- 0.03 ms lag after 22.8 +/- 0.02 ms dead time (sum 41 ms), the same for 0.3, 1 and 2.5 mm/s steps, up and down; `stepResponseFit`'s grid gives 16 ms after 28 ms | `s1`, `s2` step captures, 74 | **The command is not slewed at `G_cfgDirectCtrlAccel`**: a 2.5 mm/s step is complete in 60 ms, as is a 0.3 mm/s step, so the drive follows the command at whatever rate it needs (18 mm/s^2 for a 1 mm/s step, 45 for 2.5) with a 2 to 5 % overshoot. Fit with `opts.accel` large (1e4) and the 4 ms row spacing, from several starting dead times; with the GVL slew the model cannot follow and reports a lag near zero. |
 | tauV at the piston | not resolved (below 25 ms) | `lag_wet_char` 50 ms logs, 5 steps at 8.6 to 10 MPa/mm | No captures were taken in these runs (`opts.probe` off, probe without the pressure array). Repeat with the reloaded probe. |
-| Stopping distance under load (test 4) | 0.031 s × v in both directions, 2 to 10 MPa, 1 to 6 mm/s, residual 4 µm; no deceleration term resolvable (the drive stops within a scan or two once it acts) and no travel after rest | `stops_char_20261030_232726` (16 stops, 25 ms cycles) | The slave's allowance v·0.05 s + v²/(2·50 mm/s²) is above every stop, by 3 to 4 times at 5 mm/s. The 31 ms is the drive's 12 ms dead time and 8.7 ms lag plus the slave's command pipeline and Modbus tick, the components the design model's lag already carries. Two later runs with 90 ms cycles (the probe's register group mapped) do not resolve the stops. |
+| Stopping distance under load (test 4) | 0.031 s × v in both directions, 2 to 10 MPa, 1 to 6 mm/s, residual 4 µm; no deceleration term resolvable (the drive stops within a scan or two once it acts) and no travel after rest | `stops_char_20261030_232726` (16 stops, 25 ms cycles) | The slave's allowance v·0.05 s + v²/(2·50 mm/s²) is above every stop, by 3 to 4 times at 5 mm/s. The 31 ms is 10 ms less than the drive's 22.8 ms dead time and 18.2 ms lag of the velocity steps, so the stop is not explained by the step response plus the command pipeline and Modbus tick; the stop reaches rest earlier than a first-order lag after a dead time would, and the difference is not resolved. Two later runs with 90 ms cycles (the probe's register group mapped) do not resolve the stops. |
 
 **Two dead volumes.** The proximal valve at the cylinder head is shut
 during compression and mixing and open during the delivery, so the

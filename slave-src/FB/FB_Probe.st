@@ -6,7 +6,7 @@
 
    Description:
    Every scan the block appends one record to a ring buffer in plain memory.
-   The ring holds the last 8192 records (16 s at the 2 ms scan). The master
+   The ring holds the last 8192 records (33 s at the 4 ms scan). The master
    takes records out through a window of 13 records in the input registers:
    it writes the index of the first record it wants and reads the window,
    the counters and a copy of the window's start index in one FC#04 read.

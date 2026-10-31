@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Parity of tools/st2py.py against tools/st2m.py.
+"""Parity of the py target of tools/st_translate.py against the m target.
 
-    python3 tests/st2pyParity.py          (from anywhere; needs python3 and octave-cli)
+    python3 tests/stTargetParity.py          (from anywhere; needs python3 and octave-cli)
 
 Regenerates both translations into temporary directories, then drives every
 function block whose inputs are all scalars with one seeded random input
@@ -22,7 +22,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'tools'))
-import st2m  # noqa: E402
+import st_translate as stt  # noqa: E402
 
 STEPS = 3000                # calls for the blocks named in CORE, STEPS_OTHER for the rest
 STEPS_OTHER = 800
@@ -49,7 +49,7 @@ INT_CHOICES = {'ReqLo': [0, 1, 50, 3000, 8100, 9000, 20000, 65535],
 
 PARAM_EDGES = [0.0, -1.0, 1e-9, 1e6]
 TIME_POOL = [0.0, 0.002, 0.01, 0.05, 0.5]
-SCALAR = st2m.NUM_TYPES | {'BOOL', 'TIME'}
+SCALAR = stt.NUM_TYPES | {'BOOL', 'TIME'}
 SIGNED = {'INT', 'DINT', 'SINT'}
 
 
@@ -90,7 +90,7 @@ def make_inputs(rng, inputs, ctx, steps, block=''):
             elif typ in ctx['enums']:
                 if rng.random() < 0.1:
                     state[n] = float(rng.randrange(len(ctx['enums'][typ])))
-            elif typ in st2m.INT_TYPES:
+            elif typ in stt.INT_TYPES:
                 if rng.random() < (0.3 if n in INT_CHOICES else 0.05):
                     default = [0, 1, 2, 3, 4, 5, 7] + ([-1] if typ in SIGNED else [])
                     state[n] = float(rng.choice(INT_CHOICES.get(n, default)))
@@ -105,11 +105,11 @@ def make_inputs(rng, inputs, ctx, steps, block=''):
     return rows
 
 
-FLAT_M = '''function out = st2py_flat(x, big)
+FLAT_M = '''function out = st_parity_flat(x, big)
 if isstruct(x)
     out = [];
     for k = sort(fieldnames(x))'
-        out = [out, st2py_flat(x.(k{1}), big)]; %#ok<AGROW>
+        out = [out, st_parity_flat(x.(k{1}), big)]; %#ok<AGROW>
     end
 elseif (numel(x) > @BIG@) == big
     out = double(x(:))';
@@ -126,15 +126,15 @@ def driver(name, inputs, decls, init_tail):
     fixes = ''
     for d in decls:        # arrays start as a scalar in the generated init; size them
         if d['type'].startswith('ARRAY'):
-            lo, hi = map(int, st2m.re.findall(r'\d+', d['type'])[:2])
+            lo, hi = map(int, stt.re.findall(r'\d+', d['type'])[:2])
             fixes += f"s.{d['name']} = zeros(1, {hi - lo + 1});\n"
-    return f'''function st2py_drv_{name}(inCsv, outCsv)
+    return f'''function st_parity_drv_{name}(inCsv, outCsv)
 E = ST_enums();
 s = init_{name}(E);
 {fixes}names = {{{names}}};
 isbool = [{isbool}];
 M = dlmread(inCsv, ',');
-f0 = st2py_flat(s, false);
+f0 = st_parity_flat(s, false);
 out = zeros(rows(M) + 1, numel(f0));
 out(1, :) = f0;
 for k = 1:rows(M)
@@ -146,10 +146,10 @@ for k = 1:rows(M)
         end
     end
     s = {name}(s, E, M(k, 1));
-    out(k + 1, :) = st2py_flat(s, false);
+    out(k + 1, :) = st_parity_flat(s, false);
 end
 dlmwrite(outCsv, out, 'precision', '%.17g');
-dlmwrite([outCsv '.big'], st2py_flat(s, true), 'precision', '%.17g');
+dlmwrite([outCsv '.big'], st_parity_flat(s, true), 'precision', '%.17g');
 end
 ''' + init_tail
 
@@ -165,16 +165,16 @@ def close(a, b):
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
-        for tool, out in (('st2m.py', 'm'), ('st2py.py', 'py')):
-            r = subprocess.run([sys.executable, str(ROOT / 'tools' / tool), str(ROOT / 'slave-src'),
-                                str(tmp / out)], capture_output=True, text=True)
+        for out in ('m', 'py'):
+            r = subprocess.run([sys.executable, str(ROOT / 'tools' / 'st_translate.py'), '--target', out,
+                                str(ROOT / 'slave-src'), str(tmp / out)], capture_output=True, text=True)
             assert r.returncode == 0, r.stdout + r.stderr
         sys.path.insert(0, str(tmp / 'py'))
 
-        ctx, _ = st2m.load_project(ROOT / 'slave-src')
+        ctx, _ = stt.load_project(ROOT / 'slave-src')
         init_m = (tmp / 'm' / 'ST_init.m').read_text()
         init_tail = init_m[init_m.index('function s = init_PRG_Main'):]
-        (tmp / 'm' / 'st2py_flat.m').write_text(FLAT_M)
+        (tmp / 'm' / 'st_parity_flat.m').write_text(FLAT_M)
 
         cases, run = {}, []
         for name in sorted(ctx['fbs']):
@@ -187,9 +187,9 @@ def main():
             rows = make_inputs(rng, inputs, ctx, STEPS_LONG.get(name, STEPS if name in CORE else STEPS_OTHER), name)
             with open(tmp / f'{name}_in.csv', 'w', newline='') as f:
                 csv.writer(f).writerows(([repr(v) for v in r] for r in rows))
-            (tmp / 'm' / f'st2py_drv_{name}.m').write_text(driver(name, inputs, decls, init_tail))
+            (tmp / 'm' / f'st_parity_drv_{name}.m').write_text(driver(name, inputs, decls, init_tail))
             cases[name] = (inputs, rows)
-            run.append(f"st2py_drv_{name}('{tmp / (name + '_in.csv')}', '{tmp / (name + '_out.csv')}');")
+            run.append(f"st_parity_drv_{name}('{tmp / (name + '_in.csv')}', '{tmp / (name + '_out.csv')}');")
 
         r = subprocess.run(['octave-cli', '--quiet', '--eval',
                             f"addpath('{tmp / 'm'}', '{ROOT / 'slave-sim'}'); " + ' '.join(run)],
@@ -206,7 +206,7 @@ def main():
             for row in rows:
                 for d, v in zip(inputs, row[1:]):
                     setattr(s, d['name'], v != 0 if d['type'] == 'BOOL' else
-                            int(v) if d['type'] in st2m.INT_TYPES or d['type'] in ctx['enums'] else v)
+                            int(v) if d['type'] in stt.INT_TYPES or d['type'] in ctx['enums'] else v)
                 assert fb(s, row[0]) is None
                 got.append(flat_py(s, []))
             fields = []

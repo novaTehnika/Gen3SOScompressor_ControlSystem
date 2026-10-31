@@ -206,8 +206,8 @@ from IR410):
 
 Protocol:
 
-- **Ring.** One record per scan is appended to a ring of 8192 records (16 s at
-  the 2 ms scan) in plain memory; the master reads records through the
+- **Ring.** One record per scan is appended to a ring of 8192 records (33 s at
+  the 4 ms scan) in plain memory; the master reads records through the
   window, so the capture length is limited by the ring, not by the register
   groups. Index values wrap after 2^32 scans.
 - **Arm.** Writing a value different from the last one acted on publishes
@@ -236,7 +236,7 @@ Protocol:
   StartTail and equals the index it requested.
 - **Fault mark.** On the scan `PRG_Main` enters `ST_FAULT`, FaultMark takes
   the index of that scan's record, so the history up to the fault can be read
-  from the ring for as long as it holds (about 16 s).
+  from the ring for as long as it holds (about 33 s).
 - **Cost.** Per scan: the 8-word record, the arm and fault logic and at most
   `G_cfgProbeFillPerScan` x 8 word copies; in the scan a fill completes,
   `PRG_Output` adds a 104-word copy of the staging array into the mapped

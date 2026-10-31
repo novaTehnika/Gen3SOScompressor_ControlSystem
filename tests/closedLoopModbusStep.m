@@ -3,12 +3,13 @@ function closedLoopModbusStep()
 %   against the simulated slave through the Modbus register vectors: the
 %   master steps every cfg.dt, the registers are exchanged every
 %   cfg.exchangePeriod as packed 16-bit words, and the slave scans every
-%   2 ms, on a 1 ms tick. Covers homing, position, pressure, fault reset
+%   G_cfgScanTime (4 ms), on a 1 ms tick. Covers homing, position, pressure,
+%   fault reset
 %   and link loss on either side.
 %
 %   masterStep uses masterConfig as it is, so the slave's soft limit is
 %   widened to the bench value to match.
-%   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
+%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
 %   Depends on: master-src/logic slave-src slave-sim tools
 
@@ -280,7 +281,7 @@ for n = 1:round(T * 1000)
         end
     end
 
-    if mod(h.tick, 2) == 0
+    if mod(h.tick, round(1000 * h.sl.G.G_cfgScanTime)) == 0
         [h.sl, h.y] = slaveStep(h.sl, h.u);
     end
 

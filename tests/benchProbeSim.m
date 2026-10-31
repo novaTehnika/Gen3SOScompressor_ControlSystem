@@ -23,14 +23,14 @@ function benchProbeSim()
 %   benchProbe('fault'), the fault bit of the status word set from the
 %   marked record on.
 %   Depends on: master-src/logic slave-src slave-sim tools bench/common tests/fakeProbeLink.m
-%   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
+%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
 
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'bench', 'common'));
 bcfg = benchConfig();
 pr = bcfg.probe;
-scan = 0.002;
+scan = bcfg.slaveScan;
 
 % --- A lost arm is written again and acknowledged ----------------------------------
 [link, env] = freshLink(8192);
@@ -96,7 +96,7 @@ depth = 512;
 [link, env] = freshLink(depth);
 p = benchProbe('new', pr, scan);
 p = benchProbe('arm', p, struct('step', 1, 'tag', 'stream', 'nRecords', Inf));
-[p, caps, t] = runSlots(p, link, env, 0.01, 6, @(p, caps) false);
+[p, caps, t] = runSlots(p, link, env, 0.01, 3000 * scan, @(p, caps) false);
 assert(isempty(caps) && p.nPending == 1 && p.lost == 0, 'a fast reader lost the stream');
 [p, caps] = benchProbe('drain', p, link, env);
 S = fakeProbeLink('state');
@@ -113,12 +113,12 @@ fprintf('ok  stream of %d records through a ring of %d, read continuously every 
 [link, env] = freshLink(depth);
 p = benchProbe('new', pr, scan);
 p = benchProbe('arm', p, struct('step', 1, 'tag', 'stream', 'nRecords', Inf));
-[p, caps, t] = runSlots(p, link, env, 0.05, 12, @(p, caps) ~isempty(caps));
+[p, caps, t] = runSlots(p, link, env, 25 * scan, 12, @(p, caps) ~isempty(caps));
 assert(numel(caps) == 1 && caps{1}.lost && p.lost == 1, 'slow reader not reported lost');
 N = size(caps{1}.data, 1);
 assert(N > 0 && N < 3 * depth, 'lost stream holds %d records', N);
 assert(t < 12, 'overrun found only at %.1f s', t);
-fprintf('ok  stream lost to a 50 ms reader after %.1f s (%d records kept)\n', t, N);
+fprintf('ok  stream lost to a %.0f ms reader after %.1f s (%d records kept)\n', 25 * scan * 1000, t, N);
 
 % --- Drain reads everything pending ---------------------------------------------------
 [link, env] = freshLink(8192);
@@ -404,9 +404,9 @@ end
 
 
 function step(n)
-% n slave scans (2 ms each).
+% n slave scans.
 for k = 1:n
-    fakeProbeLink('wait', fakeProbeLink('now') + 0.002);
+    fakeProbeLink('wait', fakeProbeLink('now') + benchConfig().slaveScan);
 end
 end
 

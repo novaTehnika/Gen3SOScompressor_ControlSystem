@@ -18,7 +18,7 @@ The application spans two POUs: `PRG_Main` (Structured Text) contains the state 
 - **`G_cmd*`** — written by `PRG_Main`, read by the LD POU. Each struct mirrors the pin names of its target built-in FB (`G_cmdPower`, `G_cmdStop`, `G_cmdReset`, `G_cmdMoveAbsolute`, `G_cmdJog`, `G_cmdDirectControl`, `G_cmdSetPosition`). Command Arbitration fills every field each scan before the owning state or FB overwrites it. A target or velocity defaults to zero, as it cannot matter while the block's enable is FALSE; an acceleration or deceleration keeps the value of the block that may still be running after its owning state is left (`MC_MoveAbsolute` is not aborted by `Execute` falling, and Jog decelerates on its `Deceleration` after `Forward`/`Reverse` drop). Every `MC_Stop` uses `G_cfgStopDecel`. `Y_DirectControl` has no deceleration pin and `ST_CmdDirectControl` no `Deceleration` field. `G_cfgVelLimitMax` is the speed ceiling of every mode; in position mode `Y_DirectControl`'s `Velocity` input is the path shaper's speed (`rPosShaperVelMax`), so the two never disagree.
 - **`G_sta*`** — written by the LD POU, read by `PRG_Main` and by custom FBs that need built-in FB status (`G_staPower`, `G_staStop`, `G_staReset`, `G_staMoveAbsolute`, `G_staJog`, `G_staDirectControl`, `G_staSetPosition`).
 
-`PRG_Main` is structured as a series of processing stages that execute on every 2 ms scan cycle (the cyclic task interval, mirrored by `G_cfgScanTime`).
+`PRG_Main` is structured as a series of processing stages that execute on every 4 ms scan cycle (the cyclic task interval, mirrored by `G_cfgScanTime`).
 
 ```
 +-----------------------------------------------------------------------------+
