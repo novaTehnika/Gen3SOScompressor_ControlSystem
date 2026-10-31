@@ -8,9 +8,9 @@ function closedLoopMasterSlave(handshakeTimeout)
 %   The master steps every 25 ms, the Modbus exchange runs every 50 ms and
 %   the slave every scan (G_cfgScanTime, 4 ms), on a 1 ms tick. Registers are exchanged in
 %   engineering units; packing is covered by closedLoopModbusStep.
-%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
+%   Run from the repository root after  addpath slave-sim; buildSlaveSim
 %     addpath master-src/logic slave-sim slave-sim/generated tests
-%   Depends on: master-src/logic slave-src slave-sim tools
+%   Depends on: master-src/logic slave-src slave-sim tools design/pressure-loop
 
 if nargin < 1
     handshakeTimeout = 0.5;
@@ -86,7 +86,11 @@ for k = 1:numel(c)
 end
 rate = diff(c) / dtS;
 accel = diff(rate) / dtS;
-assert(max(abs(accel)) <= aMax * (1 + 1e-6) + 1e-6, 'command acceleration %.3f mm/s^2', max(abs(accel)));
+% The register is a REAL (32-bit float) as on the controller: the position
+% is quantised to eps(single(x)), which the second difference of the samples
+% turns into at most 2 eps / dt^2.
+quant = 2 * double(eps(single(max(abs(c))))) / dtS^2;
+assert(max(abs(accel)) <= aMax * (1 + 1e-6) + quant, 'command acceleration %.3f mm/s^2', max(abs(accel)));
 assert(max(abs(rate)) <= 4 + 0.02, 'command rate %.3f mm/s', max(abs(rate)));
 kStop = find(abs(rate) < 1e-9, 1);
 assert(~isempty(kStop) && all(abs(rate(kStop:end)) < 1e-9), 'command does not hold at rest');
@@ -131,7 +135,7 @@ fprintf('ok  position -> jog -> stop\n');
 h.in.jogVelocity = 1;
 h = command(h, 3);
 h = runUntil(h, 4, @(h) h.out.statusCode == 4);
-h.sl.ax.x = chamberPosition(h.sl.sim, 0.5);
+h.sl.ax.x = chamberPosition(h.sl, 0.5);
 h.in.targetPressure = 2;
 h = command(h, 4);
 h = runUntil(h, 10, @(h) h.out.statusCode == 5);
@@ -234,7 +238,11 @@ h = runFor(h, 1);
 assert(h.out.state == 1 && h.out.motionEnable == 0 && h.faultSeen == 0);
 fprintf('ok  e-stop\n');
 
-% Master soft limit stops a jog before the slave's own limit faults.
+% Master soft limit stops a jog before the slave's own limit faults. Both
+% limits are set below the cylinder entry for this, so the limit and not
+% the sealed chamber stops the jog.
+h.sl.G.G_cfgPosSoftLimitMax = h.sl.sim.chamberContactPos - 20;
+h.mcfg.posMax = h.sl.G.G_cfgPosSoftLimitMax - 5;
 h.sl.ax.x = h.mcfg.posMax - 3;      % place the axis near the limit
 h.faultSeen = 0;
 h = runFor(h, 0.5);

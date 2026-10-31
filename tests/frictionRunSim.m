@@ -7,9 +7,9 @@ function frictionRunSim()
 %   and a delivery, the drive lag, breakaway and stick from the scan-rate
 %   captures of the step probe, and that the run stops the axis when the
 %   pressure passes its limit.
-%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
+%   Run from the repository root after  addpath slave-sim; buildSlaveSim
 %     addpath master-src/logic slave-sim slave-sim/generated tests
-%   Depends on: master-src/logic slave-src slave-sim tools bench/friction bench/common tests/fakeProbeLink.m
+%   Depends on: master-src/logic slave-src slave-sim tools design/pressure-loop bench/friction bench/common tests/fakeProbeLink.m
 
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'bench', 'friction'), fullfile(here, '..', 'bench', 'common'));
@@ -55,38 +55,42 @@ fprintf('ok  unloaded fit: Fc %.0f N, b %.0f N s/m, Fs %.0f N at %.2f mm/s, brea
     st.Fc, st.b * 1000, st.Fs, st.vs, f.breakaway.F);
 
 % --- Step probe: velocity steps and the breakaway at the scan rate ----------
+% The drive's lag is the simulated plant's (design/pressure-loop), which
+% does not slew the command, so the fit is told no slew limit binds.
 opts = linkOpts(saveDir);
-truthLag = truth;
-truthLag.tauV = 0.025;
-fakeProbeLink('torqueModel', truthLag);
+fakeProbeLink('torqueModel', truth);
 fakeProbeLink('slave', @(sl) placeAxis(sl, 100));
+S = fakeProbeLink('state');
+tauV = S.sl.plant.par.tauV;                                     % s
 opts.probe = true;
 rs = frictionRun('sim', {{'stepv', 1, 2.2}, {'jog', 0.3, 4}}, opts);
 assert(isempty(rs.abort), rs.abort);
 assert(numel(rs.captures) == 10 && rs.probeFailures == 0, '%d captures, %d failures', ...
     numel(rs.captures), rs.probeFailures);
 assert(all(cellfun(@(c) exist(c, 'file') == 2, rs.capFiles)));
-sf = stepResponseFit(rs.capFiles, struct('quiet', true));
+noSlew = struct('quiet', true, 'accel', 1e6, 'decel', 1e6);
+sf = stepResponseFit(rs.capFiles, noSlew);
 tr = sf.transitions;
 mv = tr(~[tr.fromRest]);
 rest = tr([tr.fromRest]);
 assert(numel(mv) == 6 && numel(rest) == 3 && numel(sf.steady) == 1, ...
     '%d moving, %d from rest, %d steady', numel(mv), numel(rest), numel(sf.steady));
-assert(all(abs([mv.tauV] - truthLag.tauV) < 0.006), 'tauV %s ms', mat2str([mv.tauV] * 1000, 3));
-assert(abs(sf.tauV - truthLag.tauV) < 0.004, 'median tauV %.1f ms', sf.tauV * 1000);
+assert(all(abs([mv.tauV] - tauV) < 0.006), 'tauV %s ms', mat2str([mv.tauV] * 1000, 3));
+assert(abs(sf.tauV - tauV) < 0.004, 'median tauV %.1f ms', sf.tauV * 1000);
 peak = truth.Fc + truth.dFs;
 assert(all(abs(abs([rest.Fbreak]) - peak) < 0.15 * peak + truth.F0), 'breakaway %s N', ...
     mat2str([rest.Fbreak], 4));
 assert(all(abs([rest.tStick] - truth.tStick) < 0.06), 'stick %s s', mat2str([rest.tStick], 3));
 assert(abs(sf.steady(1).v - 0.3) < 0.05 && sf.steady(1).Fstd < 600);
-stepResponseFit(rs.capFiles);
-fprintf('ok  step probe: tauV %.1f ms (model %.0f), breakaway %.0f N, stick %.2f s\n', ...
-    sf.tauV * 1000, truthLag.tauV * 1000, sf.Fbreak, sf.tStick);
+stepResponseFit(rs.capFiles, rmfield(noSlew, 'quiet'));
+fprintf('ok  step probe: tauV %.1f ms (plant %.1f), breakaway %.0f N, stick %.2f s\n', ...
+    sf.tauV * 1000, tauV * 1000, sf.Fbreak, sf.tStick);
 
-% --- Gas charge: a soft chamber at about 1 MPa, short strokes ---------------
+% --- Gas charge: the chamber's 1:1 charge from 0.6 MPa, short strokes ------
+% A 10 mm stroke in from 0.6 MPa stays below 2 MPa.
 opts = linkOpts(saveDir);
 fakeProbeLink('torqueModel', truth);
-fakeProbeLink('slave', @(sl) softChamber(sl, 240, 1.0));
+fakeProbeLink('slave', @(sl) placeAxis(sl, chamberPosition(sl, 0.6)));
 opts.speeds = [0.3 1 5];
 opts.tSteady = [4 3 2.5];
 opts.repeats = 1;
@@ -100,6 +104,7 @@ fprintf('ok  gas set: pressure %.2f to %.2f MPa\n', min(P), max(P));
 % --- Delivery: pressure mode at 10 MPa with liquid leaving the chamber ------
 opts = linkOpts(saveDir);
 fakeProbeLink('torqueModel', truth);
+fakeProbeLink('slave', @(sl) placeAxis(sl, chamberPosition(sl, 1.0)));     % the charge's supply pressure
 fakeProbeLink('slave', @(sl) setfield(sl, 'hook', setfield(sl.hook, 'outflow', 4000)));
 opts.target = 10;
 opts.seconds = 25;
@@ -117,9 +122,8 @@ assert(l.ok && strcmp(l.form, 'full'), 'loaded fit form: %s', l.form);
 assert(abs(l.mu - truth.mu) < 0.03, 'mu %.3f, model %.3f', l.mu, truth.mu);
 assert(abs(l.Fc - truth.Fc) < 300, 'loaded Fc %.0f, model %.0f', l.Fc, truth.Fc);
 % The loaded fit is the plain form, so the Stribeck hump at 0.3 mm/s pulls
-% its slope low; its own standard error is about 20. At the 4 ms scan the
-% fit returns 80 to 91 (truth 150), so the band is 75.
-assert(abs(l.b - truth.b) < 75, 'loaded b %.1f, model %.1f', l.b, truth.b);
+% its slope low; its own standard error is about 20.
+assert(abs(l.b - truth.b) < 65, 'loaded b %.1f, model %.1f', l.b, truth.b);
 assert(sum([f.bins.used]) >= 8, 'only %d delivery bins used', sum([f.bins.used]));
 fprintf('ok  loaded fit: Fc %.0f N, b %.0f N s/m, mu %.3f (efficiency %.3f)\n', ...
     l.Fc, l.b * 1000, l.mu, l.etaForward);
@@ -133,6 +137,7 @@ fakeProbeLink('torqueModel', truth);
 opts.target = 10;
 opts.seconds = 25;
 opts.pMax = 5;
+fakeProbeLink('slave', @(sl) placeAxis(sl, chamberPosition(sl, 1.0)));
 ra = frictionRun('simabort', 'delivery', opts);
 assert(~isempty(strfind(ra.abort, 'pressure')), 'pressure limit did not abort: %s', ra.abort);
 S = fakeProbeLink('state');
@@ -164,11 +169,3 @@ sl.ax.x = x;
 end
 
 
-function sl = softChamber(sl, x, P)
-% A large gas volume whose contact position puts the piston at x at P MPa
-% gauge, so a few millimetres of travel change the pressure little.
-sl.ax.x = x;
-sl.sim.chamberGasVolume = 3e6;                               % mm^3 at atmosphere
-V = sl.sim.chamberGasVolume * sl.sim.atmMPa / (sl.sim.atmMPa + P);
-sl.sim.chamberContactPos = x - (sl.sim.chamberGasVolume - V) / sl.sim.pistonArea;
-end

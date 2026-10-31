@@ -23,7 +23,7 @@ function benchProbeSim()
 %   benchProbe('fault'), the fault bit of the status word set from the
 %   marked record on.
 %   Depends on: master-src/logic slave-src slave-sim tools bench/common tests/fakeProbeLink.m
-%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
+%   Run from the repository root after  addpath slave-sim; buildSlaveSim
 %     addpath master-src/logic slave-sim slave-sim/generated tests
 
 here = fileparts(mfilename('fullpath'));
@@ -323,7 +323,9 @@ assert(isequal(modes, [0 1]), 'confirmed mode codes in the status column: %s', m
 rowsMode1 = find(ss.mode == 1);
 assert(all(diff(rowsMode1) == 1), 'the handshake confirmation is not one block of records');
 assert(find(ss.fault, 1) == hist.mark - stream.first + 1, 'the stream''s first fault record is not the marked one');
-assert(max(abs(stream.data(:, 7) - S.sl.IO.MO1_AI_01)) < 1e-3 && any(stream.data(:, 7) > 0.5), 'raw volts column');
+% The plant's chamber pressure drifts as its oxygen charge dissolves (3 mV in
+% the 4 s of the stream), so the raw volts agree with the input to 5 mV.
+assert(max(abs(stream.data(:, 7) - S.sl.IO.MO1_AI_01)) < 5e-3 && any(stream.data(:, 7) > 0.5), 'raw volts column');
 p = benchProbe('fault', p, struct('step', 3, 'tag', 'again', 'nPre', 10, 'nPost', 10));
 [p, c] = benchProbe('drain', p, link, env);
 assert(numel(c) == 1 && c{1}.mark == hist.mark && size(c{1}.data, 1) == 20, 'a fault capture without wait did not take the latched mark');

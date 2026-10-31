@@ -19,40 +19,40 @@ function out = fakeProbeLink(cmd, varargin)
 %   fakeProbeLink('dropArm', n)         lose the next n writes that include HR111
 %   fakeProbeLink('tearRead', n)        the next n reads that include IR519-520
 %                                       find the window changed under them
-%   fakeProbeLink('ringDepth', n)       use a ring of n records: sets the probe
-%                                       block's constant cDepth in the simulated
-%                                       instance (the ST keeps 8192, the array
-%                                       its full size), so overrun is reached in
-%                                       a few hundred scans
+%   fakeProbeLink('ringDepth', n)       use a ring of n records (see below)
 %   fakeProbeLink('torqueModel', p)     report a friction torque (below)
 %   fakeProbeLink('valveAt', t, Cd)     outlet valve opens at t seconds: the
-%                                       chamber drains through the orifice
-%                                       bank, Q = Cd A_o sqrt(2P/rho), after
-%                                       losing the tube's 0.236 mL at once
+%                                       plant's orifice bank (32 of 40 um,
+%                                       discharge coefficient Cd) drains the
+%                                       chamber, after the tube fills
 %   t    = fakeProbeLink('now')
 %          fakeProbeLink('wait', t)     run the slave until t
 %   regs = fakeProbeLink('read', start, n)
 %          fakeProbeLink('write', start, values)
 %          fakeProbeLink('writeOne', address, value)
-%   S    = fakeProbeLink('state')       S.collectLog is [t, mm^3 that left]
-%                                       while the valve is open; S.ring has the
-%                                       log of records, one row per record index
-%                                       from 0: [vCmd vel torque pos pressure
-%                                       raw status] in counts; S.sp the probe's
-%                                       written, depth, arm, echo, mark, state,
-%                                       xfer, faultMark and the hooks' counts
+%   S    = fakeProbeLink('state')       S.collectLog is [t, mm^3 collected at
+%                                       the orifices, mol of free gas in the
+%                                       chamber] while the valve is open;
+%                                       S.ring has the log of records, one row
+%                                       per record index from 0: [vCmd vel
+%                                       torque pos pressure raw status] in
+%                                       counts; S.sp the probe's written,
+%                                       depth, arm, echo, mark, state, xfer,
+%                                       faultMark and the hooks' counts
 %
-%   The torque model stands in for the drive's torque feedback, which the
-%   axis model reports as zero. With p a struct of F0, Fc, dFs, vs, b, mu,
+%   The simulated chamber, outlet and drive are the design model's plant
+%   (slave-sim/c/plant.c), so the drive's dead time and lag and the
+%   chamber's stiffness are its own (sl.plant.par). The torque model stands
+%   in for the drive's torque feedback, which the simulated slave reports as
+%   zero: it is a friction law chosen by the test, for the friction fit to
+%   recover. With p a struct of F0, Fc, dFs, vs, b, mu,
 %   noisePct and tStick, the reported torque (% rated) is the piston force
 %     F0 + sign(v) (Fc + dFs exp(-(|v|/vs)^2) + mu P A) + b v + P A
 %   in N divided by newtonPerPct, plus white noise, with v the axis
 %   velocity (mm/s), P the chamber pressure (MPa) and A the piston area
 %   (mm^2). A nonzero tStick holds the axis still for that long after each
 %   command from rest while the torque ramps to F0 + sign (Fc + dFs) + P A,
-%   which is what breakaway looks like in the log. A field tauV sets the
-%   simulator's drive velocity-feedback lag (sim.velFeedbackTau), so the
-%   slave, its registers and its probe all see the lagged velocity.
+%   which is what breakaway looks like in the log.
 
 persistent S R
 out = [];
@@ -71,8 +71,8 @@ switch cmd
         S.faultAt = Inf;
         S.faultUntil = Inf;
         S.torque = [];
-        S.valve = struct('at', Inf, 'Cd', 0.7, 'open', false, 'collected', 0);
-        S.collectLog = zeros(0, 2);
+        S.valve = struct('at', Inf, 'Cd', 0.7, 'open', false, 'vOut0', 0, 'tube', 0);
+        S.collectLog = zeros(0, 3);
         S.stick = struct('until', -Inf, 'sign', 0, 'armed', true);
         S.hook = struct('dropArm', 0, 'tear', 0);
         S.nT = 0;
@@ -91,20 +91,17 @@ switch cmd
         S.sl = varargin{1}(S.sl);
     case 'torqueModel'
         S.torque = varargin{1};
-        if isfield(S.torque, 'tauV')
-            S.sl.sim.velFeedbackTau = S.torque.tauV;
-        end
-    case 'valveAt'
-        S.valve.at = varargin{1};
-        if numel(varargin) > 1
-            S.valve.Cd = varargin{2};
-        end
     case 'dropArm'
         S.hook.dropArm = varargin{1};
     case 'tearRead'
         S.hook.tear = varargin{1};
     case 'ringDepth'
         S.sl.s.fbProbe.cDepth = varargin{1};
+    case 'valveAt'
+        S.valve.at = varargin{1};
+        if numel(varargin) > 1
+            S.valve.Cd = varargin{2};
+        end
     case 'now'
         out = S.tick / 1000;
     case 'wait'
@@ -120,10 +117,11 @@ switch cmd
                     S = torqueScan(S);
                 end
                 S = valveScan(S);
-                Gpre = S.sl.G;                      % what the probe is given
+                pre = [S.sl.G.G_sysActualVelocity, S.sl.G.G_sysActualTorque, ...
+                       S.sl.G.G_sysActualPosition];     % what the probe is given
                 [S.sl, S.y] = slaveStep(S.sl, S.u);
                 S = probeScan(S);
-                [S, R] = logScan(S, R, Gpre);
+                [S, R] = logScan(S, R, pre);
             end
         end
     case 'read'
@@ -224,7 +222,7 @@ if commanded && S.stick.armed && abs(sl.ax.v) < 0.05 && p.tStick > 0
     S.stick.sign = sign(cmd.Velocity);
 end
 v = sl.ax.v;
-PA = sl.ax.P * sl.sim.pistonArea;               % MPa * mm^2 = N
+PA = sl.ax.P * 1e6 * sl.plant.par.A;            % MPa * m^2 -> N
 if t < S.stick.until
     sl.hook.blocked = true;
     frac = 1 - (S.stick.until - t) / p.tStick;
@@ -240,25 +238,28 @@ end
 
 
 function S = valveScan(S)
-% Orifice outflow once the valve is open: 32 orifices of 40 um discharging
-% to atmosphere, after the air in the 1 mm bore tube has left.
+% The outlet valve: from its opening, the plant's orifice bank at the
+% valve's discharge coefficient, and in the opening scan the flow that
+% fills the tube, eq. (37) of design/pressure-loop/README.md.
 if isinf(S.valve.at)
     return;
 end
 t = S.tick / 1000;
+dt = S.sl.G.G_cfgScanTime;
 if ~S.valve.open && t >= S.valve.at
     S.valve.open = true;
-    S.sl.ax.vOut = S.sl.ax.vOut + 236;                        % mm^3, the tube
-end
-if S.valve.open
     Ao = 32 * pi / 4 * (40e-6)^2;                             % m^2
-    Q = S.valve.Cd * Ao * sqrt(2 * max(S.sl.ax.P, 0) * 1e6 / 1000) * 1e9;    % mm^3/s
-    S.sl.hook.outflow = Q;
-    S.valve.collected = S.valve.collected + Q * S.sl.G.G_cfgScanTime;
-    S.collectLog(end + 1, :) = [t S.valve.collected];
+    S.sl.plant.par.k_orifice = S.valve.Cd * Ao * sqrt(2 / 1000);
+    S.valve.vOut0 = S.sl.ax.vOut;
+    S.valve.tube = 236;                                       % mm^3
+    S.sl.hook.valve = 1;
+    S.sl.hook.outflow = S.valve.tube / dt;
+elseif S.valve.open
+    S.sl.hook.outflow = 0;
+    S.collectLog(end + 1, :) = [t, S.sl.ax.vOut - S.valve.vOut0 - S.valve.tube, ...
+        S.sl.plant.n_tot - S.sl.plant.n_dis];
 end
 end
-
 
 
 function S = probeRegister(S, hr, value)
@@ -276,7 +277,7 @@ end
 end
 
 
-function [S, R] = logScan(S, R, Gpre)
+function [S, R] = logScan(S, R, pre)
 % Log the record the probe wrote in the scan just run, as counts: the
 % values it was given (the axis feedback as it stood before the scan, the
 % rest as the scan left them) converted here, independently of the slave.
@@ -289,9 +290,9 @@ lim = @(x, lo, hi) min(max(round(x), lo), hi);
 status = G.G_doInMotion + 2 * G.G_doPerformanceStatus + 4 * G.G_doFaultActive ...
     + 8 * G.G_doHomingComplete + 256 * min(G.G_sysConfirmedModeCode, 255);
 row = [lim(G.G_sysCommandedVelocity * 1000, -32767, 32767), ...
-       lim(Gpre.G_sysActualVelocity * 1000, -32767, 32767), ...
-       lim(Gpre.G_sysActualTorque * 100, -32767, 32767), ...
-       round(Gpre.G_sysActualPosition * 1e5), ...
+       lim(pre(1) * 1000, -32767, 32767), ...
+       lim(pre(2) * 100, -32767, 32767), ...
+       round(pre(3) * 1e5), ...
        lim(G.G_sysActualPressure * 1000, -32767, 32767), ...
        lim(G.G_aiPressure * 5000, 0, 65535), double(status)];
 while w > size(R, 1)
