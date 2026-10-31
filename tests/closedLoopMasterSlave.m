@@ -8,7 +8,7 @@ function closedLoopMasterSlave(handshakeTimeout)
 %   The master steps every 25 ms, the Modbus exchange runs every 50 ms and
 %   the slave every 2 ms, on a 1 ms tick. Registers are exchanged in
 %   engineering units; packing is covered by closedLoopModbusStep.
-%   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
+%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
 %   Depends on: master-src/logic slave-src slave-sim tools
 

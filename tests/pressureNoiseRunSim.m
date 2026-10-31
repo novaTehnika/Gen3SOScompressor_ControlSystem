@@ -4,7 +4,7 @@ function pressureNoiseRunSim()
 %   masterStep, every step yields its windows and a capture taken while the
 %   step's condition holds, and a slave fault ends the run with the axis
 %   stopped.
-%   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
+%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
 %   Depends on: master-src/logic slave-src slave-sim tools bench/pressure bench/common tests/fakeProbeLink.m
 

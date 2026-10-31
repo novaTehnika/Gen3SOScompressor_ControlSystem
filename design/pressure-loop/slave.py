@@ -14,11 +14,11 @@ blocks and configuration, so that the studies run the slave's own code
 rather than a copy of it.
 
 Importing the module does three things. It regenerates design/generated
-with tools/st2py.py when that directory is missing or older than the
-slave sources, it puts design/generated on sys.path so that statements
-such as "from FB_PressureController import ..." work, and it puts tools/
-on sys.path so that this module can use the Structured Text parser in
-st2m.py.
+with tools/st_translate.py (target py) when that directory is missing
+or older than the slave sources, it puts design/generated on sys.path so
+that statements such as "from FB_PressureController import ..." work,
+and it puts tools/ on sys.path so that this module can use the
+Structured Text parser in st_translate.py.
 
 slave_config() returns the default value of every G_cfg* setting in the
 slave's global variable list (GVL), slave-src/GVL/
@@ -27,8 +27,9 @@ other values keep the units given in the GVL comments.
 
 FILE DEPENDENCY:
 ../../tools/
-    st2py.py (run as a program to regenerate the blocks)
-    st2m.py
+    st_translate.py (run as a program to regenerate the blocks, and
+    imported for its parser)
+    st_target_py.py
 ../../slave-src/
     FB/FB_*.st
     DUT/DataTypes.st
@@ -51,7 +52,7 @@ def _sources():
     """Return the files that design/generated is translated from."""
     files = list((SLAVE_SRC / 'FB').glob('FB_*.st'))
     files.append(SLAVE_SRC / 'DUT' / 'DataTypes.st')
-    files += [TOOLS / 'st2py.py', TOOLS / 'st2m.py']
+    files += [TOOLS / 'st_translate.py', TOOLS / 'st_target_py.py']
     return files
 
 
@@ -65,8 +66,8 @@ def ensure_generated():
              or min(f.stat().st_mtime for f in out)
              < max(f.stat().st_mtime for f in _sources()))
     if stale:
-        subprocess.run([sys.executable, str(TOOLS / 'st2py.py'),
-                        str(SLAVE_SRC), str(GENERATED)],
+        subprocess.run([sys.executable, str(TOOLS / 'st_translate.py'),
+                        '--target', 'py', str(SLAVE_SRC), str(GENERATED)],
                        check=True, cwd=ROOT)
 
 
@@ -77,7 +78,7 @@ if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 
 
-import st2m  # noqa: E402  (tools/ is on the path from above)
+import st_translate  # noqa: E402  (tools/ is on the path from above)
 
 
 # %% ===== SLAVE CONFIGURATION ===========================================
@@ -89,20 +90,20 @@ def _literal(typ, init):
     if typ == 'BOOL':
         return init.upper() == 'TRUE'
     if typ == 'TIME':
-        return float(st2m.time_seconds(init))           # [s]
+        return float(st_translate.time_seconds(init))           # [s]
     try:
         # A typed literal such as REAL#0.5 keeps its value after the '#'
         value = float(init.split('#')[-1])
     except ValueError:
         return None
-    return int(value) if typ in st2m.INT_TYPES else value
+    return int(value) if typ in st_translate.INT_TYPES else value
 
 
 @lru_cache(maxsize=1)
 def _defaults():
     """Return the G_cfg* defaults of the GVL as a dict. The result is
     cached because parsing the slave project takes time."""
-    ctx, _ = st2m.load_project(SLAVE_SRC)
+    ctx, _ = st_translate.load_project(SLAVE_SRC)
     cfg = {}
     for name, decl in ctx['globals'].items():
         if name.startswith('G_cfg'):

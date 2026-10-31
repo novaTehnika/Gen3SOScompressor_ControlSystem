@@ -1,7 +1,7 @@
 function sim = slaveSimConfig()
 %SLAVESIMCONFIG Parameters of the simulated axis. The slave's own
 %   configuration is not here: it is read from GlobalVariables_Reference.st
-%   by tools/st2m.py and lives in sl.G (G_cfg*).
+%   by tools/st_translate.py and lives in sl.G (G_cfg*).
 %
 %   Physical axis coordinate x (mm): x = 0 is where the homing sequence
 %   places the coordinate zero, HomeLimRetractDist positive of the negative

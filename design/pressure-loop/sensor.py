@@ -35,7 +35,7 @@ output two scans earlier, apart from the scaling.
 FILE DEPENDENCY:
 ./
     slave.py
-../generated/ (translated by tools/st2py.py from slave-src/FB/)
+../generated/ (translated by tools/st_translate.py from slave-src/FB/)
     FB_AnalogInputFilter.py
     FB_PressureInput.py
 """

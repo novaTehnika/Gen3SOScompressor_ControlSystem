@@ -5,7 +5,7 @@ function slavePressureMode()
 %   through an outflow disturbance, clamp an excessive target, leave the
 %   mode, and fault on a broken transducer loop only while the loop is
 %   closed on it.
-%   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
+%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
 %     addpath slave-sim slave-sim/generated tests
 %   Depends on: slave-src slave-sim tools
 
