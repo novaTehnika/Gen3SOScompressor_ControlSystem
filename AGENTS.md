@@ -92,6 +92,7 @@ Each bench (`modbus`, `pressure`, `friction`, `characterisation`) is a directory
 - `closedLoopModbusStep`: `masterStep` through the packed register vectors, including link loss on either side.
 - `slaveSimParity`: the compiled and the generated Octave slave side by side through every mode, fault hook, link loss and reset; the input registers must agree every scan and every variable of `G`, `IO`, the axis and PRG_Main every 50 ms (the REAL registers after rounding to single precision).
 - `stTargetParity.py` (Python, run by `run_all.sh`): every scalar-input function block translated by the py and m targets, driven with the same seeded random inputs; all variables must agree to 1e-9.
+- `plantParity.py` (Python): the C port of the design plant (`slave-sim/c/plant.c`) against `design/pressure-loop/plant.py`, built with `cc` and driven through ctypes with the same inputs every scan; every state must agree to 1e-9 (they agree exactly). `plant.py` is the reference: a change to it needs the same change in `plant.c`.
 - `charRunSim`, `charFitsSynthetic`: the characterisation bench (`bench/characterisation/`) against the simulated slave, including the one-pass stopping-distance path, and its four fits on synthetic logs with known parameters.
 
 ## Conventions
