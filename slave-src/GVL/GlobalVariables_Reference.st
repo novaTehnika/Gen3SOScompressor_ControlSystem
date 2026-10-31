@@ -297,10 +297,10 @@
 
      (* Mode 101 - Go Home *)
      G_cfgGoHomePosition       : LREAL := 0.0         (* Target position for Go Home *)
-     G_cfgGoHomeVelocity       : LREAL := 5.0         (* Velocity for Go Home move *)
+     G_cfgGoHomeVelocity       : LREAL := 6.0         (* Velocity for Go Home move *)
      G_cfgGoHomeAccel          : LREAL := 5.0         (* Acceleration for Go Home move (mm/s²) *)
-     G_cfgGoHomeDecel          : LREAL := 5.0         (* Deceleration for Go Home move (mm/s²) *)
-     G_cfgGoHomeStopDecel      : LREAL := 5.0         (* Deceleration for MC_Stop commands (mm/s²) *)
+     G_cfgGoHomeDecel          : LREAL := 10.0         (* Deceleration for Go Home move (mm/s²) *)
+     G_cfgGoHomeStopDecel      : LREAL := 10.0         (* Deceleration for MC_Stop commands (mm/s²) *)
    END_VAR
 
 

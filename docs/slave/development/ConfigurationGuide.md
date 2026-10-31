@@ -55,7 +55,7 @@ Parameters for `fbPosGate` (`FB_PositionCommandGate`), which shapes the direct-c
 |---|---|---|---|
 | `G_cfgScanTime` | 0.002 | s | Cyclic task period (`LREAL`), used as `dt` by the position command gate and as the basis for the analog input filter's time-constant alpha. **Must equal the cyclic task interval set in the MotionWorks IEC task configuration** (2 ms is the MP2600iec minimum); a mismatch scales every commanded velocity and the filter time constant by the same ratio. |
 | `G_cfgPosGateAccelMax` | 10.0 | mm/s² | Acceleration limit applied to the gated position command. Conservative starting value — raise during commissioning once bench testing shows torque headroom. **Tuning:** This is the transparency knob for an incidental master ramp: the gate lags a ramp at velocity `v` by `v²/(2·A)`, e.g. 0.9 mm at 3 mm/s with `A` = 5 mm/s², vs. 0.09 mm with `A` = 50 mm/s². |
-| `G_cfgDirectCtrlAccel` / `G_cfgDirectCtrlDecel` | 10.0 | mm/s² | Written to `Y_DirectControl`'s `Acceleration` input (the block has no decel input) in every direct-control state except pressure mode, which uses `G_cfgPressureAccel`. A velocity-step test on the machine (`bench/characterisation/README.md` section 7) found the velocity reference followed within 30 ms whatever the step, so in VelocityTLMode this value does not slew the command; confirm by repeating a step at 1 and at 100 mm/s². |
+| `G_cfgDirectCtrlAccel` / `G_cfgDirectCtrlDecel` | 10.0 | mm/s² | Written to `Y_DirectControl`'s `Acceleration` input (the block has no decel input) in every direct-control state except pressure mode, which uses `G_cfgPressureAccel`. A velocity-step test on the machine (`bench/characterisation/README.md` section 8) found the velocity reference followed within 30 ms whatever the step, so in VelocityTLMode this value does not slew the command; confirm by repeating a step at 1 and at 100 mm/s². |
 | `G_cfgDirectCtrlFilterTime` | 0.05 | s | `Y_DirectControl`'s `FilterTimeConstant`, the block's own filter on the command it sends the drive, wired from `G_cmdDirectControl.FilterTimeConstant` (`docs/slave/ld/`). It is a lag inside the pressure loop, so it belongs with the loop's tuning; the same step test found no 50 ms lag in the velocity response, so which modes it acts on is to be established on the bench. |
 | `G_cfgPosGateMaxDeviation` | 2.0 | mm | Tether window: once the gated command leads `G_sysActualPosition` by this much in the direction of travel, the command holds until the axis catches up or the target reverses. **Tuning:** Must sit comfortably below the drive's `Pn520` excessive-deviation level so the tether acts first, and comfortably above normal following error. |
 
@@ -107,7 +107,7 @@ These parameters define the behavior of the homing (110) and Go Home (101) modes
 | Parameter | Default Value | Units | Description & Tuning Considerations |
 |---|---|---|---|
 | `G_cfgGoHomePosition` | 0.0 | mm | The target position for the Go Home command. This should match `G_cfgHomeLimSetPosition`. |
-| `G_cfgGoHomeVelocity` | 5.0 | mm/s | The velocity used for the move-to-home motion. |
+| `G_cfgGoHomeVelocity` | 6.0 | mm/s | The velocity used for the move-to-home motion. |
 | `G_cfgGoHomeAccel` | 5.0 | mm/s² | Acceleration for the Go Home move. |
-| `G_cfgGoHomeDecel` | 5.0 | mm/s² | Deceleration for the Go Home move. |
-| `G_cfgGoHomeStopDecel` | 5.0 | mm/s² | Deceleration for `MC_Stop` commands. |
+| `G_cfgGoHomeDecel` | 10.0 | mm/s² | Deceleration for the Go Home move. |
+| `G_cfgGoHomeStopDecel` | 10.0 | mm/s² | Deceleration for `MC_Stop` commands. |

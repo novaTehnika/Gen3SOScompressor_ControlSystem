@@ -18,7 +18,11 @@ if nargin < 3
     port = bcfg.port;
     serverId = bcfg.serverId;
 end
-t = tcpclient(address, port, 'Timeout', 0.5);
+% Without a transfer delay each request leaves at once; with Nagle's
+% algorithm on, a request can wait for the acknowledgement of the one
+% before it, which on this link showed as tens of milliseconds a
+% transaction.
+t = tcpclient(address, port, 'Timeout', 0.5, 'EnableTransferDelay', false);
 uid = uint8(serverId);
 link.t = t;
 link.read = @(start, n) rawTxn(t, uid, [4, u16(start - 1), u16(n)], 4, n);
@@ -40,12 +44,16 @@ tid = mod(tid + 1, 65536);
 flush(t);
 pdu = uint8(pdu);
 write(t, [u16(tid), uint8([0, 0]), u16(numel(pdu) + 1), uid, pdu]);
-hdr = double(read(t, 7, 'uint8'));
+% Wait for the reply by its byte count and read it in one call: a
+% blocking read of a fixed count can sit for a scheduler slice after the
+% bytes have arrived, which on this link showed as tens of milliseconds
+% a transaction.
+hdr = double(readExactly(t, 7));
 if numel(hdr) < 7
     error('no response (%d of 7 header bytes)', numel(hdr));
 end
 len = hdr(5) * 256 + hdr(6);
-body = double(read(t, len - 1, 'uint8'));
+body = double(readExactly(t, len - 1));
 if numel(body) < len - 1
     error('short response (%d of %d bytes)', numel(body), len - 1);
 end
@@ -65,6 +73,21 @@ if fc == 4
     regs = body(3:2:2 + 2 * nRegs) * 256 + body(4:2:3 + 2 * nRegs);
 else
     regs = [];
+end
+end
+
+
+function bytes = readExactly(t, n)
+% n bytes from the client, waiting on NumBytesAvailable up to the
+% client's Timeout; whatever arrived by then if fewer.
+t0 = tic;
+while t.NumBytesAvailable < n && toc(t0) < t.Timeout
+end
+m = min(n, t.NumBytesAvailable);
+if m > 0
+    bytes = read(t, m, 'uint8');
+else
+    bytes = uint8([]);
 end
 end
 

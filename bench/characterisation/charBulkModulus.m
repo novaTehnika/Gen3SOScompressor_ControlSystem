@@ -17,7 +17,7 @@ function r = charBulkModulus(files, opts)
 %   The liquid volume V is the chamber volume at the segment's mean
 %   position, A (posEOT - x) + deadVolume, unless opts.fillVolume_mL gives
 %   the measured fill (scalar, or one value per file). deadVolume_mL
-%   defaults to charConfig (masterConfig.deadVolume, the measured 50 mL).
+%   defaults to charConfig (masterConfig.deadVolume, the measured 57 mL).
 %
 %   With files at liquid volumes that differ by more than 20 %, the
 %   compliance dx/dP is also regressed on V: slope 1/(K A) gives the liquid

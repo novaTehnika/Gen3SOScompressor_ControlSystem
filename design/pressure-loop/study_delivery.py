@@ -70,13 +70,13 @@ def controller_set():
     1.4 mm/s the measured outflow needs) and the earlier StopVelMin of
     0.5 mm/s as a reference. The scheduled arms are
     ScheduledSlaveController at three crossovers with the measured
-    bounds (K 1.0 GPa, dead volume 74 mL, hose compliance
+    bounds (K 1.0 GPa, dead volume 81 mL, hose compliance
     0.12 mL/MPa). The flow-feedforward arm is a bound; the feedforward
     is not implementable on the machine.
     """
     S = ctl.SlaveController
     Sch = ctl.ScheduledSlaveController
-    sched = dict(V_dead_cfg=74e-6, K_cfg=1.0e9, C_hose_cfg=1.2e-13)
+    sched = dict(V_dead_cfg=81e-6, K_cfg=1.0e9, C_hose_cfg=1.2e-13)
     return [
         S('slave (GVL)'),
         S('slave vmin0.5 (earlier)', StopVelMin=0.5),

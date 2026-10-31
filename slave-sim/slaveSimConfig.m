@@ -8,7 +8,7 @@ function sim = slaveSimConfig()
 %   overtravel switch.
 
 sim.switchNegPos   = -5.0;   % negative overtravel switch active at or below (mm)
-sim.switchPosPos   = 368.0;  % positive overtravel switch active at or above (mm)
+sim.switchPosPos   = 370.0;  % positive overtravel switch active at or above (mm), past the 367 mm soft limit
 sim.hardStopMargin = 3.0;    % travel past either switch before the hard stop (mm)
 sim.initialPos     = 40.0;   % x at power-up (mm)
 sim.bootFrameError = 0.0;    % controller position minus x at power-up (mm); 0 = retained absolute frame

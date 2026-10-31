@@ -25,7 +25,7 @@ keep the table to what the picture shows.
 | ControlMode | in | `G_cmdDirectControl.ControlMode` | |
 | Position | in | `G_cmdDirectControl.Position` | |
 | Velocity | in | `G_cmdDirectControl.Velocity` | |
-| Acceleration | in | `G_cmdDirectControl.Acceleration` | The bench measured no slew of the velocity reference at this value in VelocityTLMode (`bench/characterisation/README.md` section 7). |
+| Acceleration | in | `G_cmdDirectControl.Acceleration` | The bench measured no slew of the velocity reference at this value in VelocityTLMode (`bench/characterisation/README.md` section 8). |
 | Torque | in | `G_cmdDirectControl.Torque` | |
 | FilterTimeConstant | in | `LREAL#0.05` | **To change:** wire `G_cmdDirectControl.FilterTimeConstant`, which `PRG_Main` sets from `G_cfgDirectCtrlFilterTime` (default 0.05 s), so the filter can be tuned without editing the LD. |
 | BufferMode | in | not wired | |

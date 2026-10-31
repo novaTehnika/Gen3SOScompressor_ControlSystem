@@ -23,6 +23,13 @@ function r = charRun(label, path, opts)
 %                                       command, downward for a negative one)
 %                                       or maxSec elapse
 %     {'dwell', seconds}                velocity mode, zero command
+%     {'settle', mm_per_s, MPa, maxSec} velocity mode toward the pressure
+%                                       MPa at the given speed, in the
+%                                       direction the pressure error
+%                                       needs when the step starts, until
+%                                       it is crossed or maxSec elapse;
+%                                       nothing when already within
+%                                       0.05 MPa of it
 %     {'move', mm_per_s, mm, maxSec}    velocity mode until the position
 %                                       has moved mm from where the step
 %                                       began (either sign) or maxSec
@@ -37,11 +44,18 @@ function r = charRun(label, path, opts)
 %     {'hold', seconds}                 position mode at the position where
 %                                       the step starts
 %     {'pressure', MPa, seconds}        pressure mode (target in MPa gauge)
-%   Consecutive steps of the same mode (jog, ramp, dwell, move, velstep; position,
+%   Consecutive steps of the same mode (jog, ramp, dwell, move, settle, velstep; position,
 %   hold; pressure) run in one session: the command changes without a stop
 %   and a handshake in between. A step of another mode stops the axis first.
 %   A velocity session is entered at rest and its first command sent once
 %   the mode runs, so the log shows every command as a step.
+%
+%   A fault latched on the slave when the run starts (the master reports
+%   status 10) is cleared once with the operator reset before the first
+%   step, as the app's Reset button would; a fault during the run stops
+%   it. An exchange slower than 150 ms is reported (the first three), and
+%   the probe is not polled in a cycle whose exchange was that slow, so
+%   that the heartbeat stays well inside the slave's 300 ms watchdog.
 %
 %   Guards, every master step: the run stops (MotionEnable low, mode 0) when
 %   the pressure exceeds opts.pressureStop, the position leaves
@@ -53,7 +67,11 @@ function r = charRun(label, path, opts)
 %   opts.pressureStop  MPa gauge (charConfig.pressureStop)
 %   opts.posStop, opts.posMin
 %                      mm (charConfig: inside the slave's soft limits)
-%   opts.probe         true to arm and read the step probe (default false)
+%   opts.probe         true to arm and read the step probe at every
+%                      command change in a velocity session; 'stops' to
+%                      arm it only for commands to zero, so that a
+%                      capture and its readout (2 s) are free for the
+%                      next stop; false for no probe (default)
 %   opts.safetyModel   model that holds the safety relay ('SafetyHold';
 %                      '' when the relay is held another way)
 %   opts.saveDir       where the CSV files go (default bench/common/captures)
@@ -140,9 +158,15 @@ seq.tSub = 0;
 seq.armPending = false; % reference change waits one cycle for the probe arm
 seq.firstPending = false; % a velocity session's first command waits for the mode to run
 seq.xStart = NaN;       % position when a move step's command went out
+seq.settleSign = 0;     % direction a settle step chose
+seq.resetSent = false;  % operator reset sent for a fault latched at the start
+seq.tFaultSeen = NaN;   % when that fault was first reported
 seq.abort = '';
+slowExchanges = 0;
+writeMsLog = [];
 
-probe.enabled = opts.probe;
+probe.stopsOnly = ischar(opts.probe) && strcmpi(opts.probe, 'stops');
+probe.enabled = probe.stopsOnly || (~ischar(opts.probe) && logical(opts.probe));
 probe.next = 'poll';
 probe.armRequest = false;
 probe.armValue = 0;
@@ -158,8 +182,15 @@ captures = {};
 runLog = zeros(0, 12);
 exchangeFailures = 0;
 
+if probe.stopsOnly
+    probeText = 'stops only';
+elseif probe.enabled
+    probeText = 'every command change';
+else
+    probeText = 'off';
+end
 fprintf('charRun %s: %d steps, guards %.1f MPa, %.1f..%.1f mm, probe %s\n', label, nSteps, ...
-    opts.pressureStop, opts.posMin, opts.posStop, mat2str(opts.probe));
+    opts.pressureStop, opts.posMin, opts.posStop, probeText);
 k = 0;
 while true
     tCycle = k * cfg.exchangePeriod;
@@ -168,8 +199,10 @@ while true
 
     % --- Protocol exchange, as the shell's Modbus blocks do it ------------
     tx = tic;
+    writeMs = NaN;
     try
         link.write(map.hr.heartbeat, mbWrite);
+        writeMs = toc(tx) * 1000;
         mbRead = link.read(1, map.nRead);
     catch err
         exchangeFailures = exchangeFailures + 1;
@@ -178,6 +211,13 @@ while true
         end
     end
     exchangeMs = toc(tx) * 1000;
+    writeMsLog(end + 1) = writeMs;                                      %#ok<AGROW>
+    if exchangeMs > 150
+        slowExchanges = slowExchanges + 1;
+        if slowExchanges <= 3
+            fprintf('  exchange took %.0f ms at %.2f s\n', exchangeMs, tNow);
+        end
+    end
     ref = modbusUnpack(mbWrite(map.hr.reference), mbWrite(map.hr.reference + 1));   % as sent this exchange
     [mbWrite, m] = stepMaster(mbRead, app, map, cfg);
 
@@ -205,7 +245,9 @@ while true
 
     % --- One probe transaction in the gap ----------------------------------
     if probe.enabled
-        [probe, captures] = probeSlot(probe, link, pr, captures, tNow);
+        if probe.enabled && exchangeMs <= 150
+            [probe, captures] = probeSlot(probe, link, pr, captures, tNow);
+        end
     end
 
     % --- Second master step of the cycle, registers held -------------------
@@ -267,6 +309,13 @@ for s = 1:nSteps
 end
 fprintf('%d captures, exchange failures %d, probe failures %d, exchange p99 %.1f ms\n', ...
     numel(captures), exchangeFailures, probe.failures, prctileOf(runLog(:, 12), 99));
+readMs = runLog(:, 12) - writeMsLog(1:size(runLog, 1))';
+w = writeMsLog(~isnan(writeMsLog));
+rd = readMs(~isnan(readMs));
+if ~isempty(w) && ~isempty(rd)
+    fprintf(['exchange: write median %.1f ms, p99 %.1f; read median %.1f ms, p99 %.1f ' ...
+        '(the controller answers in 1 to 8 ms)\n'], median(w), prctileOf(w, 99), median(rd), prctileOf(rd, 99));
+end
 fprintf('saved %s\n', fname);
 end
 
@@ -303,6 +352,8 @@ function C = codes()
 C.OP_STOP = 0; C.OP_POSITION = 2; C.OP_JOG = 3; C.OP_PRESSURE = 4;
 C.STATUS_IDLE = 0; C.STATUS_POS_AT_TARGET = 3; C.STATUS_JOG = 4; C.STATUS_PRESSURE = 5;
 C.STATUS_LINK_WAIT = 35;
+C.STATUS_FAULT = 10;
+C.OP_RESET = 5;
 C.abortStatus = [10 30 32 33 34];       % fault, no confirm, reset failed, stop timeout, link lost
 C.ST_IDLE = 1;
 end
@@ -338,6 +389,25 @@ function [seq, app] = sequence(seq, app, m, steps, tNow, probe, C, cfg)
 seq.armRequest = false;
 inPhase = tNow - seq.tPhase;
 
+if strcmp(seq.phase, 'wait') && m.statusCode == C.STATUS_FAULT && ~seq.resetSent
+    % A fault latched before the run: clear it as the operator would. The
+    % master acts on the reset only once the slave has mirrored the fault
+    % code for tMirrorStable, so the command waits for the mirror.
+    if isnan(seq.tFaultSeen)
+        seq.tFaultSeen = tNow;
+        fprintf('  fault %d latched on the slave: sending the operator reset\n', m.faultCode);
+    elseif tNow - seq.tFaultSeen >= cfg.tMirrorStable + 0.3
+        app.op = C.OP_RESET;
+        app.cmdSeq = app.cmdSeq + 1;
+        seq.resetSent = true;
+        seq.tPhase = tNow;
+    end
+    return;
+end
+if strcmp(seq.phase, 'wait') && seq.resetSent && m.statusCode == C.STATUS_FAULT && ...
+        inPhase <= cfg.tResetMax + 1
+    return;                     % the reset is under way
+end
 if any(m.statusCode == C.abortStatus) && ~strcmp(seq.phase, 'finish')
     seq.abort = sprintf('master status %d during step %d, phase %s', ...
         m.statusCode, seq.idx, seq.phase);
@@ -435,6 +505,14 @@ switch seq.phase
                     fprintf('  step %d: %.3f MPa reached at %.3f mm after %.1f s\n', ...
                         seq.idx, m.pressure, m.position, inPhase);
                 end
+            case 'settle'
+                crossed = (seq.settleSign > 0 && m.pressure >= s.pressureEnd) || ...
+                          (seq.settleSign < 0 && m.pressure <= s.pressureEnd) || seq.settleSign == 0;
+                done = crossed || inPhase >= s.seconds;
+                if crossed && seq.settleSign ~= 0
+                    fprintf('  step %d: settled at %.3f MPa, %.3f mm after %.1f s\n', ...
+                        seq.idx, m.pressure, m.position, inPhase);
+                end
             case 'move'
                 moved = abs(m.position - seq.xStart);
                 done = moved >= s.distance || inPhase >= s.seconds;
@@ -492,15 +570,22 @@ seq.armPending = false;
 switch s.name
     case 'idle'
         app.op = 0;
-    case {'jog', 'ramp', 'dwell', 'move', 'velstep'}
+    case {'jog', 'ramp', 'dwell', 'move', 'settle', 'velstep'}
         if strcmp(s.name, 'velstep')
             v = s.target(sub);
         elseif strcmp(s.name, 'dwell')
             v = 0;
+        elseif strcmp(s.name, 'settle')
+            % Toward the pressure: up when below it, down when above,
+            % nothing within 0.05 MPa
+            err = s.pressureEnd - m.pressure;
+            seq.settleSign = sign(err) * (abs(err) > 0.05);
+            v = seq.settleSign * abs(s.target);
         else
             v = s.target;
         end
-        if probe.enabled && ~armed && ~probe.pending && v ~= app.targetVelocity * app.jogDirection
+        if probe.enabled && ~armed && ~probe.pending && v ~= app.targetVelocity * app.jogDirection ...
+                && (~probe.stopsOnly || v == 0)
             seq.armRequest = true;
             seq.armPending = true;
             return;
@@ -642,6 +727,10 @@ for k = 1:numel(path)
             s.op = C.OP_JOG; s.target = p{2}; s.distance = abs(p{3}); s.seconds = p{4};
             assert(p{2} ~= 0 && s.distance > 0, 'move needs a nonzero velocity and distance');
             s.targetText = sprintf('%g mm/s for %g mm', p{2}, s.distance);
+        case 'settle'
+            s.op = C.OP_JOG; s.target = abs(p{2}); s.pressureEnd = p{3}; s.seconds = p{4};
+            assert(p{2} ~= 0, 'settle needs a nonzero speed');
+            s.targetText = sprintf('to %g MPa at %g mm/s', p{3}, abs(p{2}));
         case 'velstep'
             s.op = C.OP_JOG; s.target = p{2}(:)'; s.seconds = p{3}(:)';
             assert(numel(s.target) == numel(s.seconds), 'velstep needs one duration per velocity');
@@ -656,7 +745,7 @@ for k = 1:numel(path)
             s.op = C.OP_PRESSURE; s.target = p{2}; s.seconds = p{3};
             s.targetText = sprintf('%g MPa', p{2});
         otherwise
-            error('unknown step type "%s" (idle, jog, ramp, dwell, move, velstep, position, hold, pressure)', p{1});
+            error('unknown step type "%s" (idle, jog, ramp, dwell, move, settle, velstep, position, hold, pressure)', p{1});
     end
     steps(end + 1) = s;
 end
