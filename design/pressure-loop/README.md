@@ -1039,7 +1039,8 @@ stored integral.
 
 The reference's arguments map to the settings as follows: `wc` to
 `Crossover`, `K_cfg` to `BulkModulus`, `V_l_cfg` to `SalineVolume` (HR7-8),
-`V_dead_cfg` to `DeadVolume`, `C_hose_cfg` to `HoseCompliance`,
+`V_dead_cfg` to `PassagesVolume` plus `HoseVolume` and `C_hose_cfg` to
+`HoseCompliance`, both hose terms counted only when `HoseOpen` is set,
 `ratio_cfg` to `OxygenRatio` (HR9-10), `ki_ratio` to `KiRatio`, `kp_min` and
 `kp_max` to `KpMin` and `KpMax`, and `e_int` to `ArriveBand`. The lag of
 eq. (41) is built from the pressure input filter's time constant, the
@@ -1047,9 +1048,12 @@ median window, the scan time and the drive's dead time and lag
 (`DriveDeadTime`, `DriveLag`).
 
 The reference's limit-switch position `x_limit` is
-`G_cfgPosSoftLimitMax` on the slave, so `DeadVolume` is the chamber
-volume at the soft limit. The estimate stays an upper bound on the
-stiffness while `DeadVolume` is at or below the true volume there.
+`G_cfgPressureSchedEndOfTravel` on the slave, where the chamber is down
+to the passages, so the chamber volume is the swept volume to that
+position plus the passages (and the hose when it is open). All of these
+are measured values; the hose is switched in and out by
+`G_cfgPressureSchedHoseOpen`, not by editing them. The estimate stays an
+upper bound on the stiffness while each is at or below its true value.
 
 When Ki changes, the schedule outputs `IntegScale` = previous Ki / new
 Ki so that Ki times the stored integral is continuous. The integrator is
@@ -1070,6 +1074,6 @@ that sets the dissolved oxygen is updated from the measurement only.
 `check_scheduled_st` compares Kp, Ki and the stop-law limit as well as
 the command, and includes a gas-spring compression.
 
-Left for commissioning: the dead volume against the machine's soft
-limit, the hose compliance against the procedure (0 when the hose is
-shut during the compression), and the charge against the recipe.
+Left for commissioning: `G_cfgPressureSchedHoseOpen` against the
+procedure (FALSE while the proximal valve opens after mixing), and the
+charge against the recipe.

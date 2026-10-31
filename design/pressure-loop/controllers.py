@@ -557,7 +557,7 @@ class ScheduledSlaveControllerST(SlaveController):
     saline volume and charge ratio.
 
     The slave measures the piston position in its own frame, where the
-    chamber is down to the dead volume at G_cfgPosSoftLimitMax. The
+    chamber is down to the passages at G_cfgPressureSchedEndOfTravel. The
     run's position x is mapped so that the distance to that limit is
     the distance to the run's limit-switch position.
     """
@@ -574,10 +574,10 @@ class ScheduledSlaveControllerST(SlaveController):
         c = self.c
         self.active = c['G_cfgPressureScheduleEnable']
         self.x_limit = limit_position(par, scenario)            # [m]
-        self.pos_limit = c['G_cfgPosSoftLimitMax']              # [mm]
+        self.pos_limit = c['G_cfgPressureSchedEndOfTravel']     # [mm]
         s = new_FB_PressureSchedule()
         # Settings, as PRG_Main passes them
-        s.PosLimit = self.pos_limit                             # [mm]
+        s.EndOfTravel = self.pos_limit                          # [mm]
         s.VelMax = self.vel_max                                 # [mm/s]
         s.DecelMax = c['G_cfgPressureDecel']                    # [mm/s^2]
         s.StopVelMin = c['G_cfgPressureStopVelMin']             # [mm/s]
@@ -595,8 +595,10 @@ class ScheduledSlaveControllerST(SlaveController):
             s.SalineVolume = par.Vl0 * 1e6      # [m^3 -> mL]
         else:
             s.SalineVolume = self.saline_ml                     # [mL]
-        s.DeadVolume = c['G_cfgPressureSchedDeadVolume']
+        s.PassagesVolume = c['G_cfgPressureSchedPassagesVolume']
+        s.HoseVolume = c['G_cfgPressureSchedHoseVolume']
         s.HoseCompliance = c['G_cfgPressureSchedHoseCompliance']
+        s.HoseOpen = c['G_cfgPressureSchedHoseOpen']
         s.BulkModulus = c['G_cfgPressureSchedBulkModulus']
         if self.oxygen_ratio is None:
             s.OxygenRatio = scenario.ratio                      # [-]

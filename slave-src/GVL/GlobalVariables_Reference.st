@@ -255,11 +255,11 @@
      G_cfgPressureSchedKpMin         : LREAL := 0.001      (* Lower bound on the scheduled Kp (mm/s per MPa) *)
      G_cfgPressureSchedKpMax         : LREAL := 5.0        (* Upper bound on the scheduled Kp (mm/s per MPa) *)
      G_cfgPressureSchedPistonArea    : LREAL := 3431.0     (* Piston area (mm^2), 2.602 in bore *)
-     G_cfgPressureSchedDeadVolume    : LREAL := 74.0       (* Chamber volume with the piston at G_cfgPosSoftLimitMax and
-                                                              the hose open (mL); a lower bound. 74 mL is the lower end of
-                                                              the 79 mL measured at the end of travel *)
-     G_cfgPressureSchedHoseCompliance: LREAL := 1.2E-13    (* Hose compliance (m^3/Pa), a lower bound; 0 if the hose
-                                                              is shut during the compression *)
+     G_cfgPressureSchedEndOfTravel   : LREAL := 367.0      (* Position at the end of travel, where the chamber is down to the passages (mm) *)
+     G_cfgPressureSchedPassagesVolume: LREAL := 57.0       (* Cylinder passages, chamber volume at the end of travel without the hose (mL), measured with the present fittings *)
+     G_cfgPressureSchedHoseVolume    : LREAL := 29.0       (* Hose between the cylinder head and the outlet (mL), measured; used when the hose is open *)
+     G_cfgPressureSchedHoseCompliance: LREAL := 1.2E-13    (* Hose compliance beyond its liquid (m^3/Pa), a lower bound on the measured value; used when the hose is open *)
+     G_cfgPressureSchedHoseOpen      : BOOL := FALSE       (* The proximal valve is open during the compression, so the hose is part of the chamber; FALSE when it opens after mixing *)
      G_cfgPressureSchedBulkModulus   : LREAL := 1.0E9      (* Saline bulk modulus (Pa), an upper bound *)
      G_cfgPressureSchedHenry         : LREAL := 1.22E-5    (* Henry constant of oxygen in 0.9 % saline (mol/(m^3 Pa)) *)
      G_cfgPressureSchedGasTemp       : LREAL := 293.0      (* Gas temperature (K) *)

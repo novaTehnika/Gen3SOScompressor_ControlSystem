@@ -550,7 +550,8 @@ def check_scheduled_st():
             'ref', wc=cfg['G_cfgPressureSchedCrossover'],
             K_cfg=cfg['G_cfgPressureSchedBulkModulus'],
             V_l_cfg=par.Vl0,
-            V_dead_cfg=cfg['G_cfgPressureSchedDeadVolume'] * 1e-6,
+            V_dead_cfg=(cfg['G_cfgPressureSchedPassagesVolume']
+                         + cfg['G_cfgPressureSchedHoseVolume']) * 1e-6,
             C_hose_cfg=cfg['G_cfgPressureSchedHoseCompliance'],
             ratio_cfg=None,
             ki_ratio=cfg['G_cfgPressureSchedKiRatio'],
@@ -588,7 +589,8 @@ def check_scheduled_st():
 
     q = par.with_(hose_before=True)     # the hose is open throughout
     for name in ('compress', 'deliver'):
-        L = Lockstep(reference(), ctl.ScheduledSlaveControllerST())
+        L = Lockstep(reference(), ctl.ScheduledSlaveControllerST(
+            SchedHoseOpen=True))
         r = sim.run(q, scenarios.make(name, q), L)
         assert L.worst < 1e-9, (name, L.worst)            # [m/s]
         assert L.gain < 1e-9, (name, L.gain)  # [mm/s per MPa]
@@ -619,8 +621,8 @@ def check_scheduled_st():
     L = Lockstep(ctl.ScheduledSlaveController(
         'ref', wc=6.0, K_cfg=1.0e9, V_dead_cfg=1e-6, C_hose_cfg=0.0),
         ctl.ScheduledSlaveControllerST(
-            SchedBulkModulus=1.0e9, SchedDeadVolume=1.0,
-            SchedHoseCompliance=0.0, SchedCrossover=6.0,
+            SchedBulkModulus=1.0e9, SchedPassagesVolume=1.0,
+            SchedHoseOpen=False, SchedCrossover=6.0,
             saline_ml=1.0, oxygen_ratio=200.0))
     r = sim.run(g, scenarios.compress(g), L)
     assert L.worst < 1e-9 and L.gain < 1e-9, (L.worst, L.gain)

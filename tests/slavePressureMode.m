@@ -141,7 +141,6 @@ fprintf('ok  sensor fault in pressure mode, mirror and reset\n');
 sim = h.sl.sim;
 h.sl.G.G_cfgPressureScheduleEnable = true;
 h.sl.G.G_cfgPressureSchedHenry = 0;
-h.sl.G.G_cfgPressureSchedHoseCompliance = 0;
 h.sl.G.G_cfgPressureSchedBulkModulus = 1e12;
 h.sl.G.G_cfgPressureSchedPistonArea = sim.pistonArea;
 h.sl.G.G_cfgPressureSchedPatm = sim.atmMPa * 1e6;

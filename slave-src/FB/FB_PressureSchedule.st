@@ -12,15 +12,17 @@
    on entry to pressure mode.
 
    Stiffness bound, eq. (39): the chamber volume is the swept volume from the
-   piston to PosLimit plus DeadVolume. The free gas is the least there can
+   piston to EndOfTravel plus the volume left there: PassagesVolume, plus
+   HoseVolume when HoseOpen. The free gas is the least there can
    be: the configured oxygen charge less what the configured saline volume
    can hold at the highest absolute pressure seen since Reset. The saline
    volume is the configured one, or the chamber volume when that is smaller.
-   With BulkModulus the largest plausible and HoseCompliance the smallest,
+   With BulkModulus the largest plausible and the hose compliance the
+   smallest (HoseCompliance when HoseOpen, otherwise 0),
      C = Vgas / Pabs + min(Vsaline, Vchamber) / BulkModulus + HoseCompliance
      KEst = PistonArea / C
-   is never below the true stiffness while SalineVolume and DeadVolume are
-   at or below the true values. The bound is evaluated at the present
+   is never below the true stiffness while SalineVolume, PassagesVolume and
+   HoseVolume are at or below the true values. The bound is evaluated at the present
    pressure (KEst) and at the larger of the present and the target pressure
    (KEstTarget), with the highest pressure as it stands; a gas-dominated
    chamber is stiffer at the target, and the larger of the two, KSched, is
@@ -56,7 +58,7 @@
        Target          : LREAL            (* Target pressure, clamped by the caller (MPa gauge)
        Actual          : LREAL            (* Measured pressure (MPa gauge)
        Position        : LREAL            (* Piston position (mm), positive into the cylinder
-       PosLimit        : LREAL            (* Position at which the chamber is down to DeadVolume (mm)
+       EndOfTravel     : LREAL            (* Position at which the chamber is down to the passages (mm)
        VelMax          : LREAL            (* Velocity clamp in pressure mode (mm/s)
        DecelMax        : LREAL            (* Deceleration assumed by the stop law (mm/s^2)
        StopVelMin      : LREAL            (* The stop law never clamps below this (mm/s)
@@ -71,8 +73,10 @@
        KpMax           : LREAL            (* Upper bound on Kp (mm/s per MPa)
        PistonArea      : LREAL            (* Piston area (mm^2)
        SalineVolume    : LREAL            (* Saline volume, a lower bound (mL)
-       DeadVolume      : LREAL            (* Chamber volume at PosLimit, a lower bound (mL)
-       HoseCompliance  : LREAL            (* Hose compliance, a lower bound (m^3/Pa)
+       PassagesVolume  : LREAL            (* Cylinder passages: chamber volume at EndOfTravel without the hose, a lower bound (mL)
+       HoseVolume      : LREAL            (* Hose between the cylinder head and the outlet, a lower bound (mL)
+       HoseCompliance  : LREAL            (* Hose compliance beyond its liquid, a lower bound (m^3/Pa)
+       HoseOpen        : BOOL             (* The hose is open to the chamber during the compression
        BulkModulus     : LREAL            (* Saline bulk modulus, an upper bound (Pa)
        OxygenRatio     : LREAL            (* Oxygen charge as STP volume per saline volume (-)
        Henry           : LREAL            (* Henry constant of oxygen in saline (mol/(m^3 Pa))
@@ -97,6 +101,8 @@
        rMedScans       : LREAL            (* Median filter delay (scans)
        rPAbs           : LREAL            (* Absolute pressure (Pa)
        rArea           : LREAL            (* Piston area (m^2)
+       rHoseVolume     : LREAL            (* Hose volume in the chamber: HoseVolume when HoseOpen, else 0 (mL)
+       rHoseComp       : LREAL            (* Hose compliance in the chamber: HoseCompliance when HoseOpen, else 0 (m^3/Pa)
        rVch            : LREAL            (* Chamber volume (m^3)
        rVlCfg          : LREAL            (* Configured saline volume (m^3)
        rVl             : LREAL            (* Saline volume used by the bound (m^3)
@@ -122,7 +128,8 @@ ParamError := (VelMax <= LREAL#0.0) OR (DecelMax <= LREAL#0.0) OR
               (DriveLag < LREAL#0.0) OR (Crossover <= LREAL#0.0) OR
               (KiRatio < LREAL#0.0) OR (KpMin <= LREAL#0.0) OR
               (KpMax < KpMin) OR (PistonArea <= LREAL#0.0) OR
-              (NOT (SalineVolume > LREAL#0.0)) OR (DeadVolume <= LREAL#0.0) OR
+              (NOT (SalineVolume > LREAL#0.0)) OR (PassagesVolume <= LREAL#0.0) OR
+              (HoseVolume < LREAL#0.0) OR
               (HoseCompliance < LREAL#0.0) OR (BulkModulus <= LREAL#0.0) OR
               (NOT (OxygenRatio >= LREAL#0.0)) OR (Henry < LREAL#0.0) OR
               (GasTemp <= LREAL#0.0) OR (Patm <= LREAL#0.0) OR
@@ -163,8 +170,15 @@ Lag := FilterTime + (rMedScans + LREAL#3.0) * CycleTime + DriveDeadTime + DriveL
 rPAbs := MAX(Actual, LREAL#0.0) * LREAL#1.0E6 + Patm;
 rPRef := MAX(rPRef, rPAbs);
 rArea := PistonArea / LREAL#1.0E6;
-rVch := MAX(rArea * ((PosLimit - Position) / LREAL#1.0E3), LREAL#0.0)
-        + DeadVolume / LREAL#1.0E6;
+IF HoseOpen THEN
+    rHoseVolume := HoseVolume;
+    rHoseComp := HoseCompliance;
+ELSE
+    rHoseVolume := LREAL#0.0;
+    rHoseComp := LREAL#0.0;
+END_IF;
+rVch := MAX(rArea * ((EndOfTravel - Position) / LREAL#1.0E3), LREAL#0.0)
+        + (PassagesVolume + rHoseVolume) / LREAL#1.0E6;
 rVlCfg := SalineVolume / LREAL#1.0E6;
 rVl := MIN(rVlCfg, rVch);
 rNCharge := OxygenRatio * rVlCfg * Patm / (LREAL#8.314 * LREAL#273.15);
@@ -172,11 +186,11 @@ rNSat := Henry * rPRef * rVlCfg;
 rNGas := MAX(rNCharge - rNSat, LREAL#0.0);
 rRT := LREAL#8.314 * GasTemp;
 rVGas := rNGas * rRT / rPAbs;
-rC := rVGas / rPAbs + rVl / BulkModulus + HoseCompliance;
+rC := rVGas / rPAbs + rVl / BulkModulus + rHoseComp;
 KEst := rArea / rC / LREAL#1.0E9;
 rPAbsT := MAX(MAX(Actual, Target), LREAL#0.0) * LREAL#1.0E6 + Patm;
 rVGasT := rNGas * rRT / rPAbsT;
-rCT := rVGasT / rPAbsT + rVl / BulkModulus + HoseCompliance;
+rCT := rVGasT / rPAbsT + rVl / BulkModulus + rHoseComp;
 KEstTarget := rArea / rCT / LREAL#1.0E9;
 rKSched := MAX(KEst, KEstTarget);
 
