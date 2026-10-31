@@ -18,6 +18,7 @@ Depends on: design/pressure-loop slave-sim/c slave-src tools
 """
 
 import ctypes
+import os
 import subprocess
 import sys
 import tempfile
@@ -41,7 +42,7 @@ TOL = 1e-9
 
 def build(tmp):
     so = tmp / 'libplant.so'
-    subprocess.run(['cc', '-O2', '-shared', '-fPIC', '-o', str(so),
+    subprocess.run([os.environ.get('CC', 'cc'), '-O2', '-shared', '-fPIC', '-o', str(so),
                     str(ROOT / 'slave-sim' / 'c' / 'plant.c'), '-lm'], check=True)
     lib = ctypes.CDLL(str(so))
     lib.plant_size.restype = ctypes.c_int

@@ -1,16 +1,14 @@
 function runAll(varargin)
-%RUNALL  Regenerate the simulated slave and run every MATLAB/Octave test.
+%RUNALL  Build the simulated slave and run every MATLAB/Octave test.
 %
-%   runAll            regenerates slave-sim/generated from slave-src with
-%                     tools/st_translate.py, then runs each test in order and
-%                     stops at the first failure.
-%   runAll('nogen')   skips the regeneration (the generated files must
-%                     already exist).
+%   runAll            builds the simulated slave when it is stale
+%                     (slave-sim/buildSlaveSim.m: slave-src translated to C
+%                     and compiled with slave-sim/c), then runs each test in
+%                     order and stops at the first failure.
+%   runAll('nogen')   uses the slave as built (slaveSimMex must exist).
 %
-%   Either way it builds the compiled simulated slave when it is stale
-%   (slave-sim/buildSlaveSim.m) and the tests use it; when it cannot be
-%   built (no C compiler configured for mex) or SLAVE_SIM=m is set, they
-%   use the generated Octave functions, and slaveSimParity is skipped.
+%   The build needs Python 3 and a C compiler: mkoctfile in Octave, one
+%   configured for mex in MATLAB (MinGW-w64 on Windows).
 %
 %   It runs in MATLAB and in Octave and sets the paths it needs
 %   relative to its own location, so from the repository root:
@@ -20,8 +18,8 @@ function runAll(varargin)
 %
 %   or, in an open MATLAB session, cd to tests and type runAll.
 %
-%   The Python tests (stTargetParity and design/pressure-loop) are run by
-%   tests/run_all.sh, which also runs these tests, in parallel.
+%   The Python tests (stTargetParity, plantParity and design/pressure-loop)
+%   are run by tests/run_all.sh, which also runs these tests, in parallel.
 
 root = fileparts(fileparts(mfilename('fullpath')));
 addpath(fullfile(root, 'master-src', 'logic'), ...
@@ -30,19 +28,10 @@ addpath(fullfile(root, 'master-src', 'logic'), ...
         fullfile(root, 'tests'));
 
 if ~any(strcmp(varargin, 'nogen'))
-    generate(root);
+    buildSlaveSim();
 end
-if ~strcmp(getenv('SLAVE_SIM'), 'm')
-    try
-        buildSlaveSim();
-    catch err
-        fprintf('the compiled slave could not be built, using SLAVE_SIM=m:\n%s\n', err.message);
-        setenv('SLAVE_SIM', 'm');
-    end
-end
-fprintf('simulated slave: %s\n', slaveSimBackend());
 
-tests = {'smokeMasterStateMachine', 'slaveSimParity', 'closedLoopMasterSlave', ...
+tests = {'smokeMasterStateMachine', 'closedLoopMasterSlave', ...
          'closedLoopModbusStep', 'slavePressureMode', ...
          'pressureNoiseRunSim', 'frictionRunSim', 'charRunSim', ...
          'charFitsSynthetic'};
@@ -54,24 +43,3 @@ end
 fprintf('--- %d test scripts passed in %.0f s\n', numel(tests), toc(t0));
 end
 
-
-function generate(root)
-% Run tools/st_translate.py with the first Python interpreter found: python3 on
-% Linux and macOS, python or the py launcher on Windows.
-cmds = {'python3', 'python', 'py -3'};
-script = fullfile(root, 'tools', 'st_translate.py');
-src = fullfile(root, 'slave-src');
-dst = fullfile(root, 'slave-sim', 'generated');
-for k = 1:numel(cmds)
-    cmd = sprintf('%s "%s" --target m "%s" "%s"', cmds{k}, script, src, dst);
-    [status, out] = system(cmd);
-    if status == 0
-        fprintf('%s', out);
-        return
-    end
-end
-error('runAll:generate', ...
-      ['could not run tools/st_translate.py with python3, python or py; ' ...
-       'install Python 3 or call runAll(''nogen'') with the generated ' ...
-       'files in place']);
-end

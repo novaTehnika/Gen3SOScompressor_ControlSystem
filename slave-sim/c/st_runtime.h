@@ -1,7 +1,7 @@
 /* Runtime of the C target of tools/st_translate.py: the IEC standard
  * function blocks and the helpers the generated code calls. The helpers
- * follow the m target's semantics (Octave's min, max, mod, round, fix), so
- * the two targets agree. */
+ * follow the py target's runtime (st_min, st_max, st_mod, st_round, ...),
+ * so the two targets agree (tests/stTargetParity.py). */
 #ifndef ST_RUNTIME_H
 #define ST_RUNTIME_H
 

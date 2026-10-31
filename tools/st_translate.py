@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Translate the slave's Structured Text into a simulation language.
 
-    python3 tools/st_translate.py --target m  slave-src slave-sim/generated
     python3 tools/st_translate.py --target py slave-src design/generated
     python3 tools/st_translate.py --target c  slave-src slave-sim/generated-c
 
@@ -16,11 +15,11 @@ from GVL/GlobalVariables_Reference.st and from DUT/DataTypes.st.
 
 This module is the front end every target shares: declarations, tokens,
 and the Translator class, which parses ST and emits through small
-spelling methods. The spellings in Translator are Octave's; each target
-module, tools/st_target_<target>.py, subclasses it where its language
-differs and writes the files for that target:
+spelling methods. The default spellings in Translator are Octave's (the
+first target); each target module, tools/st_target_<target>.py,
+subclasses it where its language differs and writes the files for that
+target:
 
-    m    MATLAB/Octave functions for the slave simulator
     py   Python modules of the function blocks, for design studies
     c    C for the compiled slave simulator
 
@@ -574,7 +573,7 @@ def load_project(src):
 # Command line
 # --------------------------------------------------------------------------
 
-TARGETS = ('m', 'py', 'c')
+TARGETS = ('py', 'c')
 
 
 def main(argv=None):

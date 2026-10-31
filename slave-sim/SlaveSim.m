@@ -7,8 +7,7 @@ classdef SlaveSim < handle
 %   snapshot. Unlike the struct, sl is a handle: copies of it are the same
 %   slave.
 %
-%   slaveInit returns one when the compiled slave is built and selected
-%   (slaveSimBackend).
+%   slaveInit returns one.
 
     properties (SetAccess = private)
         id          % the instance in slaveSimMex

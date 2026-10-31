@@ -1,6 +1,4 @@
-/* Compiled simulated slave: see slave_sim.h. The functions follow
- * slaveInit.m, slaveStep.m, axisModel.m and chamberPressure.m statement for
- * statement; a change to one of those needs the same change here. */
+/* Simulated slave: see slave_sim.h. */
 #include <math.h>
 #include <stddef.h>
 #include <string.h>
@@ -44,8 +42,7 @@ static double slew(double v, double target, double step)
 
 static double sign(double x) { return (x > 0) - (x < 0); }
 
-/* axisModel.m: the LD POU's motion function blocks, the drive and the
- * mechanics. Reads G_cmd*, writes G_sta* and G_sysActual*. */
+/* The LD POU's motion function blocks, the drive and the mechanics. Reads G_cmd*, writes G_sta* and G_sysActual*. */
 static void axis_model(slave_sim_t *sl, double dt)
 {
     sim_ax_t *ax = &sl->ax;
@@ -218,7 +215,7 @@ static void axis_model(slave_sim_t *sl, double dt)
     G->G_sysDriveFault = hook->driveFault;
 }
 
-/* slaveStep.m: inputs -> PRG_Input -> PRG_Main -> PRG_Output -> axis. */
+/* One scan: inputs -> PRG_Input -> PRG_Main -> PRG_Output -> axis. */
 void slave_sim_step(slave_sim_t *sl, const sim_u_t *u, sim_y_t *y)
 {
     double dt = sl->G.G_cfgScanTime;

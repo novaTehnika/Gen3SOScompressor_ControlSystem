@@ -1,6 +1,6 @@
 #!/bin/sh
-# Regenerate the simulated slave and the Python function blocks from
-# slave-src and run the tests: the Python tests with python3, the
+# Build the simulated slave and regenerate the Python function blocks from
+# slave-src, and run the tests: the Python tests with python3, the
 # MATLAB-language tests in Octave or, when octave-cli is not installed, in
 # MATLAB. Tests run in parallel and are skipped while their inputs are
 # unchanged since they last passed.
@@ -12,19 +12,16 @@
 #   test    run only these tests, by name without extension (default: all)
 #
 # A test's inputs are its own file, the paths on its "Depends on:" header
-# line, the interpreter version and the simulated slave (SLAVE_SIM=c, the
-# compiled one, built here by slave-sim/buildSlaveSim.m, or SLAVE_SIM=m, the
-# generated Octave functions). Their hash is recorded in .test-cache/
+# line and the interpreter version. Their hash is recorded in .test-cache/
 # when the test passes; a later run skips the test while the hash matches.
-# Needs python3 with design/requirements.txt, octave-cli or matlab, and
-# sha256sum.
+# Needs python3 with design/requirements.txt, octave-cli or matlab, a C
+# compiler (cc, and mkoctfile or one configured for mex) and sha256sum.
 set -e
 cd "$(dirname "$0")/.."
 
 # Longest first, so the parallel run finishes as early as it can. The
 # MATLAB-language tests are also listed in tests/runAll.m.
 ALL_TESTS="
-tests/slaveSimParity.m
 tests/frictionRunSim.m
 tests/charRunSim.m
 tests/closedLoopMasterSlave.m
@@ -86,28 +83,21 @@ else
     done
 fi
 
-python3 tools/st_translate.py --target m slave-src slave-sim/generated
 python3 tools/st_translate.py --target py slave-src design/generated
 
-# The compiled simulated slave, unless SLAVE_SIM=m asks for the generated
-# Octave one; without a working compiler the tests fall back to it.
-if [ "${SLAVE_SIM:-c}" = c ]; then
-    if [ $mrunner = octave ]; then
-        build="octave-cli --quiet --eval"
-    else
-        build="matlab -batch"
-    fi
-    if $build "addpath('slave-sim'); buildSlaveSim" >"$CACHE/build.log" 2>&1; then
-        SLAVE_SIM=c
-    else
-        cat "$CACHE/build.log" >&2
-        echo "run_all.sh: could not build the compiled slave; using SLAVE_SIM=m" >&2
-        SLAVE_SIM=m
-    fi
-    rm -f "$CACHE/build.log"
+# The simulated slave: slave-src translated to C and compiled with
+# slave-sim/c into slaveSimMex (slave-sim/buildSlaveSim.m, when stale).
+if [ $mrunner = octave ]; then
+    build="octave-cli --quiet --eval"
+else
+    build="matlab -batch"
 fi
-export SLAVE_SIM
-mversion="$mversion slave=$SLAVE_SIM"
+if ! $build "addpath('slave-sim'); buildSlaveSim" >"$CACHE/build.log" 2>&1; then
+    cat "$CACHE/build.log" >&2
+    echo "run_all.sh: could not build the simulated slave" >&2
+    exit 1
+fi
+rm -f "$CACHE/build.log"
 
 # Hash of a test's inputs. Generated directories are left out: they are
 # derived from slave-src and tools, which are inputs themselves.

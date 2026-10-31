@@ -18,7 +18,7 @@ The runtime it relies on (TON, R_TRIG, F_TRIG, st_* helpers) is the
 hand-written slave-sim/c/st_runtime.h. Variables keep the controller's
 types: BOOL is bool, INT int16_t, UINT uint16_t, UDINT uint32_t, LREAL
 double and REAL float. TIME is double seconds and enumerations are
-int32_t, as in the m target. Function block instances are structs passed by
+int32_t, as in the py target. Function block instances are structs passed by
 pointer; inputs that a call leaves out keep their previous value. Each
 statement ends with its ST source line as `// :N`.
 """
@@ -73,7 +73,7 @@ class CTranslator(Translator):
 
     def open_for(self, var, lo, hi, step, line):
         # The bounds are evaluated once, and the loop counter is the
-        # block's own, as in the m target.
+        # block's own, as in the py target.
         if step is None:
             self.emit(f'for (long st_k_ = {lo}, st_hi_ = {hi}; st_k_ <= st_hi_; st_k_++) {{',
                       line)
@@ -233,7 +233,7 @@ def init_body(target, fields, ctx):
     lines = [f'    memset({target}, 0, sizeof *{target});']
     for fname, ftyp in fields:
         if ARRAY_RE.match(ftyp):
-            continue                    # zero, as the m target's zeros()
+            continue                    # zero
         if ftyp in ctx['structs'] or ftyp in ctx['fbs'] or ftyp in STD_FBS:
             lines.append(f'    init_{ftyp}(&{target}->{fname});')
             continue
