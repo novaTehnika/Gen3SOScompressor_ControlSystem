@@ -44,11 +44,17 @@ function [path, plan] = charStopPath(opts)
 %   opts.minRun_mm      shortest steady part of a leg (default 0.2 mm or
 %                       0.15 s at the speed, whichever is larger)
 %   opts.fillVolume_mL  saline at the first level (default 343)
-%   opts.chargeRatio    gas charge, STP volume per saline volume, taken as
-%                       free gas at every level (default 2.0, air: softer
-%                       than the oxygen runs, so the fast legs fit at
-%                       pressure; the stopping distance depends on the
-%                       load, not on the stiffness)
+%   opts.chargeRatio    gas charge admitted, STP volume per liquid volume
+%                       (default 2.0, air: softer than the oxygen runs, so
+%                       the fast legs fit at pressure; the stopping
+%                       distance depends on the load, not on the
+%                       stiffness)
+%   opts.solubility     mL of gas at STP that a mL of the liquid holds per
+%                       atmosphere of absolute pressure; the free gas at a
+%                       level is the charge less what the liquid holds at
+%                       equilibrium there, the stiffest the chamber can be
+%                       (default 0.018, air in water at room temperature;
+%                       oxygen is 0.03, and 0 keeps all the charge free)
 %   opts.K_Pa           bulk modulus of the saline (default 0.72e9)
 %   opts.C_hose_m3_Pa   hose compliance when the hose is open (default 0,
 %                       the proximal valve shut)
@@ -78,8 +84,9 @@ here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'common'));
 cfg = charConfig();
 known = {'levels_MPa', 'speeds', 'budget_MPa', 'rampSpeed', 'hold_s', 'pause_s', 'T0_s', ...
-    'D_mm_s2', 'minRun_mm', 'fillVolume_mL', 'chargeRatio', 'K_Pa', 'C_hose_m3_Pa', ...
-    'stiffness', 'pressureStop', 'deadVolume_mL', 'posStop', 'P_start_MPa', 'quiet'};
+    'D_mm_s2', 'minRun_mm', 'fillVolume_mL', 'chargeRatio', 'solubility', 'K_Pa', ...
+    'C_hose_m3_Pa', 'stiffness', 'pressureStop', 'deadVolume_mL', 'posStop', 'P_start_MPa', ...
+    'quiet'};
 given = fieldnames(opts);
 unknown = given(~ismember(given, known));
 if ~isempty(unknown)
@@ -97,6 +104,7 @@ opts = withDefault(opts, 'D_mm_s2', cfg.pressureDecel);
 opts = withDefault(opts, 'minRun_mm', 0.2);
 opts = withDefault(opts, 'fillVolume_mL', 343);
 opts = withDefault(opts, 'chargeRatio', 2.0);
+opts = withDefault(opts, 'solubility', 0.018);
 opts = withDefault(opts, 'K_Pa', 0.72e9);
 opts = withDefault(opts, 'C_hose_m3_Pa', 0);
 opts = withDefault(opts, 'stiffness', []);
@@ -124,12 +132,15 @@ assert(all(abs(opts.speeds) <= cfg.velMax), 'a speed exceeds G_cfgVelLimitMax');
 % Stiffness at a level, MPa/mm: the free gas (isothermal) and the saline
 % in series with the hose, eq. (4) of the design README, with the saline
 % volume at the level taken as the fill (the sweep between levels is a
-% few mL).
+% few mL). The free gas is the charge less what the liquid holds in
+% solution at equilibrium at the level (Henry's law, eq. (2)), which is
+% the least gas and so the stiffest chamber the level can present.
 if isempty(opts.stiffness)
     A_m2 = cfg.pistonArea_mm2 * 1e-6;
     Vl = opts.fillVolume_mL * 1e-6;                         % m^3
-    Vstp = opts.chargeRatio * Vl;                           % m^3 at atmosphere
-    kOf = @(P) A_m2 / (Vstp * cfg.Patm_MPa / (P + cfg.Patm_MPa) / ((P + cfg.Patm_MPa) * 1e6) ...
+    freeStp = @(P) max(opts.chargeRatio * Vl ...
+        - opts.solubility * (P + cfg.Patm_MPa) / cfg.Patm_MPa * Vl, 0);   % m^3 at atmosphere
+    kOf = @(P) A_m2 / (freeStp(P) * cfg.Patm_MPa / (P + cfg.Patm_MPa) / ((P + cfg.Patm_MPa) * 1e6) ...
         + Vl / opts.K_Pa + opts.C_hose_m3_Pa) / 1e9;          % Pa/m -> MPa/mm
 else
     kOf = opts.stiffness;
@@ -137,7 +148,7 @@ end
 % Piston position at a level, mm: the chamber holds the saline and the
 % charge compressed isothermally; NaN with a stiffness function given
 if isempty(opts.stiffness)
-    xOf = @(P) cfg.posEOT - (opts.fillVolume_mL + opts.chargeRatio * opts.fillVolume_mL ...
+    xOf = @(P) cfg.posEOT - (opts.fillVolume_mL + freeStp(P) * 1e6 ...
         * cfg.Patm_MPa / (P + cfg.Patm_MPa) - opts.deadVolume_mL) * 1000 / cfg.pistonArea_mm2;
 else
     xOf = @(P) NaN;
@@ -152,8 +163,9 @@ plan = struct('P_MPa', {}, 'k_MPa_mm', {}, 'x_mm', {}, 'budget_MPa', {}, 'speeds
     'd_mm', {}, 'stop_mm', {}, 'rise_MPa', {});
 seconds = 0;
 nStops = 0;
-say('one-pass stopping-distance path: %d levels, speeds %s mm/s, charge %g:1 air, fill %g mL\n', ...
-    nL, mat2str(opts.speeds), opts.chargeRatio, opts.fillVolume_mL);
+say(['one-pass stopping-distance path: %d levels, speeds %s mm/s, charge %g:1, fill %g mL, ' ...
+    'solubility %g mL/mL/atm\n'], nL, mat2str(opts.speeds), opts.chargeRatio, opts.fillVolume_mL, ...
+    opts.solubility);
 say('%6s %10s %8s %10s %6s %8s %8s %8s\n', 'P MPa', 'k MPa/mm', 'x mm', 'budget', 'v', 'd mm', 'stop mm', 'rise');
 Pprev = opts.P_start_MPa;
 for L = 1:nL
