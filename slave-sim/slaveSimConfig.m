@@ -14,6 +14,7 @@ sim.initialPos     = 40.0;   % x at power-up (mm)
 sim.bootFrameError = 0.0;    % controller position minus x at power-up (mm); 0 = retained absolute frame
 sim.powerOnDelay   = 0.1;    % MC_Power Enable -> Status (s)
 sim.torqueAccel    = 0.2;    % TorqueVLMode acceleration per % torque (mm/s^2)
+sim.velFeedbackTau = 0;      % first-order lag of the drive's velocity feedback (s); 0 = none
 
 % Chamber: a gas spring. Past chamberContactPos the piston compresses an
 % isothermal gas volume that starts at chamberGasVolume at atmosphere, plus

@@ -4,7 +4,9 @@ function [ax, G] = axisModel(ax, G, E, sim, hook, dt)
 %
 %   Reads the G_cmd* structs written by PRG_Main and writes the G_sta*
 %   structs and G_sysActual*. The axis follows its command exactly (no
-%   servo dynamics, no load) unless hook.blocked holds it still.
+%   servo dynamics, no load) unless hook.blocked holds it still. The
+%   velocity feedback G_sysActualVelocity lags the axis by a first-order
+%   sim.velFeedbackTau (0, no lag, by default).
 %
 %   Modelled behaviour
 %     MC_Power         Status follows Enable after sim.powerOnDelay.
@@ -207,7 +209,13 @@ G.G_staJog.Done = jogDone;
 G.G_staJog.Error = false;
 
 G.G_sysActualPosition = ax.x + ax.offset;
-G.G_sysActualVelocity = ax.v;
+% Velocity feedback, lagged by the drive when sim.velFeedbackTau is set
+if sim.velFeedbackTau > 0
+    ax.vFb = ax.vFb + (ax.v - ax.vFb) * dt / (sim.velFeedbackTau + dt);
+else
+    ax.vFb = ax.v;
+end
+G.G_sysActualVelocity = ax.vFb;
 G.G_sysActualTorque = hook.torque;
 G.G_sysDriveFault = hook.driveFault;
 end

@@ -17,6 +17,7 @@ sl.sim = slaveSimConfig();
 
 ax.x = sl.sim.initialPos;
 ax.v = 0;
+ax.vFb = 0;         % velocity feedback after sim.velFeedbackTau (mm/s)
 ax.offset = sl.sim.bootFrameError;
 ax.tPower = 0;
 ax.prevResetExec = false;

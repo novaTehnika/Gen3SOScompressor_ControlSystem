@@ -50,10 +50,9 @@ function out = fakeProbeLink(cmd, varargin)
 %   velocity (mm/s), P the chamber pressure (MPa) and A the piston area
 %   (mm^2). A nonzero tStick holds the axis still for that long after each
 %   command from rest while the torque ramps to F0 + sign (Fc + dFs) + P A,
-%   which is what breakaway looks like in the log. A field tauV lags the
-%   velocity the registers report behind the axis by that time constant,
-%   standing in for the drive's velocity loop, which the axis model does
-%   not have.
+%   which is what breakaway looks like in the log. A field tauV sets the
+%   simulator's drive velocity-feedback lag (sim.velFeedbackTau), so the
+%   slave, its registers and its probe all see the lagged velocity.
 
 persistent S R
 out = [];
@@ -75,7 +74,6 @@ switch cmd
         S.valve = struct('at', Inf, 'Cd', 0.7, 'open', false, 'collected', 0);
         S.collectLog = zeros(0, 2);
         S.stick = struct('until', -Inf, 'sign', 0, 'armed', true);
-        S.vLag = 0;
         S.hook = struct('dropArm', 0, 'tear', 0);
         S.nT = 0;
         R = zeros(4096, 7);
@@ -93,6 +91,9 @@ switch cmd
         S.sl = varargin{1}(S.sl);
     case 'torqueModel'
         S.torque = varargin{1};
+        if isfield(S.torque, 'tauV')
+            S.sl.sim.velFeedbackTau = S.torque.tauV;
+        end
     case 'valveAt'
         S.valve.at = varargin{1};
         if numel(varargin) > 1
@@ -121,7 +122,6 @@ switch cmd
                 S = valveScan(S);
                 Gpre = S.sl.G;                      % what the probe is given
                 [S.sl, S.y] = slaveStep(S.sl, S.u);
-                S = lagScan(S);
                 S = probeScan(S);
                 [S, R] = logScan(S, R, Gpre);
             end
@@ -131,9 +131,6 @@ switch cmd
         n = varargin{2};
         regs = zeros(1, 524);
         regs(1:S.map.nRead) = packRead(S.y, S.map);
-        if ~isempty(S.torque)
-            regs(S.map.ir.velocity:S.map.ir.velocity + 1) = modbusPack(S.vLag);
-        end
         regs(101:102) = modbusPack(S.p.stats(1));
         regs(103:104) = modbusPack(S.p.stats(2));
         regs(105:106) = modbusPack(S.p.stats(3));
@@ -262,18 +259,6 @@ if S.valve.open
 end
 end
 
-
-function S = lagScan(S)
-% The velocity the registers report: the axis velocity through a
-% first-order lag when the torque model asks for one.
-dt = S.sl.G.G_cfgScanTime;
-if ~isempty(S.torque) && isfield(S.torque, 'tauV') && S.torque.tauV > 0
-    S.vLag = S.vLag + (S.sl.ax.v - S.vLag) * dt / (S.torque.tauV + dt);
-else
-    S.vLag = S.sl.ax.v;
-end
-S.sl.G.G_sysActualVelocity = S.vLag;            % the feedback the next scan sees
-end
 
 
 function S = probeRegister(S, hr, value)
