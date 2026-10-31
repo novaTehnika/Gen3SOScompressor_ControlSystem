@@ -43,7 +43,11 @@ function r = charStopDistance(files, opts)
 %                compression, -1 return), x_mm (travel to rest), dP_MPa
 %                (the pressure's own excursion during the stop, signed with
 %                the motion), torquePeak, t_stop_s, x_cfg_mm (the slave's
-%                allowance), and alarm (a fault status within the stop)
+%                allowance), creep_mm (further travel in the direction of
+%                the motion over the second after rest, with dPcreep_MPa
+%                the pressure change over it: the drive still moving under
+%                load after its velocity feedback reads zero), and alarm (a
+%                fault status within the stop)
 %   r.fit.comp, r.fit.ret
 %                per direction: T0_s, D_mm_s2, n, residual_mm (rms), and
 %                perLevel (P_MPa, D_mm_s2, n) where fitted
@@ -70,9 +74,7 @@ opts = withDefault(opts, 'A_mm2', cfg.pistonArea_mm2);
 opts = withDefault(opts, 'quiet', false);
 say = @(varargin) sayIf(~opts.quiet, varargin{:});
 
-stops = struct('source', {}, 'file', {}, 't0', {}, 'v_mm_s', {}, 'P_MPa', {}, ...
-    'dir', {}, 'x_mm', {}, 'dP_MPa', {}, 'torquePeak', {}, 't_stop_s', {}, ...
-    'x_cfg_mm', {}, 'alarm', {});
+stops = emptyStops();
 for f = 1:numel(files)
     d = benchReadCsv(files{f});
     if isfield(d, 'vCmd')
@@ -94,13 +96,18 @@ r.stops = stops;
 % --- Report the stops ------------------------------------------------------------
 say('stops: %d (%d from captures, %d from the log)\n', numel(stops), ...
     sum(strcmp({stops.source}, 'capture')), sum(strcmp({stops.source}, 'log')));
-say('%-8s %7s %7s %5s %9s %9s %8s %8s %8s %6s\n', 'source', 'P MPa', 'v mm/s', 'dir', ...
-    'x mm', 'x cfg mm', 'dP MPa', 'T peak', 't stop', 'alarm');
+say('%-8s %7s %7s %5s %9s %9s %8s %9s %8s %8s %6s\n', 'source', 'P MPa', 'v mm/s', 'dir', ...
+    'x mm', 'x cfg mm', 'dP MPa', 'creep mm', 'T peak', 't stop', 'alarm');
 for k = 1:numel(stops)
     s = stops(k);
-    say('%-8s %7.2f %7.2f %5s %9.3f %9.3f %8.3f %8.1f %8.3f %6s\n', s.source, s.P_MPa, ...
-        abs(s.v_mm_s), dirText(s.dir), s.x_mm, s.x_cfg_mm, s.dP_MPa, s.torquePeak, ...
+    say('%-8s %7.2f %7.2f %5s %9.3f %9.3f %8.3f %9.3f %8.1f %8.3f %6s\n', s.source, s.P_MPa, ...
+        abs(s.v_mm_s), dirText(s.dir), s.x_mm, s.x_cfg_mm, s.dP_MPa, s.creep_mm, s.torquePeak, ...
         s.t_stop_s, yesNo(s.alarm));
+end
+creep = [stops.creep_mm];
+if any(~isnan(creep))
+    say('creep after rest: median %.3f mm, max %.3f mm (%.2f MPa) over the second after the velocity reads zero\n', ...
+        median(creep(~isnan(creep))), max(creep), max([stops.dPcreep_MPa]));
 end
 
 % --- Fit per direction -----------------------------------------------------------
@@ -109,7 +116,8 @@ names = {'comp', 'ret'};
 dirs = [1 -1];
 for j = 1:2
     sel = stops([stops.dir] == dirs(j) & ~[stops.alarm]);
-    fit = struct('T0_s', NaN, 'D_mm_s2', NaN, 'n', numel(sel), 'residual_mm', NaN, 'perLevel', []);
+    fit = struct('T0_s', NaN, 'D_mm_s2', NaN, 'n', numel(sel), 'residual_mm', NaN, ...
+        'perLevel', struct('P_MPa', {}, 'D_mm_s2', {}, 'n', {}));
     if numel(sel) >= 2
         v = abs([sel.v_mm_s])';
         x = [sel.x_mm]';
@@ -173,9 +181,7 @@ rest = opts.restSamples;
 if isempty(rest)
     rest = 3;
 end
-stops = struct('source', {}, 'file', {}, 't0', {}, 'v_mm_s', {}, 'P_MPa', {}, ...
-    'dir', {}, 'x_mm', {}, 'dP_MPa', {}, 'torquePeak', {}, 't_stop_s', {}, ...
-    'x_cfg_mm', {}, 'alarm', {});
+stops = emptyStops();
 inVel = d.mode == 3;
 n = numel(d.t);
 for i = 2:n
@@ -201,9 +207,7 @@ rest = opts.restSamples;
 if isempty(rest)
     rest = 10;
 end
-stops = struct('source', {}, 'file', {}, 't0', {}, 'v_mm_s', {}, 'P_MPa', {}, ...
-    'dir', {}, 'x_mm', {}, 'dP_MPa', {}, 'torquePeak', {}, 't_stop_s', {}, ...
-    'x_cfg_mm', {}, 'alarm', {});
+stops = emptyStops();
 i = find(d.vCmd(2:end) == 0 & abs(d.vCmd(1:end - 1)) >= opts.minSpeed, 1) + 1;
 if isempty(i)
     return;
@@ -257,7 +261,27 @@ s.dP_MPa = dirSign * (P(jRest) - P(i));
 s.torquePeak = max(abs(trq(i:j)));
 s.t_stop_s = t(jRest) - t(i);
 s.x_cfg_mm = NaN;
+% Creep: travel in the direction of the motion over the second after the
+% velocity first read zero, while the command stays at zero
+jEnd = jRest;
+while jEnd < n && t(jEnd + 1) - t(jRest) <= 1.0
+    jEnd = jEnd + 1;
+end
+if t(jEnd) - t(jRest) >= 0.3
+    s.creep_mm = dirSign * (x(jEnd) - x(jRest));
+    s.dPcreep_MPa = dirSign * (P(jEnd) - P(jRest));
+else
+    s.creep_mm = NaN;
+    s.dPcreep_MPa = NaN;
+end
 s.alarm = false;
+end
+
+
+function stops = emptyStops()
+stops = struct('source', {}, 'file', {}, 't0', {}, 'v_mm_s', {}, 'P_MPa', {}, ...
+    'dir', {}, 'x_mm', {}, 'dP_MPa', {}, 'torquePeak', {}, 't_stop_s', {}, ...
+    'x_cfg_mm', {}, 'creep_mm', {}, 'dPcreep_MPa', {}, 'alarm', {});
 end
 
 

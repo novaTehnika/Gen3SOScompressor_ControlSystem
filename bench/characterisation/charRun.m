@@ -23,6 +23,13 @@ function r = charRun(label, path, opts)
 %                                       command, downward for a negative one)
 %                                       or maxSec elapse
 %     {'dwell', seconds}                velocity mode, zero command
+%     {'settle', mm_per_s, MPa, maxSec} velocity mode toward the pressure
+%                                       MPa at the given speed, in the
+%                                       direction the pressure error
+%                                       needs when the step starts, until
+%                                       it is crossed or maxSec elapse;
+%                                       nothing when already within
+%                                       0.05 MPa of it
 %     {'move', mm_per_s, mm, maxSec}    velocity mode until the position
 %                                       has moved mm from where the step
 %                                       began (either sign) or maxSec
@@ -37,7 +44,7 @@ function r = charRun(label, path, opts)
 %     {'hold', seconds}                 position mode at the position where
 %                                       the step starts
 %     {'pressure', MPa, seconds}        pressure mode (target in MPa gauge)
-%   Consecutive steps of the same mode (jog, ramp, dwell, move, velstep; position,
+%   Consecutive steps of the same mode (jog, ramp, dwell, move, settle, velstep; position,
 %   hold; pressure) run in one session: the command changes without a stop
 %   and a handshake in between. A step of another mode stops the axis first.
 %   A velocity session is entered at rest and its first command sent once
@@ -147,6 +154,7 @@ seq.tSub = 0;
 seq.armPending = false; % reference change waits one cycle for the probe arm
 seq.firstPending = false; % a velocity session's first command waits for the mode to run
 seq.xStart = NaN;       % position when a move step's command went out
+seq.settleSign = 0;     % direction a settle step chose
 seq.resetSent = false;  % operator reset sent for a fault latched at the start
 seq.tFaultSeen = NaN;   % when that fault was first reported
 seq.abort = '';
@@ -485,6 +493,14 @@ switch seq.phase
                     fprintf('  step %d: %.3f MPa reached at %.3f mm after %.1f s\n', ...
                         seq.idx, m.pressure, m.position, inPhase);
                 end
+            case 'settle'
+                crossed = (seq.settleSign > 0 && m.pressure >= s.pressureEnd) || ...
+                          (seq.settleSign < 0 && m.pressure <= s.pressureEnd) || seq.settleSign == 0;
+                done = crossed || inPhase >= s.seconds;
+                if crossed && seq.settleSign ~= 0
+                    fprintf('  step %d: settled at %.3f MPa, %.3f mm after %.1f s\n', ...
+                        seq.idx, m.pressure, m.position, inPhase);
+                end
             case 'move'
                 moved = abs(m.position - seq.xStart);
                 done = moved >= s.distance || inPhase >= s.seconds;
@@ -542,11 +558,17 @@ seq.armPending = false;
 switch s.name
     case 'idle'
         app.op = 0;
-    case {'jog', 'ramp', 'dwell', 'move', 'velstep'}
+    case {'jog', 'ramp', 'dwell', 'move', 'settle', 'velstep'}
         if strcmp(s.name, 'velstep')
             v = s.target(sub);
         elseif strcmp(s.name, 'dwell')
             v = 0;
+        elseif strcmp(s.name, 'settle')
+            % Toward the pressure: up when below it, down when above,
+            % nothing within 0.05 MPa
+            err = s.pressureEnd - m.pressure;
+            seq.settleSign = sign(err) * (abs(err) > 0.05);
+            v = seq.settleSign * abs(s.target);
         else
             v = s.target;
         end
@@ -692,6 +714,10 @@ for k = 1:numel(path)
             s.op = C.OP_JOG; s.target = p{2}; s.distance = abs(p{3}); s.seconds = p{4};
             assert(p{2} ~= 0 && s.distance > 0, 'move needs a nonzero velocity and distance');
             s.targetText = sprintf('%g mm/s for %g mm', p{2}, s.distance);
+        case 'settle'
+            s.op = C.OP_JOG; s.target = abs(p{2}); s.pressureEnd = p{3}; s.seconds = p{4};
+            assert(p{2} ~= 0, 'settle needs a nonzero speed');
+            s.targetText = sprintf('to %g MPa at %g mm/s', p{3}, abs(p{2}));
         case 'velstep'
             s.op = C.OP_JOG; s.target = p{2}(:)'; s.seconds = p{3}(:)';
             assert(numel(s.target) == numel(s.seconds), 'velstep needs one duration per velocity');
@@ -706,7 +732,7 @@ for k = 1:numel(path)
             s.op = C.OP_PRESSURE; s.target = p{2}; s.seconds = p{3};
             s.targetText = sprintf('%g MPa', p{2});
         otherwise
-            error('unknown step type "%s" (idle, jog, ramp, dwell, move, velstep, position, hold, pressure)', p{1});
+            error('unknown step type "%s" (idle, jog, ramp, dwell, move, settle, velstep, position, hold, pressure)', p{1});
     end
     steps(end + 1) = s;
 end

@@ -10,10 +10,13 @@ function [path, plan] = charStopPath(opts)
 %
 %   At each level the set is, for every speed v that fits the budget:
 %     {'move', +v, d, maxSec}  {'dwell', pause}  {'move', -v, d, maxSec}  {'dwell', pause}
+%     {'settle', 0.5, P, maxSec}
 %   The move runs d mm at v and the dwell that follows is the stop, which
 %   the step probe captures (charRun arms it before every command change
 %   in a velocity session when opts.probe is set). The pair returns the
-%   piston to where it started, so the level is unchanged.
+%   piston to where it started; the settle then brings the pressure back
+%   to the level at a slow speed, since the drive's creep after each stop
+%   and the chamber's hysteresis leave the pair a little off it.
 %
 %   The distance d is set by the pressure budget at the level: the leg
 %   plus the stopping distance the slave's own law allows (v T0 + v^2 /
@@ -32,7 +35,9 @@ function [path, plan] = charStopPath(opts)
 %   opts.rampSpeed      mm/s between levels (default 2); the ramps are the
 %                       stiffness measurement
 %   opts.hold_s         dwell at each level before the set (default 2)
-%   opts.pause_s        dwell after each leg, the stop (default 1)
+%   opts.pause_s        dwell after each leg, the stop (default 2; a probe
+%                       capture and its readout need about 2 s between
+%                       command changes, so use 3 with opts.probe)
 %   opts.T0_s, opts.D_mm_s2
 %                       stopping-distance allowance v T0 + v^2 / (2 D)
 %                       (default 0.05 s and charConfig.pressureDecel)
@@ -86,7 +91,7 @@ opts = withDefault(opts, 'speeds', [1 2 5 7]);
 opts = withDefault(opts, 'budget_MPa', []);
 opts = withDefault(opts, 'rampSpeed', 2);
 opts = withDefault(opts, 'hold_s', 2);
-opts = withDefault(opts, 'pause_s', 1);
+opts = withDefault(opts, 'pause_s', 2);
 opts = withDefault(opts, 'T0_s', 0.05);
 opts = withDefault(opts, 'D_mm_s2', cfg.pressureDecel);
 opts = withDefault(opts, 'minRun_mm', 0.2);
@@ -186,7 +191,8 @@ for L = 1:nL
         path{end + 1} = {'dwell', opts.pause_s};
         path{end + 1} = {'move', -v, d, maxSec};
         path{end + 1} = {'dwell', opts.pause_s};
-        seconds = seconds + 2 * (d / v + opts.pause_s);
+        path{end + 1} = {'settle', 0.5, P, 2 * d / 0.5 + 5};
+        seconds = seconds + 2 * (d / v + opts.pause_s) + 2;
         nStops = nStops + 2;
         pl.speeds(end + 1) = v;
         pl.d_mm(end + 1) = d;

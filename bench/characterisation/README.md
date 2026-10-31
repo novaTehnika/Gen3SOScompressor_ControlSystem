@@ -385,7 +385,10 @@ speed, with an excursion set at each level:
   lag under load (test 3's fit), each stop gives a stopping distance in
   compression or on the return, the steady part of each leg gives the
   torque at speed in both directions, and the pair returns the piston to
-  where it started, so the level stands for the next speed.
+  where it started. A slow `settle` step then brings the pressure back to
+  the level, since the drive's creep after each stop and the chamber's
+  hysteresis leave the pair a little off it, so the level stands for the
+  next speed.
 
 `charStopPath` builds the path from the fill and the gas charge. The
 chamber is saline with an air charge (2:1 by STP volume by default, from a
@@ -420,7 +423,10 @@ velocity session is a stop: from the 50 ms log, the travel from the row
 that sent the command to the first rows at rest, to about half an
 exchange; from a capture, the same at the scan rate. Each stop is
 reported with its speed, pressure, direction, travel, the pressure's own
-excursion during the stop, the peak torque and whether a fault ended it.
+excursion during the stop, the creep (further travel in the direction of
+the motion over the second after the velocity feedback first reads zero,
+with the pressure change it causes; the drive still moving under load
+after it reports rest), the peak torque and whether a fault ended it.
 Per direction, the travel is fitted to x = T0·v + v²/(2·D) with both
 terms non-negative; with two or more stops at a level, D is also fitted
 per level with T0 held, which shows the load dependence. Every stop is
