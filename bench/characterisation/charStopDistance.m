@@ -69,6 +69,11 @@ function r = charStopDistance(files, opts)
 %   r.T0_s, r.D_mm_s2
 %                the values for the slave: the larger T0 and the smaller
 %                D of the two directions
+%   r.scan_s     the scan period the captures were taken at, from the
+%                position step per sample against the velocity feedback
+%                over the samples before each stop (NaN without captures);
+%                the capture files carry charConfig's scan, and a period
+%                that differs from it rescales every time in them
 %   r.pass, r.checks
 
 if ischar(files)
@@ -108,6 +113,38 @@ for k = 1:numel(stops)
     stops(k).x_cfg_mm = v * opts.lag_s + v^2 / (2 * opts.D_cfg);
 end
 r.stops = stops;
+
+% --- Scan period from the captures ----------------------------------------------
+% The probe writes one row per scan with no clock; the position advance per
+% row over the steady samples before the stop, divided by the velocity the
+% drive reports there, is the scan.
+scans = [];
+for f = 1:numel(files)
+    d = benchReadCsv(files{f});
+    if ~isfield(d, 'vCmd')
+        continue;
+    end
+    i = find(d.vCmd(2:end) == 0 & abs(d.vCmd(1:end - 1)) >= opts.minSpeed, 1);
+    if isempty(i) || i < 30
+        continue;
+    end
+    w = (i - 25):(i - 5);
+    v = mean(d.velocity(w));                                % [mm/s]
+    if abs(v) > 0.1
+        scans(end + 1) = (d.position(w(end)) - d.position(w(1))) / (numel(w) - 1) / v;   %#ok<AGROW> [s]
+    end
+end
+if isempty(scans)
+    r.scan_s = NaN;
+else
+    r.scan_s = median(scans);
+    say('capture scan period from position against velocity: %.2f ms (files assume %.2f ms)\n', ...
+        1000 * r.scan_s, 1000 * cfg.scanTime);
+    if abs(r.scan_s / cfg.scanTime - 1) > 0.2
+        say('  the captures were taken at a different scan than charConfig''s: their times, and\n');
+        say('  the slave''s filter and pipeline settings that use G_cfgScanTime, are off by that ratio\n');
+    end
+end
 
 % --- Report the stops ------------------------------------------------------------
 say('stops: %d (%d from captures, %d from the log)\n', numel(stops), ...
