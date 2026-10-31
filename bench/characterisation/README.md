@@ -78,11 +78,14 @@ and one read, should take under 20 ms; the run prints any exchange over
 150 ms, skips the probe transaction in that cycle, and at the end gives
 the write and read times separately. The slave's watchdog faults the run
 with `FAULT_COMM` (code 4) if the heartbeat stops for 300 ms
-(`G_cfgCommTimeout`), so exchanges of 200 ms end it. Exchanges that slow
-have come from a second Modbus client on the controller (the shell model
-or the operator app still connected, another MATLAB session, an OPC
-client) or from the network path; `bench/modbus/modbusRawProbe` times the
-transactions on their own, without the master, and is the first check.
+(`G_cfgCommTimeout`), so exchanges of 200 ms end it. `bench/modbus/modbusRawProbe`
+times the transactions on their own, without the master, and is the
+first check: 20 ms median and 30 ms p99 for the sequential exchange is
+the controller's normal. The step probe's register group in Hardware
+Configuration more than doubles that whether or not the probe program
+runs (`bench/common/README.md` step 3); a second Modbus client (the shell
+model or the operator app still connected, another MATLAB session, an
+OPC client) and the network path are the other causes.
 
 The run ends with the axis stopped, prints a table of the steps and saves
 `../common/captures/<label>_char_<timestamp>.csv` (columns as in
