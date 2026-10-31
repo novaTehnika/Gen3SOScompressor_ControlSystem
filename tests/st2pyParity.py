@@ -26,28 +26,48 @@ import st2m  # noqa: E402
 
 STEPS = 3000                # calls for the blocks named in CORE, STEPS_OTHER for the rest
 STEPS_OTHER = 800
+STEPS_LONG = {'FB_Probe': 12000}     # past its ring depth of 8192, so the overrun paths run
+# BOOL inputs that follow a schedule of the call number instead of toggling at
+# random: the probe is on except for calls 3000-3099, so its recording runs long
+# enough to reach the ring depth.
+SCHEDULE = {('FB_Probe', 'Enable'): lambda k: not 3000 <= k < 3100}
+BIG = 1024                  # arrays longer than this are compared once, after the last call
 CORE = {'FB_PressureController', 'FB_AnalogInputFilter', 'FB_PressureInput',
         'FB_PositionPathShaper', 'FB_DigitalInputFilter'}
 TOL = 1e-9
 SIGNALS = {'Target', 'Actual', 'Volts', 'RawInput', 'ActualPosition', 'Position',
-           'Pressure', 'Velocity'}
+           'Pressure', 'Velocity', 'VelCmd', 'Vel', 'Torque'}
+# Values drawn for integer inputs by name (default: small codes, -1 for signed
+# types). The probe's registers get values that reach its pending, filling and
+# overrun paths and a request index with a high word.
+INT_CHOICES = {'ReqLo': [0, 1, 50, 3000, 8100, 9000, 20000, 65535],
+               'ReqHi': [0, 0, 0, 1],
+               'Arm': [0, 1, 2, 3, 4, 5, 65535],
+               'Length': [0, 1, 10, 500, 9000, 65535],
+               'FillPerScan': [1, 3, 6, 13, 0, 40, -2],
+               'ModeCode': [0, 1, 2, 7, 300]}
+
 PARAM_EDGES = [0.0, -1.0, 1e-9, 1e6]
 TIME_POOL = [0.0, 0.002, 0.01, 0.05, 0.5]
 SCALAR = st2m.NUM_TYPES | {'BOOL', 'TIME'}
+SIGNED = {'INT', 'DINT', 'SINT'}
 
 
-def flat_py(x, out):
+def flat_py(x, out, big=False):
+    """Flatten a state to floats: the arrays of at most BIG elements (the
+    per-call state), or with big=True only the longer ones."""
     if isinstance(x, list):
-        out.extend(float(v) for v in x)
+        if (len(x) > BIG) == big:
+            out.extend(float(v) for v in x)
     elif hasattr(x, '__dict__'):
         for k in sorted(vars(x)):
-            flat_py(vars(x)[k], out)
-    else:
+            flat_py(vars(x)[k], out, big)
+    elif not big:
         out.append(float(x))
     return out
 
 
-def make_inputs(rng, inputs, ctx, steps):
+def make_inputs(rng, inputs, ctx, steps, block=''):
     """Rows of (dt, input values): signals redraw every call, flags toggle,
     parameters hold a value and occasionally jump to an edge case."""
     nominal = {d['name']: rng.uniform(0.1, 10.0) for d in inputs}
@@ -57,8 +77,10 @@ def make_inputs(rng, inputs, ctx, steps):
         row = [rng.choice([0.001, 0.002, 0.005])]
         for d in inputs:
             n, typ = d['name'], d['type']
-            if typ == 'BOOL':
-                if rng.random() < (0.08 if n != 'Enable' else 0.03):
+            if (block, n) in SCHEDULE:
+                state[n] = float(SCHEDULE[(block, n)](_))
+            elif typ == 'BOOL':
+                if rng.random() < 0.08 if n != 'Enable' else 0.03:
                     state[n] = 1.0 - state[n] if state[n] in (0.0, 1.0) else 1.0
                 if _ == 0 and n == 'Enable':
                     state[n] = 1.0
@@ -69,8 +91,9 @@ def make_inputs(rng, inputs, ctx, steps):
                 if rng.random() < 0.1:
                     state[n] = float(rng.randrange(len(ctx['enums'][typ])))
             elif typ in st2m.INT_TYPES:
-                if rng.random() < 0.05:
-                    state[n] = float(rng.choice([0, 1, 2, 3, 4, 5, 7, -1]))
+                if rng.random() < (0.3 if n in INT_CHOICES else 0.05):
+                    default = [0, 1, 2, 3, 4, 5, 7] + ([-1] if typ in SIGNED else [])
+                    state[n] = float(rng.choice(INT_CHOICES.get(n, default)))
             elif n in SIGNALS:
                 state[n] = rng.uniform(-12.0, 12.0) if rng.random() < 0.97 else rng.choice([0.0, 1e6])
             elif rng.random() < 0.02:
@@ -82,17 +105,19 @@ def make_inputs(rng, inputs, ctx, steps):
     return rows
 
 
-FLAT_M = '''function out = st2py_flat(x)
+FLAT_M = '''function out = st2py_flat(x, big)
 if isstruct(x)
     out = [];
     for k = sort(fieldnames(x))'
-        out = [out, st2py_flat(x.(k{1}))]; %#ok<AGROW>
+        out = [out, st2py_flat(x.(k{1}), big)]; %#ok<AGROW>
     end
-else
+elseif (numel(x) > @BIG@) == big
     out = double(x(:))';
+else
+    out = [];
 end
 end
-'''
+'''.replace('@BIG@', str(BIG))
 
 
 def driver(name, inputs, decls, init_tail):
@@ -109,7 +134,7 @@ s = init_{name}(E);
 {fixes}names = {{{names}}};
 isbool = [{isbool}];
 M = dlmread(inCsv, ',');
-f0 = st2py_flat(s);
+f0 = st2py_flat(s, false);
 out = zeros(rows(M) + 1, numel(f0));
 out(1, :) = f0;
 for k = 1:rows(M)
@@ -121,9 +146,10 @@ for k = 1:rows(M)
         end
     end
     s = {name}(s, E, M(k, 1));
-    out(k + 1, :) = st2py_flat(s);
+    out(k + 1, :) = st2py_flat(s, false);
 end
 dlmwrite(outCsv, out, 'precision', '%.17g');
+dlmwrite([outCsv '.big'], st2py_flat(s, true), 'precision', '%.17g');
 end
 ''' + init_tail
 
@@ -158,7 +184,7 @@ def main():
                 print(f'skip {name} (non-scalar inputs)')
                 continue
             rng = random.Random(name)
-            rows = make_inputs(rng, inputs, ctx, STEPS if name in CORE else STEPS_OTHER)
+            rows = make_inputs(rng, inputs, ctx, STEPS_LONG.get(name, STEPS if name in CORE else STEPS_OTHER), name)
             with open(tmp / f'{name}_in.csv', 'w', newline='') as f:
                 csv.writer(f).writerows(([repr(v) for v in r] for r in rows))
             (tmp / 'm' / f'st2py_drv_{name}.m').write_text(driver(name, inputs, decls, init_tail))
@@ -185,6 +211,8 @@ def main():
                 got.append(flat_py(s, []))
             fields = []
             flat_py_names(s, '', fields)
+            big = [float(v) for v in (tmp / f'{name}_out.csv.big').read_text().replace(',', ' ').split()]
+            assert big == flat_py(s, [], True), f'{name}: arrays of more than {BIG} elements differ'
             assert len(got[0]) == len(ref[0]), f'{name}: state width {len(got[0])} vs {len(ref[0])}'
             worst = 0.0
             for k, (g, m) in enumerate(zip(got, ref)):
@@ -193,12 +221,14 @@ def main():
                                          f'octave {b!r}')
                     if math.isfinite(a) and math.isfinite(b):
                         worst = max(worst, abs(a - b))
-            print(f'ok  {name}: {len(rows)} calls, {len(got[0])} variables, max diff {worst:.1e}')
+            print(f'ok  {name}: {len(rows)} calls, {len(got[0])} variables, max diff {worst:.1e}'
+                  + (f', {len(big)} ring words at the end' if big else ''))
 
 
 def flat_py_names(x, prefix, out):
     if isinstance(x, list):
-        out.extend(f'{prefix}[{i}]' for i in range(len(x)))
+        if len(x) <= BIG:
+            out.extend(f'{prefix}[{i}]' for i in range(len(x)))
     elif hasattr(x, '__dict__'):
         for k in sorted(vars(x)):
             flat_py_names(vars(x)[k], f'{prefix}.{k}' if prefix else k, out)

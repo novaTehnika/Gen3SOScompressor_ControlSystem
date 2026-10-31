@@ -31,7 +31,7 @@ import copy
 from pathlib import Path
 
 import st2m
-from st2m import STError, STD_FBS, Translator, init_value, load_project
+from st2m import INT_WIDTH, STError, STD_FBS, Translator, init_value, load_project
 
 HEADER = '# Generated from slave-src by tools/st2py.py - do not edit.'
 
@@ -229,6 +229,21 @@ class PyTranslator(Translator):
 
     def to_int(self, code):
         return f'st_round({code})'
+
+    def wrap(self, code, bits, signed):
+        # [two's complement wrap of an integer to the target width]
+        if signed:
+            return f'(({code} + {2 ** (bits - 1)}) % {2 ** bits} - {2 ** (bits - 1)})'
+        return f'({code} % {2 ** bits})'
+
+    def shift(self, op, code, n, typ):
+        if op == 'SHR':
+            return f'(int({code}) >> int({n}))'
+        bits, signed = INT_WIDTH[typ]
+        return self.wrap(f'(int({code}) << int({n}))', bits, signed)
+
+    def copy_back(self, target, source, line):
+        pass            # lists are shared with the caller, so the block wrote into it
 
     def resolve(self, name, line):
         if name not in self.vars and name.startswith(('G_', 'MO1_')):

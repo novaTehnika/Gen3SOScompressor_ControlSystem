@@ -4,8 +4,12 @@
     python3 tools/st2m.py slave-src slave-sim/generated
 
 Covers the ST subset used in slave-src: assignments, IF/ELSIF/ELSE, FOR,
-RETURN, function block calls with named inputs, typed literals, TIME
-literals, one-dimensional arrays and a handful of standard functions.
+RETURN, function block calls with named inputs and VAR_IN_OUT arguments,
+typed literals, TIME literals, one-dimensional arrays and a handful of
+standard functions (ABS, SQRT, MIN, MAX, LIMIT, SHR, SHL, the type
+conversions, MOD). An integer conversion whose source range is not inside
+the target's wraps modulo 2^bits as on the controller (INT_TO_WORD of a
+negative value, DINT_TO_DWORD, DWORD_TO_WORD).
 Anything outside that subset is reported as an error, not guessed at.
 
 MotionWorks IEC keeps variable declarations in its GUI, so they are read
@@ -30,7 +34,12 @@ import re
 import sys
 from pathlib import Path
 
-INT_TYPES = {'INT', 'DINT', 'UINT', 'UDINT', 'SINT', 'USINT', 'BYTE', 'WORD'}
+INT_TYPES = {'INT', 'DINT', 'UINT', 'UDINT', 'SINT', 'USINT', 'BYTE', 'WORD', 'DWORD'}
+# Width in bits and signedness of the integer types. A conversion between
+# them wraps modulo 2^bits when the source range is not inside the target's.
+INT_WIDTH = {'SINT': (8, True), 'USINT': (8, False), 'BYTE': (8, False),
+             'INT': (16, True), 'UINT': (16, False), 'WORD': (16, False),
+             'DINT': (32, True), 'UDINT': (32, False), 'DWORD': (32, False)}
 NUM_TYPES = INT_TYPES | {'LREAL', 'REAL'}
 STD_FBS = {'TON', 'R_TRIG', 'F_TRIG'}
 # Library enumerations that are not declared in DataTypes.st.
@@ -46,6 +55,17 @@ FUNCTIONS = {'ABS': 'abs', 'SQRT': 'sqrt', 'MIN': 'min', 'MAX': 'max',
 
 class STError(Exception):
     pass
+
+
+def int_range(typ):
+    bits, signed = INT_WIDTH[typ]
+    return (-2 ** (bits - 1), 2 ** (bits - 1) - 1) if signed else (0, 2 ** bits - 1)
+
+
+def int_fits(src, dst):
+    """True when every value of integer type src is a value of dst."""
+    (a, b), (c, d) = int_range(src), int_range(dst)
+    return c <= a and b <= d
 
 
 # --------------------------------------------------------------------------
@@ -70,13 +90,21 @@ def parse_datatypes(text):
     return enums, structs
 
 
+def parse_array_types(text):
+    """Named array types of DataTypes.st: {name: 'ARRAY[lo..hi] OF T'}."""
+    code = strip_comments(text)
+    return {m.group(1): f'ARRAY[{m.group(2)}..{m.group(3)}] OF {m.group(4)}'
+            for m in re.finditer(r'(\w+)\s*:\s*ARRAY\s*\[\s*(\d+)\s*\.\.\s*(\d+)\s*\]'
+                                 r'\s*OF\s+(\w+)\s*;', code)}
+
+
 DECL_RE = re.compile(
     r'^\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*:\s*'
     r'(ARRAY\s*\[\s*\d+\s*\.\.\s*\d+\s*\]\s*OF\s+\w+|\w+)'
     r'(?:\s*:=\s*([^\s(]+))?')
 
 
-def parse_header_decls(text, known_types):
+def parse_header_decls(text, known_types, aliases=None):
     """Variable declarations from the header comment of a POU."""
     start = text.find('Variables (define in MWiec GUI)')
     if start < 0:
@@ -85,7 +113,7 @@ def parse_header_decls(text, known_types):
     decls, section = [], None
     for line in text[start:end].splitlines()[1:]:
         s = line.strip()
-        m = re.match(r'^(VAR_INPUT|VAR_OUTPUT|VAR CONSTANT|VAR)\s*:', s)
+        m = re.match(r'^(VAR_INPUT|VAR_OUTPUT|VAR_IN_OUT|VAR CONSTANT|VAR)\s*:', s)
         if m:
             section = m.group(1)
             continue
@@ -95,6 +123,7 @@ def parse_header_decls(text, known_types):
         if not m:
             continue
         typ = re.sub(r'\s+', ' ', m.group(2))
+        typ = (aliases or {}).get(typ, typ)
         base = typ.split(' OF ')[-1] if typ.startswith('ARRAY') else typ
         if base not in known_types:
             continue
@@ -104,12 +133,19 @@ def parse_header_decls(text, known_types):
     return decls
 
 
-def parse_globals(text, known_types):
+def parse_globals(text, known_types, aliases=None):
     decls = {}
     for line in text.splitlines():
-        m = re.match(r'^\s*(G_\w+)\s*(?:AT\s+%\S+\s*)?:\s*(\w+)\s*(?::=\s*([^\s(]+))?', line)
-        if m and m.group(2) in known_types:
-            decls[m.group(1)] = {'name': m.group(1), 'type': m.group(2),
+        m = re.match(r'^\s*(G_\w+)\s*(?:AT\s+%\S+\s*)?:\s*'
+                     r'(ARRAY\s*\[\s*\d+\s*\.\.\s*\d+\s*\]\s*OF\s+\w+|\w+)'
+                     r'\s*(?::=\s*([^\s(]+))?', line)
+        if not m:
+            continue
+        typ = re.sub(r'\s+', ' ', m.group(2))
+        typ = (aliases or {}).get(typ, typ)
+        base = typ.split(' OF ')[-1] if typ.startswith('ARRAY') else typ
+        if base in known_types:
+            decls[m.group(1)] = {'name': m.group(1), 'type': typ,
                                  'init': m.group(3), 'section': 'VAR_GLOBAL'}
     return decls
 
@@ -274,15 +310,22 @@ class Translator:
         if decl is None or not (decl['type'] in STD_FBS or decl['type'] in self.ctx['fbs']):
             raise STError(f'{self.pou} line {line}: {name} is not a function block instance')
         inst = f's.{name}'
+        inouts = {d['name'] for d in self.ctx['pou_decls'].get(decl['type'], [])
+                  if d['section'] == 'VAR_IN_OUT'}
+        back = []
         self.expect('(')
         while not self.accept(')'):
             arg = self.next()[1]
             self.expect(':=')
             value = self.expr()[0]
             self.emit(f'{inst}.{arg} = {value}{self.EOS}', line)
+            if arg in inouts:
+                back.append((arg, value))
             self.accept(',')
         self.expect(';')
         self.emit_fb_call(inst, decl['type'], line)
+        for arg, value in back:     # VAR_IN_OUT: the caller's variable takes the result
+            self.copy_back(value, f'{inst}.{arg}', line)
         self.ctx['called'].add(decl['type'])
 
     # -- expressions: (code, type) --
@@ -333,6 +376,9 @@ class Translator:
     def copy_value(self, code, typ):
         return code
 
+    def copy_back(self, target, source, line):
+        self.emit(f'{target} = {source}{self.EOS}', line)
+
     # -- Target language: expressions --
     def bitwise(self, op, lc, rc):
         return f'{ {"OR": "bitor", "XOR": "bitxor"}.get(op, "bitand") }({lc}, {rc})'
@@ -357,6 +403,18 @@ class Translator:
 
     def to_int(self, code):
         return f'round({code})'
+
+    def wrap(self, code, bits, signed):
+        # [two's complement wrap of an integer to the target width]
+        if signed:
+            return f'(mod({code} + {2 ** (bits - 1)}, {2 ** bits}) - {2 ** (bits - 1)})'
+        return f'mod({code}, {2 ** bits})'
+
+    def shift(self, op, code, n, typ):
+        if op == 'SHR':
+            return f'floor({code} / 2^({n}))'
+        bits, signed = INT_WIDTH[typ]
+        return self.wrap(f'({code} * 2^({n}))', bits, signed)
 
     def combine(self, op, left, right):
         (lc, lt), (rc, rt) = left, right
@@ -434,6 +492,11 @@ class Translator:
             self.accept(',')
         codes = ', '.join(a[0] for a in args)
         upper = name.upper()
+        if upper in ('SHR', 'SHL') and len(args) == 2:
+            if args[0][1] not in INT_WIDTH:
+                raise STError(f'{self.pou} line {line}: {name} needs a bit-string '
+                              f'or integer first operand, got {args[0][1]}')
+            return self.shift(upper, args[0][0], args[1][0], args[0][1]), args[0][1]
         if upper in self.FUNCTIONS:
             return f'{self.FUNCTIONS[upper]}({codes})', args[-1][1]
         if upper == 'TIME_TO_DINT':
@@ -443,6 +506,8 @@ class Translator:
             to = m.group(2)
             if to in INT_TYPES and m.group(1) not in INT_TYPES:
                 return self.to_int(codes), to
+            if to in INT_WIDTH and m.group(1) in INT_WIDTH and not int_fits(m.group(1), to):
+                return self.wrap(codes, *INT_WIDTH[to]), to
             return f'({codes})', to
         raise STError(f'{self.pou} line {line}: unsupported function {name}')
 
@@ -518,7 +583,7 @@ class OctaveInit:
 
 def init_value(decl, ctx, spell=OctaveInit()):
     typ, init = decl['type'], decl.get('init')
-    m = re.match(r'ARRAY \[\s*(\d+)\s*\.\.\s*(\d+)\s*\] OF (\w+)', typ)
+    m = re.match(r'ARRAY\s*\[\s*(\d+)\s*\.\.\s*(\d+)\s*\]\s*OF\s+(\w+)', typ)
     if m:
         return spell.array(m.group(3), int(m.group(2)) - int(m.group(1)) + 1)
     if typ in ctx['enums']:
@@ -583,20 +648,22 @@ def gen_enums(ctx):
 
 def load_project(src):
     """Parse the declarations of slave-src: returns (ctx, sources by POU name)."""
-    enums, structs = parse_datatypes((src / 'DUT/DataTypes.st').read_text())
+    datatypes = (src / 'DUT/DataTypes.st').read_text()
+    enums, structs = parse_datatypes(datatypes)
+    aliases = parse_array_types(datatypes)
     fb_files = sorted((src / 'FB').glob('FB_*.st'))
     fbs = {f.stem for f in fb_files}
     known = (NUM_TYPES | {'BOOL', 'TIME'} | STD_FBS | fbs | set(enums) | set(structs))
 
     ctx = {'enums': enums, 'structs': structs, 'fbs': fbs, 'io': set(),
-           'globals': parse_globals((src / 'GVL/GlobalVariables_Reference.st').read_text(), known),
+           'globals': parse_globals((src / 'GVL/GlobalVariables_Reference.st').read_text(), known, aliases),
            'used_globals': set(), 'undeclared': set(), 'called': set(), 'pou_decls': {}}
 
     sources = {f.stem: f.read_text() for f in fb_files}
     for prg in ('PRG_Main', 'PRG_Input', 'PRG_Output'):
         sources[prg] = (src / 'PRG' / f'{prg}.st').read_text()
     for name, text in sources.items():
-        ctx['pou_decls'][name] = parse_header_decls(text, known)
+        ctx['pou_decls'][name] = parse_header_decls(text, known, aliases)
     return ctx, sources
 
 
