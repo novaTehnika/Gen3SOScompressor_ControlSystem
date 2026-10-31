@@ -221,19 +221,21 @@ c.stepSize = cmd(j + 1) - cmd(j);
 
 % Several starting dead times: below a zero dead time the cost is flat in
 % Td, and a simplex started there settles on a long lag with none. The
-% search is bounded to a lag of 1 ms to 0.5 s and a dead time of 0 to 0.2 s.
-cost = @(th) boundedCost(th, @(t) sum((v - velModel(t, cmd, Ts, v0, opts)).^2), opts.fitAccel);
+% dead time is searched as Td = u^2, which reaches zero smoothly, and the
+% lag and dead time are bounded to 1 ms to 0.5 s and 0 to 0.2 s.
+toTh = @(u) [u(1) u(2)^2 u(3:end)];
+cost = @(u) boundedCost(toTh(u), @(t) sum((v - velModel(t, cmd, Ts, v0, opts)).^2), opts.fitAccel);
 fmo = optimset('TolX', 1e-6, 'TolFun', 1e-9, 'MaxFunEvals', 4000, 'MaxIter', 2000);
 best = Inf;
 for Td0 = 0.004:0.008:0.052
-    th0 = [log(0.02) Td0];
+    u0 = [log(0.02) sqrt(Td0)];
     if opts.fitAccel
-        th0(3) = 0;
+        u0(3) = 0;
     end
-    thk = fminsearch(cost, th0, fmo);
-    if cost(thk) < best
-        best = cost(thk);
-        th = thk;
+    uk = fminsearch(cost, u0, fmo);
+    if cost(uk) < best
+        best = cost(uk);
+        th = toTh(uk);
     end
 end
 c.tauV = exp(th(1));
