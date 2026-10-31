@@ -1,5 +1,9 @@
-function sl = slaveInit()
+function sl = slaveInit(backend)
 %SLAVEINIT Simulated slave at power-up.
+%   sl = slaveInit()        the backend slaveSimBackend selects
+%   sl = slaveInit('m')     the generated Octave functions: a struct
+%   sl = slaveInit('c')     the compiled slave: a SlaveSim handle with the
+%                           same fields
 %   sl.s   PRG_Main variables and function block instances
 %   sl.G   global variables (G_* in the ST)
 %   sl.IO  controller I/O image (MO1_* in PRG_Input / PRG_Output)
@@ -10,6 +14,14 @@ function sl = slaveInit()
 %   sl.hook.torque      reported actual torque (%)
 %   sl.hook.outflow     liquid leaving the chamber (mm^3/s)
 %   sl.hook.pressureVolt  analog input override (V); NaN = transducer model
+
+if nargin < 1
+    backend = slaveSimBackend();
+end
+if strcmp(backend, 'c')
+    sl = SlaveSim();
+    return
+end
 
 sl.E = ST_enums();
 [sl.s, sl.G, sl.IO] = ST_init(sl.E);

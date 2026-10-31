@@ -7,6 +7,11 @@ function runAll(varargin)
 %   runAll('nogen')   skips the regeneration (the generated files must
 %                     already exist).
 %
+%   Either way it builds the compiled simulated slave when it is stale
+%   (slave-sim/buildSlaveSim.m) and the tests use it; when it cannot be
+%   built (no C compiler configured for mex) or SLAVE_SIM=m is set, they
+%   use the generated Octave functions, and slaveSimParity is skipped.
+%
 %   It runs in MATLAB and in Octave and sets the paths it needs
 %   relative to its own location, so from the repository root:
 %
@@ -16,7 +21,7 @@ function runAll(varargin)
 %   or, in an open MATLAB session, cd to tests and type runAll.
 %
 %   The Python tests (stTargetParity and design/pressure-loop) are run by
-%   tests/run_all.sh, which calls this function for the MATLAB side.
+%   tests/run_all.sh, which also runs these tests, in parallel.
 
 root = fileparts(fileparts(mfilename('fullpath')));
 addpath(fullfile(root, 'master-src', 'logic'), ...
@@ -27,8 +32,17 @@ addpath(fullfile(root, 'master-src', 'logic'), ...
 if ~any(strcmp(varargin, 'nogen'))
     generate(root);
 end
+if ~strcmp(getenv('SLAVE_SIM'), 'm')
+    try
+        buildSlaveSim();
+    catch err
+        fprintf('the compiled slave could not be built, using SLAVE_SIM=m:\n%s\n', err.message);
+        setenv('SLAVE_SIM', 'm');
+    end
+end
+fprintf('simulated slave: %s\n', slaveSimBackend());
 
-tests = {'smokeMasterStateMachine', 'closedLoopMasterSlave', ...
+tests = {'smokeMasterStateMachine', 'slaveSimParity', 'closedLoopMasterSlave', ...
          'closedLoopModbusStep', 'slavePressureMode', ...
          'pressureNoiseRunSim', 'frictionRunSim', 'charRunSim', ...
          'charFitsSynthetic'};

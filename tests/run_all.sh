@@ -12,7 +12,9 @@
 #   test    run only these tests, by name without extension (default: all)
 #
 # A test's inputs are its own file, the paths on its "Depends on:" header
-# line and the interpreter version. Their hash is recorded in .test-cache/
+# line, the interpreter version and the simulated slave (SLAVE_SIM=c, the
+# compiled one, built here by slave-sim/buildSlaveSim.m, or SLAVE_SIM=m, the
+# generated Octave functions). Their hash is recorded in .test-cache/
 # when the test passes; a later run skips the test while the hash matches.
 # Needs python3 with design/requirements.txt, octave-cli or matlab, and
 # sha256sum.
@@ -22,6 +24,7 @@ cd "$(dirname "$0")/.."
 # Longest first, so the parallel run finishes as early as it can. The
 # MATLAB-language tests are also listed in tests/runAll.m.
 ALL_TESTS="
+tests/slaveSimParity.m
 tests/frictionRunSim.m
 tests/charRunSim.m
 tests/closedLoopMasterSlave.m
@@ -45,7 +48,7 @@ while [ $# -gt 0 ]; do
         --all) force=1 ;;
         -j) shift; jobs=$1 ;;
         -j*) jobs=${1#-j} ;;
-        -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,/^set -e/p' "$0" | sed -n 's/^# \{0,1\}//p'; exit 0 ;;
         -*) echo "unknown option $1" >&2; exit 2 ;;
         *) names="$names $1" ;;
     esac
@@ -65,6 +68,7 @@ else
     exit 1
 fi
 pversion=$(python3 --version)
+mkdir -p "$CACHE"
 
 tests=
 if [ -z "$names" ]; then
@@ -83,7 +87,26 @@ fi
 
 python3 tools/st_translate.py --target m slave-src slave-sim/generated
 python3 tools/st_translate.py --target py slave-src design/generated
-mkdir -p "$CACHE"
+
+# The compiled simulated slave, unless SLAVE_SIM=m asks for the generated
+# Octave one; without a working compiler the tests fall back to it.
+if [ "${SLAVE_SIM:-c}" = c ]; then
+    if [ $mrunner = octave ]; then
+        build="octave-cli --quiet --eval"
+    else
+        build="matlab -batch"
+    fi
+    if $build "addpath('slave-sim'); buildSlaveSim" >"$CACHE/build.log" 2>&1; then
+        SLAVE_SIM=c
+    else
+        cat "$CACHE/build.log" >&2
+        echo "run_all.sh: could not build the compiled slave; using SLAVE_SIM=m" >&2
+        SLAVE_SIM=m
+    fi
+    rm -f "$CACHE/build.log"
+fi
+export SLAVE_SIM
+mversion="$mversion slave=$SLAVE_SIM"
 
 # Hash of a test's inputs. Generated directories are left out: they are
 # derived from slave-src and tools, which are inputs themselves.

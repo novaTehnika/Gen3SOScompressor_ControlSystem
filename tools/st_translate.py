@@ -3,6 +3,7 @@
 
     python3 tools/st_translate.py --target m  slave-src slave-sim/generated
     python3 tools/st_translate.py --target py slave-src design/generated
+    python3 tools/st_translate.py --target c  slave-src slave-sim/generated-c
 
 Covers the ST subset used in slave-src: assignments, IF/ELSIF/ELSE, FOR,
 RETURN, function block calls with named inputs, typed literals, TIME
@@ -21,6 +22,7 @@ differs and writes the files for that target:
 
     m    MATLAB/Octave functions for the slave simulator
     py   Python modules of the function blocks, for design studies
+    c    C for the compiled slave simulator
 
 Function block inputs, outputs and locals are fields of the instance; a
 call assigns the named inputs and then invokes the block, so inputs that a
@@ -572,7 +574,7 @@ def load_project(src):
 # Command line
 # --------------------------------------------------------------------------
 
-TARGETS = ('m', 'py')
+TARGETS = ('m', 'py', 'c')
 
 
 def main(argv=None):

@@ -221,20 +221,19 @@ end
 function S = stepProbeScan(S)
 % One scan of PRG_StepProbe.
 sp = S.sp;
-G = S.sl.G;
 if sp.arm ~= sp.lastArm && sp.state ~= 1
     sp.lastArm = sp.arm;
     sp.idx = 0;
-    sp.pos0 = G.G_sysActualPosition;
+    sp.pos0 = S.sl.G.G_sysActualPosition;
     sp.state = 1;
 end
 if sp.state == 1
     sp.idx = sp.idx + 1;
-    sp.vCmd(sp.idx) = G.G_sysCommandedVelocity;
+    sp.vCmd(sp.idx) = S.sl.G.G_sysCommandedVelocity;
     sp.vel(sp.idx) = S.vLag;
     sp.trq(sp.idx) = S.sl.hook.torque;
-    sp.pos(sp.idx) = G.G_sysActualPosition - sp.pos0;
-    sp.pres(sp.idx) = G.G_sysActualPressure;
+    sp.pos(sp.idx) = S.sl.G.G_sysActualPosition - sp.pos0;
+    sp.pres(sp.idx) = S.sl.G.G_sysActualPressure;
     if sp.idx >= 500
         sp.echo = sp.lastArm;
         sp.state = 2;

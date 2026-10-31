@@ -13,7 +13,7 @@ The contract between them is a mode code + MotionEnable + FaultReset + reference
 
 ## Commands
 
-Everything runs headless with `python3` and either `octave-cli` or MATLAB; the MATLAB-language files are written to run in both.
+Everything runs headless with `python3` and either `octave-cli` or MATLAB; the MATLAB-language files are written to run in both. The compiled simulated slave also needs a C compiler: `mkoctfile` for Octave (Debian/Ubuntu package `octave-dev`), or a compiler configured for `mex` in MATLAB (MinGW-w64 on Windows). Without one the tests fall back to the generated Octave slave, about 10–20 times slower.
 
 ```sh
 tests/run_all.sh            # regenerate, then run the tests whose inputs changed
@@ -26,14 +26,15 @@ tests\run_all.bat           # every test, one after another, on Windows (MATLAB)
 
 `runAll.m` runs the MATLAB-language tests one after another in one session, with no skipping. It regenerates `slave-sim/generated` itself (with `python3`, `python` or `py -3`) unless called as `runAll('nogen')`, so from an open MATLAB or Octave session, `cd tests` and `runAll` runs them.
 
-Run a single test (from the repo root, after generating):
+Run a single test (from the repo root, after generating and building):
 
 ```sh
 python3 tools/st_translate.py --target m slave-src slave-sim/generated
+octave-cli --quiet --eval "addpath('slave-sim'); buildSlaveSim"
 octave-cli --quiet --eval "addpath('master-src/logic','slave-sim','slave-sim/generated','tests'); closedLoopMasterSlave"
 ```
 
-or the same `addpath` and call in MATLAB. Tests are scripts that print `ok  ...` per scenario and fail on the first `assert`. `closedLoopMasterSlave(t)` takes an optional slave handshake timeout.
+or the same `addpath` and call in MATLAB. `SLAVE_SIM=m` in the environment runs a test on the generated Octave slave instead of the compiled one. Tests are scripts that print `ok  ...` per scenario and fail on the first `assert`. `closedLoopMasterSlave(t)` takes an optional slave handshake timeout.
 
 The Simulink shell and the operator app can only be exercised on the lab PC (`master-src/README.md` has the steps). The ST cannot be compiled here. It is built in MotionWorks IEC.
 
@@ -44,13 +45,14 @@ The Simulink shell and the operator app can only be exercised on the lab PC (`ma
 The slave ST is the single source of truth. `tools/st_translate.py --target T SRC OUT` translates it for simulation. `tools/st_translate.py` is the front end every target shares (declarations, tokens, and the `Translator` parser, whose spelling methods default to Octave's), and each target is a module `tools/st_target_<T>.py` that overrides the spellings where its language differs and writes the files:
 
 - `m`: Octave functions for the slave simulator, in `slave-sim/generated/`.
+- `c`: C for the compiled slave simulator, in `slave-sim/generated-c/` (see Slave structure).
 - `py`: Python modules of the function blocks for design studies, in `design/generated/` (see below).
 
-Both output directories are gitignored, so never edit them by hand. Consequences:
+The output directories are gitignored, so never edit them by hand. Consequences:
 
 - MotionWorks keeps variable declarations in its GUI, so the translator reads them from the **`Variables (define in MWiec GUI)` header comment** of each `.st` file, from `slave-src/GVL/GlobalVariables_Reference.st` (including `G_cfg*` default values) and from `slave-src/DUT/DataTypes.st`. Those comments are functional input. When you add or rename a variable, update the header comment or the translation breaks or goes stale.
 - The translator supports only the ST subset already used: assignments, IF/ELSIF/ELSE, FOR, RETURN, named-input FB calls, typed/TIME literals, 1-D arrays, ABS/SQRT/MIN/MAX/LIMIT, TON/R_TRIG/F_TRIG. It errors on anything else. If you use a new construct, extend the front end and every target's spelling of it; `tests/stTargetParity.py` runs the targets on the same input sequences and compares every variable.
-- FB instances become structs, and inputs omitted from a call keep their previous value (IEC semantics). Generated lines carry `% :N` pointing back to the ST source line.
+- FB instances become structs, and inputs omitted from a call keep their previous value (IEC semantics). Generated lines carry `% :N` (`// :N` in C) pointing back to the ST source line. The `c` target keeps the controller's types (INT as `int16_t`, UINT `uint16_t`, REAL `float`); TIME stays in seconds.
 
 ### Python target (`--target py`)
 
@@ -63,7 +65,8 @@ Both output directories are gitignored, so never edit them by hand. Consequences
 
 - `PRG_Main.st` holds the central state machine (idle → drive reset/enable → brake release → operational modes → hold/deactivate, plus fault and recovery states). It calls every user FB exactly once at the end of the file.
 - All built-in motion FBs (`MC_Power`, `MC_Stop`, `MC_MoveAbsolute`, `Y_DirectControl`, `MC_SetPosition`, Jog, …) and `G_sysAxis` live in a **Ladder Diagram POU that is not in this repo**. ST never calls them directly. It writes `G_cmd*` structs and reads `G_sta*` structs (types in `DataTypes.st`). Custom FBs that drive motion emit `Cmd*` outputs and take `Sta*` inputs, and `PRG_Main` wires them to the globals.
-- In the simulator, `slave-sim/axisModel.m` stands in for that LD POU plus the drive and mechanics. `slaveStep.m` takes the holding registers and returns the input registers in engineering units and runs one scan: `PRG_Input` → `PRG_Main` → `PRG_Output` → `axisModel`, so PRG_Main sees motion status one scan late. `slaveSimConfig.m` holds only the physical axis parameters. The slave's own config comes from the ST. Test hooks (`sl.hook.driveFault`, `blocked`, `torque`) inject faults.
+- In the simulator, `slave-sim/axisModel.m` stands in for that LD POU plus the drive and mechanics, with the chamber in `chamberPressure.m`. `slaveStep.m` takes the holding registers and returns the input registers in engineering units and runs one scan: `PRG_Input` → `PRG_Main` → `PRG_Output` → `axisModel`, so PRG_Main sees motion status one scan late. `slaveSimConfig.m` holds only the physical axis parameters. The slave's own config comes from the ST. Test hooks (`sl.hook.driveFault`, `blocked`, `torque`, `outflow`, `pressureVolt`) inject faults.
+- The simulator exists twice, and `slaveInit` picks one (`slaveSimBackend`: the `SLAVE_SIM` environment variable, else the compiled one when it is built). The generated Octave slave is a struct of `G`, `IO`, `s` (PRG_Main), `ax`, `sim`, `hook`. The compiled slave is `SlaveSim`, a handle object over the MEX file `slaveSimMex` (built into `slave-sim/generated/` by `buildSlaveSim.m` from the `c` target and `slave-sim/c/`), whose fields read and assign like the struct's, so tests and bench stand-ins work on either; a read of a group (`sl.G`) is a snapshot, so read single fields in per-scan code. `slave-sim/c/slave_sim.c` is the C port of `slaveInit.m`, `slaveStep.m`, `axisModel.m` and `chamberPressure.m`, statement for statement: a change to one needs the same change in the other, and `tests/slaveSimParity.m` runs both slaves on the same inputs and requires every variable to agree. The axis, `sim` and `hook` fields are declared once, in the X-macros of `slave_sim.h`; the `sim` values come from `slaveSimConfig.m` when a `SlaveSim` is created.
 - Naming: Hungarian-style local prefixes (`b`, `n`, `r`, `t`, `e`, `st`, `fb`, `rTrig`/`fTrig`) and global prefixes `G_cfg*`, `G_sys*`, `G_pos*`, `G_di*`/`G_do*` (hardwired I/O), `G_ai*` (pressure input), `G_mb*` (Modbus registers). See `docs/slave/development/SlaveDeveloperGuide.md`.
 
 ### Design studies
@@ -87,6 +90,7 @@ Each bench (`modbus`, `pressure`, `friction`, `characterisation`) is a directory
 - `smokeMasterStateMachine`: master state machine against a protocol-level stand-in slave (not the ST sim).
 - `closedLoopMasterSlave`: `masterStateMachine` against the generated slave in engineering units. The master steps every 25 ms, the exchange runs every 50 ms and the slave every 2 ms on a 1 ms tick.
 - `closedLoopModbusStep`: `masterStep` through the packed register vectors, including link loss on either side.
+- `slaveSimParity`: the compiled and the generated Octave slave side by side through every mode, fault hook, link loss and reset; the input registers must agree every scan and every variable of `G`, `IO`, the axis and PRG_Main every 50 ms (the REAL registers after rounding to single precision).
 - `stTargetParity.py` (Python, run by `run_all.sh`): every scalar-input function block translated by the py and m targets, driven with the same seeded random inputs; all variables must agree to 1e-9.
 - `charRunSim`, `charFitsSynthetic`: the characterisation bench (`bench/characterisation/`) against the simulated slave, including the one-pass stopping-distance path, and its four fits on synthetic logs with known parameters.
 

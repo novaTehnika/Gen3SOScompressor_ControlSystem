@@ -14,6 +14,11 @@ function [sl, y] = slaveStep(sl, u)
 %   blocks, so PRG_Main sees motion status one scan late. Packing the
 %   registers into 16-bit words is the master-side test's job.
 
+if isobject(sl)
+    y = step(sl, u);        % the compiled slave (SlaveSim)
+    return
+end
+
 dt = sl.G.G_cfgScanTime;
 
 % Modbus holding registers (group FC#06,16) and controller input pins.
