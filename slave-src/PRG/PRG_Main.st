@@ -96,6 +96,8 @@
        (* Pressure loop (ST_PRESSURE_CTRL)
        rPressureTarget     : LREAL            (* Clamped target from the master, input to fbPressureCtrl
        bPressureCtrlActive : BOOL             (* Set by the pressure state body this scan; gates fbPressureCtrl.Enable
+       rSchedSaline        : LREAL            (* G_sysSalineVolume latched on entry to pressure mode (mL)
+       rSchedOxygenRatio   : LREAL            (* G_sysOxygenRatio latched on entry to pressure mode
        bPressureSchedActive : BOOL            (* G_cfgPressureScheduleEnable latched on entry to pressure mode
        bPressureSchedUsed  : BOOL             (* fbPressureSched drives fbPressureCtrl's gains this scan
        rPressureKp         : LREAL            (* Gains and limits passed to fbPressureCtrl this scan:
@@ -401,9 +403,12 @@ ELSIF G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL THEN
             G_sysConfirmedMode := E_OperatingMode#MODE_PRESSURE;
             stCurrentLimits.VelMax := G_cfgPressureVelMax;
             stCurrentLimits.TorqueMax := G_cfgPressureTorqueLimit;
-            (* The gain schedule is chosen once per entry, so a change of
-               the switch never changes the gains mid-run. *)
+            (* The gain schedule and the fill it is computed for are chosen
+               once per entry, so a change of the switch or of the fill
+               registers never changes the gains mid-run. *)
             bPressureSchedActive := G_cfgPressureScheduleEnable;
+            rSchedSaline := G_sysSalineVolume;
+            rSchedOxygenRatio := G_sysOxygenRatio;
         END_IF;
 
         rPressureTarget := LIMIT(LREAL#0.0, G_sysReference, G_cfgPressureTargetMax);
@@ -1163,11 +1168,11 @@ fbPressureSched(
     KpMin := G_cfgPressureSchedKpMin,
     KpMax := G_cfgPressureSchedKpMax,
     PistonArea := G_cfgPressureSchedPistonArea,
-    SalineVolume := G_cfgPressureSchedSalineVolume,
+    SalineVolume := rSchedSaline,
     DeadVolume := G_cfgPressureSchedDeadVolume,
     HoseCompliance := G_cfgPressureSchedHoseCompliance,
     BulkModulus := G_cfgPressureSchedBulkModulus,
-    OxygenRatio := G_cfgPressureSchedOxygenRatio,
+    OxygenRatio := rSchedOxygenRatio,
     Henry := G_cfgPressureSchedHenry,
     GasTemp := G_cfgPressureSchedGasTemp,
     Patm := G_cfgPressureSchedPatm,

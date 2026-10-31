@@ -17,7 +17,7 @@ measured by the bench test in `bench/modbus`.
 | Client | Simulink shell on the lab PC |
 
 Each exchange is one **Write Multiple Registers (FC16)** of holding registers
-1–6 followed at once by one **Read Input Registers (FC04)** of input registers
+1–10 followed at once by one **Read Input Registers (FC04)** of input registers
 1–18, so both land in the same controller service tick. The exchange period is
 up to 50 ms, a multiple of the master step; see
 [EthernetCommsReference.md](EthernetCommsReference.md).
@@ -67,7 +67,9 @@ task interval.
 | 3 | `%MW3.483332` | UINT | `G_mbMotionEnable` | 1 = MotionEnable |
 | 4 | `%MW3.483334` | UINT | `G_mbFaultReset` | 1 = FaultReset (level) |
 | 5–6 | `%MD3.483336` | REAL | `G_mbReference` | Position mode: mm. Velocity mode: mm/s. Torque mode: % of rated. Pressure mode (code 7): target pressure, MPa gauge |
-| 7–20 | | | | Reserved |
+| 7–8 | `%MD3.483340` | REAL | `G_mbSalineVolume` | Saline volume of the fill, mL, for the pressure gain schedule. Latched by the slave on entry to pressure mode; 0 (never written) makes the schedule fall back to the configured gains |
+| 9–10 | `%MD3.483344` | REAL | `G_mbOxygenRatio` | Oxygen charge as STP volume per saline volume (1.0 for 1:1), for the pressure gain schedule. Latched on entry to pressure mode |
+| 11–20 | | | | Reserved |
 | 101–110 | | | | Bench probe area (`bench/modbus`) |
 
 ---

@@ -551,15 +551,23 @@ class ScheduledSlaveControllerST(SlaveController):
     unless ScheduleEnable=False is given; otherwise the block runs on
     the configured gains, as PRG_Main does.
 
+    The saline volume [mL] and the oxygen ratio [-] are what the master
+    writes to holding registers HR7 to HR10. They are the constructor
+    arguments saline_ml and oxygen_ratio, which default to the run's
+    saline volume and charge ratio.
+
     The slave measures the piston position in its own frame, where the
     chamber is down to the dead volume at G_cfgPosSoftLimitMax. The
     run's position x is mapped so that the distance to that limit is
     the distance to the run's limit-switch position.
     """
 
-    def __init__(self, name='scheduled-st', flow_ff=False, **overrides):
+    def __init__(self, name='scheduled-st', flow_ff=False,
+                 saline_ml=None, oxygen_ratio=None, **overrides):
         overrides.setdefault('ScheduleEnable', True)
         super().__init__(name, flow_ff, **overrides)
+        self.saline_ml = saline_ml                              # [mL]
+        self.oxygen_ratio = oxygen_ratio                        # [-]
 
     def reset(self, par, scenario):
         u0 = super().reset(par, scenario)
@@ -583,11 +591,17 @@ class ScheduledSlaveControllerST(SlaveController):
         s.KpMin = c['G_cfgPressureSchedKpMin']
         s.KpMax = c['G_cfgPressureSchedKpMax']
         s.PistonArea = c['G_cfgPressureSchedPistonArea']
-        s.SalineVolume = c['G_cfgPressureSchedSalineVolume']
+        if self.saline_ml is None:
+            s.SalineVolume = par.Vl0 * 1e6      # [m^3 -> mL]
+        else:
+            s.SalineVolume = self.saline_ml                     # [mL]
         s.DeadVolume = c['G_cfgPressureSchedDeadVolume']
         s.HoseCompliance = c['G_cfgPressureSchedHoseCompliance']
         s.BulkModulus = c['G_cfgPressureSchedBulkModulus']
-        s.OxygenRatio = c['G_cfgPressureSchedOxygenRatio']
+        if self.oxygen_ratio is None:
+            s.OxygenRatio = scenario.ratio                      # [-]
+        else:
+            s.OxygenRatio = self.oxygen_ratio                   # [-]
         s.Henry = c['G_cfgPressureSchedHenry']
         s.GasTemp = c['G_cfgPressureSchedGasTemp']
         s.Patm = c['G_cfgPressureSchedPatm']

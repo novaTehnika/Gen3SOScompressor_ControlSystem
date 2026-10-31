@@ -537,8 +537,6 @@ def check_scheduled_st():
     # The reference takes the plant's values where the slave has settings;
     # they must agree for the two to be compared.
     assert abs(par.A - cfg['G_cfgPressureSchedPistonArea'] * 1e-6) < 1e-15
-    assert abs(par.Vl0
-               - cfg['G_cfgPressureSchedSalineVolume'] * 1e-6) < 1e-15
     assert par.t_dead == cfg['G_cfgPressureSchedDriveDeadTime']
     assert par.tauV == cfg['G_cfgPressureSchedDriveLag']
     assert (par.kH, par.T, par.Patm) == (cfg['G_cfgPressureSchedHenry'],
@@ -548,10 +546,10 @@ def check_scheduled_st():
         return ctl.ScheduledSlaveController(
             'ref', wc=cfg['G_cfgPressureSchedCrossover'],
             K_cfg=cfg['G_cfgPressureSchedBulkModulus'],
-            V_l_cfg=cfg['G_cfgPressureSchedSalineVolume'] * 1e-6,
+            V_l_cfg=par.Vl0,
             V_dead_cfg=cfg['G_cfgPressureSchedDeadVolume'] * 1e-6,
             C_hose_cfg=cfg['G_cfgPressureSchedHoseCompliance'],
-            ratio_cfg=cfg['G_cfgPressureSchedOxygenRatio'],
+            ratio_cfg=None,
             ki_ratio=cfg['G_cfgPressureSchedKiRatio'],
             kp_min=cfg['G_cfgPressureSchedKpMin'],
             kp_max=cfg['G_cfgPressureSchedKpMax'],
@@ -620,7 +618,7 @@ def check_scheduled_st():
         ctl.ScheduledSlaveControllerST(
             SchedBulkModulus=1.0e9, SchedDeadVolume=1.0,
             SchedHoseCompliance=0.0, SchedCrossover=6.0,
-            SchedSalineVolume=1.0, SchedOxygenRatio=200.0))
+            saline_ml=1.0, oxygen_ratio=200.0))
     r = sim.run(g, scenarios.compress(g), L)
     assert L.worst < 1e-9 and L.gain < 1e-9, (L.worst, L.gain)
     assert r['overshoot'] < 0.3, r['overshoot']             # [MPa]

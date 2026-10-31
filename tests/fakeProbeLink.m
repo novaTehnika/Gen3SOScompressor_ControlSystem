@@ -132,12 +132,14 @@ switch cmd
         out = regs(start:start + n - 1);
     case 'write'
         w = varargin{2};
-        assert(varargin{1} == 1 && numel(w) == S.map.nWrite, 'write is not HR1-6');
+        assert(varargin{1} == 1 && numel(w) == S.map.nWrite, 'write is not HR1-10');
         S.u.heartbeat    = w(S.map.hr.heartbeat);
         S.u.modeCode     = w(S.map.hr.modeCode);
         S.u.motionEnable = w(S.map.hr.motionEnable);
         S.u.faultReset   = w(S.map.hr.faultReset);
         S.u.reference    = modbusUnpack(w(S.map.hr.reference), w(S.map.hr.reference + 1));
+        S.u.salineVolume = modbusUnpack(w(S.map.hr.salineVolume), w(S.map.hr.salineVolume + 1));
+        S.u.oxygenRatio  = modbusUnpack(w(S.map.hr.oxygenRatio), w(S.map.hr.oxygenRatio + 1));
     case 'writeOne'
         switch varargin{1}
             case 101

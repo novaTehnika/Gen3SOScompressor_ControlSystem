@@ -136,7 +136,6 @@ fprintf('ok  sensor fault in pressure mode, mirror and reset\n');
 % without overshoot, and the switch is latched on entry.
 sim = h.sl.sim;
 h.sl.G.G_cfgPressureScheduleEnable = true;
-h.sl.G.G_cfgPressureSchedSalineVolume = 1.0;          % mL, negligible liquid
 h.sl.G.G_cfgPressureSchedHenry = 0;
 h.sl.G.G_cfgPressureSchedHoseCompliance = 0;
 h.sl.G.G_cfgPressureSchedBulkModulus = 1e12;
@@ -144,11 +143,14 @@ h.sl.G.G_cfgPressureSchedPistonArea = sim.pistonArea;
 h.sl.G.G_cfgPressureSchedPatm = sim.atmMPa * 1e6;
 % Charge whose free gas at Patm and GasTemp is the spring's volume:
 % n R T = ratio * Vl * Patm * T / 273.15 = Patm * V0.
-h.sl.G.G_cfgPressureSchedOxygenRatio = (sim.chamberGasVolume / 1e3) * 273.15 ...
-    / h.sl.G.G_cfgPressureSchedGasTemp / h.sl.G.G_cfgPressureSchedSalineVolume;
+% The fill description arrives in holding registers HR7-10.
+h.u.salineVolume = 1.0;                                % mL, negligible liquid
+h.u.oxygenRatio = (sim.chamberGasVolume / 1e3) * 273.15 ...
+    / h.sl.G.G_cfgPressureSchedGasTemp / h.u.salineVolume;
 h.sl.ax.x = sim.chamberContactPos - 5;
 h = enterMode(h, MODE_PRESSURE, 10);
 assert(h.sl.s.bPressureSchedActive && h.sl.s.fbPressureSched.IntegHold);
+assert(h.sl.s.rSchedSaline == h.u.salineVolume && h.sl.s.rSchedOxygenRatio == h.u.oxygenRatio);
 h.pMax = 0;
 h = runUntil(h, 30, @(h) h.y.performanceStatus == 1);
 assert(h.y.performanceStatus == 1, 'scheduled loop did not reach the band');
@@ -164,11 +166,16 @@ assert(h.sl.s.fbPressureCtrl.Kp == sc.Kp && h.sl.s.fbPressureCtrl.Stiffness == s
 assert(~sc.IntegHold && ~sc.ParamError);
 assert(abs(h.sl.ax.P - 10) <= G.G_cfgPressureInBand && h.pMax <= 10.5, ...
     'overshoot %.3f MPa', h.pMax - 10);
-% The switch is latched on entry: turning it off mid-run changes nothing.
+% The switch and the fill are latched on entry: turning the switch off or
+% rewriting the registers mid-run changes nothing.
 kp = sc.Kp;
 h.sl.G.G_cfgPressureScheduleEnable = false;
+h.u.salineVolume = 343;
+h.u.oxygenRatio = 1;
 h = runFor(h, 0.5);
 assert(h.sl.s.bPressureSchedActive && abs(h.sl.s.fbPressureCtrl.Kp - kp) < 0.05 * kp);
+assert(h.sl.s.rSchedSaline == 1.0 && ...
+    abs(h.sl.s.fbPressureSched.KEst / sc.KEst - 1) < 0.02);
 h.u.motionEnable = 0;
 h = runFor(h, 1);
 h.u.modeCode = 0;
@@ -178,6 +185,23 @@ assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE && h.y.faultActive ==
 fprintf('ok  scheduled gains: 10 MPa in %.1f s, k_est %.2f MPa/mm (true %.2f), Kp %.3f, max %.3f MPa\n', ...
     t1, sc.KEst, kTrue, sc.Kp, h.pMax);
 
+% A fill that was never written (zero saline volume) is a ParamError of the
+% schedule, and the loop runs on the configured gains.
+h.sl.G.G_cfgPressureScheduleEnable = true;
+h.u.salineVolume = 0;
+h.u.oxygenRatio = 0;
+h.sl.ax.x = sim.chamberContactPos - 5;
+h = enterMode(h, MODE_PRESSURE, 10);
+h = runFor(h, 1);
+assert(h.sl.s.bPressureSchedActive && h.sl.s.fbPressureSched.ParamError && ~h.sl.s.bPressureSchedUsed);
+assert(h.sl.s.fbPressureCtrl.Kp == h.sl.G.G_cfgPressureKp && h.sl.s.fbPressureCtrl.Ki == h.sl.G.G_cfgPressureKi);
+h.u.motionEnable = 0;
+h = runFor(h, 1);
+h.u.modeCode = 0;
+h.u.reference = 0;
+h = runUntil(h, 5, @(h) h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE);
+fprintf('ok  unwritten fill -> schedule ParamError, configured gains\n');
+
 fprintf('all passed\n');
 end
 
@@ -185,7 +209,7 @@ end
 function h = harnessInit()
 h.sl = slaveInit();
 h.u = struct('heartbeat', 0, 'modeCode', 0, 'motionEnable', 0, ...
-    'faultReset', 0, 'reference', 0);
+    'faultReset', 0, 'reference', 0, 'salineVolume', 0, 'oxygenRatio', 0);
 [h.sl, h.y] = slaveStep(h.sl, h.u);
 h.t = 0;
 h.vMax = 0;

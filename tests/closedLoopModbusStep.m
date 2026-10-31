@@ -25,7 +25,7 @@ h.cfg = cfg;
 h.app = struct('op', 0, 'cmdSeq', 0, 'targetPosition', 100, 'targetVelocity', 0, ...
     'jogDirection', 0, 'targetPressure', 0, 'estop', 0, 'mixer', 0);
 h.u = struct('heartbeat', 0, 'modeCode', 0, 'motionEnable', 0, ...
-    'faultReset', 0, 'reference', 0);
+    'faultReset', 0, 'reference', 0, 'salineVolume', 0, 'oxygenRatio', 0);
 [h.sl, h.y] = slaveStep(h.sl, h.u);
 h.mbRead = zeros(1, map.nRead);
 h.tick = 0;
@@ -90,6 +90,11 @@ h = command(h, 4);
 h = runUntil(h, 10, @(h) h.m.statusCode == 5);
 assert(h.m.statusCode == 5 && h.u.modeCode == 7);
 assert(abs(h.u.reference - 20 / cfg.atmPerMPa) < 1e-3);
+% The fill description rides in the same exchange and is latched by the
+% slave on entry to the mode, as the REAL it was sent as.
+assert(h.u.salineVolume == single(cfg.salineVolume) && h.u.oxygenRatio == single(cfg.oxygenRatio));
+assert(h.sl.s.rSchedSaline == single(cfg.salineVolume) && h.sl.s.rSchedOxygenRatio == single(cfg.oxygenRatio), ...
+    'fill not latched by the slave');
 h = runUntil(h, 30, @(h) h.y.performanceStatus == 1);
 assert(h.y.performanceStatus == 1, 'pressure target not reached');
 % Let the loop settle, so that the display (filtered on the master and
@@ -226,6 +231,8 @@ u.modeCode     = w(map.hr.modeCode);
 u.motionEnable = w(map.hr.motionEnable);
 u.faultReset   = w(map.hr.faultReset);
 u.reference    = modbusUnpack(w(map.hr.reference), w(map.hr.reference + 1));
+u.salineVolume = modbusUnpack(w(map.hr.salineVolume), w(map.hr.salineVolume + 1));
+u.oxygenRatio  = modbusUnpack(w(map.hr.oxygenRatio), w(map.hr.oxygenRatio + 1));
 end
 
 

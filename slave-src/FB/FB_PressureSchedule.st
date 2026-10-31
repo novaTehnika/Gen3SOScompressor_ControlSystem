@@ -122,9 +122,9 @@ ParamError := (VelMax <= LREAL#0.0) OR (DecelMax <= LREAL#0.0) OR
               (DriveLag < LREAL#0.0) OR (Crossover <= LREAL#0.0) OR
               (KiRatio < LREAL#0.0) OR (KpMin <= LREAL#0.0) OR
               (KpMax < KpMin) OR (PistonArea <= LREAL#0.0) OR
-              (SalineVolume <= LREAL#0.0) OR (DeadVolume <= LREAL#0.0) OR
+              (NOT (SalineVolume > LREAL#0.0)) OR (DeadVolume <= LREAL#0.0) OR
               (HoseCompliance < LREAL#0.0) OR (BulkModulus <= LREAL#0.0) OR
-              (OxygenRatio < LREAL#0.0) OR (Henry < LREAL#0.0) OR
+              (NOT (OxygenRatio >= LREAL#0.0)) OR (Henry < LREAL#0.0) OR
               (GasTemp <= LREAL#0.0) OR (Patm <= LREAL#0.0) OR
               (ArriveBand < LREAL#0.0);
 

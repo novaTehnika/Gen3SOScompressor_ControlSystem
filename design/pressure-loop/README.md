@@ -1015,9 +1015,6 @@ Kp = wc/k holds 37° at wc = 11 everywhere.
 - The lag at the piston (not resolved) and the dissolution time constant
   are the two unmeasured plant parameters; the robustness study covers
   the first, and the second sets only the hold time.
-- The saline volume and the charge are GVL settings
-  (`G_cfgPressureSchedSalineVolume`, `G_cfgPressureSchedOxygenRatio`);
-  whether they should come over the protocol per run.
 - The hose: how much of its 0.24 mL/MPa is wall and how much trapped
   air (air would make the proximal opening worse than eq. (43) at low
   pressure); whether the whole 29 mL is purged; how long the pause
@@ -1034,14 +1031,16 @@ Kp = wc/k holds 37° at wc = 11 everywhere.
 `FB_PressureSchedule` (`slave-src/FB/`) is the port of
 `ScheduledSlaveController`. It is off by default and is selected on
 entry to pressure mode by `G_cfgPressureScheduleEnable`; its settings
-are the `G_cfgPressureSched*` values of the GVL. `FB_PressureController`
+are the `G_cfgPressureSched*` values of the GVL, except the saline volume and
+the oxygen charge of the fill, which the master writes in holding registers
+HR7-10 and the slave latches on entry to pressure mode. `FB_PressureController`
 gains an `IntegScale` input, because PRG_Main cannot write the block's
 stored integral.
 
 The reference's arguments map to the settings as follows: `wc` to
-`Crossover`, `K_cfg` to `BulkModulus`, `V_l_cfg` to `SalineVolume`,
+`Crossover`, `K_cfg` to `BulkModulus`, `V_l_cfg` to `SalineVolume` (HR7-8),
 `V_dead_cfg` to `DeadVolume`, `C_hose_cfg` to `HoseCompliance`,
-`ratio_cfg` to `OxygenRatio`, `ki_ratio` to `KiRatio`, `kp_min` and
+`ratio_cfg` to `OxygenRatio` (HR9-10), `ki_ratio` to `KiRatio`, `kp_min` and
 `kp_max` to `KpMin` and `KpMax`, and `e_int` to `ArriveBand`. The lag of
 eq. (41) is built from the pressure input filter's time constant, the
 median window, the scan time and the drive's dead time and lag

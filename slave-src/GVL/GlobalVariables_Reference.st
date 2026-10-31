@@ -105,6 +105,8 @@
      G_mbMotionEnable      AT %MW3.483332 : UINT  (* HR3: 1 = MotionEnable *)
      G_mbFaultReset        AT %MW3.483334 : UINT  (* HR4: 1 = FaultReset *)
      G_mbReference         AT %MD3.483336 : REAL  (* HR5-6: reference, mm / mm/s / % by mode *)
+     G_mbSalineVolume      AT %MD3.483340 : REAL  (* HR7-8: saline volume of the fill, mL (gain schedule) *)
+     G_mbOxygenRatio       AT %MD3.483344 : REAL  (* HR9-10: oxygen charge as STP volume per saline volume (gain schedule) *)
    END_VAR
 
 
@@ -253,15 +255,12 @@
      G_cfgPressureSchedKpMin         : LREAL := 0.001      (* Lower bound on the scheduled Kp (mm/s per MPa) *)
      G_cfgPressureSchedKpMax         : LREAL := 5.0        (* Upper bound on the scheduled Kp (mm/s per MPa) *)
      G_cfgPressureSchedPistonArea    : LREAL := 3431.0     (* Piston area (mm^2), 2.602 in bore *)
-     G_cfgPressureSchedSalineVolume  : LREAL := 343.0      (* Saline volume of the fill including the dead volume (mL);
-                                                              a lower bound on the true fill *)
      G_cfgPressureSchedDeadVolume    : LREAL := 74.0       (* Chamber volume with the piston at G_cfgPosSoftLimitMax and
                                                               the hose open (mL); a lower bound. 74 mL is the lower end of
                                                               the 79 mL measured at the end of travel *)
      G_cfgPressureSchedHoseCompliance: LREAL := 1.2E-13    (* Hose compliance (m^3/Pa), a lower bound; 0 if the hose
                                                               is shut during the compression *)
      G_cfgPressureSchedBulkModulus   : LREAL := 1.0E9      (* Saline bulk modulus (Pa), an upper bound *)
-     G_cfgPressureSchedOxygenRatio   : LREAL := 1.0        (* Oxygen charge as STP volume per saline volume (-) *)
      G_cfgPressureSchedHenry         : LREAL := 1.22E-5    (* Henry constant of oxygen in 0.9 % saline (mol/(m^3 Pa)) *)
      G_cfgPressureSchedGasTemp       : LREAL := 293.0      (* Gas temperature (K) *)
      G_cfgPressureSchedPatm          : LREAL := 101325.0   (* Atmospheric pressure (Pa) *)
@@ -396,6 +395,8 @@
      G_sysPreviousState        : E_SystemState := ST_INIT     (* Previous state *)
      G_sysRequestedMode        : E_OperatingMode := MODE_IDLE (* Mode from master *)
      G_sysReference            : LREAL := 0.0     (* Reference from master: mm, mm/s or % by mode *)
+     G_sysSalineVolume         : LREAL := 0.0     (* Saline volume from master (mL); 0 until written *)
+     G_sysOxygenRatio          : LREAL := 0.0     (* Oxygen charge per saline volume from master (STP volume ratio) *)
      G_sysScanCounter          : UINT := UINT#0   (* Incremented every scan, published in G_mbSlaveCounter *)
      G_sysActiveFaultCode      : UINT := UINT#0   (* G_sysActiveFault as an integer, published in G_mbFaultCode *)
      G_sysConfirmedModeCode    : UINT := UINT#0   (* Handshake confirmed mode as an integer, published in G_mbConfCode *)

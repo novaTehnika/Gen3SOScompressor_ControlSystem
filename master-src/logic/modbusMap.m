@@ -5,7 +5,7 @@ function map = modbusMap()
 %   docs/master/ModbusRegisterMap.md. REAL values occupy two registers, low
 %   word first (modbusPack / modbusUnpack).
 
-map.nWrite = 6;             % HR1-6, one FC16 write
+map.nWrite = 10;            % HR1-10, one FC16 write
 map.nRead  = 20;            % IR1-20, one FC04 read
 
 map.hr.heartbeat    = 1;    % master step counter, wraps at 65536
@@ -13,6 +13,8 @@ map.hr.modeCode     = 2;    % mode code, or the full fault code during reset
 map.hr.motionEnable = 3;
 map.hr.faultReset   = 4;
 map.hr.reference    = 5;    % REAL: mm, mm/s or % by mode (5-6)
+map.hr.salineVolume = 7;    % REAL: mL, saline volume of the fill (7-8)
+map.hr.oxygenRatio  = 9;    % REAL: oxygen charge as STP volume per saline volume (9-10)
 
 map.ir.heartbeatEcho     = 1;
 map.ir.slaveCounter      = 2;   % slave scan counter, wraps at 65536

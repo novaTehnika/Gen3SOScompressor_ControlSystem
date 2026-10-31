@@ -1,7 +1,8 @@
 function [mbWrite, doSafety, doMixer, position, velocity, pressure, ...
           statusCode, faultCode, state, linkOk] = masterStep( ...
           mbRead, op, cmdSeq, targetPosition, ...
-          targetVelocity, jogDirection, targetPressure, estop, mixer)
+          targetVelocity, jogDirection, targetPressure, estop, mixer, ...
+          salineVolume, oxygenRatio)
 %MASTERSTEP Entry point for the Simulink shell's MATLAB Function block:
 %   Modbus registers and app requests in; Modbus registers, DAQ lines and
 %   displayed values out. Called once per model step (cfg.dt). The Modbus
@@ -13,10 +14,16 @@ function [mbWrite, doSafety, doMixer, position, velocity, pressure, ...
 %   targetPressure, estop, mixer
 %                 values of the Constant blocks the app writes;
 %                 targetPressure in atm absolute, as the app shows pressure
+%   salineVolume, oxygenRatio
+%                 the fill description for the slave's pressure gain
+%                 schedule: saline volume (mL) and oxygen charge as STP
+%                 volume per saline volume; cfg.salineVolume and
+%                 cfg.oxygenRatio when omitted
 %
-%   mbWrite       holding registers HR1..HR6 for the Modbus Client Write
+%   mbWrite       holding registers HR1..HR10 for the Modbus Client Write
 %                 block (heartbeat, mode code, MotionEnable, FaultReset,
-%                 reference as two registers)
+%                 reference, saline volume and oxygen ratio, each REAL as
+%                 two registers)
 %   doSafety      safety relay / STO enable (P0.0): 0 on E-stop or link loss
 %   doMixer       stir bar motor (P0.4)
 %   position (mm), velocity (mm/s), pressure (atm absolute: the slave's
@@ -38,6 +45,12 @@ OP_STOP = 0;
 cfg = masterConfig();
 map = modbusMap();
 r = double(mbRead(:)');
+if nargin < 10
+    salineVolume = cfg.salineVolume;
+end
+if nargin < 11
+    oxygenRatio = cfg.oxygenRatio;
+end
 
 if isempty(started)
     started = true;
@@ -102,6 +115,8 @@ mbWrite(map.hr.modeCode)     = out.modeCode;
 mbWrite(map.hr.motionEnable) = out.motionEnable;
 mbWrite(map.hr.faultReset)   = out.faultReset;
 mbWrite(map.hr.reference:map.hr.reference + 1) = modbusPack(out.reference);
+mbWrite(map.hr.salineVolume:map.hr.salineVolume + 1) = modbusPack(salineVolume);
+mbWrite(map.hr.oxygenRatio:map.hr.oxygenRatio + 1) = modbusPack(oxygenRatio);
 
 doSafety = double(in.estop == 0);
 doMixer  = double(mixer ~= 0 && in.estop == 0);
