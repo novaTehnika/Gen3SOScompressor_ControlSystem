@@ -16,11 +16,15 @@ The contract between them is a mode code + MotionEnable + FaultReset + reference
 Everything runs headless with `python3` and either `octave-cli` or MATLAB; the MATLAB-language files are written to run in both.
 
 ```sh
-tests/run_all.sh            # regenerate the slave sim from slave-src, run all tests
-tests\run_all.bat           # the same on Windows (MATLAB)
+tests/run_all.sh            # regenerate, then run the tests whose inputs changed
+tests/run_all.sh --all      # run every test regardless
+tests/run_all.sh -j 2 closedLoopMasterSlave   # chosen tests, at most 2 at once
+tests\run_all.bat           # every test, one after another, on Windows (MATLAB)
 ```
 
-`run_all.sh` runs the Python tests, then `tests/runAll.m` in Octave or, when `octave-cli` is not on the PATH, in `matlab -batch`. `runAll` regenerates `slave-sim/generated` itself (with `python3`, `python` or `py -3`) unless called as `runAll('nogen')`, so from an open MATLAB or Octave session, `cd tests` and `runAll` runs the MATLAB-language tests alone.
+`run_all.sh` regenerates `slave-sim/generated` and `design/generated`, then runs each test in its own process: the Python tests with `python3`, the MATLAB-language tests in `octave-cli` or, when that is not on the PATH, in `matlab -batch`. It runs as many at once as there are CPUs (one at a time with MATLAB). It skips a test whose inputs hash the same as when it last passed (recorded in the gitignored `.test-cache/`, which also holds each test's log). A test's inputs are its own file, the paths on its `Depends on:` header line and the interpreter version. Keep that line current when a test starts using another directory, or the test will be skipped when that code changes. A new test goes in `ALL_TESTS` in the script and, if it is MATLAB-language, in `tests/runAll.m`.
+
+`runAll.m` runs the MATLAB-language tests one after another in one session, with no skipping. It regenerates `slave-sim/generated` itself (with `python3`, `python` or `py -3`) unless called as `runAll('nogen')`, so from an open MATLAB or Octave session, `cd tests` and `runAll` runs them.
 
 Run a single test (from the repo root, after generating):
 

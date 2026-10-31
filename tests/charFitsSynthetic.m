@@ -11,6 +11,7 @@ function charFitsSynthetic()
 %   log of stops in both directions. The logs are in frictionRun's
 %   formats.
 %   Run from the repository root:  addpath master-src/logic tests
+%   Depends on: master-src/logic bench/characterisation bench/common
 
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'bench', 'characterisation'), fullfile(here, '..', 'bench', 'common'));

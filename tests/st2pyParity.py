@@ -7,6 +7,8 @@ Regenerates both translations into temporary directories, then drives every
 function block whose inputs are all scalars with one seeded random input
 sequence, once through the generated Python and once through the generated
 Octave, and compares every output and internal variable after every call.
+
+Depends on: tools slave-src slave-sim
 """
 
 import csv

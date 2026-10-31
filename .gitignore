@@ -14,3 +14,5 @@ bench/common/captures/
 bench/common/SafetyHold.slx
 octave-workspace
 __pycache__/
+# Test pass records and logs (tests/run_all.sh)
+.test-cache/
