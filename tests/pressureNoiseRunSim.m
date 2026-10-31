@@ -8,7 +8,7 @@ function pressureNoiseRunSim()
 %     addpath master-src/logic slave-sim slave-sim/generated tests
 
 here = fileparts(mfilename('fullpath'));
-addpath(fullfile(here, '..', 'bench', 'pressure'), fullfile(here, '..', 'bench', 'modbus'));
+addpath(fullfile(here, '..', 'bench', 'pressure'), fullfile(here, '..', 'bench', 'common'));
 saveDir = tempname();
 
 opts = linkOpts(saveDir);

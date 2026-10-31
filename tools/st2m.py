@@ -156,6 +156,15 @@ def time_seconds(lit):
 # --------------------------------------------------------------------------
 
 class Translator:
+    """ST parser and Octave emitter. The target-language spellings are the
+    class attributes and the small methods under "Target language"; another
+    backend (tools/st2py.py) subclasses and overrides only those."""
+
+    COMMENT = '%'
+    EOS = ';'                       # statement terminator
+    FUNCTIONS = FUNCTIONS
+    OPS = {'OR': '||', 'AND': '&&', '&': '&&', '=': '==', '<>': '~='}
+
     def __init__(self, pou, decls, ctx):
         self.pou = pou
         self.vars = {d['name']: d for d in decls}
@@ -187,7 +196,7 @@ class Translator:
         return tok
 
     def emit(self, text, line=None):
-        tag = f'  % :{line}' if line else ''
+        tag = f'  {self.COMMENT} :{line}' if line else ''
         self.out.append('    ' * self.depth + text + tag)
 
     # -- statements --
@@ -204,21 +213,21 @@ class Translator:
             self.next()
             cond = self.expr()[0]
             self.expect('THEN')
-            self.emit(f'if {cond}', line)
+            self.open_if(cond, line)
             self.block(('ELSIF', 'ELSE', 'END_IF'))
             while True:
                 tok = self.next()
                 if tok[1].upper() == 'ELSIF':
                     cond = self.expr()[0]
                     self.expect('THEN')
-                    self.emit(f'elseif {cond}', tok[2])
+                    self.open_elif(cond, tok[2])
                     self.block(('ELSIF', 'ELSE', 'END_IF'))
                 elif tok[1].upper() == 'ELSE':
-                    self.emit('else', tok[2])
+                    self.open_else(tok[2])
                     self.block(('END_IF',))
                 else:
                     break
-            self.emit('end')
+            self.close_block()
             self.accept(';')
         elif upper == 'FOR':
             self.next()
@@ -231,33 +240,32 @@ class Translator:
             if self.accept('BY'):
                 step = self.expr()[0]
             self.expect('DO')
-            rng = f'{lo}:{step}:{hi}' if step else f'{lo}:{hi}'
-            self.emit(f'for st_k_ = {rng}', line)
-            self.depth += 1
-            self.emit(f'{var} = st_k_;')
-            self.depth -= 1
+            self.open_for(var, lo, hi, step, line)
             self.block(('END_FOR',))
             self.expect('END_FOR')
-            self.emit('end')
+            self.close_block()
             self.accept(';')
         elif upper == 'RETURN':
             self.next()
-            self.emit('return;', line)
+            self.emit(f'return{self.EOS}', line)
             self.accept(';')
         elif kind == 'id' and self.peek(1)[1] == '(':
             self.fb_call()
         elif kind == 'id':
             target = self.postfix()[0]
             self.expect(':=')
-            value = self.expr()[0]
+            value, vtype = self.expr()
             self.expect(';')
-            self.emit(f'{target} = {value};', line)
+            self.emit(f'{target} = {self.copy_value(value, vtype)}{self.EOS}', line)
         else:
             raise STError(f'{self.pou} line {line}: unexpected {text!r}')
 
     def block(self, terminators):
         self.depth += 1
+        start = len(self.out)
         self.statements(terminators)
+        if len(self.out) == start:
+            self.empty_block()
         self.depth -= 1
 
     def fb_call(self):
@@ -271,10 +279,10 @@ class Translator:
             arg = self.next()[1]
             self.expect(':=')
             value = self.expr()[0]
-            self.emit(f'{inst}.{arg} = {value};', line)
+            self.emit(f'{inst}.{arg} = {value}{self.EOS}', line)
             self.accept(',')
         self.expect(';')
-        self.emit(f'{inst} = {decl["type"]}({inst}, E, dt);', line)
+        self.emit_fb_call(inst, decl['type'], line)
         self.ctx['called'].add(decl['type'])
 
     # -- expressions: (code, type) --
@@ -296,32 +304,79 @@ class Translator:
             left = self.combine(op, left, right)
         return left
 
+    # -- Target language: statements --
+    def open_if(self, cond, line):
+        self.emit(f'if {cond}', line)
+
+    def open_elif(self, cond, line):
+        self.emit(f'elseif {cond}', line)
+
+    def open_else(self, line):
+        self.emit('else', line)
+
+    def close_block(self):
+        self.emit('end')
+
+    def empty_block(self):
+        pass
+
+    def open_for(self, var, lo, hi, step, line):
+        rng = f'{lo}:{step}:{hi}' if step else f'{lo}:{hi}'
+        self.emit(f'for st_k_ = {rng}', line)
+        self.depth += 1
+        self.emit(f'{var} = st_k_;')
+        self.depth -= 1
+
+    def emit_fb_call(self, inst, typ, line):
+        self.emit(f'{inst} = {typ}({inst}, E, dt);', line)
+
+    def copy_value(self, code, typ):
+        return code
+
+    # -- Target language: expressions --
+    def bitwise(self, op, lc, rc):
+        return f'{ {"OR": "bitor", "XOR": "bitxor"}.get(op, "bitand") }({lc}, {rc})'
+
+    def logical_xor(self, lc, rc):
+        return f'xor({lc}, {rc})'
+
+    def logical_not(self, code):
+        return f'(~{code})'
+
+    def modulo(self, lc, rc):
+        return f'mod({lc}, {rc})'
+
+    def divide(self, lc, rc, both_int):
+        return f'fix({lc} / {rc})' if both_int else f'({lc} / {rc})'
+
+    def bool_literal(self, value):
+        return 'true' if value else 'false'
+
+    def index(self, code, idx):
+        return f'{code}({idx} + 1)'
+
+    def to_int(self, code):
+        return f'round({code})'
+
     def combine(self, op, left, right):
         (lc, lt), (rc, rt) = left, right
         both_int = lt in INT_TYPES and rt in INT_TYPES
         if op in ('OR', 'AND', '&', 'XOR'):
             # Bitwise on integer operands, logical on BOOL operands.
             if both_int:
-                fn = {'OR': 'bitor', 'XOR': 'bitxor'}.get(op, 'bitand')
-                return f'{fn}({lc}, {rc})', lt
+                return self.bitwise(op, lc, rc), lt
             if lt != 'BOOL' or rt != 'BOOL':
                 raise STError(f'{self.pou}: {op} needs two BOOL or two integer '
                               f'operands, got {lt} and {rt}: {lc} {op} {rc}')
-            if op == 'OR':
-                return f'({lc} || {rc})', 'BOOL'
             if op == 'XOR':
-                return f'xor({lc}, {rc})', 'BOOL'
-            return f'({lc} && {rc})', 'BOOL'
-        if op == '=':
-            return f'({lc} == {rc})', 'BOOL'
-        if op == '<>':
-            return f'({lc} ~= {rc})', 'BOOL'
-        if op in ('<', '>', '<=', '>='):
-            return f'({lc} {op} {rc})', 'BOOL'
+                return self.logical_xor(lc, rc), 'BOOL'
+            return f'({lc} {self.OPS[op]} {rc})', 'BOOL'
+        if op in ('=', '<>', '<', '>', '<=', '>='):
+            return f'({lc} {self.OPS.get(op, op)} {rc})', 'BOOL'
         if op == 'MOD':
-            return f'mod({lc}, {rc})', lt
-        if op == '/' and both_int:
-            return f'fix({lc} / {rc})', lt
+            return self.modulo(lc, rc), lt
+        if op == '/':
+            return self.divide(lc, rc, both_int), (lt if both_int else 'LREAL')
         return f'({lc} {op} {rc})', (lt if both_int else 'LREAL')
 
     def unary(self):
@@ -329,7 +384,7 @@ class Translator:
             code, typ = self.unary()
             if typ != 'BOOL':
                 raise STError(f'{self.pou}: NOT needs a BOOL operand, got {typ}: {code}')
-            return f'(~{code})', 'BOOL'
+            return self.logical_not(code), 'BOOL'
         if self.accept('-'):
             code, typ = self.unary()
             return f'(-{code})', typ
@@ -364,7 +419,7 @@ class Translator:
             upper = text.upper()
             if upper in ('TRUE', 'FALSE'):
                 self.next()
-                return upper.lower(), 'BOOL'
+                return self.bool_literal(upper == 'TRUE'), 'BOOL'
             if self.peek(1)[1] == '(' and text not in self.vars:
                 return self.function_call()
             return self.postfix()
@@ -379,15 +434,15 @@ class Translator:
             self.accept(',')
         codes = ', '.join(a[0] for a in args)
         upper = name.upper()
-        if upper in FUNCTIONS:
-            return f'{FUNCTIONS[upper]}({codes})', args[-1][1]
+        if upper in self.FUNCTIONS:
+            return f'{self.FUNCTIONS[upper]}({codes})', args[-1][1]
         if upper == 'TIME_TO_DINT':
-            return f'round({codes} * 1000)', 'DINT'
+            return self.to_int(f'{codes} * 1000'), 'DINT'
         m = re.match(r'^(\w+)_TO_(\w+)$', upper)
         if m and len(args) == 1:
             to = m.group(2)
             if to in INT_TYPES and m.group(1) not in INT_TYPES:
-                return f'round({codes})', to
+                return self.to_int(codes), to
             return f'({codes})', to
         raise STError(f'{self.pou} line {line}: unsupported function {name}')
 
@@ -401,7 +456,7 @@ class Translator:
             elif self.accept('['):
                 index = self.expr()[0]
                 self.expect(']')
-                code = f'{code}({index} + 1)'
+                code = self.index(code, index)
                 typ = typ.split(' OF ')[-1] if typ and typ.startswith('ARRAY') else None
             else:
                 return code, typ
@@ -444,25 +499,38 @@ class Translator:
 # Initial values
 # --------------------------------------------------------------------------
 
-def init_value(decl, ctx):
+class OctaveInit:
+    """Spellings of initial values in the target language."""
+    true, false = 'true', 'false'
+
+    def array(self, elem, n):
+        return f'zeros(1, {n})'
+
+    def enum(self, typ, member):
+        return f'E.{typ}.{member}'
+
+    def instance(self, typ):
+        return f'init_{typ}(E)'
+
+    def number(self, typ, text):
+        return text
+
+
+def init_value(decl, ctx, spell=OctaveInit()):
     typ, init = decl['type'], decl.get('init')
     m = re.match(r'ARRAY \[\s*(\d+)\s*\.\.\s*(\d+)\s*\] OF (\w+)', typ)
     if m:
-        return f'zeros(1, {int(m.group(2)) - int(m.group(1)) + 1})'
+        return spell.array(m.group(3), int(m.group(2)) - int(m.group(1)) + 1)
     if typ in ctx['enums']:
         member = (init or '').split('#')[-1]
-        return f'E.{typ}.{member}' if member in ctx['enums'][typ] else '0'
-    if typ in ctx['structs']:
-        return f'init_{typ}(E)'
-    if typ in ctx['fbs'] or typ in STD_FBS:
-        return f'init_{typ}(E)'
+        return spell.enum(typ, member) if member in ctx['enums'][typ] else '0'
+    if typ in ctx['structs'] or typ in ctx['fbs'] or typ in STD_FBS:
+        return spell.instance(typ)
     if typ == 'BOOL':
-        return 'true' if (init or '').upper() == 'TRUE' else 'false'
+        return spell.true if (init or '').upper() == 'TRUE' else spell.false
     if typ == 'TIME':
         return time_seconds(init) if init else '0'
-    if init:
-        return init.split('#')[-1]
-    return '0'
+    return spell.number(typ, init.split('#')[-1] if init else '0')
 
 
 def gen_init(ctx, main_decls):
@@ -513,12 +581,8 @@ def gen_enums(ctx):
 # Driver
 # --------------------------------------------------------------------------
 
-def main(src, out):
-    src, out = Path(src), Path(out)
-    out.mkdir(parents=True, exist_ok=True)
-    for old in out.glob('*.m'):
-        old.unlink()
-
+def load_project(src):
+    """Parse the declarations of slave-src: returns (ctx, sources by POU name)."""
     enums, structs = parse_datatypes((src / 'DUT/DataTypes.st').read_text())
     fb_files = sorted((src / 'FB').glob('FB_*.st'))
     fbs = {f.stem for f in fb_files}
@@ -533,6 +597,15 @@ def main(src, out):
         sources[prg] = (src / 'PRG' / f'{prg}.st').read_text()
     for name, text in sources.items():
         ctx['pou_decls'][name] = parse_header_decls(text, known)
+    return ctx, sources
+
+
+def main(src, out):
+    src, out = Path(src), Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    for old in out.glob('*.m'):
+        old.unlink()
+    ctx, sources = load_project(src)
 
     signatures = {'PRG_Main': '[s, G] = PRG_Main(s, G, E, dt)',
                   'PRG_Input': 'G = PRG_Input(G, IO)',

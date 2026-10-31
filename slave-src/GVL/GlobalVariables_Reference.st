@@ -73,21 +73,6 @@
 
 
      (* ========================================================================
-        MODBUS HOLDING REGISTERS (master -> slave), group FC#03,06,16
-        With "Use %M for bidirectional Holding Registers" the group lives in
-        %M memory: register k is at %MB3.(483328 + 2*(k-1)). Declared under
-        the group that Hardware Configuration creates. See
-        docs/master/ModbusRegisterMap.md.
-        ======================================================================== *)
-
-     G_mbHeartbeat         AT %MW3.483328 : UINT  (* HR1: master step counter *)
-     G_mbModeCode          AT %MW3.483330 : UINT  (* HR2: mode code 0-7, or the full fault code mirrored during reset *)
-     G_mbMotionEnable      AT %MW3.483332 : UINT  (* HR3: 1 = MotionEnable *)
-     G_mbFaultReset        AT %MW3.483334 : UINT  (* HR4: 1 = FaultReset *)
-     G_mbReference         AT %MD3.483336 : REAL  (* HR5-6: reference, mm / mm/s / % by mode *)
-
-
-     (* ========================================================================
         MODBUS INPUT REGISTERS (slave -> master), group FC#04
         Register k is at byte offset 73792 + 2*(k-1).
         ======================================================================== *)
@@ -106,6 +91,20 @@
      G_mbCommandedPosition AT %QD73824 : REAL  (* IR17-18: mm *)
      G_mbActualPressure    AT %QD73828 : REAL  (* IR19-20: MPa gauge *)
 
+
+     (* ========================================================================
+        MODBUS HOLDING REGISTERS (master -> slave), group FC#03,06,16
+        With "Use %M for bidirectional Holding Registers" the group lives in
+        %M memory: register k is at %MB3.(483328 + 2*(k-1)). Declared under
+        the group that Hardware Configuration creates. See
+        docs/master/ModbusRegisterMap.md.
+        ======================================================================== *)
+
+     G_mbHeartbeat         AT %MW3.483328 : UINT  (* HR1: master step counter *)
+     G_mbModeCode          AT %MW3.483330 : UINT  (* HR2: mode code 0-7, or the full fault code mirrored during reset *)
+     G_mbMotionEnable      AT %MW3.483332 : UINT  (* HR3: 1 = MotionEnable *)
+     G_mbFaultReset        AT %MW3.483334 : UINT  (* HR4: 1 = FaultReset *)
+     G_mbReference         AT %MD3.483336 : REAL  (* HR5-6: reference, mm / mm/s / % by mode *)
    END_VAR
 
 
@@ -130,7 +129,7 @@
         ======================================================================== *)
 
      (* Soft limits - software enforced boundaries *)
-     G_cfgPosSoftLimitMax      : LREAL := 305.0       (* Soft limit - extend direction *)
+     G_cfgPosSoftLimitMax      : LREAL := 367.0       (* Soft limit - extend direction *)
      G_cfgPosSoftLimitMin      : LREAL := -2.5        (* Soft limit - retract direction. Lives midway between
                                                           position 0 (the homed retract endpoint) and the
                                                           negative overtravel switch (at -G_cfgHomeLimRetractDist,
@@ -147,8 +146,8 @@
         VELOCITY LIMITS (mm/s)
         ======================================================================== *)
 
-     G_cfgVelLimitMax          : LREAL := 5.0         (* Maximum velocity limit *)
-     G_cfgVelLimitNormal       : LREAL := 5.0         (* Normal operating velocity *)
+     G_cfgVelLimitMax          : LREAL := 7.0         (* Maximum velocity limit *)
+     G_cfgVelLimitNormal       : LREAL := 6.0         (* Normal operating velocity *)
 
 
      (* ========================================================================
@@ -158,8 +157,17 @@
         Velocity/Position; zero values leave the servo unable to move.
         ======================================================================== *)
 
-     G_cfgDirectCtrlAccel      : LREAL := 5.0         (* Accel for Y_DirectControl operating modes (mm/s^2) *)
-     G_cfgDirectCtrlDecel      : LREAL := 5.0         (* Decel for Y_DirectControl operating modes (mm/s^2) *)
+     G_cfgDirectCtrlAccel      : LREAL := 10.0         (* Accel for Y_DirectControl operating modes (mm/s^2). A
+                                                          velocity step on the machine was not slewed at this
+                                                          value in VelocityTLMode (bench/characterisation) *)
+     G_cfgDirectCtrlDecel      : LREAL := 10.0         (* Decel for Y_DirectControl operating modes (mm/s^2);
+                                                          the block has no decel input, so only the stop law
+                                                          uses it *)
+     G_cfgDirectCtrlFilterTime : LREAL := 0.05        (* Y_DirectControl FilterTimeConstant (s): the block's own
+                                                          filter on the command it sends the drive. Wired from
+                                                          G_cmdDirectControl.FilterTimeConstant in the LD POU. A
+                                                          lag inside the pressure loop; tune on the bench with
+                                                          a velocity step (bench/friction 'steps') *)
 
 
      (* ========================================================================
@@ -173,7 +181,7 @@
      G_cfgScanTime             : LREAL := 0.002       (* Task period (s). dt for the gate and the analog filter alpha.
                                                           Must match the cyclic task interval in the MWiec task
                                                           configuration (2 ms is the MP2600iec lower bound). *)
-     G_cfgPosGateAccelMax      : LREAL := 5.0         (* Command accel limit (mm/s^2). Conservative start - raise on the
+     G_cfgPosGateAccelMax      : LREAL := 10.0         (* Command accel limit (mm/s^2). Conservative start - raise on the
                                                           bench. A master ramp at v is followed with lag v^2/(2A):
                                                           2.5 mm at 5 mm/s with A=5, 0.25 mm with A=50. *)
      G_cfgPosGateMaxDeviation  : LREAL := 2.0         (* Tether window (mm). Command never leads actual by more than this
@@ -202,7 +210,10 @@
         assumed chamber stiffness.
         ======================================================================== *)
 
-     G_cfgPressureShuntOhms      : LREAL := 434.0      (* Shunt across the loop (ohm) *)
+     G_cfgPressureShuntOhms      : LREAL := 421.4      (* Volts the input reads per A of loop current (ohm): the
+                                                          434 ohm shunt in parallel with the input's own load,
+                                                          calibrated end to end against a current source
+                                                          (bench/pressure/README.md section 6) *)
      G_cfgPressureZeroMa         : LREAL := 4.0        (* Loop current at RangeMin (mA) *)
      G_cfgPressureSpanMa         : LREAL := 16.0       (* Loop current span (mA) *)
      G_cfgPressureRangeMin       : LREAL := 0.0        (* Pressure at ZeroMa (MPa gauge) *)
@@ -221,9 +232,12 @@
                                                           velocity is clamped to sqrt(2*Decel*|error|/stiffness).
                                                           Above the liquid-only chamber's ~20 MPa/mm because the
                                                           filtered reading lags the chamber during the approach *)
-     G_cfgPressureStopVelMin     : LREAL := 0.5        (* The stop law never clamps below this (mm/s), so outflow
-                                                          can be balanced at zero error; overshoot from this
-                                                          velocity is at most stiffness*v^2/(2*decel) *)
+     G_cfgPressureStopVelMin     : LREAL := 2.0        (* The stop law never clamps below this (mm/s), so outflow
+                                                          can be balanced at zero error. Must exceed the piston
+                                                          speed the outlet needs (1.4 mm/s at 10 MPa through the
+                                                          orifice bank), or the loop holds a steady error below
+                                                          the target. Overshoot from this velocity is at most
+                                                          stiffness*v^2/(2*decel) *)
      G_cfgPressureTorqueLimit    : LREAL := 100.0      (* Torque limit in pressure mode (% of rated). Caps the piston
                                                           force if the sensor reads low *)
      G_cfgPressureTargetMax      : LREAL := 15.0       (* Highest target accepted from the master (MPa gauge) *)
@@ -272,7 +286,7 @@
         ======================================================================== *)
 
      (* Mode 110 - Home to Negative Overtravel Switch (two-stage approach + fixed retract) *)
-     G_cfgHomeLimFastApproachVel : LREAL := 5.0       (* Coarse approach toward switch (mm/s) *)
+     G_cfgHomeLimFastApproachVel : LREAL := 6.0       (* Coarse approach toward switch (mm/s) *)
      G_cfgHomeLimSlowApproachVel : LREAL := 1.0       (* Slow re-approach for precise switch detect (mm/s) *)
      G_cfgHomeLimBackoffVel      : LREAL := 5.0       (* Inter-approach backoff AND final retract velocity (mm/s) *)
      G_cfgHomeLimRetractDist     : LREAL := 5.0       (* Retract distance from precise switch to position 0 (mm).
@@ -283,10 +297,10 @@
 
      (* Mode 101 - Go Home *)
      G_cfgGoHomePosition       : LREAL := 0.0         (* Target position for Go Home *)
-     G_cfgGoHomeVelocity       : LREAL := 5.0         (* Velocity for Go Home move *)
+     G_cfgGoHomeVelocity       : LREAL := 6.0         (* Velocity for Go Home move *)
      G_cfgGoHomeAccel          : LREAL := 5.0         (* Acceleration for Go Home move (mm/s²) *)
-     G_cfgGoHomeDecel          : LREAL := 5.0         (* Deceleration for Go Home move (mm/s²) *)
-     G_cfgGoHomeStopDecel      : LREAL := 5.0         (* Deceleration for MC_Stop commands (mm/s²) *)
+     G_cfgGoHomeDecel          : LREAL := 10.0         (* Deceleration for Go Home move (mm/s²) *)
+     G_cfgGoHomeStopDecel      : LREAL := 10.0         (* Deceleration for MC_Stop commands (mm/s²) *)
    END_VAR
 
 
@@ -307,7 +321,7 @@
                                     by Mode 110: slow approach precisely re-detects
                                     the switch, then MC_SetPosition declares this
                                     point to be (SetPosition - RetractDist).
-   - G_cfgPosSoftLimitMin (~-2.5) : Software floor; lives between zero and the
+   - G_cfgPosSoftLimitMin         : Software floor; lives between zero and the
                                     switch, providing noise headroom while still
                                     catching real over-travel toward the switch.
    - 0 mm                         : Home / zero reference. Reached by MC_MoveAbsolute(
@@ -316,7 +330,7 @@
    - G_cfgPosCylinderEntry        : Physical cylinder-entry point. Below this the
                                     piston is leaving the cylinder bore; the exit
                                     guard monitors torque/velocity here.
-   - G_cfgPosSoftLimitMax (305 mm): Software ceiling; end-of-stroke in compression
+   - G_cfgPosSoftLimitMax         : Software ceiling; end-of-stroke in compression
                                     direction.
 
    VAR_GLOBAL
@@ -324,7 +338,7 @@
         DEVICE DIMENSIONS (physical landmarks in the coordinate frame)
         ======================================================================== *)
 
-     G_cfgPosCylinderEntry     : LREAL := 200.0       (* Physical cylinder-entry position (mm).
+     G_cfgPosCylinderEntry     : LREAL := 176.0       (* Physical cylinder-entry position (mm).
                                                           Below this the piston is leaving the
                                                           cylinder — exit guard fires regardless
                                                           of soft-limit value. Measure and set to

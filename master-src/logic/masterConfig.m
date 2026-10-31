@@ -7,9 +7,9 @@ cfg.commTimeout    = 0.3;       % slave counter unchanged this long = link lost 
 
 % Cylinder geometry. Displayed positions are distances from the end of
 % travel (posEOT) and volume is swept volume from there plus deadVolume.
-cfg.posEOT       = 365;             % mm, position at the end of travel (compression end)
+cfg.posEOT       = 367;             % mm, position at the end of travel (compression end)
 cfg.boreDiameter = 2.602 * 25.4;    % mm (2.602 in)
-cfg.deadVolume   = 10;              % mL, volume left at the end of travel
+cfg.deadVolume   = 57;              % mL, volume left at the end of travel (measured: 57 g of water fills it, with the present fittings)
 
 % Pressure: the app works in atm absolute, the slave in MPa gauge.
 cfg.atmPerMPa   = 9.869;
@@ -21,8 +21,8 @@ cfg.posMin = 0;             % mm
 cfg.posMax = 367;           % mm
 
 % Velocity command limit.
-cfg.jogVelMax = 5;          % mm/s
-cfg.jogSpeeds = [0.1 0.25 0.5 1 2 5];   % mm/s, app presets; the largest is the default
+cfg.jogVelMax = 6;          % mm/s
+cfg.jogSpeeds = [0.1 0.25 0.5 1 2 5 6];   % mm/s, app presets; the largest is the default
 
 % Position arrival judged from feedback.
 cfg.posTolerance = 0.5;     % mm

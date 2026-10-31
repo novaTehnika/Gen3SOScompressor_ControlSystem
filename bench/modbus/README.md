@@ -11,7 +11,7 @@ the same heartbeat registers (HR1, IR1–2) and a separate probe area (101+).
 | File | Contents |
 |------|----------|
 | `slave/PRG_ModbusBench.st` | Slave program: heartbeat echo, scan counter, probe patterns |
-| `modbusBenchConfig.m` | Controller IP, timeout, register numbers, step |
+| `modbusBenchConfig.m` | Timeout, register numbers, step; the controller IP comes from `bench/common/benchConfig.m` |
 | `modbusProbe.m` | MATLAB-only check of address mapping and word order, plus timed round trips |
 | `modbusRawProbe.m` | Timed heartbeat exchange with hand-built frames over `tcpclient`: client floor and pipelined requests |
 | `modbusCaptureTiming.py` | Splits a Wireshark capture into controller time and client time (needs `tshark`) |
@@ -45,8 +45,8 @@ ModbusRegisterMap.md are added, since both use HR1 and IR1–2.
 
 ## 2. Mapping and word order
 
-On the lab PC, set `cfg.address` in `modbusBenchConfig.m` to the controller IP
-(the address MotionWorks connects to), then:
+On the lab PC, set `cfg.address` in `bench/common/benchConfig.m` to the
+controller IP (the address MotionWorks connects to), then:
 
 ```matlab
 cd bench/modbus
