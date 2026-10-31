@@ -252,7 +252,6 @@ TYPE
       Velocity        : LREAL;
       Torque          : LREAL;
       Acceleration    : LREAL;
-      Deceleration    : LREAL;
       FilterTimeConstant : LREAL;   (* s, the block's FilterTimeConstant input *)
    END_STRUCT;
 

@@ -322,7 +322,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
             G_sysConfirmedMode := E_OperatingMode#MODE_POSITION;
             stCurrentLimits.PosMax := G_cfgPosSoftLimitMax;
             stCurrentLimits.PosMin := G_cfgPosSoftLimitMin;
-            stCurrentLimits.VelMax := G_cfgVelLimitNormal;
+            stCurrentLimits.VelMax := G_cfgVelLimitMax;
             stCurrentLimits.TorqueMax := G_cfgTorqueLimitNormal;
             bPosStopping := FALSE;
         END_IF;
@@ -399,7 +399,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL THEN
            ---------------------------------------------------------------- *)
         IF bEnterState THEN
             G_sysConfirmedMode := E_OperatingMode#MODE_PRESSURE;
-            stCurrentLimits.VelMax := G_cfgPressureVelMax;
+            stCurrentLimits.VelMax := MIN(G_cfgPressureVelMax, G_cfgVelLimitMax);
             stCurrentLimits.TorqueMax := G_cfgPressureTorqueLimit;
         END_IF;
 
@@ -687,7 +687,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
             G_sysConfirmedMode := E_OperatingMode#MODE_POSITION;
             stCurrentLimits.PosMax := G_cfgPosSoftLimitMax;
             stCurrentLimits.PosMin := G_cfgPosSoftLimitMin;
-            stCurrentLimits.VelMax := G_cfgVelLimitNormal;
+            stCurrentLimits.VelMax := G_cfgVelLimitMax;
             stCurrentLimits.TorqueMax := G_cfgTorqueLimitNormal;
             bPosStopping := FALSE;
         END_IF;
@@ -882,26 +882,32 @@ G_cmdPower.Enable := FALSE;
 G_cmdPower.EnablePositive := FALSE;
 G_cmdPower.EnableNegative := FALSE;
 G_cmdStop.Execute := FALSE;
-G_cmdStop.Deceleration := G_cfgGoHomeDecel;
+(* Every command default below is the value of the block that may still be
+   running after the owning state is left; the owning FB or state overwrites
+   it while it commands. A Execute/Forward/Reverse that has dropped does not
+   stop the block (MC_MoveAbsolute is not aborted by Execute falling; Jog
+   decelerates on its Deceleration pin), so the rates keep real values.
+   Targets and velocities cannot matter while the enable is FALSE and are
+   zeroed. *)
+G_cmdStop.Deceleration := G_cfgStopDecel;   (* the one MC_Stop deceleration: hold, fault, recovery *)
 G_cmdReset.Execute := FALSE;
 G_cmdMoveAbsolute.Execute := FALSE;
 G_cmdMoveAbsolute.Position := LREAL#0.0;
 G_cmdMoveAbsolute.Velocity := LREAL#0.0;
-G_cmdMoveAbsolute.Acceleration := G_cfgGoHomeAccel;
+G_cmdMoveAbsolute.Acceleration := G_cfgGoHomeAccel;   (* Go Home's move, the one a hold or fault can interrupt before MC_Stop takes the axis *)
 G_cmdMoveAbsolute.Deceleration := G_cfgGoHomeDecel;
 G_cmdMoveAbsolute.Direction := MC_Direction#Current_Direction;
 G_cmdJog.Forward := FALSE;
 G_cmdJog.Reverse := FALSE;
 G_cmdJog.Velocity := LREAL#0.0;
-G_cmdJog.Acceleration := G_cfgHomeLimAccel;
-G_cmdJog.Deceleration := G_cfgHomeLimDecel;
+G_cmdJog.Acceleration := G_cfgHomeLimAccel;   (* homing is the only user of Jog; an abort into ST_HOLD_POSITION drops Forward/Reverse and *)
+G_cmdJog.Deceleration := G_cfgHomeLimDecel;   (* the block then stops on this Deceleration, as it did under FB_HomeLimit *)
 G_cmdDirectControl.Enable := FALSE;
 G_cmdDirectControl.ControlMode := Y_ControlMode#VelocityTLMode;
 G_cmdDirectControl.Position := LREAL#0.0;
 G_cmdDirectControl.Velocity := LREAL#0.0;
 G_cmdDirectControl.Torque := LREAL#0.0;
-G_cmdDirectControl.Acceleration := G_cfgDirectCtrlAccel;
-G_cmdDirectControl.Deceleration := G_cfgDirectCtrlDecel;
+G_cmdDirectControl.Acceleration := G_cfgDirectCtrlAccel;   (* kept through the MC_Stop hand-off, where Enable stays TRUE *)
 G_cmdDirectControl.FilterTimeConstant := G_cfgDirectCtrlFilterTime;
 G_cmdSetPosition.Execute := FALSE;
 G_cmdSetPosition.Position := LREAL#0.0;
@@ -931,6 +937,12 @@ IF bPositionMode THEN
     G_cmdDirectControl.Enable := TRUE;
     G_cmdDirectControl.ControlMode := Y_ControlMode#PositionMode;
     G_cmdDirectControl.Position := G_sysCommandedPosition;   (* previous scan; overridden by fbPosGate in Route Active FB Command Outputs *)
+    (* Y_DirectControl does no path shaping in PositionMode: the position
+       command reaches the drive as given. Its Velocity (and Acceleration)
+       inputs therefore set no limits in this mode. fbPosGate
+       (FB_PositionCommandGate) does the path shaping, and its VelMax and
+       AccelMax are what limit a position move. The master sends only the
+       target position (HR5-6). *)
     G_cmdDirectControl.Velocity := stCurrentLimits.VelMax;
     G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
     bKeepDirectControl := TRUE;
@@ -962,7 +974,6 @@ ELSIF G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL THEN
     G_cmdDirectControl.Velocity := G_sysCommandedVelocity;
     G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
     G_cmdDirectControl.Acceleration := G_cfgPressureAccel;
-    G_cmdDirectControl.Deceleration := G_cfgPressureDecel;
     bKeepDirectControl := TRUE;
     eKeepDirectMode := Y_ControlMode#VelocityTLMode;
 
@@ -1088,9 +1099,10 @@ fbGoHome(
     Enable := bInGoHome,
     Execute := bInGoHome,
     HomePosition := G_cfgGoHomePosition,
-    HomeVelocity := G_cfgGoHomeVelocity,
+    HomeVelocity := MIN(G_cfgGoHomeVelocity, G_cfgVelLimitMax),
     Acceleration := G_cfgGoHomeAccel,
     Deceleration := G_cfgGoHomeDecel,
+    StopDeceleration := G_cfgStopDecel,
     Abort := NOT bFilteredMotionEnable,
     StaMoveAbsolute := G_staMoveAbsolute,
     StaStop := G_staStop
@@ -1100,9 +1112,9 @@ fbGoHome(
 fbHomeLimit(
     Enable := bInHomeLimit,
     Execute := bInHomeLimit,
-    FastApproachVelocity := G_cfgHomeLimFastApproachVel,
-    SlowApproachVelocity := G_cfgHomeLimSlowApproachVel,
-    BackoffVelocity := G_cfgHomeLimBackoffVel,
+    FastApproachVelocity := MIN(G_cfgHomeLimFastApproachVel, G_cfgVelLimitMax),
+    SlowApproachVelocity := MIN(G_cfgHomeLimSlowApproachVel, G_cfgVelLimitMax),
+    BackoffVelocity := MIN(G_cfgHomeLimBackoffVel, G_cfgVelLimitMax),
     RetractDist := G_cfgHomeLimRetractDist,
     Acceleration := G_cfgHomeLimAccel,
     Deceleration := G_cfgHomeLimDecel,

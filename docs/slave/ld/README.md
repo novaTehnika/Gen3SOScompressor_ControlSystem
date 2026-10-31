@@ -24,8 +24,8 @@ keep the table to what the picture shows.
 | Enable | in | `G_cmdDirectControl.Enable` | |
 | ControlMode | in | `G_cmdDirectControl.ControlMode` | |
 | Position | in | `G_cmdDirectControl.Position` | |
-| Velocity | in | `G_cmdDirectControl.Velocity` | |
-| Acceleration | in | `G_cmdDirectControl.Acceleration` | The bench measured no slew of the velocity reference at this value in VelocityTLMode (`bench/characterisation/README.md` section 8). |
+| Velocity | in | `G_cmdDirectControl.Velocity` | In PositionMode the block does no path shaping, so this input (and Acceleration) sets no limit; `FB_PositionCommandGate`'s `VelMax` and `AccelMax` do. |
+| Acceleration | in | `G_cmdDirectControl.Acceleration` | The block has no Deceleration pin, so `ST_CmdDirectControl` has no `Deceleration` field. The bench measured no slew of the velocity reference at this value in VelocityTLMode (`bench/characterisation/README.md` section 8). |
 | Torque | in | `G_cmdDirectControl.Torque` | |
 | FilterTimeConstant | in | `LREAL#0.05` | **To change:** wire `G_cmdDirectControl.FilterTimeConstant`, which `PRG_Main` sets from `G_cfgDirectCtrlFilterTime` (default 0.05 s), so the filter can be tuned without editing the LD. |
 | BufferMode | in | not wired | |

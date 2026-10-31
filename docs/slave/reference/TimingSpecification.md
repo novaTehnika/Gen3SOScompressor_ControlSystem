@@ -138,7 +138,7 @@ Hold Secure ______________________|‾‾‾‾‾‾‾‾‾‾‾‾
 ### Position Mode Move Timing
 
 `FB_PositionCommandGate` shapes each position setpoint as a trapezoidal (or, for small steps,
-triangular) velocity move at the configured velocity limit `V` (`G_cfgVelLimitNormal`) and
+triangular) velocity move at the configured velocity limit `V` (`G_cfgVelLimitMax`) and
 acceleration limit `A` (`G_cfgPosGateAccelMax`). For a setpoint step of size `d`, move time is:
 
 | Profile | Condition | Move Time |

@@ -146,13 +146,20 @@
         VELOCITY LIMITS (mm/s)
         ======================================================================== *)
 
-     G_cfgVelLimitMax          : LREAL := 7.0         (* Maximum velocity limit *)
-     G_cfgVelLimitNormal       : LREAL := 6.0         (* Normal operating velocity *)
+     G_cfgVelLimitMax          : LREAL := 6.0         (* The one axis speed ceiling, VelMax in every mode. The mode
+                                                          speeds below (Go Home, homing, pressure) are passed through
+                                                          MIN(.., G_cfgVelLimitMax). In position mode the master sends
+                                                          only the position; FB_PositionCommandGate's VelMax is the
+                                                          limit that governs the move, as Y_DirectControl does
+                                                          no path shaping in PositionMode. masterConfig.jogVelMax must
+                                                          not exceed it *)
+     G_cfgStopDecel            : LREAL := 10.0        (* The one MC_Stop deceleration (mm/s^2): hold, fault,
+                                                          recovery and Go Home abort *)
 
 
      (* ========================================================================
-        DIRECT CONTROL ACCEL/DECEL (mm/s^2)
-        Slew limits applied by Y_DirectControl in Position/Velocity/Torque
+        DIRECT CONTROL ACCEL (mm/s^2)
+        Slew limit applied by Y_DirectControl in Position/Velocity/Torque
         operating modes. Required nonzero for the FB to ramp to commanded
         Velocity/Position; zero values leave the servo unable to move.
         ======================================================================== *)
@@ -160,9 +167,6 @@
      G_cfgDirectCtrlAccel      : LREAL := 10.0         (* Accel for Y_DirectControl operating modes (mm/s^2). A
                                                           velocity step on the machine was not slewed at this
                                                           value in VelocityTLMode (bench/characterisation) *)
-     G_cfgDirectCtrlDecel      : LREAL := 10.0         (* Decel for Y_DirectControl operating modes (mm/s^2);
-                                                          the block has no decel input, so only the stop law
-                                                          uses it *)
      G_cfgDirectCtrlFilterTime : LREAL := 0.05        (* Y_DirectControl FilterTimeConstant (s): the block's own
                                                           filter on the command it sends the drive. Wired from
                                                           G_cmdDirectControl.FilterTimeConstant in the LD POU. A
@@ -225,7 +229,8 @@
      G_cfgPressureKi             : LREAL := 0.2        (* Velocity per integrated pressure error (mm/s per MPa*s) *)
      G_cfgPressureVelMax         : LREAL := 5.0        (* Velocity clamp in pressure mode (mm/s) *)
      G_cfgPressureAccel          : LREAL := 50.0       (* Y_DirectControl accel in pressure mode (mm/s^2) *)
-     G_cfgPressureDecel          : LREAL := 50.0       (* Y_DirectControl decel in pressure mode (mm/s^2). The chamber
+     G_cfgPressureDecel          : LREAL := 50.0       (* Deceleration the pressure stop law assumes (mm/s^2); the
+                                                          Y_DirectControl block has no decel input. The chamber
                                                           stiffens by orders of magnitude as the gas dissolves; the
                                                           command must reverse within v^2/(2*decel) of travel *)
      G_cfgPressureStopStiffness  : LREAL := 100.0      (* Chamber stiffness assumed by the stop law (MPa/mm): the
@@ -300,7 +305,6 @@
      G_cfgGoHomeVelocity       : LREAL := 6.0         (* Velocity for Go Home move *)
      G_cfgGoHomeAccel          : LREAL := 5.0         (* Acceleration for Go Home move (mm/s²) *)
      G_cfgGoHomeDecel          : LREAL := 10.0         (* Deceleration for Go Home move (mm/s²) *)
-     G_cfgGoHomeStopDecel      : LREAL := 10.0         (* Deceleration for MC_Stop commands (mm/s²) *)
    END_VAR
 
 

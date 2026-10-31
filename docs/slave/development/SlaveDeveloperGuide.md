@@ -35,7 +35,7 @@ Because `G_sysAxis` and the built-in motion FBs live in the LD POU, `PRG_Main` n
 | `G_cmdReset` | `MC_Reset` | `G_staReset` |
 | `G_cmdMoveAbsolute` | `MC_MoveAbsolute` | `G_staMoveAbsolute` |
 | `G_cmdJog` | Jog | `G_staJog` |
-| `G_cmdDirectControl` | `Y_DirectControl` | `G_staDirectControl` |
+| `G_cmdDirectControl` | `Y_DirectControl` (no deceleration pin, so no `Deceleration` field) | `G_staDirectControl` |
 | `G_cmdSetPosition` | `MC_SetPosition` | `G_staSetPosition` |
 
 Custom FBs that need to command or observe a built-in motion FB (`FB_HomeLimit`, `FB_GoHome`) follow the same pattern at the FB level: they emit `Cmd*` `VAR_OUTPUT` structs and receive `Sta*` `VAR_INPUT` structs. `PRG_Main` wires those to the matching globals — see §4 below.

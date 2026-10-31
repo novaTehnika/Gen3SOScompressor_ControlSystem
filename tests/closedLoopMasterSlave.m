@@ -21,7 +21,7 @@ E = h.sl.E;
 
 h = runFor(h, 0.5);
 assert(h.out.state == 1 && h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE);
-vLimit = h.sl.G.G_cfgVelLimitNormal;
+vLimit = h.sl.G.G_cfgVelLimitMax;
 
 % Position move from power-up: lands inside tolerance, no overshoot,
 % velocity limited. No homing is needed first. The move is long enough to

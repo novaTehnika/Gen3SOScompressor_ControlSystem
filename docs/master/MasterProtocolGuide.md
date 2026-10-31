@@ -313,7 +313,7 @@ FAULT_PERSISTENT:
 | Mode | Unit | Limits applied by the slave |
 |------|------|-----------------------------|
 | Position | mm | Soft limits, position gate (velocity and acceleration) |
-| Velocity | mm/s | `G_cfgVelLimitNormal` (6 mm/s) |
+| Velocity | mm/s | `G_cfgVelLimitMax` (6 mm/s) |
 | Torque | % of rated | `G_cfgTorqueLimitNormal` |
 | Pressure | MPa gauge | `0` to `G_cfgPressureTargetMax` (15 MPa); velocity within `G_cfgPressureVelMax` (5 mm/s) and the stop law; torque within `G_cfgPressureTorqueLimit` |
 
@@ -353,7 +353,7 @@ position is **executed as a move**. A reference left at 0 mm with the piston ret
 commands a full stroke the moment motion is enabled.
 
 **Setpoint behavior**: Position setpoints (steps in the reference) are executed as
-trapezoidal-velocity moves at the slave's configured limits — velocity `G_cfgVelLimitNormal`
+trapezoidal-velocity moves at the slave's configured limits — velocity `G_cfgVelLimitMax`
 (6 mm/s default) and acceleration `G_cfgPosGateAccelMax` — landing on the setpoint without
 overshoot. If the master instead ramps the reference itself, the slave's command follows with
 a small lag of approximately `v^2 / (2*A)`, where `v` is the reference's rate of change and
