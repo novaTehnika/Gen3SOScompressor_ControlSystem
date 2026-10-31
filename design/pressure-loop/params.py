@@ -215,15 +215,15 @@ class Params:
     # The drive's response to a velocity command was measured on
     # 2026-10-26 (bench/friction, bench/characterisation): the command is
     # not slewed at the configured accel, and the motor velocity follows
-    # it after a dead time of 12 ms with a first-order lag of 8.7 ms, the
-    # same for 0.3 to 2.5 mm/s steps in both directions. The lag at the
-    # piston (behind the gearbox and screw) was not resolved; it is below
-    # 25 ms.
+    # it after a dead time of 22.8 ms with a first-order lag of 18.2 ms,
+    # the same for 0.3 to 2.5 mm/s steps in both directions, fitted at
+    # the 4 ms row spacing of the slave scan. The lag at the piston
+    # (behind the gearbox and screw) was not resolved.
     # [s] Dead time between the velocity command and the start of the
-    # response, applied in whole scans
-    t_dead: float = 0.012
+    # response, applied in whole scans (6 scans of 4 ms)
+    t_dead: float = 0.0228
     # [s] Time constant of the drive's velocity loop
-    tauV: float = 0.0087
+    tauV: float = 0.0182
     # True if the drive slews the velocity command at the accel and
     # decel limits. The drive does not; the option keeps the earlier
     # model available.

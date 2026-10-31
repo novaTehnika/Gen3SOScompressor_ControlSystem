@@ -83,8 +83,9 @@ UNCERTAIN = [
               'hose compliance, 0.24 mL/MPa by difference of two K runs'),
     Uncertain('tauDiss', 10.0, 100.0, True, 1.0, 's',
               'gas dissolution time constant'),
-    Uncertain('tauV', 0.005, 0.025, True, 1e3, 'ms',
-              'drive lag: 8.7 ms at the motor, below 25 ms at the piston'),
+    Uncertain('tauV', 0.010, 0.050, True, 1e3, 'ms',
+              'drive lag: 18.2 ms at the motor, 10 to 50 ms for the '
+              'piston side, which is not resolved'),
     Uncertain('noise', 1.5e3, 5e3, True, 1e-3, 'kPa',
               'transducer plus ADC noise, 1.8 to 4.6 kPa rms per sample'),
     Uncertain('Cd', 0.8, 0.9, False, 1.0, '',

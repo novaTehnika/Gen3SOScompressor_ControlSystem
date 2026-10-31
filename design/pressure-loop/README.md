@@ -173,14 +173,15 @@ compliance, 0.3 MPa with the hose open, before the controller can act.
 **Velocity actuator** (Y_DirectControl in VelocityTLMode). The bench
 measured the drive's response to a velocity command on 2026-10-26
 (`bench/friction`, `bench/characterisation`): the motor velocity follows
-the command after a dead time of 12 ms with a first-order lag of 8.7 ms,
+the command after a dead time of 22.8 ms with a first-order lag of
+18.2 ms (fitted at the 4 ms spacing of the slave's scan rows),
 the same for 0.3 to 2.5 mm/s steps in both directions, and **the command
 is not slewed at the configured accel**; the drive accelerates at
 whatever rate the step needs. The model therefore applies the dead time
 in whole scans and the lag, and has the slew limit of eq. (11) only as an
 option (`slew_limited`, off by default). The lag at the piston, behind
-the gearbox and screw, was not resolved by the bench (below 25 ms); the
-robustness study varies the lag from 5 to 25 ms to cover it. The piston
+the gearbox and screw, was not resolved by the bench; the robustness
+study varies the lag from 10 to 50 ms to cover it. The piston
 stalls when the force the drive must supply, the pressure force plus the
 load-dependent, Coulomb and viscous friction, reaches the torque limit,
 eq. (13): about 20 MPa at 100 % rated torque.
@@ -356,6 +357,9 @@ First-order filter coefficient, with the time constant tau rounded to
 whole milliseconds as `PRG_Main` rounds it:
 
     (16) alpha = Ts / (tau + Ts)
+
+The filter runs once per scan, so with the 4 ms scan the 20 ms
+configured is a 20 ms time constant (alpha = 1/6).
 
 Median of N samples followed by the first-order filter:
 
@@ -543,7 +547,7 @@ the velocity Q/A, so the error is
 the sensor samples the pressure, the controller computes a command, and
 the plant advances with the command computed in the previous scan held
 constant. The plant splits the scan into `nsub` integration steps of
-length dt = Ts / nsub (5 steps of 0.4 ms by default). Before each step
+length dt = Ts / nsub (5 steps of 0.8 ms by default). Before each step
 it applies the slew limit, eq. (11); after each step it applies the stall
 or velocity clamp and the physical bounds on the state: the dissolved
 gas cannot exceed the gas present, and the absolute pressure cannot fall
@@ -628,7 +632,7 @@ the limits (`THRESH`), the requirements and the sampler.
 | passages | 52–62 mL | linear | measured 57 mL with the hose shut |
 | hose compliance | 0.12–0.36 mL/MPa | log | 0.24 mL/MPa by difference of two bulk-modulus runs |
 | tauDiss | 10–100 s | log | not measured |
-| tauV | 5–25 ms | log | 8.7 ms at the motor; below 25 ms at the piston |
+| tauV | 10–50 ms | log | 18.2 ms at the motor; the piston side is not resolved |
 | sensor noise | 1.5–5 kPa rms | log | measured 1.8 (with capacitor) to 4.6 kPa |
 | orifice Cd | 0.8–0.9 | linear | measured 0.84–0.87 |
 | supply pressure | 0.52–1.38 MPa | linear | 75–200 psi with the cylinder's charge |
@@ -637,7 +641,7 @@ The ranges are the bench measurements of 2026-10-26 with their spread
 (`bench/characterisation/README.md` section 7, `bench/friction`,
 `bench/pressure`). `mr`, `b`, `Fc` and `mu` act only in torque mode and
 the stall, so they are not varied; the dead time is fixed at its
-measured 12 ms. Each
+measured 22.8 ms. Each
 sample runs compress and deliver and checks these requirements:
 
 - The pressure never exceeds the ceiling, 12 MPa (`Params.P_ceiling`).
@@ -686,8 +690,8 @@ assumed before:
 | Dead volume | 57 mL of passages (hose shut, with the present fittings); 86 mL with the 29 mL hose and the tube (delivery) | 20–30 mL (then 10 mL in the master) | 57 g of water fills it |
 | Hose compliance | 0.24 mL/MPa | not modelled | difference between bulk-modulus runs with the hose shut and open |
 | Orifice Cd | 0.85 (0.84–0.87), exponent 0.48; 4.8 mL/s at 10 MPa | 0.7; 4.0 mL/s | `charOrificeFlow`, deliveries at 2, 5 and 10 MPa |
-| Drive response | 12 ms dead time, 8.7 ms lag at the motor, no slew | 20 ms lag, slewed at the configured accel | `stepResponseFit`, 74 step captures |
-| Lag at the piston | below 25 ms (not resolved) | — | repeat with the pressure probe |
+| Drive response | 22.8 ms dead time, 18.2 ms lag at the motor, no slew | 20 ms lag, slewed at the configured accel | `charDriveLag`, 74 step captures at the 4 ms scan |
+| Lag at the piston | not resolved | — | repeat with the pressure probe |
 | Coulomb friction Fc | 6.1 kN | 0.5 kN | `frictionFit` |
 | Viscous friction b | 2.3 MN s/m | 5 kN s/m | `frictionFit` |
 | Load-dependent friction mu | 0.45 (efficiency 0.69 pushing) | 0.85 efficiency | `frictionFit` |
@@ -711,8 +715,8 @@ filter. StopVelMin was 0.5 mm/s until this study; that setting appears
 below as "StopVelMin 0.5". The time-domain results use
 Heun's method at five steps per scan and the measured plant: K 0.72 GPa,
 343 mL of saline with 57 mL of passages and a 29 mL hose, Cd 0.85, a
-12 ms dead time
-and 8.7 ms lag in the drive, and the −0.11 MPa transducer offset, which
+22.8 ms dead time
+and 18.2 ms lag in the drive, and the −0.11 MPa transducer offset, which
 puts the true pressure 0.11 MPa above every target.
 
 **Velocity versus torque command.** Velocity command wins, now more
@@ -813,10 +817,11 @@ chamber transducer does, by the time the pressure wave takes to run
 up the hose. The hose line's compressibility is the saline's plus the
 wall's per unit volume, 1/K + C_hose/V_hose = 9.7e-9 per Pa (an
 effective bulk modulus of 0.1 GPa), so the wave runs at 320 m/s (850
-in rigid saline) and crosses the 0.92 m hose in 2.8 ms, under two
-scans. The loop's own delay from a reading to piston motion is about
-50 ms: the 20 ms filter, the median and pipeline scans, the 12 ms
-drive dead time and the 8.7 ms velocity-loop lag. A lead of 2.8 ms
+in rigid saline) and crosses the 0.92 m hose in 2.8 ms, under one
+scan. The loop's own delay from a reading to piston motion is about
+80 ms: the 20 ms filter, the median and pipeline scans (16 ms), the
+command's scan, the 22.8 ms drive dead time and the 18.2 ms
+velocity-loop lag. A lead of 2.8 ms
 cannot be turned into feedforward that acts before the dip; the hose
 would have to be 15 m long. What a transducer downstream of the
 distal valve, in the tube, would give is a measurement of the outflow
@@ -964,7 +969,7 @@ compliance), where the peak crosses 12 MPa.
   tuning levers; VelMax 7 mm/s shortens the compression only.
 
 **Margins against stiffness** (linear model, GVL gains, 20 ms filter,
-12 ms dead time):
+22.8 ms dead time):
 
 | Chamber | k (MPa/mm) | Gain margin | Phase margin | Crossover (rad/s) | Max stable Kp |
 |---|---|---|---|---|---|

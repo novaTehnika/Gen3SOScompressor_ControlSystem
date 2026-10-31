@@ -166,7 +166,7 @@ end
 
 
 function h = runUntil(h, T, done)
-% The master's heartbeat advances every 25 ms; the slave scans every 2 ms.
+% The master's heartbeat advances every 25 ms; the slave scans every 4 ms.
 dt = h.sl.G.G_cfgScanTime;
 for k = 1:round(T / dt)
     h.t = h.t + dt;
