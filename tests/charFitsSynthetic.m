@@ -181,7 +181,7 @@ end
 
 
 function writeStopCapture(file, v0, T0, D, P0, cfg)
-% PRG_StepProbe capture of a stop: 500 scans at 2 ms, the command to zero
+% step probe capture of a stop: 500 scans at 2 ms, the command to zero
 % at 0.1 s, at a stiffness of 3 MPa/mm.
 [t, cmd, v, x] = stopTrace(cfg.scanTime, 499 * cfg.scanTime, v0, 0.1, T0, D);
 P = P0 + 3 * (x - x(1));
@@ -306,7 +306,7 @@ end
 
 
 function writeCapture(file, v0, v1, tau, Td, accel, k, P0, cfg)
-% PRG_StepProbe capture: 500 scans at 2 ms from the arm, the command step
+% step probe capture: 500 scans at 2 ms from the arm, the command step
 % from v0 to v1 at 0.1 s, slew at accel, dead time, first-order lag (the
 % piston's when k > 0), and the pressure at stiffness k from P0 through
 % the slave's sensor chain.

@@ -110,3 +110,14 @@ These parameters define the behavior of the homing (110) and Go Home (101) modes
 | `G_cfgGoHomeVelocity` | 6.0 | mm/s | The velocity used for the move-to-home motion. |
 | `G_cfgGoHomeAccel` | 5.0 | mm/s² | Acceleration for the Go Home move. |
 | `G_cfgGoHomeDecel` | 10.0 | mm/s² | Deceleration for the Go Home move. |
+
+---
+
+## 7. Step Probe
+
+The scan-rate recorder `FB_Probe` (ModbusRegisterMap.md, section 6). Nothing in the protocol depends on it.
+
+| Parameter | Default Value | Units | Description & Tuning Considerations |
+|---|---|---|---|
+| `G_cfgProbeEnable` | TRUE | | FALSE stops the probe: nothing is recorded, arms are not acted on and `G_mbProbeState` reads `PROBE_OFF`. The Modbus groups still span IR524 and HR114. |
+| `G_cfgProbeFillPerScan` | 6 | records | Records `FB_Probe` copies into the window per scan (limited to 1-13), 8 words each: the bound on the cost a transfer adds to one scan. A window of 13 records takes 3 scans at 6 and 13 at 1. **Tuning:** Lower it if scan time is tight; raise it if a stream reader needs the window refilled faster than every 6 ms. |

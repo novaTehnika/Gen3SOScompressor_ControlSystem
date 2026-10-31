@@ -19,11 +19,11 @@ here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'modbus'), fullfile(here, '..', 'common'));
 cfg = modbusBenchConfig();
 
-hrArm      = 101;       % G_mbProbeArm
+hrArm      = 101;       % G_mbNoiseArm
 irStats    = 101;       % IR101-108 mean, rms, min, max (REAL, low word first)
-irWindow   = 109;       % G_mbProbeWindow
-irState    = 110;       % G_mbProbeState
-irArmEcho  = 113;       % G_mbProbeArmEcho
+irWindow   = 109;       % G_mbNoiseWindow
+irState    = 110;       % G_mbNoiseState
+irArmEcho  = 113;       % G_mbNoiseArmEcho
 irSamples  = 121;       % IR121-370
 nSamples   = 250;
 countsPerVolt = 5000;   % 0.2 mV per count

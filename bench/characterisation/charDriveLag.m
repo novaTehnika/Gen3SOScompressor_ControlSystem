@@ -7,7 +7,7 @@ function r = charDriveLag(files, opts)
 %   r = charDriveLag(file)
 %   r = charDriveLag({capture1, capture2, ..., runLog}, opts)
 %
-%   Captures (PRG_StepProbe, 2 ms: t, vCmd, velocity, torque, position,
+%   Captures (step probe, 2 ms: t, vCmd, velocity, torque, position,
 %   pressure) give the lag at the motor: tauV and Td are fitted to the
 %   velocity feedback by least squares. The feedback is the controller's
 %   axis velocity, the motor encoder differentiated and scaled through the

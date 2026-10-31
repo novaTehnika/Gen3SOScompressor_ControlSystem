@@ -28,12 +28,16 @@ low side to the controller's analog ground, `MO1_AI_01` across the shunt.
    `%QB74531`) so that the capture block IR121-370 lies inside it. Save
    and cycle power.
 2. Declare the globals listed in the header of `slave/PRG_PressureProbe.st`
-   in the matching groups. `G_mbProbeSamples` is a located array; if the
+   in the matching groups. `G_mbNoiseSamples` is a located array; if the
    editor refuses an array at a direct address, declare it with a named
    type `ARRAY[0..249] OF UINT` from the Data Types worksheet.
 3. Add `PRG_PressureProbe` to the project and assign it to the 2 ms cyclic
    task. It uses only its own globals and runs beside `PRG_Main`. Do not
    load it together with `PRG_ModbusBench`, which uses the same registers.
+   Its globals are named `G_mbNoise*` so that it loads beside the main
+   program, whose step probe uses `G_mbProbe*` (HR111-114, IR401-524): the
+   registers do not overlap, and the main program's input group to IR524
+   already contains IR121-370.
 4. Compile, download, start.
 
 ## 2. Running

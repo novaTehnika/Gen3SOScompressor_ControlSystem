@@ -36,7 +36,11 @@ MotionWorks IEC 3 Express has a single task. Every POU (`PRG_Input`,
 `PRG_Main`, `PRG_Output`, the LD POU and any bench program) and the
 Modbus groups' IO Task Assignment run on that one cyclic task, so work
 cannot be moved to a slower task: anything that does not need every scan
-has to be skipped or spread over scans inside its own POU.
+has to be skipped or spread over scans inside its own POU (the step probe,
+`FB_Probe`, copies at most `G_cfgProbeFillPerScan` records per scan for
+this reason). The Modbus holding group spans HR1-114 and the input group
+IR1-524 for the probe's registers (`docs/master/ModbusRegisterMap.md`,
+section 6).
 
 1. Assign `PRG_Main` (and the LD POU) to the cyclic task
 2. Set the task interval to **2 ms** (the MP2600iec minimum)

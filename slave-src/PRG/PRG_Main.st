@@ -15,6 +15,8 @@
    via G_cmd*/G_sta* structured globals. Homing (ST_HOME_LIMIT) uses Jog.
 
    Every user-defined FB is called exactly once at the end of this file.
+   The step probe (fbProbe) is called last, after the state of the scan is
+   final, so its record and its fault mark see the scan's end state.
 
    State Machine Groups:
    - Idle: ST_IDLE (first scan goes directly here)
@@ -53,6 +55,8 @@
        fbFaultToInt        : FB_FaultToInt
        fbConfModeToInt     : FB_ModeToInt
        fbCommWatchdog      : FB_CommWatchdog
+       (* Step probe: scan-rate data capture, called last
+       fbProbe             : FB_Probe
        (* Timers — each has exactly one call site (see end of body)
        tStateTimer         : TON
        tBrakeTimer         : TON
@@ -1265,3 +1269,44 @@ ELSE
     G_sysScanCounter := G_sysScanCounter + UINT#1;
 END_IF;
 
+
+(* --------------------------------------------------------------------------
+   Step Probe
+   Records this scan's values in the probe's ring and serves the master's
+   window requests (see FB_Probe). Last in the file: the state, the status
+   outputs and the confirmed mode code are final for this scan, and a fault
+   entered by the safety monitor above marks this scan's record. The staging
+   array is passed by reference; PRG_Output publishes it.
+   -------------------------------------------------------------------------- *)
+fbProbe(
+    Enable := G_cfgProbeEnable,
+    FillPerScan := G_cfgProbeFillPerScan,
+    VelCmd := G_sysCommandedVelocity,
+    Vel := G_sysActualVelocity,
+    Torque := G_sysActualTorque,
+    Position := G_sysActualPosition,
+    Pressure := G_sysActualPressure,
+    Volts := G_aiPressure,
+    InMotion := G_doInMotion,
+    Performance := G_doPerformanceStatus,
+    FaultActive := G_doFaultActive,
+    HomingComplete := G_doHomingComplete,
+    ModeCode := G_sysConfirmedModeCode,
+    FaultState := (G_sysCurrentState = E_SystemState#ST_FAULT),
+    Arm := G_mbProbeArm,
+    Length := G_mbProbeLength,
+    ReqLo := G_mbProbeReqLo,
+    ReqHi := G_mbProbeReqHi,
+    Stage := G_sysProbeStage
+);
+G_sysProbePublish := fbProbe.Publish;
+G_sysProbeWritten := fbProbe.Written;
+G_sysProbeMark := fbProbe.Mark;
+G_sysProbeFaultMark := fbProbe.FaultMark;
+G_sysProbeStart := fbProbe.Start;
+G_sysProbeCount := fbProbe.Count;
+G_sysProbeArmEcho := fbProbe.ArmEcho;
+G_sysProbeDepth := fbProbe.Depth;
+G_sysProbeWords := fbProbe.Words;
+G_sysProbeState := fbProbe.StateCode;
+G_sysProbeXfer := fbProbe.XferCode;

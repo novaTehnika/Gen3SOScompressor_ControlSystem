@@ -139,6 +139,42 @@ The core logic resides in a state machine within `PRG_Main.st`. Understanding th
 
 ---
 
+### Step Probe and the Per-Scan Bound
+
+MotionWorks IEC 3 Express has a single task, so every POU runs every scan and
+anything that stretches a scan stretches the cycle. `FB_Probe` therefore
+bounds its own cost:
+
+- the record write is 8 word stores and some scaling;
+- a transfer copies at most `G_cfgProbeFillPerScan` records (8 words each,
+  default 6, limited to 1-13) from the ring into the staging array
+  `G_sysProbeStage` per scan, and a request is served over several scans
+  (`XFER_FILLING`) instead of in one;
+- the mapped window is written only in the scan a fill completes
+  (`G_sysProbePublish`), by one 104-word copy in `PRG_Output`, with StartTail
+  made different from Start before the copy and set equal to it last;
+- everything else is a few comparisons and assignments.
+
+The worst scan therefore adds 8 + 8 x `G_cfgProbeFillPerScan` word moves from the
+block plus, in the completing scan, the 104-word copy. Do not replace the
+fill loop by a copy of the whole window in one scan, and keep any new probe
+channel inside the record, whose layout is defined only in `FB_Probe.st`
+(the master decoder is `benchProbe.m`).
+
+The block is written so that `tools/st2m.py` and `tools/st2py.py` translate it
+and the simulator runs the source: it reads no `G_*` variable (the caller
+passes the channels and the probe's holding registers as inputs) and takes the
+staging array as a `VAR_IN_OUT`. It uses `MOD`, `SHR`, the `*_TO_WORD` /
+`DWORD_TO_WORD` / `DINT_TO_DWORD` conversions (which wrap modulo 2^16 and 2^32,
+as on the controller) and IF/ELSIF chains, no CASE. MotionWorks setup for it:
+the `FB_Probe` block, the `E_ProbeState` / `E_ProbeXferState` enumerations and
+the `ARRAY104WORD` / `ARRAY65536WORD` types from `DataTypes.st`; the `G_cfgProbe*`,
+`G_mbProbe*` and `G_sysProbe*` globals of `GlobalVariables_Reference.st` with the
+Modbus holding group extended to HR114 and the input group to IR524; and an
+`fbProbe : FB_Probe` instance in `PRG_Main`.
+
+---
+
 ## 5. How-To Guides
 
 ### How to Add a New Operating Mode

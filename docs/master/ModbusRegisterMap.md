@@ -54,7 +54,7 @@ bidirectional Holding Registers** checked, **Set all outputs off when PLC
 stops**, and the four Modbus groups assigned to the cyclic task that runs
 `PRG_Main` (MotionWorks IEC 3 Express has only that one task), so the
 registers update once per scan. Every register in the groups is copied
-every scan, so the groups are sized to the registers in use. The controller services the
+every scan, so the groups are sized to the registers in use (the step probe of section 6 extends them to IR524 and HR114). The controller services the
 connection on a 4 ms tick, so a transaction takes 1 to 8 ms regardless of the
 task interval.
 
@@ -71,9 +71,10 @@ task interval.
 | 5–6 | `%MD3.483336` | REAL | `G_mbReference` | Position mode: mm. Velocity mode: mm/s. Torque mode: % of rated. Pressure mode (code 7): target pressure, MPa gauge |
 | 7–8 | `%MD3.483340` | REAL | `G_mbPositionSpeed` | Speed of a position move, mm/s. The slave limits it to `0` to `G_cfgVelLimitMax`; 0 holds position. Written every exchange |
 | 9–20 | | | | Reserved |
-| 101–110 | | | | Bench probe area (`bench/modbus`) |
-| 111 | `%MW3.483548` | UINT | `G_mbStepArm` | Bench step probe (`bench/common/slave/PRG_StepProbe.st`): a changed value is an arm |
-| 112–113 | `%MW3.483550` | UINT ×2 | `G_mbStepReqLo`, `G_mbStepReqHi` | Bench step probe: index of the first record wanted in the window (low word first) |
+| 101–110 | | | | Bench areas (`bench/modbus`, `bench/pressure`): not loaded with the main program in service |
+| 111 | `%MW3.483548` | UINT | `G_mbProbeArm` | Step probe (section 6): a changed value is an arm |
+| 112–113 | `%MW3.483550` | UINT ×2 | `G_mbProbeReqLo`, `G_mbProbeReqHi` | Step probe: index of the first record wanted in the window (low word first) |
+| 114 | `%MW3.483554` | UINT | `G_mbProbeLength` | Step probe: records the next arm wants, 0 = open ended |
 
 ---
 
@@ -95,16 +96,8 @@ task interval.
 | 15–16 | `%QD73820` | REAL | `G_mbActualTorque` | `G_sysActualTorque` (% of rated) |
 | 17–18 | `%QD73824` | REAL | `G_mbCommandedPosition` | `G_sysCommandedPosition` (mm) |
 | 19–20 | `%QD73828` | REAL | `G_mbActualPressure` | `G_sysActualPressure` (MPa gauge): the transducer on the slave's analog input, scaled by `FB_PressureInput`. Valid in every mode; below zero or above range when the loop current is out of range |
-| 101–110 | | | | Bench probe area (`bench/modbus`) |
-| 401–402 | `%QD74592` | UDINT | `G_mbStepWritten` | Bench step probe: records written so far |
-| 403–404 | `%QD74596` | UDINT | `G_mbStepMark` | Index of the record written in the scan of the last arm |
-| 405–406 | `%QD74600` | UDINT | `G_mbStepStart` | Index of the first record in the window |
-| 407 | `%QW74604` | UINT | `G_mbStepArmEcho` | Arm value last acted on |
-| 408 | `%QW74606` | UINT | `G_mbStepCount` | Records in the window (0 to 18) |
-| 409 | `%QW74608` | UINT | `G_mbStepDepth` | Ring depth in records (8192) |
-| 410 | `%QW74610` | UINT | `G_mbStepWords` | Words per record (6) |
-| 411–518 | `%QW74612` | WORD ×108 | `G_mbStepWindow` | 18 records of vCmd, velocity, torque, position low word, position high word, pressure (0.001 mm/s, 0.001 mm/s, 0.01 %, 0.01 µm, 0.001 MPa) |
-| 519–520 | `%QD74828` | UDINT | `G_mbStepStartTail` | Copy of Start written after the window; a read with Start ≠ StartTail is torn |
+| 101–370 | | | | Bench areas (`bench/modbus`, `bench/pressure`): not loaded with the main program in service |
+| 401–524 | | | | Step probe, the next table (section 6) |
 
 ---
 
@@ -150,6 +143,101 @@ reads as a counter frozen at 0.
   the 6-register write vector; `modbusMap.m` holds the indices and
   `modbusPack.m` / `modbusUnpack.m` the REAL packing (low word first). The
   Simulink blocks handle plain `uint16`.
+- The step probe's registers (section 6) are filled by `PRG_Output` from
+  the `G_sysProbe*` globals that `PRG_Main` sets from `fbProbe`; `PRG_Main`
+  passes the probe's holding registers (`G_mbProbe*`) to the block directly.
 - Hardwired signals stay as they are: safety relay, brake, overtravel
   switches and stir bar motor
   (see [EthernetCommsReference.md](EthernetCommsReference.md)).
+
+---
+
+## 6. Step Probe (optional side channel)
+
+`FB_Probe` records the axis at the scan rate for experiments and benches and
+serves the records to `bench/common/benchProbe.m`. The protocol does not use
+it: with `G_cfgProbeEnable` FALSE the registers hold their last values and
+the master and slave behave identically. It is read in its own FC04 read
+(IR401-524, 124 registers) and written with FC16 (HR111-114) in the gaps
+between the protocol's exchanges, never in them. The input group must extend
+to IR524 and the holding group to HR114. A group is copied every scan over its
+whole span, so these spans (gaps included) are the probe's standing cost; a
+project that does not use the probe keeps the groups at IR20 and HR6 and
+`G_cfgProbeEnable` FALSE. Every 32-bit value is on a 4-byte boundary except the request at HR112,
+which is two UINT registers, low word first.
+
+Holding registers:
+
+| HR | Address | Type | Global | Content |
+|----|---------|------|--------|---------|
+| 111 | `%MW3.483548` | UINT | `G_mbProbeArm` | A changed value is an arm: the slave publishes Mark and echoes the value in ArmEcho |
+| 112–113 | `%MW3.483550` | UINT ×2 | `G_mbProbeReqLo`, `G_mbProbeReqHi` | Index of the first record wanted in the window, low word first |
+| 114 | `%MW3.483554` | UINT | `G_mbProbeLength` | Records the next arm wants, latched with the arm; 0 = open ended. Written before the arm, or together with it in one FC16 write of HR111-114 |
+
+Input registers:
+
+| IR | Address | Type | Global | Content |
+|----|---------|------|--------|---------|
+| 401–402 | `%QD74592` | UDINT | `G_mbProbeWritten` | Records written so far |
+| 403–404 | `%QD74596` | UDINT | `G_mbProbeMark` | Index of the record written in the scan of the last arm |
+| 405–406 | `%QD74600` | UDINT | `G_mbProbeStart` | Index of the first record in the window |
+| 407 | `%QW74604` | UINT | `G_mbProbeArmEcho` | Arm value last acted on |
+| 408 | `%QW74606` | UINT | `G_mbProbeCount` | Records in the window (0 to 13) |
+| 409 | `%QW74608` | UINT | `G_mbProbeDepth` | Ring depth in records (8192) |
+| 410 | `%QW74610` | UINT | `G_mbProbeWords` | Words per record (8) |
+| 411–514 | `%QW74612` | WORD ×104 | `G_mbProbeWindow` | 13 records of 8 words (the record layout below). IR515-518 are not used |
+| 519–520 | `%QD74828` | UDINT | `G_mbProbeStartTail` | Copy of Start written after the window; a read with Start ≠ StartTail is torn |
+| 521 | `%QW74832` | UINT | `G_mbProbeState` | `E_ProbeState`: 0 `PROBE_OFF`, 1 `PROBE_RECORDING`, 2 `PROBE_CAPTURING`, 3 `PROBE_HELD` |
+| 522 | `%QW74834` | UINT | `G_mbProbeXfer` | `E_ProbeXferState`: 0 `XFER_IDLE`, 1 `XFER_FILLING`, 2 `XFER_PENDING`, 3 `XFER_OVERRUN` |
+| 523–524 | `%QD74836` | UDINT | `G_mbProbeFaultMark` | Index of the record written in the scan `PRG_Main` last entered `ST_FAULT`; 0 until the first fault |
+
+Record (8 words, defined in `FB_Probe.st`; the master reads the word count
+from IR410):
+
+| Word | Type | Content | Unit |
+|------|------|---------|------|
+| 0 | INT | Commanded velocity | 0.001 mm/s |
+| 1 | INT | Actual velocity | 0.001 mm/s |
+| 2 | INT | Actual torque | 0.01 % of rated |
+| 3–4 | DINT | Actual position, absolute, low word first | 0.01 µm |
+| 5 | INT | Chamber pressure | 0.001 MPa gauge |
+| 6 | UINT | Raw pressure input (`G_aiPressure`) | 0.2 mV per count |
+| 7 | WORD | Status: bit 0 in motion, bit 1 performance status, bit 2 fault active, bit 3 homing complete, bits 8-15 confirmed mode code | |
+
+Protocol:
+
+- **Ring.** One record per scan is appended to a ring of 8192 records (16 s at
+  the 2 ms scan) in plain memory; the master reads records through the
+  window, so the capture length is limited by the ring, not by the register
+  groups. Index values wrap after 2^32 scans.
+- **Arm.** Writing a value different from the last one acted on publishes
+  Mark, echoes the value and starts a capture of Length records from Mark
+  (0 = open ended). An arm is accepted at any time. The master takes the
+  records it wants from Mark on (or before it, while the ring holds them).
+- **Recording state** (IR521): `PROBE_RECORDING` while no armed capture is open;
+  `PROBE_CAPTURING` from the arm until the capture's last record
+  (Mark + Length - 1) is written, for ever if open ended; `PROBE_HELD` while the
+  capture is fully recorded and still entirely in the ring; back to
+  `PROBE_RECORDING` once the ring overwrites the record at Mark (a capture
+  longer than the ring goes straight there). `PROBE_OFF` with
+  `G_cfgProbeEnable` FALSE: nothing is recorded and arms are not acted on.
+- **Window and transfer state** (IR522): the master writes the index of the
+  first record it wants. A request that differs from the one being served
+  restarts the fill; writing the same request again changes nothing. The slave
+  copies at most `G_cfgProbeFillPerScan` records (default 6) per scan into a
+  staging array and, when the window is complete, publishes it in one scan:
+  Start, Count and StartTail change then and not before, so the master never
+  accepts a half-filled window. `XFER_FILLING` while copying, `XFER_IDLE`
+  when the window is complete for the request, `XFER_PENDING` when the
+  requested records are not recorded yet (the window is served from the first
+  record written, and a window with fewer than 13 records grows as records
+  are written), `XFER_OVERRUN` when the requested start has been overwritten
+  (nothing is published). The master accepts a read when Start equals
+  StartTail and equals the index it requested.
+- **Fault mark.** On the scan `PRG_Main` enters `ST_FAULT`, FaultMark takes
+  the index of that scan's record, so the history up to the fault can be read
+  from the ring for as long as it holds (about 16 s).
+- **Cost.** Per scan: the 8-word record, the arm and fault logic and at most
+  `G_cfgProbeFillPerScan` x 8 word copies; in the scan a fill completes,
+  `PRG_Output` adds a 104-word copy of the staging array into the mapped
+  window.

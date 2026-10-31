@@ -54,7 +54,7 @@ cfg.exitGuardPos  = 220;      % mm, G_cfgPosCylinderEntry + G_cfgPosExitGuardMar
 % seconds, with a scan-rate capture armed before every change.
 cfg.stepHold = 3;         % s per level; the capture and its readout take about 2 s
 
-% Scan-rate capture by PRG_StepProbe: registers, length and scales are
+% Scan-rate capture by the slave's step probe (FB_Probe): registers, length and scales are
 % shared with the other benches (bench/common/benchConfig.m).
 cfg.probe = benchConfig().probe;
 

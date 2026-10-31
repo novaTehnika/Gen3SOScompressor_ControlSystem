@@ -109,6 +109,38 @@
    END_VAR
 
 
+   VAR_GLOBAL
+     (* ========================================================================
+        STEP PROBE REGISTERS (FB_Probe), an optional side channel beside the
+        protocol: nothing in the master/slave protocol depends on them.
+        Holding group FC#03,06,16 extends to HR114 (HR101-110 are left to
+        the bench programs in bench/). Input group FC#04 extends to IR524
+        (IR101-370 are left to PRG_PressureProbe). See
+        docs/master/ModbusRegisterMap.md.
+        ======================================================================== *)
+
+     (* Holding registers, master -> slave *)
+     G_mbProbeArm          AT %MW3.483548 : UINT   (* HR111: a changed value is an arm *)
+     G_mbProbeReqLo        AT %MW3.483550 : UINT   (* HR112: low word of the first record index wanted in the window *)
+     G_mbProbeReqHi        AT %MW3.483552 : UINT   (* HR113: high word *)
+     G_mbProbeLength       AT %MW3.483554 : UINT   (* HR114: records the next arm wants, 0 = open ended *)
+
+     (* Input registers, slave -> master. Every 32-bit value is on a 4-byte boundary. *)
+     G_mbProbeWritten      AT %QD74592 : UDINT  (* IR401-402: records written so far *)
+     G_mbProbeMark         AT %QD74596 : UDINT  (* IR403-404: index of the record written in the scan of the last arm *)
+     G_mbProbeStart        AT %QD74600 : UDINT  (* IR405-406: index of the first record in the window *)
+     G_mbProbeArmEcho      AT %QW74604 : UINT   (* IR407: arm value last acted on *)
+     G_mbProbeCount        AT %QW74606 : UINT   (* IR408: records in the window (0..13) *)
+     G_mbProbeDepth        AT %QW74608 : UINT   (* IR409: ring depth in records (8192) *)
+     G_mbProbeWords        AT %QW74610 : UINT   (* IR410: words per record (8) *)
+     G_mbProbeWindow       AT %QW74612 : ARRAY104WORD  (* IR411-514: 13 records of 8 words; IR515-518 are not used *)
+     G_mbProbeStartTail    AT %QD74828 : UDINT  (* IR519-520: copy of Start, assigned after the window *)
+     G_mbProbeState        AT %QW74832 : UINT   (* IR521: E_ProbeState code *)
+     G_mbProbeXfer         AT %QW74834 : UINT   (* IR522: E_ProbeXferState code *)
+     G_mbProbeFaultMark    AT %QD74836 : UDINT  (* IR523-524: index of the record written in the scan PRG_Main entered ST_FAULT *)
+   END_VAR
+
+
    ============================================================================
    2. CONFIGURABLE PARAMETERS
    ============================================================================
@@ -308,6 +340,15 @@
      G_cfgGoHomeVelocity       : LREAL := 6.0         (* Velocity for Go Home move *)
      G_cfgGoHomeAccel          : LREAL := 5.0         (* Acceleration for Go Home move (mm/s²) *)
      G_cfgGoHomeDecel          : LREAL := 10.0         (* Deceleration for Go Home move (mm/s²) *)
+
+
+     (* ========================================================================
+        STEP PROBE (FB_Probe)
+        ======================================================================== *)
+
+     G_cfgProbeEnable          : BOOL := TRUE         (* FALSE: the probe records nothing and publishes PROBE_OFF *)
+     G_cfgProbeFillPerScan     : INT := 6             (* Records copied into the probe window per scan (1-13): bounds the
+                                                          cost one transfer adds to a scan (8 words per record) *)
    END_VAR
 
 
@@ -429,6 +470,25 @@
      G_sysLastFaultCode        : E_FaultCode := FAULT_NONE    (* Last fault that occurred *)
      G_sysLastFaultState       : E_SystemState := ST_INIT     (* State when last fault occurred *)
      G_sysFaultCount           : UDINT := 0       (* Total number of faults since power-up *)
+
+
+     (* ========================================================================
+        STEP PROBE (FB_Probe outputs, published by PRG_Output)
+        ======================================================================== *)
+
+     G_sysProbeStage           : ARRAY104WORD     (* Window being filled; copied to G_mbProbeWindow when a fill completes *)
+     G_sysProbePublish         : BOOL := FALSE    (* TRUE in the scan a fill completes *)
+     G_sysProbeWritten         : UDINT := 0
+     G_sysProbeMark            : UDINT := 0
+     G_sysProbeFaultMark       : UDINT := 0
+     G_sysProbeStart           : UDINT := 0
+     G_sysProbeCount           : UINT := UINT#0
+     G_sysProbeArmEcho         : UINT := UINT#0
+     G_sysProbeDepth           : UINT := UINT#0
+     G_sysProbeWords           : UINT := UINT#0
+     G_sysProbeState           : UINT := UINT#0
+     G_sysProbeXfer            : UINT := UINT#0
+     G_sysProbeIndex           : INT := 0         (* Loop counter of PRG_Output's window copy *)
    END_VAR
 
 

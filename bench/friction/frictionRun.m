@@ -5,7 +5,7 @@ function r = frictionRun(label, set, opts)
 %   back, every 50 ms, sequenced by masterStep as in the shell) and every
 %   exchange is logged with the torque feedback, which the shell and the
 %   operator app do not show. With opts.probe the script also takes
-%   scan-rate captures from PRG_StepProbe (bench/common/slave, read by
+%   scan-rate captures from the slave's step probe (FB_Probe, read by
 %   benchProbe) in the gaps between exchanges. The shell model must not be running: a second
 %   client on the controller stalls the shell's exchange and the slave
 %   raises FAULT_COMM while motion is commanded. The safety relay is held
@@ -302,8 +302,8 @@ for c = 1:numel(captures)
     cname = fullfile(opts.saveDir, sprintf('%s_cap_%s_%d_%d_%s_%s.csv', label, setName, ...
         c, cap.step, cap.tag, stamp));
     fid = fopen(cname, 'w');
-    fprintf(fid, 't,vCmd,velocity,torque,position,pressure\n');
-    fprintf(fid, '%.3f,%.3f,%.3f,%.2f,%.5f,%.4f\n', cap.data');
+    fprintf(fid, 't,vCmd,velocity,torque,position,pressure,volts,status\n');
+    fprintf(fid, '%.3f,%.3f,%.3f,%.2f,%.5f,%.4f,%.4f,%d\n', cap.data');
     fclose(fid);
     cap.file = cname;
     captures{c} = cap;

@@ -1,16 +1,29 @@
 function out = fakeProbeLink(cmd, varargin)
 %FAKEPROBELINK Stand-in for the bench runs' Modbus link and clock: the
 %   simulated slave behind the protocol registers (IR1-20, HR1-8), an
-%   emulation of PRG_PressureProbe behind the probe registers (HR101,
-%   IR101-113, IR121-370) and one of PRG_StepProbe behind its registers
-%   (HR111-113, IR401-520): the ring of records, the arm latch, the
-%   18-record window with its fill rule and the tail copy of its start.
+%   emulation of PRG_PressureProbe behind the noise registers (HR101,
+%   IR101-113, IR121-370) and, behind the step probe registers (HR111-114,
+%   IR401-524), the slave's own FB_Probe: the registers are read from and
+%   written to the generated slave's globals (G_mbProbe*), so the ring,
+%   the arm latch, the recording and transfer state machines, the window
+%   and the fault mark are the slave source's. Only the link is emulated:
+%   the hooks below lose an arm write or tear a read. The test keeps a log
+%   of what the probe was given each scan, converted to counts here and
+%   not by the slave, to check the ring's records against.
 %   Time advances only in 'wait'.
 %
 %   fakeProbeLink('init')               fresh slave, axis 40 mm into the chamber
 %   fakeProbeLink('faultAt', t)         drive fault injected at t seconds
 %   fakeProbeLink('faultAt', t, until)  the fault clears again at until
 %   fakeProbeLink('slave', fn)          sl = fn(sl): edit the simulated slave
+%   fakeProbeLink('dropArm', n)         lose the next n writes that include HR111
+%   fakeProbeLink('tearRead', n)        the next n reads that include IR519-520
+%                                       find the window changed under them
+%   fakeProbeLink('ringDepth', n)       use a ring of n records: sets the probe
+%                                       block's constant cDepth in the simulated
+%                                       instance (the ST keeps 8192, the array
+%                                       its full size), so overrun is reached in
+%                                       a few hundred scans
 %   fakeProbeLink('torqueModel', p)     report a friction torque (below)
 %   fakeProbeLink('valveAt', t, Cd)     outlet valve opens at t seconds: the
 %                                       chamber drains through the orifice
@@ -22,7 +35,12 @@ function out = fakeProbeLink(cmd, varargin)
 %          fakeProbeLink('write', start, values)
 %          fakeProbeLink('writeOne', address, value)
 %   S    = fakeProbeLink('state')       S.collectLog is [t, mm^3 that left]
-%                                       while the valve is open
+%                                       while the valve is open; S.ring has the
+%                                       log of records, one row per record index
+%                                       from 0: [vCmd vel torque pos pressure
+%                                       raw status] in counts; S.sp the probe's
+%                                       written, depth, arm, echo, mark, state,
+%                                       xfer, faultMark and the hooks' counts
 %
 %   The torque model stands in for the drive's torque feedback, which the
 %   axis model reports as zero. With p a struct of F0, Fc, dFs, vs, b, mu,
@@ -58,8 +76,9 @@ switch cmd
         S.collectLog = zeros(0, 2);
         S.stick = struct('until', -Inf, 'sign', 0, 'armed', true);
         S.vLag = 0;
-        S.sp = newStepProbe(8192);
-        R = zeros(8192, 5);
+        S.hook = struct('dropArm', 0, 'tear', 0);
+        S.nT = 0;
+        R = zeros(4096, 7);
         S.noise = 0.001;        % V rms added to the sampled input
         S.p = struct('window', 0, 'state', 0, 'echo', 0, 'arm', 0, 'lastArm', 0, ...
             'idx', 0, 'samples', zeros(1, 250), 'sum', 0, 'sumSq', 0, ...
@@ -80,12 +99,11 @@ switch cmd
             S.valve.Cd = varargin{2};
         end
     case 'dropArm'
-        S.sp.dropArm = varargin{1};
+        S.hook.dropArm = varargin{1};
     case 'tearRead'
-        S.sp.tear = varargin{1};
+        S.hook.tear = varargin{1};
     case 'ringDepth'
-        S.sp = newStepProbe(varargin{1});
-        R = zeros(varargin{1}, 5);
+        S.sl.s.fbProbe.cDepth = varargin{1};
     case 'now'
         out = S.tick / 1000;
     case 'wait'
@@ -101,18 +119,17 @@ switch cmd
                     S = torqueScan(S);
                 end
                 S = valveScan(S);
+                Gpre = S.sl.G;                      % what the probe is given
                 [S.sl, S.y] = slaveStep(S.sl, S.u);
                 S = lagScan(S);
                 S = probeScan(S);
-                S = stepProbeScan(S);
-                R(S.sp.slot, :) = S.sp.row;         % in place: R has no other reference
-                S = stepProbeWindow(S, R);
+                [S, R] = logScan(S, R, Gpre);
             end
         end
     case 'read'
         start = varargin{1};
         n = varargin{2};
-        regs = zeros(1, 520);
+        regs = zeros(1, 524);
         regs(1:S.map.nRead) = packRead(S.y, S.map);
         if ~isempty(S.torque)
             regs(S.map.ir.velocity:S.map.ir.velocity + 1) = modbusPack(S.vLag);
@@ -126,29 +143,40 @@ switch cmd
         regs(111:112) = modbusPack(S.p.live);
         regs(113) = S.p.echo;
         regs(121:370) = S.p.samples;
-        sp = S.sp;
-        regs(401:402) = u32Words(sp.written);
-        regs(403:404) = u32Words(sp.mark);
-        regs(405:406) = u32Words(sp.wStart);
-        regs(407) = sp.echo;
-        regs(408) = sp.wCount;
-        regs(409) = sp.depth;
-        regs(410) = 6;
-        regs(411:518) = sp.window;
-        regs(519:520) = u32Words(sp.wStart);
-        assert(start >= 1 && start + n - 1 <= 520, 'read outside the register groups');
-        if start + n - 1 >= 520 && sp.tear > 0
-            regs(519:520) = u32Words(sp.wStart + 1);        % a window that changed under the read
-            S.sp.tear = sp.tear - 1;
+        G = S.sl.G;
+        regs(401:402) = u32Words(G.G_mbProbeWritten);
+        regs(403:404) = u32Words(G.G_mbProbeMark);
+        regs(405:406) = u32Words(G.G_mbProbeStart);
+        regs(407) = G.G_mbProbeArmEcho;
+        regs(408) = G.G_mbProbeCount;
+        regs(409) = G.G_mbProbeDepth;
+        regs(410) = G.G_mbProbeWords;
+        regs(411:514) = G.G_mbProbeWindow;
+        regs(519:520) = u32Words(G.G_mbProbeStartTail);
+        regs(521) = G.G_mbProbeState;
+        regs(522) = G.G_mbProbeXfer;
+        regs(523:524) = u32Words(G.G_mbProbeFaultMark);
+        assert(start >= 1 && start + n - 1 <= 524, 'read outside the register groups');
+        if start <= 519 && start + n - 1 >= 520 && S.hook.tear > 0
+            regs(519:520) = u32Words(G.G_mbProbeStartTail + 1);     % a window that changed under the read
+            S.hook.tear = S.hook.tear - 1;
         end
         out = regs(start:start + n - 1);
     case 'write'
         w = varargin{2};
-        if varargin{1} == 112 && numel(w) == 2
-            S.sp.req = w(1) + 65536 * w(2);
+        first = varargin{1};
+        if first >= 111 && first <= 114
+            assert(first + numel(w) - 1 <= 114, 'write past HR114');
+            if first == 111 && S.hook.dropArm > 0
+                S.hook.dropArm = S.hook.dropArm - 1;
+                return;
+            end
+            for k = 1:numel(w)
+                S = probeRegister(S, first + k - 1, w(k));
+            end
             return;
         end
-        assert(varargin{1} == 1 && numel(w) == S.map.nWrite, 'write is not HR1-8 or HR112-113');
+        assert(first == 1 && numel(w) == S.map.nWrite, 'write is not HR1-8 or HR111-114');
         S.u.heartbeat    = w(S.map.hr.heartbeat);
         S.u.modeCode     = w(S.map.hr.modeCode);
         S.u.motionEnable = w(S.map.hr.motionEnable);
@@ -160,17 +188,24 @@ switch cmd
             case 101
                 S.p.arm = varargin{2};
             case 111
-                if S.sp.dropArm > 0
-                    S.sp.dropArm = S.sp.dropArm - 1;
+                if S.hook.dropArm > 0
+                    S.hook.dropArm = S.hook.dropArm - 1;
                 else
-                    S.sp.arm = varargin{2};
+                    S = probeRegister(S, 111, varargin{2});
                 end
+            case {112, 113, 114}
+                S = probeRegister(S, varargin{1}, varargin{2});
             otherwise
-                error('single write is not HR101 or HR111');
+                error('single write is not HR101 or HR111-114');
         end
     case 'state'
         out = S;
-        out.ring = R;           % the step probe's ring: one row per record, integer counts
+        out.ring = R(1:S.nT, :);        % the log of records, one row per index from 0, counts
+        G = S.sl.G;
+        out.sp = struct('written', G.G_mbProbeWritten, 'depth', G.G_mbProbeDepth, ...
+            'arm', G.G_mbProbeArm, 'echo', G.G_mbProbeArmEcho, 'mark', G.G_mbProbeMark, ...
+            'state', G.G_mbProbeState, 'xfer', G.G_mbProbeXfer, ...
+            'faultMark', G.G_mbProbeFaultMark, 'dropArm', S.hook.dropArm, 'tear', S.hook.tear);
 end
 end
 
@@ -237,56 +272,48 @@ if ~isempty(S.torque) && isfield(S.torque, 'tauV') && S.torque.tauV > 0
 else
     S.vLag = S.sl.ax.v;
 end
+S.sl.G.G_sysActualVelocity = S.vLag;            % the feedback the next scan sees
 end
 
 
-function sp = newStepProbe(depth)
-% Registers and state of PRG_StepProbe. The ring (R in fakeProbeLink)
-% holds the records as the integers the program stores: vCmd, vel, torque
-% and pressure as INT, the position as DINT.
-sp = struct('depth', depth, 'written', 0, 'mark', 0, 'arm', 0, 'lastArm', 0, ...
-    'echo', 0, 'req', 0, 'wStart', 0, 'wCount', 0, 'window', zeros(1, 108), ...
-    'dropArm', 0, 'tear', 0, 'slot', 1, 'row', zeros(1, 5));
+function S = probeRegister(S, hr, value)
+% A write to one of the step probe's holding registers (HR111-114).
+switch hr
+    case 111
+        S.sl.G.G_mbProbeArm = value;
+    case 112
+        S.sl.G.G_mbProbeReqLo = value;
+    case 113
+        S.sl.G.G_mbProbeReqHi = value;
+    case 114
+        S.sl.G.G_mbProbeLength = value;
+end
 end
 
 
-function S = stepProbeScan(S)
-% One scan of PRG_StepProbe: the arm latch and this scan's record.
-sp = S.sp;
+function [S, R] = logScan(S, R, Gpre)
+% Log the record the probe wrote in the scan just run, as counts: the
+% values it was given (the axis feedback as it stood before the scan, the
+% rest as the scan left them) converted here, independently of the slave.
+w = S.sl.s.fbProbe.Written;
+if w <= S.nT
+    return;
+end
 G = S.sl.G;
-if sp.arm ~= sp.lastArm
-    sp.lastArm = sp.arm;
-    sp.echo = sp.arm;
-    sp.mark = sp.written;
+lim = @(x, lo, hi) min(max(round(x), lo), hi);
+status = G.G_doInMotion + 2 * G.G_doPerformanceStatus + 4 * G.G_doFaultActive ...
+    + 8 * G.G_doHomingComplete + 256 * min(G.G_sysConfirmedModeCode, 255);
+row = [lim(G.G_sysCommandedVelocity * 1000, -32767, 32767), ...
+       lim(Gpre.G_sysActualVelocity * 1000, -32767, 32767), ...
+       lim(Gpre.G_sysActualTorque * 100, -32767, 32767), ...
+       round(Gpre.G_sysActualPosition * 1e5), ...
+       lim(G.G_sysActualPressure * 1000, -32767, 32767), ...
+       lim(G.G_aiPressure * 5000, 0, 65535), double(status)];
+while w > size(R, 1)
+    R(end + size(R, 1), 1) = 0;                 % twice the rows
 end
-sp.slot = mod(sp.written, sp.depth) + 1;
-lim = @(x) min(max(round(x), -32767), 32767);
-sp.row = [lim(G.G_sysCommandedVelocity * 1000), lim(S.vLag * 1000), ...
-    lim(S.sl.hook.torque * 100), round(G.G_sysActualPosition * 1e5), ...
-    lim(G.G_sysActualPressure * 1000)];
-sp.written = sp.written + 1;
-S.sp = sp;
-end
-
-
-function S = stepProbeWindow(S, R)
-% The window of PRG_StepProbe: refilled when the request moved or it can
-% hold more, from the records that are written and not overwritten.
-sp = S.sp;
-if sp.req ~= sp.wStart || (sp.wCount < 18 && sp.wStart + sp.wCount < sp.written)
-    sp.wStart = sp.req;
-    sp.wCount = 0;
-    oldest = max(sp.written - sp.depth, 0);
-    if sp.req >= oldest && sp.req < sp.written
-        sp.wCount = min(sp.written - sp.req, 18);
-        for i = 0:sp.wCount - 1
-            r = R(mod(sp.req + i, sp.depth) + 1, :);
-            d = mod(r(4), 2^32);
-            sp.window(6 * i + (1:6)) = [mod(r(1:3), 65536), mod(d, 65536), floor(d / 65536), mod(r(5), 65536)];
-        end
-    end
-end
-S.sp = sp;
+R(w, :) = row;
+S.nT = w;
 end
 
 

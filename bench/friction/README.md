@@ -16,7 +16,7 @@ logs every exchange.
 | `frictionFit.m` | Reads the logs, checks each step, fits the friction unloaded and loaded, prints the model values |
 | `stepResponseFit.m` | Reads the captures: the drive's velocity-loop lag from steps taken while moving, the breakaway and stick time from steps from rest, the torque ripple at the lead and motor periods |
 
-The step probe (`PRG_StepProbe`), the Modbus link, the safety-hold model
+The step probe (`FB_Probe` in the slave program), the Modbus link, the safety-hold model
 and the `captures/` directory are shared with the other benches and live in
 `bench/common/` (its README has the setup).
 
@@ -239,32 +239,37 @@ from standing.
 
 The 50 ms log cannot show the drive's velocity-loop lag (`tauV`, 20 ms in
 the model), a breakaway shorter than one exchange, or the torque ripple
-at the motor turn. `PRG_StepProbe` records every scan (2 ms) into a ring
-of 8192 records of the commanded velocity, the actual velocity, the
-torque, the position and the chamber pressure. The run writes an arm
+at the motor turn. The slave's step probe (`FB_Probe`, part of the main
+program) records every scan (2 ms) into a ring of 8192 records of the
+commanded velocity, the actual velocity, the torque, the position, the
+chamber pressure, the raw pressure input and a status word. The run writes an arm
 register before each change it wants to see, `benchProbe` takes the
-500 records from the arm's mark (1 s at 2 ms) through an 18-record window
+500 records from the arm's mark (1 s at 2 ms) through a 13-record window
 in the gaps between exchanges, and the rest are read after the last step
 (`bench/common/README.md`, "The step probe"). The pressure channel serves
 the characterisation bench, which reads the lag at the piston from it
 (`bench/characterisation/README.md` section 5).
 
-Slave setup, once:
+Slave setup, once (the probe is in `slave-src`; `G_cfgProbeEnable` is TRUE
+by default):
 
 1. Hardware Configuration, online: the Modbus server as in service, with
-   the **FC#04 input register group to IR520** (byte range `%QB73792` to
-   `%QB74831`) and the **holding register group to HR113**. Save and cycle
+   the **FC#04 input register group to IR524** (byte range `%QB73792` to
+   `%QB74839`) and the **holding register group to HR114**. Save and cycle
    power. The group is small enough to stay configured (a larger group
    slows every exchange, `bench/common/README.md` step 3).
-2. Declare the globals in the header of `bench/common/slave/PRG_StepProbe.st` in the
-   matching groups, and the ring arrays and constants of its `VAR` block.
-   If the compiler refuses the five 8192-element arrays, shrink them: the
-   constant `cDepth`, the array bounds and the value assigned to
-   `G_mbStepDepth` change together, and the master reads the depth from
-   the slave.
-3. Add `PRG_StepProbe` to the project on the cyclic task (the only one).
-   It reads `G_sys*` globals only and runs beside `PRG_Main`. Do not
-   load it together with `PRG_PressureProbe` or `PRG_ModbusBench`.
+2. Declare the globals of `GlobalVariables_Reference.st` (the `G_cfgProbe*`
+   parameters, the `G_mbProbe*` registers and the `G_sysProbe*` variables),
+   the `E_ProbeState` / `E_ProbeXferState` enumerations and the
+   `ARRAY104WORD` / `ARRAY65536WORD` types of `DataTypes.st`, add `FB_Probe`
+   and the `fbProbe : FB_Probe` instance of `PRG_Main`, and the probe call
+   and the register block at the end of `PRG_Main` and `PRG_Output`. If the
+   compiler refuses the 65536-word ring, shrink it: the constant `cDepth`,
+   the `ARRAY65536WORD` bound (`cDepth` x 8 words) change together, and the
+   master reads the depth from the slave.
+3. Do not load `PRG_PressureProbe` or `PRG_ModbusBench` with the same
+   registers in service; the first uses HR101 and IR101-370 (`G_mbNoise*`),
+   the second HR101-110 and IR101-108.
 4. Compile, download, start.
 
 Then, with the piston placed as for the unloaded set:
@@ -285,7 +290,8 @@ for the ripple. 2v must stay within the 5 mm/s limit, so v is at most
 
 Captures are saved as `bench/common/captures/<label>_cap_<set>_<n>_<step>_<tag>_<timestamp>.csv`
 with `t` (s from the first scan), `vCmd` and `velocity` (mm/s), `torque`
-(% rated), `position` (mm) and `pressure` (MPa gauge); the tag is
+(% rated), `position` (mm), `pressure` (MPa gauge), `volts` (the raw
+pressure input, V) and `status` (the record's status word); the tag is
 `t<k>_<v>` for the k-th transition to v, or `steady`.
 
 ```matlab

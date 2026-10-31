@@ -4,7 +4,7 @@ function r = charRun(label, path, opts)
 %   The script is the master for the run: one Modbus TCP connection carries
 %   the protocol exchange (HR1-8 out, IR1-20 back, every 50 ms, sequenced by
 %   masterStep as in the shell) and, between exchanges, the shared step
-%   probe (bench/common/slave/PRG_StepProbe.st, read by benchProbe), which
+%   probe (slave-src/FB/FB_Probe.st, read by benchProbe), which
 %   records the velocity command and feedback at the 2 ms scan. The
 %   log and the captures are in frictionRun's formats, so the fits of both
 %   benches read either. The shell model must not be running: a second
@@ -277,8 +277,8 @@ for c = 1:numel(captures)
     fname = fullfile(opts.saveDir, sprintf('%s_cap_%d_%s_%s.csv', label, c, ...
         steps(max(cap.step, 1)).name, stamp));
     fid = fopen(fname, 'w');
-    fprintf(fid, 't,vCmd,velocity,torque,position,pressure\n');
-    fprintf(fid, '%.3f,%.3f,%.3f,%.2f,%.5f,%.4f\n', cap.data');
+    fprintf(fid, 't,vCmd,velocity,torque,position,pressure,volts,status\n');
+    fprintf(fid, '%.3f,%.3f,%.3f,%.2f,%.5f,%.4f,%.4f,%d\n', cap.data');
     fclose(fid);
     cap.file = fname;
     captures{c} = cap;

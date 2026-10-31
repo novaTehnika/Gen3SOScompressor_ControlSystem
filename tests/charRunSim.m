@@ -38,7 +38,10 @@ s5 = L(L(:, STEP) == 5, :);
 assert(any(s5(:, MODE) == 2) && any(s5(:, STATUS) == 3), 'hold did not run in position mode');
 assert(numel(r.captures) == 5, 'expected one capture per command change, got %d', numel(r.captures));
 cap = r.captures{1};
-assert(cap.step == 1 && size(cap.data, 1) == 500 && size(cap.data, 2) == 6);
+assert(cap.step == 1 && size(cap.data, 1) == 500 && size(cap.data, 2) == 8);
+csv = benchReadCsv(r.capFiles{1});
+assert(isequal(fieldnames(csv)', {'t', 'vCmd', 'velocity', 'torque', 'position', 'pressure', 'volts', 'status', 'file'}) ...
+    && abs(csv.volts(1) - cap.data(1, 7)) < 1e-4 && csv.status(1) == cap.data(1, 8), 'capture file columns');
 assert(abs(cap.data(1, 6) - s1(1, P)) < 0.3, 'capture pressure %.2f, log %.2f MPa', cap.data(1, 6), s1(1, P));
 j = find(cap.data(:, 2) ~= 0, 1);
 assert(~isempty(j) && abs(cap.data(j, 2) - 0.1) < 1e-3 && j > 5, 'first capture not around the 0.1 mm/s command');
