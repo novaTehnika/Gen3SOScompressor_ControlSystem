@@ -109,7 +109,7 @@ run test 3 anyway: the 50 ms log gives the lag to about 25 ms.
 ### Settings that matter
 
 `charConfig` reads the GVL reference, which must match the controller:
-velocity-mode slew (`G_cfgDirectCtrlAccel`, `G_cfgDirectCtrlDecel`), the
+velocity-mode slew (`G_cfgDirectCtrlAccel`, in both directions), the
 velocity clamp, the soft limits, the pressure filter (`G_cfgAnalogFilterTimeConst`,
 `G_cfgAnalogMedianSize`) and the scan time. The ramps and steps below stay
 within `G_cfgVelLimitMax`, the torque limits (34 kN at 10 MPa is about 37 %

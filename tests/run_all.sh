@@ -29,6 +29,7 @@ tests/closedLoopModbusStep.m
 tests/slavePressureMode.m
 tests/charFitsSynthetic.m
 tests/pressureNoiseRunSim.m
+tests/benchProbeSim.m
 design/pressure-loop/test_model.py
 design/pressure-loop/test_robust.py
 tests/st2pyParity.py

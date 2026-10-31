@@ -9,6 +9,7 @@ function benchProbeSim()
 %   arm the slave never sees. The record contents are checked against the
 %   ring behind the emulation (torque carries white noise, so every
 %   record differs).
+%   Depends on: master-src/logic slave-src slave-sim tools bench/common tests/fakeProbeLink.m
 %   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
 
