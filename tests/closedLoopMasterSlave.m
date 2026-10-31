@@ -8,7 +8,7 @@ function closedLoopMasterSlave(handshakeTimeout)
 %   The master steps every 25 ms, the Modbus exchange runs every 50 ms and
 %   the slave every scan (G_cfgScanTime, 4 ms), on a 1 ms tick. Registers are exchanged in
 %   engineering units; packing is covered by closedLoopModbusStep.
-%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
+%   Run from the repository root after  addpath slave-sim; buildSlaveSim
 %     addpath master-src/logic slave-sim slave-sim/generated tests
 %   Depends on: master-src/logic slave-src slave-sim tools models
 
@@ -21,7 +21,10 @@ E = h.sl.E;
 
 h = runFor(h, 0.5);
 assert(h.out.state == 1 && h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE);
-vLimit = h.sl.G.G_cfgVelLimitNormal;
+vLimit = h.sl.G.G_cfgVelLimitMax;
+assert(h.mcfg.jogVelMax <= vLimit, 'masterConfig.jogVelMax exceeds G_cfgVelLimitMax');
+assert(h.mcfg.positionSpeedMax <= vLimit, 'masterConfig.positionSpeedMax exceeds G_cfgVelLimitMax');
+assert(h.mcfg.positionSpeed <= h.mcfg.positionSpeedMax, 'masterConfig.positionSpeed exceeds positionSpeedMax');
 
 % Position move from power-up: lands inside tolerance, no overshoot,
 % velocity limited. No homing is needed first. The move is long enough to
@@ -36,6 +39,78 @@ assert(abs(h.sl.ax.x - target) <= h.mcfg.posTolerance);
 assert(h.xMax <= target + 0.05 && h.vMax <= vLimit + 0.01);
 assert(h.vMax >= vLimit - 0.05, 'move did not reach the velocity limit');
 fprintf('ok  position move (peak %.2f mm/s, overshoot %.3f mm)\n', h.vMax, h.xMax - target);
+
+% Position speed: the master sets the speed of the move through HR7-8.
+aMax = h.sl.G.G_cfgPosShaperAccelMax;
+dtS = h.sl.G.G_cfgScanTime;
+h.in.positionSpeed = 2;
+h.vMax = 0;
+h.in.targetPosition = target - 12;
+h = command(h, 2);
+h = runFor(h, 0.3);
+h = runUntil(h, 20, @(h) h.out.statusCode == 3);
+assert(h.out.statusCode == 3 && abs(h.sl.ax.x - h.in.targetPosition) <= h.mcfg.posTolerance);
+assert(h.vMax <= 2 + 0.02 && h.vMax >= 2 - 0.05, 'peak %.3f mm/s at a 2 mm/s position speed', h.vMax);
+fprintf('ok  position speed 2 mm/s (peak %.2f mm/s)\n', h.vMax);
+
+% A speed above the ceiling is limited by the master, and by the slave when
+% the master's limit is bypassed.
+h.in.positionSpeed = 100;
+h = runFor(h, 0.2);
+assert(h.out.positionSpeed == h.mcfg.positionSpeedMax && h.u.positionSpeed == h.mcfg.positionSpeedMax);
+h.mcfg.positionSpeedMax = 100;
+h = runFor(h, 0.2);
+assert(h.u.positionSpeed == 100);
+h.vMax = 0;
+h.in.targetPosition = target;
+h = command(h, 2);
+h = runFor(h, 0.3);
+h = runUntil(h, 20, @(h) h.out.statusCode == 3);
+assert(h.out.statusCode == 3 && h.vMax <= vLimit + 0.01 && h.vMax >= vLimit - 0.05, ...
+    'peak %.3f mm/s at a speed above the ceiling', h.vMax);
+h.mcfg.positionSpeedMax = masterConfig().positionSpeedMax;
+fprintf('ok  position speed above the ceiling limited (peak %.2f mm/s)\n', h.vMax);
+
+% Speed 0 set mid-move: the command decelerates at the acceleration limit
+% with no jump, holds, and the move resumes when the speed is restored.
+h.in.positionSpeed = 4;
+h.in.targetPosition = target - 20;
+h = command(h, 2);
+h = runUntil(h, 20, @(h) abs(h.sl.ax.v) > 3.9);
+assert(abs(h.sl.ax.v) > 3.9, 'axis did not reach 4 mm/s');
+h.in.positionSpeed = 0;
+c = zeros(1, 2000);
+for k = 1:numel(c)
+    h = runFor(h, dtS);
+    c(k) = h.y.commandedPosition;
+end
+rate = diff(c) / dtS;
+accel = diff(rate) / dtS;
+% The register is a REAL (32-bit float) as on the controller: the position
+% is quantised to eps(single(x)), which the second difference of the samples
+% turns into at most 2 eps / dt^2.
+quant = 2 * double(eps(single(max(abs(c))))) / dtS^2;
+assert(max(abs(accel)) <= aMax * (1 + 1e-6) + quant, 'command acceleration %.3f mm/s^2', max(abs(accel)));
+assert(max(abs(rate)) <= 4 + 0.02, 'command rate %.3f mm/s', max(abs(rate)));
+kStop = find(abs(rate) < 1e-9, 1);
+assert(~isempty(kStop) && all(abs(rate(kStop:end)) < 1e-9), 'command does not hold at rest');
+assert(max(abs(accel(1:kStop - 2))) >= 0.99 * aMax, 'command did not brake at the acceleration limit');
+xHold = c(end);
+assert(abs(h.sl.ax.x - xHold) < 0.5 && abs(h.sl.ax.v) < 0.01 && h.sl.G.G_sysCurrentState == E.E_SystemState.ST_POSITION_CTRL);
+assert(h.faultSeen == 0 && h.out.statusCode == 2);
+fprintf('ok  position speed 0 mid-move: stopped in %.2f s, held at %.2f mm\n', kStop * dtS, xHold);
+h.in.positionSpeed = 4;
+h = runUntil(h, 20, @(h) h.out.statusCode == 3);
+assert(h.out.statusCode == 3 && abs(h.sl.ax.x - h.in.targetPosition) <= h.mcfg.posTolerance);
+fprintf('ok  position speed restored: move resumed to target\n');
+
+% Back to the original target at the default speed for the tests that follow.
+h.in.positionSpeed = h.mcfg.positionSpeed;
+h.in.targetPosition = target;
+h = command(h, 2);
+h = runFor(h, 0.3);
+h = runUntil(h, 20, @(h) h.out.statusCode == 3);
+assert(h.out.statusCode == 3);
 
 % Position -> jog: the slave changes mode from hold, without a brake cycle.
 brake0 = h.brakeEngagements;
@@ -193,9 +268,9 @@ h.mcfg.posMax = h.sl.G.G_cfgPosSoftLimitMax - 5;
 h.in = struct('reset', 1, 'confCode', 0, 'faultActive', 0, 'inMotion', 0, ...
     'homingComplete', 0, 'brakeDisengage', 0, 'position', 0, 'estop', 0, ...
     'op', 0, 'cmdSeq', 0, 'targetPosition', 100, 'jogVelocity', 0, ...
-    'targetPressure', 0);
+    'targetPressure', 0, 'positionSpeed', h.mcfg.positionSpeed);
 h.u = struct('heartbeat', 0, 'modeCode', 0, 'motionEnable', 0, ...
-    'faultReset', 0, 'reference', 0);
+    'faultReset', 0, 'reference', 0, 'positionSpeed', 0);
 [h.sl, h.y] = slaveStep(h.sl, h.u);
 h.ySnap = h.y;
 h.out = [];
@@ -260,6 +335,7 @@ for k = 1:round(T * 1000)
         h.u.motionEnable = h.out.motionEnable;
         h.u.faultReset   = h.out.faultReset;
         h.u.reference    = h.out.reference;
+        h.u.positionSpeed = h.out.positionSpeed;
         h.ySnap = h.y;
     end
 

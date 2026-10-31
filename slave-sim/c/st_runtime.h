@@ -58,4 +58,18 @@ static inline double st_mod(double a, double b)
     return (r != 0 && ((r < 0) != (b < 0))) ? r + b : r;
 }
 
+/* SHR and SHL on the integer value, as the py target's >> and <<; SHL's
+ * result is wrapped to the operand's width by the generated code. The
+ * shift count is limited to the 64-bit range. */
+static inline double st_shr(double a, double n)
+{
+    long long k = (long long)n;
+    return (double)((long long)a >> (k < 0 ? 0 : k > 63 ? 63 : k));
+}
+static inline double st_shl(double a, double n)
+{
+    long long k = (long long)n;
+    return (double)(long long)((unsigned long long)(long long)a << (k < 0 ? 0 : k > 63 ? 63 : k));
+}
+
 #endif

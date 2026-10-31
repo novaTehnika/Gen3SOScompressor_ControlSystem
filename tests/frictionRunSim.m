@@ -7,7 +7,7 @@ function frictionRunSim()
 %   and a delivery, the drive lag, breakaway and stick from the scan-rate
 %   captures of the step probe, and that the run stops the axis when the
 %   pressure passes its limit.
-%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
+%   Run from the repository root after  addpath slave-sim; buildSlaveSim
 %     addpath master-src/logic slave-sim slave-sim/generated tests
 %   Depends on: master-src/logic slave-src slave-sim tools models bench/friction bench/common tests/fakeProbeLink.m
 
@@ -151,6 +151,7 @@ end
 function opts = linkOpts(saveDir)
 clear fakeProbeLink
 fakeProbeLink('init');
+randn('seed', 3);           % each run draws the same torque noise, whatever ran before it
 link.read     = @(start, n) fakeProbeLink('read', start, n);
 link.write    = @(start, v) fakeProbeLink('write', start, v);
 link.writeOne = @(addr, v) fakeProbeLink('writeOne', addr, v);

@@ -2,7 +2,8 @@ function [sl, y] = slaveStep(sl, u)
 %SLAVESTEP One controller scan (G_cfgScanTime) of the simulated slave.
 %   u  the Modbus holding registers as the master wrote them, in engineering
 %      units: heartbeat, modeCode, motionEnable, faultReset (0/1) and
-%      reference (mm, mm/s, % or MPa by mode)
+%      reference (mm, mm/s, % or MPa by mode) and positionSpeed (mm/s);
+%      every field is required
 %   y  the Modbus input registers in engineering units: heartbeatEcho,
 %      slaveCounter, confCode, faultCode, faultActive, inMotion,
 %      performanceStatus, homingComplete, actualPosition, actualVelocity,

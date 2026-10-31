@@ -11,7 +11,8 @@
    Uses only its own globals, so it can run alongside PRG_Main.
 
    Assign this program and the four Modbus server blocks (Hardware
-   Configuration, IO Task Assignment) to the 2 ms cyclic task.
+   Configuration, IO Task Assignment) to the cyclic task (MotionWorks IEC 3
+   Express has only the one).
 
    Modbus register k (1-based, as addressed by MATLAB/Simulink) maps to the
    byte offset of the group Hardware Configuration creates: holding registers

@@ -24,7 +24,8 @@
        HomePosition        : LREAL                 (* Target home position (mm)
        HomeVelocity        : LREAL                 (* Movement velocity (mm/s)
        Acceleration        : LREAL                 (* Move acceleration (mm/s²)
-       Deceleration        : LREAL                 (* Move/stop deceleration (mm/s²)
+       Deceleration        : LREAL                 (* Move deceleration (mm/s²)
+       StopDeceleration    : LREAL                 (* MC_Stop deceleration on abort (mm/s²)
        Abort               : BOOL                  (* Abort the move
        StaMoveAbsolute     : ST_StaMoveAbsolute    (* Status from MC_MoveAbsolute
        StaStop             : ST_StaStop            (* Status from MC_Stop
@@ -142,7 +143,7 @@ ELSIF eState = GOH_AT_POSITION THEN
 ELSIF eState = GOH_ABORTING THEN
 
     (* GOH_ABORTING - Stop motion *)
-        CmdStop.Deceleration := Deceleration;
+        CmdStop.Deceleration := StopDeceleration;
         CmdStop.Execute := TRUE;
 
         IF StaStop.Done THEN

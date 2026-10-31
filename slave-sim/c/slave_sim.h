@@ -71,7 +71,7 @@ typedef struct { HOOK_FIELDS(SIM_DECLARE) } sim_hook_t;
 
 /* The holding registers in engineering units (slaveStep.m's u). */
 typedef struct {
-    double heartbeat, modeCode, motionEnable, faultReset, reference;
+    double heartbeat, modeCode, motionEnable, faultReset, reference, positionSpeed;
 } sim_u_t;
 
 /* The input registers in engineering units, and the brake output pin. */

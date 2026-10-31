@@ -1,4 +1,4 @@
-# Generated from slave-src by tools/st_translate.py --target m
+# The compiled simulated slave (slave-sim/buildSlaveSim.m)
 slave-sim/generated/
 # Generated from slave-src by tools/st_translate.py --target c
 slave-sim/generated-c/

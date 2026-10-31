@@ -28,14 +28,15 @@ statement ends with its ST source line as `// :N`.
 import re
 from pathlib import Path
 
-from st_translate import STD_FBS, STError, Translator, OctaveInit, init_value, load_project
+from st_translate import (INT_WIDTH, STD_FBS, STError, Translator, OctaveInit,
+                          init_value, load_project)
 
 TOOL = 'tools/st_translate.py --target c'
 HEADER = f'/* Generated from slave-src by {TOOL} - do not edit. */'
 
 SCALARS = {'BOOL': 'bool', 'SINT': 'int8_t', 'USINT': 'uint8_t', 'BYTE': 'uint8_t',
            'INT': 'int16_t', 'UINT': 'uint16_t', 'WORD': 'uint16_t',
-           'DINT': 'int32_t', 'UDINT': 'uint32_t', 'LREAL': 'double', 'REAL': 'float',
+           'DINT': 'int32_t', 'UDINT': 'uint32_t', 'DWORD': 'uint32_t', 'LREAL': 'double', 'REAL': 'float',
            'TIME': 'double'}
 # Type codes of st_names[], shared with slave-sim/c/st_names.h.
 TYPE_CODES = {'bool': 'ST_BOOL', 'int8_t': 'ST_I8', 'uint8_t': 'ST_U8', 'int16_t': 'ST_I16',
@@ -52,7 +53,8 @@ STD_FB_FIELDS = {'TON': [('IN', 'BOOL'), ('PT', 'TIME'), ('Q', 'BOOL'), ('ET', '
 MODBUS_GROUPS = {'holding': (('MW3.', 'MD3.'), 483328),
                  'input': (('QW', 'QD'), 73792)}
 REG_TYPES = {'UINT': ('ST_U16', 1), 'WORD': ('ST_U16', 1), 'INT': ('ST_I16', 1),
-             'UDINT': ('ST_U32', 2), 'DINT': ('ST_I32', 2), 'REAL': ('ST_F32', 2)}
+             'UDINT': ('ST_U32', 2), 'DWORD': ('ST_U32', 2), 'DINT': ('ST_I32', 2),
+             'REAL': ('ST_F32', 2)}
 ARRAY_RE = re.compile(r'ARRAY\s*\[\s*(\d+)\s*\.\.\s*(\d+)\s*\]\s*OF\s+(\w+)')
 
 
@@ -125,10 +127,23 @@ class CTranslator(Translator):
         return f'st_idiv({lc}, {rc})' if both_int else f'((double)({lc}) / ({rc}))'
 
     def index(self, code, idx):
-        return f'{code}[{idx}]'
+        # [an index computed in double (MOD, mixed arithmetic) to integer]
+        return f'{code}[(long)({idx})]'
 
     def to_int(self, code):
         return f'st_round({code})'
+
+    def wrap(self, code, bits, signed):
+        # [two's complement wrap of an integer to the target width]
+        if signed:
+            return f'(st_mod({code} + {2 ** (bits - 1)}, {2 ** bits}) - {2 ** (bits - 1)})'
+        return f'st_mod({code}, {2 ** bits})'
+
+    def shift(self, op, code, n, typ):
+        if op == 'SHR':
+            return f'st_shr({code}, {n})'
+        bits, signed = INT_WIDTH[typ]
+        return self.wrap(f'st_shl({code}, {n})', bits, signed)
 
     def resolve(self, name, line):
         code, typ = super().resolve(name, line)
@@ -308,15 +323,17 @@ def register_rows(ctx):
             if prefix is None:
                 continue
             typ = ctx['globals'][name]['type']
-            if typ not in REG_TYPES:
+            m = ARRAY_RE.match(typ)
+            elem, count = (m.group(3), int(m.group(2)) - int(m.group(1)) + 1) if m else (typ, 1)
+            if elem not in REG_TYPES:
                 raise STError(f'{name} AT %{at}: no Modbus register form for {typ}')
-            code, words = REG_TYPES[typ]
+            code, words = REG_TYPES[elem]
             if (prefix[1] == 'D') != (words == 2):
-                raise STError(f'{name} AT %{at}: a {typ} needs a {"D" if words == 2 else "W"} address')
+                raise STError(f'{name} AT %{at}: a {elem} needs a {"D" if words == 2 else "W"} address')
             offset = int(at[len(prefix):]) - base
             if offset < 0 or offset % 2:
                 raise STError(f'{name} AT %{at}: not a register of the {group} group')
-            rows[group].append((offset // 2 + 1, words, code, name))
+            rows[group].append((offset // 2 + 1, words * count, code, name, count))
     for group, regs in rows.items():
         regs.sort()
         for a, b in zip(regs, regs[1:]):
@@ -339,8 +356,8 @@ def gen_names(ctx):
     reg_lines = []
     for group, entries in regs.items():
         reg_lines += [f'const st_reg_t st_{group}_regs[] = {{']
-        reg_lines += [f'    {{"G.{n}", {first}, {words}, {code}, offsetof(G_t, {n})}},'
-                      for first, words, code, n in entries]
+        reg_lines += [f'    {{"G.{n}", {first}, {words}, {code}, offsetof(G_t, {n}), {count}}},'
+                      for first, words, code, n, count in entries]
         reg_lines += ['};', f'const int st_{group}_regs_count = {len(entries)};', '']
     return [HEADER, '#include <stddef.h>', '#include "st_slave.h"', '#include "st_names.h"', '',
             'const st_name_t st_names[] = {'] + rows + ['};',

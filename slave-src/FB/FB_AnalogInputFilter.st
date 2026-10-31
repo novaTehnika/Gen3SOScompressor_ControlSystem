@@ -35,16 +35,15 @@
      VAR:
        aMedianBuffer       : ARRAY[0..4] OF LREAL  (* Median filter buffer
        nMedianIndex        : INT := 0
-       aSortBuffer         : ARRAY[0..4] OF LREAL
        rFilteredValue      : LREAL := 0.0     (* Low-pass filter state
        rAlpha              : LREAL
        bInitialized        : BOOL := FALSE
-       i, j                : INT
-       rTemp               : LREAL
+       i                   : INT
+       rS0, rS1, rS2       : LREAL            (* Median network working copies
+       rS3, rS4            : LREAL
+       rTemp               : LREAL            (* Compare-exchange scratch
        rMedianResult       : LREAL
        nSize               : INT
-       nIdx1, nIdx2        : INT              (* Index variables for array access
-       nMedianIdx          : INT              (* Median middle index
    ============================================================================ *)
 
 (* ============================================================================
@@ -91,28 +90,45 @@ IF nMedianIndex >= nSize THEN
     nMedianIndex := 0;
 END_IF;
 
-(* Copy to sort buffer *)
-FOR i := 0 TO nSize - 1 DO
-    aSortBuffer[i] := aMedianBuffer[i];
-END_FOR;
+(* Median by compare-exchange. cx(x, y) is: rTemp := MIN(x, y); y := MAX(x, y);
+   x := rTemp, leaving the smaller value in x. The buffer is left in place,
+   so the network works on copies. *)
+rS0 := aMedianBuffer[0];
+rS1 := aMedianBuffer[1];
+rS2 := aMedianBuffer[2];
 
-(* Simple bubble sort (efficient for small arrays) *)
-FOR i := 0 TO nSize - 2 DO
-    FOR j := 0 TO nSize - 2 - i DO
-        (* Pre-calculate indices for array access *)
-        nIdx1 := j;
-        nIdx2 := j + 1;
-        IF aSortBuffer[nIdx1] > aSortBuffer[nIdx2] THEN
-            rTemp := aSortBuffer[nIdx1];
-            aSortBuffer[nIdx1] := aSortBuffer[nIdx2];
-            aSortBuffer[nIdx2] := rTemp;
-        END_IF;
-    END_FOR;
-END_FOR;
+IF nSize = 3 THEN
+    (* Median of 3: cx(s0,s1), cx(s1,s2), cx(s0,s1) leaves it in s1 *)
+    rTemp := MIN(rS0, rS1);  rS1 := MAX(rS0, rS1);  rS0 := rTemp;
+    rTemp := MIN(rS1, rS2);  rS2 := MAX(rS1, rS2);  rS1 := rTemp;
+    rTemp := MIN(rS0, rS1);  rS1 := MAX(rS0, rS1);  rS0 := rTemp;
+    rMedianResult := rS1;
+ELSE
+    rS3 := aMedianBuffer[3];
+    rS4 := aMedianBuffer[4];
 
-(* Get median value (middle element) *)
-nMedianIdx := nSize / 2;
-rMedianResult := aSortBuffer[nMedianIdx];
+    (* Median of 5. Order the pairs (s0,s1) and (s2,s3). *)
+    rTemp := MIN(rS0, rS1);  rS1 := MAX(rS0, rS1);  rS0 := rTemp;
+    rTemp := MIN(rS2, rS3);  rS3 := MAX(rS2, rS3);  rS2 := rTemp;
+
+    (* Put the pair with the smaller minimum in (s0,s1). That minimum is
+       below three of the other samples, so it cannot be the median and
+       drops out. The median is the second smallest of s1, s2, s3, s4. *)
+    IF rS0 > rS2 THEN
+        rTemp := rS0;  rS0 := rS2;  rS2 := rTemp;
+        rTemp := rS1;  rS1 := rS3;  rS3 := rTemp;
+    END_IF;
+
+    (* Order (s1,s4). Of the two ordered pairs (s1,s4) and (s2,s3), put the
+       one with the smaller minimum first; the second smallest of the four
+       is the smaller of that pair's maximum and the other pair's minimum. *)
+    rTemp := MIN(rS1, rS4);  rS4 := MAX(rS1, rS4);  rS1 := rTemp;
+    IF rS1 > rS2 THEN
+        rTemp := rS1;  rS1 := rS2;  rS2 := rTemp;
+        rTemp := rS4;  rS4 := rS3;  rS3 := rTemp;
+    END_IF;
+    rMedianResult := MIN(rS4, rS2);
+END_IF;
 
 (* --------------------------------------------------------------------------
    Stage 2: Low-Pass Filter (First-Order IIR)

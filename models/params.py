@@ -315,9 +315,10 @@ class Params:
     @property
     def dmax(self):
         """[m/s^2] Velocity command decel limit used when the controller
-        does not supply one (G_cfgDirectCtrlDecel)"""
+        does not supply one (G_cfgDirectCtrlAccel, the block's one
+        rate for both directions)"""
         # [mm/s^2 -> m/s^2]
-        return self.cfg()['G_cfgDirectCtrlDecel'] * 1e-3
+        return self.cfg()['G_cfgDirectCtrlAccel'] * 1e-3
 
     @property
     def medN(self):

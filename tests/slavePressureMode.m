@@ -5,7 +5,7 @@ function slavePressureMode()
 %   through an outflow disturbance, clamp an excessive target, leave the
 %   mode, and fault on a broken transducer loop only while the loop is
 %   closed on it.
-%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
+%   Run from the repository root after  addpath slave-sim; buildSlaveSim
 %     addpath slave-sim slave-sim/generated tests
 %   Depends on: slave-src slave-sim tools models
 
@@ -151,7 +151,7 @@ end
 function h = harnessInit()
 h.sl = slaveInit();
 h.u = struct('heartbeat', 0, 'modeCode', 0, 'motionEnable', 0, ...
-    'faultReset', 0, 'reference', 0);
+    'faultReset', 0, 'reference', 0, 'positionSpeed', 0);
 [h.sl, h.y] = slaveStep(h.sl, h.u);
 h.t = 0;
 h.vMax = 0;

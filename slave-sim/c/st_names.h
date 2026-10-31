@@ -24,13 +24,15 @@ typedef struct {
 
 /* A Modbus register of the controller's register groups (generated from
  * the globals' AT addresses): registers first .. first + words - 1, 1-based,
- * holding the global at offset in G_t; 32-bit values low word first. */
+ * holding the global at offset in G_t, an array of count elements of type;
+ * 32-bit values low word first. */
 typedef struct {
     const char *name;   /* "G.G_mbActualPressure" */
     int first;          /* register number */
-    int words;          /* 1 or 2 */
-    int type;           /* ST_U16, ST_I16, ST_U32, ST_I32 or ST_F32 */
+    int words;          /* registers in all */
+    int type;           /* of an element: ST_U16, ST_I16, ST_U32, ST_I32 or ST_F32 */
     size_t offset;      /* in G_t */
+    int count;          /* elements; 1 for a scalar */
 } st_reg_t;
 
 extern const st_reg_t st_holding_regs[];

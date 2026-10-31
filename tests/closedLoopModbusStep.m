@@ -26,7 +26,8 @@ h.map = map;
 h.cfg = cfg;
 
 h.app = struct('op', 0, 'cmdSeq', 0, 'targetPosition', 100, 'targetVelocity', 0, ...
-    'jogDirection', 0, 'targetPressure', 0, 'estop', 0, 'mixer', 0);
+    'jogDirection', 0, 'targetPressure', 0, 'estop', 0, 'mixer', 0, ...
+    'positionSpeed', cfg.positionSpeed);
 h.y = scan(h.sl);
 h.mbRead = zeros(1, map.nRead);
 h.tick = 0;
@@ -40,7 +41,7 @@ h.readLost = false;     % slave's registers do not reach the master
 R = slaveSimMex('registers');
 pairs = {'hr', 'heartbeat', 'G_mbHeartbeat'; 'hr', 'modeCode', 'G_mbModeCode';
          'hr', 'motionEnable', 'G_mbMotionEnable'; 'hr', 'faultReset', 'G_mbFaultReset';
-         'hr', 'reference', 'G_mbReference';
+         'hr', 'reference', 'G_mbReference'; 'hr', 'positionSpeed', 'G_mbPositionSpeed';
          'ir', 'heartbeatEcho', 'G_mbHeartbeatEcho'; 'ir', 'slaveCounter', 'G_mbSlaveCounter';
          'ir', 'confCode', 'G_mbConfCode'; 'ir', 'faultCode', 'G_mbFaultCode';
          'ir', 'faultActive', 'G_mbFaultActive'; 'ir', 'inMotion', 'G_mbInMotion';
@@ -49,7 +50,11 @@ pairs = {'hr', 'heartbeat', 'G_mbHeartbeat'; 'hr', 'modeCode', 'G_mbModeCode';
          'ir', 'velocity', 'G_mbActualVelocity'; 'ir', 'torque', 'G_mbActualTorque';
          'ir', 'commandedPosition', 'G_mbCommandedPosition';
          'ir', 'pressure', 'G_mbActualPressure'};
-assert(numel(R) == rows(pairs), 'the slave has %d registers, modbusMap names %d', numel(R), rows(pairs));
+% Every register of the slave inside the exchange is one modbusMap names
+% (the registers beyond it are the step probe's, read separately).
+inside = arrayfun(@(r) r.first <= map.(groupOf(sideOf(r.group), 'nWrite', 'nRead')), R);
+assert(sum(inside) == rows(pairs), 'the exchange covers %d of the slave''s registers, modbusMap names %d', ...
+    sum(inside), rows(pairs));
 for k = 1:rows(pairs)
     r = R(strcmp({R.name}, pairs{k, 3}));
     assert(numel(r) == 1, '%s has no register', pairs{k, 3});
@@ -59,7 +64,7 @@ for k = 1:rows(pairs)
     last = r.first + r.words - 1;
     assert(last <= map.(groupOf(pairs{k, 1}, 'nWrite', 'nRead')), '%s beyond the exchange', pairs{k, 3});
 end
-fprintf('ok  register map: modbusMap agrees with the GVL for %d registers\n', numel(R));
+fprintf('ok  register map: modbusMap agrees with the GVL for %d registers\n', rows(pairs));
 
 % Until the slave's counter is seen the link is not up: safety relay off,
 % waiting status, no latch once it appears.
@@ -85,6 +90,28 @@ h = runUntil(h, 30, @(h) h.m.statusCode == 3);
 assert(h.m.statusCode == 3 && abs(h.sl.ax.x - 5) <= cfg.posTolerance);
 assert(abs(h.m.position - h.sl.ax.x) < 0.1);
 fprintf('ok  position move, displayed position %.3f mm\n', h.m.position);
+
+% Position speed through HR7-8: the packed value reaches the slave, a move
+% runs at it, 0 mid-move holds position and the speed above the ceiling is
+% limited.
+assert(abs(h.sl.G.G_mbPositionSpeed - cfg.positionSpeed) < 1e-6);
+h.app.positionSpeed = 2;
+h.app.targetPosition = 25;
+h = command(h, 2);
+h = runUntil(h, 30, @(h) abs(h.sl.ax.v) > 1.9);
+assert(abs(h.sl.G.G_mbPositionSpeed - 2) < 1e-6 && abs(h.sl.ax.v - 2) < 0.1);
+h.app.positionSpeed = 0;
+h = runUntil(h, 3, []);
+xHold = h.sl.ax.x;
+h = runUntil(h, 1, []);
+assert(h.sl.G.G_mbPositionSpeed == 0 && abs(h.sl.ax.v) < 0.01 && abs(h.sl.ax.x - xHold) < 0.01);
+assert(h.y.faultActive == 0 && h.m.statusCode == 2 && xHold < 24);
+h.app.positionSpeed = 100;
+h = runUntil(h, 30, @(h) h.m.statusCode == 3);
+assert(h.m.statusCode == 3 && abs(h.sl.G.G_mbPositionSpeed - cfg.positionSpeedMax) < 1e-6);
+h.app.positionSpeed = cfg.positionSpeed;
+fprintf('ok  position speed through HR7-8: 2 mm/s, 0 holds at %.2f mm, 100 limited to %g mm/s\n', ...
+    xHold, h.sl.G.G_mbPositionSpeed);
 
 % Go Home with a slow drive start. The link carries no BrakeDisengage, so
 % the master enters the operation tEnableMax after raising MotionEnable,
@@ -229,6 +256,16 @@ h.app.cmdSeq = h.app.cmdSeq + 1;
 end
 
 
+function side = sideOf(group)
+% The modbusMap side of a slave register group.
+if strcmp(group, 'holding')
+    side = 'hr';
+else
+    side = 'ir';
+end
+end
+
+
 function g = groupOf(side, hr, ir)
 % The slave's register group of a modbusMap side, or the given names.
 if nargin < 2
@@ -254,7 +291,8 @@ for n = 1:round(T * 1000)
         [m.mbWrite, m.doSafety, m.doMixer, m.position, m.velocity, m.pressure, ...
             m.statusCode, m.faultCode, m.state, m.linkOk] = masterStep(h.mbRead, ...
             a.op, a.cmdSeq, a.targetPosition, ...
-            a.targetVelocity, a.jogDirection, a.targetPressure, a.estop, a.mixer);
+            a.targetVelocity, a.jogDirection, a.targetPressure, a.estop, a.mixer, ...
+            a.positionSpeed);
         h.m = m;
     end
 

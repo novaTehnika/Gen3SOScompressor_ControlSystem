@@ -240,7 +240,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         slave_sim_t *sl = instance(prhs[1]);
         sim_u_t u = {field(prhs[2], "heartbeat"), field(prhs[2], "modeCode"),
                      field(prhs[2], "motionEnable"), field(prhs[2], "faultReset"),
-                     field(prhs[2], "reference")};
+                     field(prhs[2], "reference"), field(prhs[2], "positionSpeed")};
         sim_y_t y;
         int scans = nrhs > 3 ? (int)mxGetScalar(prhs[3]) : 1;
         for (int k = 0; k < scans; k++)

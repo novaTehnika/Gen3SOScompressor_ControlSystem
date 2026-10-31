@@ -18,6 +18,10 @@
      FB_PressureInput) while the pressure loop is closed on the sensor
    - Piston exit guard faults (from FB_PistonExitGuard)
 
+   The caller classifies the state once per scan (PRG_Main, State Properties)
+   and passes the results in as the In* inputs; the block compares
+   CurrentState itself only for ST_HOME_LIMIT and ST_PRESSURE_CTRL.
+
    Fault Priority (highest to lowest):
    1. Drive fault (FAULT_DRIVE)
    2. Link loss (FAULT_COMM)
@@ -40,6 +44,11 @@
        SoftLimitMax        : LREAL            (* Maximum allowed position (mm)
        DriveFault          : BOOL             (* Drive has reported a fault
        CurrentState        : E_SystemState    (* Current state machine state
+       InCommandedMotion   : BOOL             (* State commands motion from the master's reference (link loss faults only here)
+       InMotionWatched     : BOOL             (* State in which either overtravel switch is a fault
+       InHoming            : BOOL             (* ST_HOME_LIMIT / ST_HOME_COMPLETE
+       InRecovery          : BOOL             (* ST_RECOVERY / ST_RECOVERY_POSITION / ST_RECOVERY_VELOCITY
+       InFault             : BOOL             (* ST_FAULT / ST_FAULT_IDLE
        ExitGuardTriggered  : BOOL             (* Piston exit guard triggered fault
        CommLost            : BOOL             (* Master heartbeat stale
        PressureSensorFault : BOOL             (* Transducer loop current out of range (from FB_PressureInput)
@@ -55,11 +64,6 @@
      VAR:
        bLatchedFault       : BOOL
        eLatchedFaultCode   : E_FaultCode
-       bInMotionState      : BOOL
-       bInHomingState      : BOOL
-       bInFaultState       : BOOL
-       bInRecoveryState    : BOOL             (* TRUE in ST_RECOVERY / ST_RECOVERY_POSITION / ST_RECOVERY_VELOCITY
-       bCommandedMotion    : BOOL             (* TRUE in the states that command motion (control, go home, homing, recovery moves)
    ============================================================================ *)
 
 (* ============================================================================
@@ -82,34 +86,6 @@ IF NOT Enable THEN
 END_IF;
 
 (* --------------------------------------------------------------------------
-   Determine operating context
-   -------------------------------------------------------------------------- *)
-
-(* Check if in a motion state *)
-bInMotionState := (CurrentState = E_SystemState#ST_POSITION_CTRL) OR
-                  (CurrentState = E_SystemState#ST_VELOCITY_CTRL) OR
-                  (CurrentState = E_SystemState#ST_TORQUE_CTRL) OR
-                  (CurrentState = E_SystemState#ST_PRESSURE_CTRL) OR
-                  (CurrentState = E_SystemState#ST_GO_HOME) OR
-                  (CurrentState = E_SystemState#ST_HOLD_POSITION);
-
-(* Check if in a homing state *)
-bInHomingState := (CurrentState = E_SystemState#ST_HOME_LIMIT) OR
-                  (CurrentState = E_SystemState#ST_HOME_COMPLETE);
-
-(* Check if already in fault state *)
-bInFaultState := (CurrentState = E_SystemState#ST_FAULT) OR
-                 (CurrentState = E_SystemState#ST_FAULT_IDLE);
-
-(* Check if in a limit-recovery state. While recovering, the operator is
-   deliberately jogging off an active limit; the active overtravel switch and
-   out-of-soft-limit position are expected and must not fault. Travel direction
-   is enforced by command clamping in PRG_Main, not here. *)
-bInRecoveryState := (CurrentState = E_SystemState#ST_RECOVERY) OR
-                    (CurrentState = E_SystemState#ST_RECOVERY_POSITION) OR
-                    (CurrentState = E_SystemState#ST_RECOVERY_VELOCITY);
-
-(* --------------------------------------------------------------------------
    DRIVE FAULT MONITORING
    Most critical - servo amplifier has detected an issue
    -------------------------------------------------------------------------- *)
@@ -126,19 +102,7 @@ FaultDrive := DriveFault;
    idle on its own.
    -------------------------------------------------------------------------- *)
 
-bCommandedMotion := (CurrentState = E_SystemState#ST_POSITION_CTRL) OR
-                    (CurrentState = E_SystemState#ST_VELOCITY_CTRL) OR
-                    (CurrentState = E_SystemState#ST_TORQUE_CTRL) OR
-                    (CurrentState = E_SystemState#ST_PRESSURE_CTRL) OR
-                    (CurrentState = E_SystemState#ST_GO_HOME) OR
-                    (CurrentState = E_SystemState#ST_HOME_LIMIT) OR
-                    (CurrentState = E_SystemState#ST_HOME_LIM_APPROACH) OR
-                    (CurrentState = E_SystemState#ST_HOME_LIM_DETECT) OR
-                    (CurrentState = E_SystemState#ST_HOME_LIM_BACKOFF) OR
-                    (CurrentState = E_SystemState#ST_HOME_LIM_SETREF) OR
-                    (CurrentState = E_SystemState#ST_RECOVERY_POSITION) OR
-                    (CurrentState = E_SystemState#ST_RECOVERY_VELOCITY);
-FaultComm := CommLost AND bCommandedMotion;
+FaultComm := CommLost AND InCommandedMotion;
 
 (* --------------------------------------------------------------------------
    OVERTRAVEL FAULT MONITORING
@@ -147,7 +111,7 @@ FaultComm := CommLost AND bCommandedMotion;
    inside ST_HOME_LIMIT.
    -------------------------------------------------------------------------- *)
 
-IF bInHomingState THEN
+IF InHoming THEN
     (* During homing, negative overtravel is the expected target.
        Positive overtravel is never expected - always faults. *)
     IF OvertravelPosActive THEN
@@ -155,8 +119,9 @@ IF bInHomingState THEN
     ELSE
         FaultLimitSwitch := FALSE;
     END_IF;
-ELSIF bInRecoveryState THEN
+ELSIF InRecovery THEN
     (* During recovery, the active switch is expected (we are jogging off it).
+       Travel direction is enforced by command clamping in PRG_Main, not here.
        Only a simultaneous both-switches reading is impossible mechanically and
        indicates a wiring/sensor fault. *)
     IF OvertravelNegActive AND OvertravelPosActive THEN
@@ -164,7 +129,7 @@ ELSIF bInRecoveryState THEN
     ELSE
         FaultLimitSwitch := FALSE;
     END_IF;
-ELSIF bInMotionState THEN
+ELSIF InMotionWatched THEN
     (* During normal motion, hitting either overtravel switch is a fault. *)
     IF OvertravelNegActive OR OvertravelPosActive THEN
         FaultLimitSwitch := TRUE;
@@ -187,13 +152,13 @@ END_IF;
    - CurrentState = ST_HOME_LIMIT (the homing sequence is running). The
      sequence legitimately drives the axis below SoftLimitMin to find the
      switch, and the coordinate frame is being re-established mid-flight.
-   - In a recovery state (bInRecoveryState): the axis starts outside the
+   - In a recovery state (InRecovery): the axis starts outside the
      soft-limit box and is being jogged back inside; faulting on the very
      position we are recovering from would defeat the recovery.
    -------------------------------------------------------------------------- *)
 
 IF (CurrentState <> E_SystemState#ST_HOME_LIMIT) AND
-   (NOT bInRecoveryState) AND
+   (NOT InRecovery) AND
    ((ActualPosition < SoftLimitMin) OR (ActualPosition > SoftLimitMax)) THEN
     FaultPosition := TRUE;
 ELSE
@@ -263,12 +228,12 @@ END_IF;
    -------------------------------------------------------------------------- *)
 
 (* Clear latch once we're out of fault states with no raw fault present. *)
-IF NOT bInFaultState AND NOT FaultDetected THEN
+IF NOT InFault AND NOT FaultDetected THEN
     bLatchedFault := FALSE;
     eLatchedFaultCode := E_FaultCode#FAULT_NONE;
 END_IF;
 
-IF FaultDetected AND NOT bLatchedFault AND NOT bInFaultState THEN
+IF FaultDetected AND NOT bLatchedFault AND NOT InFault THEN
     bLatchedFault := TRUE;
     eLatchedFaultCode := FaultCode;
 END_IF;
