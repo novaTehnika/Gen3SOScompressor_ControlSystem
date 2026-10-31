@@ -1,11 +1,12 @@
 function closedLoopModbusStep()
 %CLOSEDLOOPMODBUSSTEP Run masterStep (the Simulink block's entry point)
-%   against the simulated slave through the Modbus registers: the master
-%   steps every cfg.dt; every cfg.exchangePeriod its 16-bit write vector
-%   goes into the slave's holding registers and the slave's input
-%   registers come back as its read vector, packed and unpacked by the
-%   slave's register map (the GVL's AT addresses); and the slave scans
-%   every G_cfgScanTime (4 ms), on a 1 ms tick. Checks that the master's
+%   against the simulated slave through the Modbus registers and the link
+%   timing model (modbusLink, modbusLinkConfig: the bench's measurements):
+%   the master steps every cfg.dt; every cfg.exchangePeriod it reads the
+%   slave's input registers, steps on what it read and writes its holding
+%   registers, as 16-bit words packed and unpacked by the slave's register
+%   map (the GVL's AT addresses); and the slave scans every G_cfgScanTime
+%   (4 ms), serving the link's requests around its scans, on a 1 ms tick. Checks that the master's
 %   register map (modbusMap) agrees with the slave's, then covers homing,
 %   position, pressure, fault reset and link loss on either side.
 %
@@ -30,6 +31,11 @@ h.app = struct('op', 0, 'cmdSeq', 0, 'targetPosition', 100, 'targetVelocity', 0,
     'positionSpeed', cfg.positionSpeed);
 h.y = scan(h.sl);
 h.mbRead = zeros(1, map.nRead);
+% The Modbus link with the bench's timing (modbusLinkConfig)
+h.link = modbusLink('init', modbusLinkConfig(), h.sl.G.G_cfgScanTime);
+h.readId = 0;
+h.pending = false;
+h.log = struct('read', zeros(0, 2), 'written', zeros(1, 0));
 h.tick = 0;
 h.m = [];
 h.writeLost = false;    % master's registers do not reach the slave
@@ -77,6 +83,20 @@ assert(h.m.statusCode == 0 && h.m.doSafety == 1 && h.m.linkOk == 1);
 assert(h.y.heartbeatEcho > 0, 'heartbeat not echoed');
 fprintf('ok  start-up: waits for the slave, then idle; heartbeat echoed\n');
 
+% With the link's timing the slave's reply to a write appears in the
+% following exchange: the heartbeat echo each read returns is the
+% heartbeat the master wrote in the exchange before.
+n0 = rows(h.log.read);
+h = runUntil(h, 3, []);
+echo = h.log.read(n0 + 1:end, 2)';
+written = h.log.written(n0:end - 1);
+nPair = min(numel(echo), numel(written));
+assert(isequal(echo(1:nPair), written(1:nPair)), 'echoes %s for writes %s', ...
+    mat2str(echo(1:min(nPair, 8))), mat2str(written(1:min(nPair, 8))));
+tr = sort(h.log.read(n0 + 1:end, 1));
+fprintf('ok  echo in the following exchange over %d exchanges; read call median %.1f ms, max %.1f ms\n', ...
+    nPair, 1000 * median(tr), 1000 * tr(end));
+
 % Homing from close to the negative overtravel switch.
 h.sl.ax.x = 10;
 h = command(h, 1);
@@ -98,7 +118,10 @@ assert(abs(h.sl.G.G_mbPositionSpeed - cfg.positionSpeed) < 1e-6);
 h.app.positionSpeed = 2;
 h.app.targetPosition = 25;
 h = command(h, 2);
-h = runUntil(h, 30, @(h) abs(h.sl.ax.v) > 1.9);
+% (The new speed reaches the slave an exchange or more after the command,
+% so the condition waits for it as well as for the motion.)
+h = runUntil(h, 30, @(h) abs(h.sl.G.G_mbPositionSpeed - 2) < 1e-6 && abs(h.sl.ax.v) > 1.9);
+h = runUntil(h, 0.3, []);
 assert(abs(h.sl.G.G_mbPositionSpeed - 2) < 1e-6 && abs(h.sl.ax.v - 2) < 0.1);
 h.app.positionSpeed = 0;
 h = runUntil(h, 3, []);
@@ -281,36 +304,83 @@ end
 
 
 function h = runUntil(h, T, done)
+% On a 1 ms tick: the master steps every cfg.dt; at an exchange step it
+% reads the input registers through the link, steps when the read returns
+% and then writes its holding registers (the Read block, masterStep, the
+% Write block). The slave scans every G_cfgScanTime and serves the link's
+% requests around each scan: reads before it, writes after it.
 stepTicks = round(h.cfg.dt * 1000);
 exchangeTicks = round(h.cfg.exchangePeriod * 1000);
+scanTicks = round(1000 * h.sl.G.G_cfgScanTime);
 for n = 1:round(T * 1000)
     h.tick = h.tick + 1;
+    t = h.tick / 1000;
 
-    if mod(h.tick, stepTicks) == 0
-        a = h.app;
-        [m.mbWrite, m.doSafety, m.doMixer, m.position, m.velocity, m.pressure, ...
-            m.statusCode, m.faultCode, m.state, m.linkOk] = masterStep(h.mbRead, ...
-            a.op, a.cmdSeq, a.targetPosition, ...
-            a.targetVelocity, a.jogDirection, a.targetPressure, a.estop, a.mixer, ...
-            a.positionSpeed);
-        h.m = m;
-    end
-
-    if mod(h.tick, exchangeTicks) == 0 && ~isempty(h.m)
-        if ~h.writeLost
-            writeHoldingRegisters(h.sl, 1, h.m.mbWrite);
-        end
-        if ~h.readLost
-            h.mbRead = readInputRegisters(h.sl, 1, h.map.nRead);
+    if mod(h.tick, stepTicks) == 0 && ~h.pending
+        if mod(h.tick, exchangeTicks) ~= 0 || isempty(h.m)
+            h = stepMaster(h);
+        elseif h.readLost
+            h = stepMaster(h);
+            h = submitWrite(h, t);
+        else
+            [h.link, h.readId] = modbusLink('submit', h.link, t, 'read', 1, h.map.nRead);
+            h.pending = true;
         end
     end
 
-    if mod(h.tick, round(1000 * h.sl.G.G_cfgScanTime)) == 0
+    [h.link, fin] = modbusLink('poll', h.link, t);
+    for d = fin
+        if strcmp(d.kind, 'read') && d.id == h.readId
+            h.mbRead = d.data;
+            h.log.read(end + 1, :) = [d.tDone - d.tCall, d.data(h.map.ir.heartbeatEcho)];
+            h = stepMaster(h);
+            h = submitWrite(h, t);
+            h.pending = false;
+        end
+    end
+
+    if mod(h.tick, scanTicks) == 0
+        k = h.tick / scanTicks;
+        [h.link, reqs] = modbusLink('due', h.link, k, 'read');
+        for q = reqs
+            h.link = modbusLink('answer', h.link, q.slot, readInputRegisters(h.sl, q.start, q.n));
+        end
         h.y = scan(h.sl);
+        [h.link, reqs] = modbusLink('due', h.link, k, 'write');
+        for q = reqs
+            writeHoldingRegisters(h.sl, q.start, q.words);
+            h.link = modbusLink('answer', h.link, q.slot, []);
+        end
     end
 
     if ~isempty(done) && ~isempty(h.m) && done(h)
         return;
     end
+end
+end
+
+
+function h = stepMaster(h)
+a = h.app;
+[m.mbWrite, m.doSafety, m.doMixer, m.position, m.velocity, m.pressure, ...
+    m.statusCode, m.faultCode, m.state, m.linkOk] = masterStep(h.mbRead, ...
+    a.op, a.cmdSeq, a.targetPosition, ...
+    a.targetVelocity, a.jogDirection, a.targetPressure, a.estop, a.mixer, ...
+    a.positionSpeed);
+h.m = m;
+end
+
+
+function h = submitWrite(h, t)
+% The master's write of this exchange, unless the link loses it; the
+% heartbeat written is logged against the read that preceded it.
+if ~h.writeLost
+    [h.link, ~] = modbusLink('submit', h.link, t, 'write', 1, h.m.mbWrite);
+    h.log.written(end + 1) = h.m.mbWrite(h.map.hr.heartbeat);
+else
+    h.log.written(end + 1) = NaN;
+end
+if h.readLost
+    h.log.read(end + 1, :) = [NaN, NaN];
 end
 end

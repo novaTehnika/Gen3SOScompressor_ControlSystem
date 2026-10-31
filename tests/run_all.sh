@@ -35,6 +35,7 @@ design/pressure-loop/test_robust.py
 tests/stTargetParity.py
 tests/plantParity.py
 design/pressure-loop/test_linear.py
+tests/modbusLinkTiming.m
 tests/smokeMasterStateMachine.m
 "
 CACHE=.test-cache

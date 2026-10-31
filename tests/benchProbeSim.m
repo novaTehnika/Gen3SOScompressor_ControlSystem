@@ -151,7 +151,11 @@ assert(isempty(caps) && p.nPending == 0 && ~p.armBusy && p.failures == 1, 'given
 fprintf('ok  arm never acknowledged given up and counted\n');
 
 % --- Recording state: CAPTURING, HELD, RECORDING ------------------------------------
+% These sections check FB_Probe scan by scan, reading its registers after
+% every scan, so their reads are instant: a call through the timed link
+% spans several scans (the sections above exercise the reader over it).
 freshLink(64);
+fakeProbeLink('linkTiming', []);
 step(50);
 r = probeRegs();
 assert(r.state == 1 && r.depth == 64 && r.words == 8 && r.xfer == 0, 'power-up: state %d, depth %d, words %d', ...
@@ -188,6 +192,7 @@ fprintf('ok  recording states: CAPTURING, HELD at the last record, RECORDING onc
 
 % --- Transfer: a fill spread over several scans --------------------------------------
 freshLink(8192);
+fakeProbeLink('linkTiming', []);
 step(250);
 r0 = probeRegs();
 assert(r0.depth == 8192 && r0.xfer == 0 && r0.count == 13 && r0.start == 0, 'start: depth %d, count %d', r0.depth, r0.count);
