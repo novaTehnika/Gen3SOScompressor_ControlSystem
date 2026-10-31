@@ -16,7 +16,8 @@ function [ax, G] = axisModel(ax, G, E, sim, hook, dt)
 %                      VelocityTLMode slews to Velocity at Acceleration /
 %                      Deceleration; TorqueVLMode accelerates in proportion
 %                      to Torque up to the Velocity limit.
-%     MC_MoveAbsolute  Rising Execute starts a trapezoidal move. Done is held
+%     MC_MoveAbsolute  Rising Execute starts a trapezoidal move, speeding up at
+%                      Acceleration and braking at Deceleration. Done is held
 %                      while Execute, or for one scan if Execute has dropped.
 %     Jog              Level-sensitive Forward / Reverse; Done pulses for one
 %                      scan once the axis has stopped after both are FALSE.
@@ -132,7 +133,12 @@ elseif ax.moveActive
     aDt = ax.moveDec * dt;
     rateStop = -aDt + sqrt(aDt * aDt + 2 * ax.moveDec * abs(dist));
     vT = sign(dist) * min(ax.moveVel, rateStop);
-    ax.v = slew(ax.v, vT, ax.moveAcc * dt);
+    if abs(vT) > abs(ax.v) && vT * ax.v >= 0
+        rate = ax.moveAcc;
+    else
+        rate = ax.moveDec;
+    end
+    ax.v = slew(ax.v, vT, rate * dt);
     if abs(dist) <= abs(ax.v) * dt + 1e-9 && abs(ax.v) <= aDt + 1e-9
         directPosition = true;
         xDirect = ax.moveTarget;
