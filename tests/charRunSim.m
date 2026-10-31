@@ -7,8 +7,9 @@ function charRunSim()
 %   test 4 (charStopPath) and its fit (charStopDistance); a delivery
 %   through the orifice bank in pressure mode; the pressure and position
 %   guards and a slave fault.
-%   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
+%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
+%   Depends on: master-src/logic slave-src slave-sim tools bench/characterisation bench/common tests/fakeProbeLink.m
 
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'bench', 'characterisation'), fullfile(here, '..', 'bench', 'common'));
@@ -20,8 +21,10 @@ T = 1; STEP = 2; STATUS = 3; MODE = 4; REF = 5; POS = 6; P = 9;    % log columns
 % The simulated chamber is a gas spring: 1.7 MPa at 255 mm, 3 MPa at 256.4 mm.
 opts = linkOpts(saveDir, 255);
 opts.probe = true;
-path = {{'ramp', 0.1, 3.0, 40}, {'dwell', 2.5}, {'ramp', -0.1, 2.0, 40}, ...
-        {'velstep', [0.5 0], [2.5 2.5]}, {'hold', 1}};
+% A capture is 500 scans, 2 s at the 4 ms scan, and its readout takes
+% about as long again, so each dwell outlasts both.
+path = {{'ramp', 0.1, 3.0, 40}, {'dwell', 4}, {'ramp', -0.1, 2.0, 40}, ...
+        {'velstep', [0.2 0], [4 4]}, {'hold', 1}};
 r = charRun('sim', path, opts);
 assert(isempty(r.abort), r.abort);
 L = r.runLog;
@@ -43,7 +46,7 @@ j = find(cap.data(:, 2) ~= 0, 1);
 assert(~isempty(j) && abs(cap.data(j, 2) - 0.1) < 1e-3 && j > 5, 'first capture not around the 0.1 mm/s command');
 assert(cap.data(min(j + 60, 500), 3) > 0.09, 'velocity did not follow the command in the capture');
 cap = r.captures{4};
-j = find(abs(cap.data(:, 2) - 0.5) < 1e-3, 1);
+j = find(abs(cap.data(:, 2) - 0.2) < 1e-3, 1);
 assert(~isempty(j) && abs(cap.data(j - 1, 2) + 0.1) < 1e-3, 'velstep capture command');
 assert(exist(r.file, 'file') == 2 && numel(r.capFiles) == 5);
 assert(r.exchangeFailures == 0 && r.probeFailures == 0);
@@ -59,13 +62,15 @@ assert(all([lag.captures.tauV] < 0.006), 'lag %s s on a lag-free axis', mat2str(
 assert(all([lag.captures.residual] < 0.03), 'lag fit residual %s', mat2str([lag.captures.residual], 3));
 assert(~isempty(lag.runLog) && lag.runLog.nSteps >= 2, 'run log steps not found');   % the 0.1 mm/s commands are below minStep
 assert(lag.runLog.nStepsP >= 1, 'no pressurised step in the run log');
-% The gas spring stiffens by a fifth over the 0.5 mm/s capture, which the
-% constant-stiffness model absorbs as a few tens of milliseconds; a liquid
-% chamber holds its stiffness to a percent over a capture.
+% The gas spring stiffens over a capture, which the constant-stiffness
+% model absorbs as a lag: about 30 ms for each second of capture at these
+% speeds (a liquid chamber holds its stiffness to a percent). A capture
+% is 500 scans.
+biasMax = 0.03 * 500 * ccfg.scanTime;                              % [s]
 capsP = lag.captures(~isnan([lag.captures.tauP]));
-assert(numel(capsP) >= 1 && all([capsP.tauP] + [capsP.TdP] < 0.03), ...
+assert(numel(capsP) >= 1 && all([capsP.tauP] + [capsP.TdP] < biasMax), ...
     'piston lag %s s from the captures of a lag-free axis', mat2str([capsP.tauP] + [capsP.TdP], 3));
-assert(lag.tauP_s < 0.03, 'piston lag %.3f s on a lag-free axis', lag.tauP_s);
+assert(lag.tauP_s < biasMax, 'piston lag %.3f s on a lag-free axis', lag.tauP_s);
 fprintf('ok  drive lag fit: captures %.1f ms, run log %.0f ms, pressure %.1f ms from %d captures\n', ...
     1000 * lag.tauV_s, 1000 * (lag.runLog.tauV + lag.runLog.Td), 1000 * lag.tauP_s, numel(capsP));
 
@@ -125,7 +130,10 @@ assert(numel(rs.stops) >= nStops, 'only %d stops found', numel(rs.stops));
 assert(sum(strcmp({rs.stops.source}, 'capture')) >= nStops - 1, 'only %d stops in the captures', ...
     sum(strcmp({rs.stops.source}, 'capture')));
 for f = {rs.fit.comp, rs.fit.ret}
-    assert(abs(f{1}.D_mm_s2 / ccfg.velDecel - 1) < 0.05 && f{1}.T0_s < 0.01, ...
+    % The simulated axis sums its velocity in steps of one scan, which
+    % shortens each stop by v*Ts/2: a relative error D*Ts/v in the
+    % deceleration, 2 % per millisecond of scan at the 0.5 mm/s speed.
+    assert(abs(f{1}.D_mm_s2 / ccfg.velDecel - 1) < 0.025 * 1000 * ccfg.scanTime && f{1}.T0_s < 0.01, ...
         'fit D %.1f mm/s^2 (axis slews at %.0f), T0 %.3f s', f{1}.D_mm_s2, ccfg.velDecel, f{1}.T0_s);
 end
 assert(rs.pass, 'stopping-distance checks failed');

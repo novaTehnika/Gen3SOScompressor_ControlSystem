@@ -4,13 +4,14 @@ function charFitsSynthetic()
 %   the split between liquid and series compliance from two fills;
 %   charOrificeFlow recovers Cd and the square-root exponent from
 %   deliveries at three pressures; charDriveLag recovers tauV and the dead
-%   time from 2 ms step probe captures, and roughly from 50 ms run logs,
+%   time from step probe captures, and roughly from 50 ms run logs,
 %   including the piston-side lag from the pressure column through the
 %   sensor chain; charStopDistance recovers the delay and the
 %   deceleration of the stopping-distance law from captures and a run
 %   log of stops in both directions. The logs are in frictionRun's
 %   formats.
 %   Run from the repository root:  addpath master-src/logic tests
+%   Depends on: master-src/logic bench/characterisation bench/common
 
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'bench', 'characterisation'), fullfile(here, '..', 'bench', 'common'));
@@ -95,8 +96,27 @@ assert(all(abs([r.captures.tauV] - tau) < 0.002), 'tauV %s, set %.3f', mat2str([
 assert(all(abs([r.captures.Td] - Td) < 0.002), 'Td %s, set %.3f', mat2str([r.captures.Td], 3), Td);
 assert(all(isnan([r.captures.tauP])) && isnan(r.tauP_s), 'a pressure fit on a dry capture');
 assert(r.pass);
-fprintf('ok  drive lag: tauV %.1f / %.1f ms (set %.0f), Td %.1f / %.1f ms (set %.0f) from 2 ms captures\n', ...
+fprintf('ok  drive lag: tauV %.1f / %.1f ms (set %.0f), Td %.1f / %.1f ms (set %.0f) from scan-spaced captures\n', ...
     1000 * [r.captures.tauV], 1000 * tau, 1000 * [r.captures.Td], 1000 * Td);
+
+% A capture whose t column is written at half the real row spacing, as
+% the 26 October captures were, is fitted at the spacing
+% opts.rowPeriod_s gives.
+c4 = fullfile(dir, 'lag_cap_4_mislabelled.csv');
+lines = strsplit(strtrim(fileread(c1)), "\n");
+fid = fopen(c4, 'w');
+fprintf(fid, '%s\n', lines{1});
+for i = 2:numel(lines)
+    f = strsplit(lines{i}, ',');
+    f{1} = sprintf('%.3f', (i - 2) * cfg.scanTime / 2);
+    fprintf(fid, '%s\n', strjoin(f, ','));
+end
+fclose(fid);
+r = charDriveLag(c4, struct('quiet', true, 'accel', accel, 'decel', accel, 'rowPeriod_s', cfg.scanTime));
+assert(abs(r.captures.tauV - tau) < 0.002 && abs(r.captures.Td - Td) < 0.002, ...
+    'override: tauV %.4f, Td %.4f, set %.3f, %.3f', r.captures.tauV, r.captures.Td, tau, Td);
+fprintf('ok  drive lag: rows labelled at half spacing fitted with rowPeriod_s: tauV %.1f ms, Td %.1f ms (set %.0f, %.0f)\n', ...
+    1000 * r.captures.tauV, 1000 * r.captures.Td, 1000 * tau, 1000 * Td);
 
 % Under pressure the capture's pressure channel gives the lag at the
 % piston through the median, low-pass and pipeline delay, here set larger
@@ -157,7 +177,10 @@ end
 caps = rs.stops(strcmp({rs.stops.source}, 'capture'));
 for s = caps
     v = abs(s.v_mm_s);
-    assert(abs(s.x_mm - (v * T0 + v^2 / (2 * D))) < 0.01, 'capture stop %.3f mm at %g mm/s', s.x_mm, v);
+    % The trace is summed as rectangles of one scan, which counts the
+    % travel v*Ts/2 short of the continuous ramp.
+    xSet = v * T0 + v^2 / (2 * D) - v * cfg.scanTime / 2;
+    assert(abs(s.x_mm - xSet) < 0.01, 'capture stop %.3f mm at %g mm/s, expected %.3f', s.x_mm, v, xSet);
 end
 assert(rs.pass, 'stopping-distance checks failed on the synthetic stops');
 fprintf('ok  stopping distance: D %.1f / %.1f mm/s^2 (set %.0f), T0 %.0f / %.0f ms (set %.0f)\n', ...
@@ -180,7 +203,7 @@ end
 
 
 function writeStopCapture(file, v0, T0, D, P0, cfg)
-% PRG_StepProbe capture of a stop: 500 scans at 2 ms, the command to zero
+% PRG_StepProbe capture of a stop: 500 scans, the command to zero
 % at 0.1 s, at a stiffness of 3 MPa/mm.
 [t, cmd, v, x] = stopTrace(cfg.scanTime, 499 * cfg.scanTime, v0, 0.1, T0, D);
 P = P0 + 3 * (x - x(1));
@@ -305,7 +328,7 @@ end
 
 
 function writeCapture(file, v0, v1, tau, Td, accel, k, P0, cfg)
-% PRG_StepProbe capture: 500 scans at 2 ms from the arm, the command step
+% PRG_StepProbe capture: 500 scans from the arm, the command step
 % from v0 to v1 at 0.1 s, slew at accel, dead time, first-order lag (the
 % piston's when k > 0), and the pressure at stiffness k from P0 through
 % the slave's sensor chain.

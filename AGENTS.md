@@ -16,16 +16,20 @@ The contract between them is a mode code + MotionEnable + FaultReset + reference
 Everything runs headless with `python3` and either `octave-cli` or MATLAB; the MATLAB-language files are written to run in both.
 
 ```sh
-tests/run_all.sh            # regenerate the slave sim from slave-src, run all tests
-tests\run_all.bat           # the same on Windows (MATLAB)
+tests/run_all.sh            # regenerate, then run the tests whose inputs changed
+tests/run_all.sh --all      # run every test regardless
+tests/run_all.sh -j 2 closedLoopMasterSlave   # chosen tests, at most 2 at once
+tests\run_all.bat           # every test, one after another, on Windows (MATLAB)
 ```
 
-`run_all.sh` runs the Python tests, then `tests/runAll.m` in Octave or, when `octave-cli` is not on the PATH, in `matlab -batch`. `runAll` regenerates `slave-sim/generated` itself (with `python3`, `python` or `py -3`) unless called as `runAll('nogen')`, so from an open MATLAB or Octave session, `cd tests` and `runAll` runs the MATLAB-language tests alone.
+`run_all.sh` regenerates `slave-sim/generated` and `design/generated`, then runs each test in its own process: the Python tests with `python3`, the MATLAB-language tests in `octave-cli` or, when that is not on the PATH, in `matlab -batch`. It runs as many at once as there are CPUs (one at a time with MATLAB). It skips a test whose inputs hash the same as when it last passed (recorded in the gitignored `.test-cache/`, which also holds each test's log). A test's inputs are its own file, the paths on its `Depends on:` header line and the interpreter version. Keep that line current when a test starts using another directory, or the test will be skipped when that code changes. A new test goes in `ALL_TESTS` in the script and, if it is MATLAB-language, in `tests/runAll.m`.
+
+`runAll.m` runs the MATLAB-language tests one after another in one session, with no skipping. It regenerates `slave-sim/generated` itself (with `python3`, `python` or `py -3`) unless called as `runAll('nogen')`, so from an open MATLAB or Octave session, `cd tests` and `runAll` runs them.
 
 Run a single test (from the repo root, after generating):
 
 ```sh
-python3 tools/st2m.py slave-src slave-sim/generated
+python3 tools/st_translate.py --target m slave-src slave-sim/generated
 octave-cli --quiet --eval "addpath('master-src/logic','slave-sim','slave-sim/generated','tests'); closedLoopMasterSlave"
 ```
 
@@ -35,17 +39,22 @@ The Simulink shell and the operator app can only be exercised on the lab PC (`ma
 
 ## Architecture
 
-### Slave → simulator translation (`tools/st2m.py`)
+### Slave translation (`tools/st_translate.py`)
 
-The slave ST is the single source of truth. `tools/st2m.py` translates it into Octave functions in `slave-sim/generated/`. That directory is gitignored, so never edit it by hand. Consequences:
+The slave ST is the single source of truth. `tools/st_translate.py --target T SRC OUT` translates it for simulation. `tools/st_translate.py` is the front end every target shares (declarations, tokens, and the `Translator` parser, whose spelling methods default to Octave's), and each target is a module `tools/st_target_<T>.py` that overrides the spellings where its language differs and writes the files:
 
-- MotionWorks keeps variable declarations in its GUI, so st2m reads them from the **`Variables (define in MWiec GUI)` header comment** of each `.st` file, from `slave-src/GVL/GlobalVariables_Reference.st` (including `G_cfg*` default values) and from `slave-src/DUT/DataTypes.st`. Those comments are functional input. When you add or rename a variable, update the header comment or the translation breaks or goes stale.
-- st2m supports only the ST subset already used: assignments, IF/ELSIF/ELSE, FOR, RETURN, named-input FB calls, typed/TIME literals, 1-D arrays, ABS/SQRT/MIN/MAX/LIMIT, TON/R_TRIG/F_TRIG. It errors on anything else. If you use a new construct, extend st2m.
+- `m`: Octave functions for the slave simulator, in `slave-sim/generated/`.
+- `py`: Python modules of the function blocks for design studies, in `design/generated/` (see below).
+
+Both output directories are gitignored, so never edit them by hand. Consequences:
+
+- MotionWorks keeps variable declarations in its GUI, so the translator reads them from the **`Variables (define in MWiec GUI)` header comment** of each `.st` file, from `slave-src/GVL/GlobalVariables_Reference.st` (including `G_cfg*` default values) and from `slave-src/DUT/DataTypes.st`. Those comments are functional input. When you add or rename a variable, update the header comment or the translation breaks or goes stale.
+- The translator supports only the ST subset already used: assignments, IF/ELSIF/ELSE, FOR, RETURN, named-input FB calls, typed/TIME literals, 1-D arrays, ABS/SQRT/MIN/MAX/LIMIT, TON/R_TRIG/F_TRIG. It errors on anything else. If you use a new construct, extend the front end and every target's spelling of it; `tests/stTargetParity.py` runs the targets on the same input sequences and compares every variable.
 - FB instances become structs, and inputs omitted from a call keep their previous value (IEC semantics). Generated lines carry `% :N` pointing back to the ST source line.
 
-### Slave → Python translation (`tools/st2py.py`)
+### Python target (`--target py`)
 
-`python3 tools/st2py.py slave-src design/generated` translates every `FB_*.st` into a Python module for design studies (`design/generated/` is gitignored; never edit it by hand). It subclasses st2m's `Translator` and overrides only the target-language spellings, and it reads declarations the same way, so st2py and st2m must stay in step on the ST subset: a construct added to one needs the matching override in the other, and `tests/st2pyParity.py` runs both on the same input sequences and compares every variable.
+`python3 tools/st_translate.py --target py slave-src design/generated` translates every `FB_*.st` into a Python module for design studies.
 
 - Output: one `FB_<Name>.py` per block with `new_FB_<Name>()` (a `SimpleNamespace` holding every VAR_INPUT/VAR_OUTPUT/VAR at its header default) and `FB_<Name>(s, dt)` (one scan, mutates `s` in place, `dt` in seconds), plus `st_runtime.py` (enumerations as `E`, `TON`/`R_TRIG`/`F_TRIG`, helpers, struct constructors). Imports are flat, so put `design/generated` on `sys.path`.
 - Programs (`PRG_*`) are not translated, and blocks that reference `G_*` globals or I/O points are rejected. ST arrays must be 0-based and become lists.
@@ -59,7 +68,7 @@ The slave ST is the single source of truth. `tools/st2m.py` translates it into O
 
 ### Design studies
 
-- `design/pressure-loop/` holds the Python model used to design the slave pressure loop (chamber, actuators, sensor chain) and the studies run on it. It runs the slave's own `FB_AnalogInputFilter`, `FB_PressureInput` and `FB_PressureController`, translated by `tools/st2py.py` into the gitignored `design/generated/` (regenerated automatically when stale) with their configuration read from the GVL, so the slave controller in the studies is the slave source. The model is split as model, driver and solver: `plant.py` (`Plant.derivatives` is the continuous-time model; the command dead time, stall and state bounds run between steps), `sim.py` (the scan loop) and `solver.py` (fixed-step Heun by default, forward Euler as a check). The plant includes the hose between the cylinder head and the outlet (its virgin saline, its compliance, and the proximal valve's opening as a one-scan equalisation or as a throttled fill through a given bore, with the admitted solution tracked as parcels and flagged where it degassed) and the purge of that saline and the degassed slug before the delivery; `Params.hose_before` selects whether the hose is opened before the compression or after mixing. The plant parameters are the bench measurements (`bench/`), and the requirements are the machine's: a pressure ceiling, no degassing below the saturation pressure of the dissolved oxygen, control kept to the limit switch. `controllers.py` holds the slave's controller and `ScheduledSlaveController`, the candidate that schedules the block's gains and stop law on a stiffness bound. `test_model.py`, `test_linear.py` and `test_robust.py` are the checks (run by `tests/run_all.sh`). The studies are `study_compare.py`, `study_delivery.py` (time-domain scenarios; the latter gives deliverable volume against oxygen charge) and `study_hose_opening.py` (the proximal valve opened at pressure against its bore), `study_linear.py` (discrete-time margins against chamber stiffness), `study_robust.py` (Monte Carlo over the measured parameter ranges against the requirements in `robust.py`, per charge and target) and `study_convergence.py` (integration error against the step); they run from the repo root or that directory with `--set key=value` and `--out DIR`. Python dependencies are in `design/requirements.txt`. Its README gives the model, the numbered model equations, the numerical method, the assumptions still to be measured and the results. It is not part of the product and nothing imports it.
+- `design/pressure-loop/` holds the Python model used to design the slave pressure loop (chamber, actuators, sensor chain) and the studies run on it. It runs the slave's own `FB_AnalogInputFilter`, `FB_PressureInput` and `FB_PressureController`, translated by `tools/st_translate.py --target py` into the gitignored `design/generated/` (regenerated automatically when stale) with their configuration read from the GVL, so the slave controller in the studies is the slave source. The model is split as model, driver and solver: `plant.py` (`Plant.derivatives` is the continuous-time model; the command dead time, stall and state bounds run between steps), `sim.py` (the scan loop) and `solver.py` (fixed-step Heun by default, forward Euler as a check). The plant includes the hose between the cylinder head and the outlet (its virgin saline, its compliance, and the proximal valve's opening as a one-scan equalisation or as a throttled fill through a given bore, with the admitted solution tracked as parcels and flagged where it degassed) and the purge of that saline and the degassed slug before the delivery; `Params.hose_before` selects whether the hose is opened before the compression or after mixing. The plant parameters are the bench measurements (`bench/`), and the requirements are the machine's: a pressure ceiling, no degassing below the saturation pressure of the dissolved oxygen, control kept to the limit switch. `controllers.py` holds the slave's controller and `ScheduledSlaveController`, the candidate that schedules the block's gains and stop law on a stiffness bound. `test_model.py`, `test_linear.py` and `test_robust.py` are the checks (run by `tests/run_all.sh`). The studies are `study_compare.py`, `study_delivery.py` (time-domain scenarios; the latter gives deliverable volume against oxygen charge) and `study_hose_opening.py` (the proximal valve opened at pressure against its bore), `study_linear.py` (discrete-time margins against chamber stiffness), `study_robust.py` (Monte Carlo over the measured parameter ranges against the requirements in `robust.py`, per charge and target) and `study_convergence.py` (integration error against the step); they run from the repo root or that directory with `--set key=value` and `--out DIR`. Python dependencies are in `design/requirements.txt`. Its README gives the model, the numbered model equations, the numerical method, the assumptions still to be measured and the results. It is not part of the product and nothing imports it.
 - Code in `design/` is written to be read by someone assessing the analysis. Every file opens with a header docstring (file name and type, AUTHORS, CREATION DATE, PURPOSE/DESCRIPTION, FILE DEPENDENCY; no revision table and no license block). Module-level sections are marked `# %% ===== NAME =====` and class-level subsections `# ----- Name -----`. Lines stay within 75 columns. Every quantity carries its unit in square brackets (`# [Pa]`) and every conversion is commented (`# [mm/s -> m/s]`). Every equation or group of equations has a written label and cites its number in the README's "Model equations" section (`eq. (5)`); a new equation gets a number there. Comments and docstrings are complete sentences.
 
 ### Master structure
@@ -76,9 +85,9 @@ Each bench (`modbus`, `pressure`, `friction`, `characterisation`) is a directory
 ### Tests
 
 - `smokeMasterStateMachine`: master state machine against a protocol-level stand-in slave (not the ST sim).
-- `closedLoopMasterSlave`: `masterStateMachine` against the generated slave in engineering units. The master steps every 25 ms, the exchange runs every 50 ms and the slave every 2 ms on a 1 ms tick.
+- `closedLoopMasterSlave`: `masterStateMachine` against the generated slave in engineering units. The master steps every 25 ms, the exchange runs every 50 ms and the slave every 4 ms (its scan) on a 1 ms tick.
 - `closedLoopModbusStep`: `masterStep` through the packed register vectors, including link loss on either side.
-- `st2pyParity.py` (Python, run by `run_all.sh`): every scalar-input function block translated by st2py and by st2m, driven with the same seeded random inputs; all variables must agree to 1e-9.
+- `stTargetParity.py` (Python, run by `run_all.sh`): every scalar-input function block translated by the py and m targets, driven with the same seeded random inputs; all variables must agree to 1e-9.
 - `charRunSim`, `charFitsSynthetic`: the characterisation bench (`bench/characterisation/`) against the simulated slave, including the one-pass stopping-distance path, and its four fits on synthetic logs with known parameters.
 
 ## Conventions

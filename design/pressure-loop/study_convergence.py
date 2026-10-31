@@ -49,7 +49,7 @@ import studyutil
 
 
 # %% ===== STUDY VARIABLES ===============================================
-SCENARIOS = ('compress', 'stiffstep', 'discharge', 'valve')
+SCENARIOS = ('compress', 'stiffstep', 'deliver')
 NSUB = (1, 2, 5, 10, 20, 50)        # [-] integration steps per scan
 NSUB_REF = 100                      # [-] steps per scan of the reference
 SOLVERS = ('euler', 'heun')

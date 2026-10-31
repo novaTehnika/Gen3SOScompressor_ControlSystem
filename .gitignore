@@ -1,6 +1,6 @@
-# Generated from slave-src by tools/st2m.py
+# Generated from slave-src by tools/st_translate.py --target m
 slave-sim/generated/
-# Generated from slave-src by tools/st2py.py
+# Generated from slave-src by tools/st_translate.py --target py
 design/generated/
 *.asv
 slprj/
@@ -14,3 +14,5 @@ bench/common/captures/
 bench/common/SafetyHold.slx
 octave-workspace
 __pycache__/
+# Test pass records and logs (tests/run_all.sh)
+.test-cache/

@@ -1,11 +1,10 @@
-#!/usr/bin/env python3
-"""Translate the slave's function blocks into Python modules.
+"""Python target of tools/st_translate.py: the function blocks as modules.
 
-    python3 tools/st2py.py slave-src design/generated
+    python3 tools/st_translate.py --target py slave-src design/generated
 
-The ST subset and the parsing are those of tools/st2m.py; this backend
-subclasses its Translator and overrides only the target-language spellings,
-so the two must be kept in step. Programs (PRG_*) are not translated.
+The ST subset and the parsing are those of tools/st_translate.py; this
+target subclasses its Translator and overrides only the target-language
+spellings. Programs (PRG_*) are not translated.
 
 Generated code (flat imports: put the output directory on sys.path)
     st_runtime.py       E (enumerations), TON, R_TRIG, F_TRIG, st_* helpers,
@@ -30,10 +29,10 @@ import sys
 import copy
 from pathlib import Path
 
-import st2m
-from st2m import STError, STD_FBS, Translator, init_value, load_project
+from st_translate import (STError, STD_FBS, Translator, OctaveInit, init_value,
+                          load_project)
 
-HEADER = '# Generated from slave-src by tools/st2py.py - do not edit.'
+HEADER = '# Generated from slave-src by tools/st_translate.py --target py - do not edit.'
 
 RUNTIME = '''\
 import math
@@ -139,7 +138,7 @@ def F_TRIG(s, dt):
 '''
 
 
-class PyInit(st2m.OctaveInit):
+class PyInit(OctaveInit):
     true, false = 'True', 'False'
 
     def array(self, elem, n):
@@ -233,7 +232,7 @@ class PyTranslator(Translator):
     def resolve(self, name, line):
         if name not in self.vars and name.startswith(('G_', 'MO1_')):
             raise STError(f'{self.pou} line {line}: {name} is a global or I/O '
-                          'point; st2py translates only self-contained blocks')
+                          'point; the py target translates only self-contained blocks')
         return super().resolve(name, line)
 
 
@@ -281,7 +280,7 @@ def gen_module(name, decls, body, calls, ctx):
     return lines
 
 
-def main(src, out):
+def generate(src, out):
     src, out = Path(src), Path(out)
     out.mkdir(parents=True, exist_ok=True)
     for old in out.glob('*.py'):
@@ -310,8 +309,3 @@ def main(src, out):
     print(f'{len(blocks) - len(errors)} of {len(blocks)} function blocks translated to {out}')
     return 1 if errors else 0
 
-
-if __name__ == '__main__':
-    if len(sys.argv) != 3:
-        sys.exit(__doc__)
-    sys.exit(main(sys.argv[1], sys.argv[2]))
