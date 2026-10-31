@@ -985,20 +985,25 @@ a soft chamber at the openings and the closing, where the fixed gain is
 four times too low for the dip and the peak. The scheduled gain
 Kp = wc/k holds 56° at wc = 11 everywhere.
 
-**Open questions:**
-- The mechanical pressure ceiling: 12 MPa is assumed; 15 MPa may break
-  the piston. With the 434 Ω setting the true pressure is
+**Settled:**
+- The mechanical pressure ceiling is 12 MPa (15 MPa may break the
+  piston). With the 434 Ω setting the true pressure is
   (reading + 0.104) / 0.971 MPa, so an 11 MPa target holds at 11.4 MPa;
   with the calibrated 421.4 Ω the reading is true to the meter the
   calibration used (about 1 %, 0.1 MPa at 10 MPa).
+- The saline volume and the oxygen charge, which the schedule's
+  stiffness bound needs, reach the slave over the protocol as holding
+  registers.
+- The proximal valve stays shut during the compression and opens after
+  mixing (`Params.hose_before` False). A switched bypass orifice is not
+  fitted.
+
+**Open questions:**
 - The calibration's reference: a hand-held meter's mA range. A loop
   calibrator would tighten it.
 - The lag at the piston (below 25 ms) and the dissolution time constant
   are the two unmeasured plant parameters; the robustness study covers
   the first, and the second sets only the hold time.
-- Whether the saline volume and the charge can be given to the slave
-  (as configuration or over the protocol), which the schedule's
-  stiffness bound needs.
 - The hose: how much of its 0.24 mL/MPa is wall and how much trapped
   air (air would make the proximal opening worse than eq. (43) at low
   pressure); whether the whole 29 mL is purged; how long the pause
@@ -1006,8 +1011,6 @@ Kp = wc/k holds 56° at wc = 11 everywhere.
   during it (`tube_refills` in the scenario, off by default); and how
   fast the distal valve is shut (`Params.Tclose`, 0 by default, which
   is the worst case and changes the peak by 0.1 MPa).
-- Whether the proximal valve can be opened before the compression in
-  the protocol (the hose's saline is then compressed and mixed with
-  the charge; its 29 mL leave in the purge as before), or whether a
-  bypass orifice of 0.3 mm or less (Cv 0.003), opened ahead of the
-  ball valve, can be fitted and be opened at pressure.
+- Whether a bypass orifice of 0.3 mm or less (Cv 0.003), opened ahead
+  of the ball valve at pressure, is worth fitting later
+  (`study_hose_opening.py`).
