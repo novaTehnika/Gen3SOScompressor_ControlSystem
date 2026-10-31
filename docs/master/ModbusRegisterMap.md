@@ -35,7 +35,11 @@ Configuration creates in the Global Variables worksheet:
   `73792 + 2*(k-1)`
 
 The group address ranges are shown in the worksheet and must be checked
-there; published application notes give other bases.
+there; published application notes give other bases. The simulated slave
+derives its registers from the globals' `AT` addresses with these bases
+(`MODBUS_GROUPS` in `tools/st_target_c.py`), packing 32-bit values low word
+first, and `tests/closedLoopModbusStep.m` checks `modbusMap.m` against them
+before exchanging the 16-bit words with it.
 
 ### Data types
 

@@ -12,8 +12,12 @@ function [sl, y] = slaveStep(sl, u)
 %   Scan order: inputs -> PRG_Input -> PRG_Main -> PRG_Output -> axis model
 %   (slave-sim/c/slave_sim.c). The axis model stands in for the LD POU that
 %   owns the motion function blocks, so PRG_Main sees motion status one scan
-%   late. Packing the registers into 16-bit words is the master-side test's
-%   job. sl is a handle; it is returned for the callers' [sl, y] = form.
+%   late. sl is a handle; it is returned for the callers' [sl, y] = form.
+%
+%   This is the engineering-units view. For the registers as 16-bit words,
+%   use writeHoldingRegisters(sl, start, words), y = scan(sl) and
+%   readInputRegisters(sl, start, n): the simulated slave packs them by its
+%   register map, the globals' AT addresses.
 
 y = step(sl, u);
 end

@@ -10,6 +10,7 @@
 #define SLAVE_SIM_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include "st_slave.h"
 #include "st_names.h"
 #include "plant.h"
@@ -97,8 +98,20 @@ typedef struct {
 
 /* Power-up state; sim must be set before (initial position, frame error). */
 void slave_sim_reset(slave_sim_t *sl);
-/* One controller scan of G_cfgScanTime. */
+/* One controller scan of G_cfgScanTime, with the holding registers set
+ * from u in engineering units first. */
 void slave_sim_step(slave_sim_t *sl, const sim_u_t *u, sim_y_t *y);
+/* One controller scan on the holding registers as they stand. */
+void slave_sim_scan(slave_sim_t *sl, sim_y_t *y);
+
+/* The controller's Modbus server: n registers from start (1-based) of
+ * the holding (holding = 1) or input (holding = 0) group, as 16-bit words
+ * packed from or into the globals the AT addresses name. Registers no
+ * global covers read 0; a write sets only the values it covers whole. */
+void slave_sim_read_registers(const slave_sim_t *sl, int holding, int start, int n,
+                              uint16_t *words);
+void slave_sim_write_registers(slave_sim_t *sl, int holding, int start, int n,
+                               const uint16_t *words);
 
 /* Axis position (mm) at which the chamber, with its present contents,
  * holds gauge pressure P (MPa) at rest. */

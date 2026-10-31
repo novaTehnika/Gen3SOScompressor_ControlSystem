@@ -1,6 +1,7 @@
 function out = fakeProbeLink(cmd, varargin)
 %FAKEPROBELINK Stand-in for the bench runs' Modbus link and clock: the
-%   simulated slave behind the protocol registers (IR1-20, HR1-6), an
+%   simulated slave's own holding and input registers behind the protocol
+%   registers (IR1-20, HR1-6, packed by its register map), an
 %   emulation of PRG_PressureProbe behind the probe registers (HR101,
 %   IR101-113, IR121-370) and one of PRG_StepProbe behind its registers
 %   (HR111, IR401-405, IR411-3410). Time advances only in 'wait'.
@@ -49,7 +50,7 @@ switch cmd
         S.sl.ax.x = S.sl.sim.chamberContactPos + 40;
         S.u = struct('heartbeat', 0, 'modeCode', 0, 'motionEnable', 0, ...
             'faultReset', 0, 'reference', 0);
-        [S.sl, S.y] = slaveStep(S.sl, S.u);
+        S.y = scan(S.sl);
         S.tick = 0;
         S.faultAt = Inf;
         S.faultUntil = Inf;
@@ -94,7 +95,7 @@ switch cmd
                     S = torqueScan(S);
                 end
                 S = valveScan(S);
-                [S.sl, S.y] = slaveStep(S.sl, S.u);
+                S.y = scan(S.sl);
                 S = probeScan(S);
                 S = stepProbeScan(S);
             end
@@ -103,7 +104,7 @@ switch cmd
         start = varargin{1};
         n = varargin{2};
         regs = zeros(1, 3410);
-        regs(1:S.map.nRead) = packRead(S.y, S.map);
+        regs(1:S.map.nRead) = readInputRegisters(S.sl, 1, S.map.nRead);
         regs(101:102) = modbusPack(S.p.stats(1));
         regs(103:104) = modbusPack(S.p.stats(2));
         regs(105:106) = modbusPack(S.p.stats(3));
@@ -130,6 +131,8 @@ switch cmd
     case 'write'
         w = varargin{2};
         assert(varargin{1} == 1 && numel(w) == S.map.nWrite, 'write is not HR1-6');
+        writeHoldingRegisters(S.sl, 1, w);
+        % The master's last write, decoded, for the tests' checks
         S.u.heartbeat    = w(S.map.hr.heartbeat);
         S.u.modeCode     = w(S.map.hr.modeCode);
         S.u.motionEnable = w(S.map.hr.motionEnable);
@@ -268,23 +271,4 @@ if p.state == 1
     end
 end
 S.p = p;
-end
-
-
-function regs = packRead(y, map)
-regs = zeros(1, map.nRead);
-regs(map.ir.heartbeatEcho)     = y.heartbeatEcho;
-regs(map.ir.slaveCounter)      = y.slaveCounter;
-regs(map.ir.confCode)          = y.confCode;
-regs(map.ir.faultCode)         = y.faultCode;
-regs(map.ir.faultActive)       = y.faultActive;
-regs(map.ir.inMotion)          = y.inMotion;
-regs(map.ir.performanceStatus) = y.performanceStatus;
-regs(map.ir.homingComplete)    = y.homingComplete;
-regs(map.ir.position:map.ir.position + 1)   = modbusPack(y.actualPosition);
-regs(map.ir.velocity:map.ir.velocity + 1)   = modbusPack(y.actualVelocity);
-regs(map.ir.torque:map.ir.torque + 1)       = modbusPack(y.actualTorque);
-regs(map.ir.commandedPosition:map.ir.commandedPosition + 1) = ...
-    modbusPack(y.commandedPosition);
-regs(map.ir.pressure:map.ir.pressure + 1) = modbusPack(y.actualPressure);
 end

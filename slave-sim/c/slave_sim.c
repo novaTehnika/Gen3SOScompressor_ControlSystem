@@ -296,14 +296,19 @@ static void axis_model(slave_sim_t *sl, double dt)
 /* One scan: inputs -> PRG_Input -> PRG_Main -> PRG_Output -> axis. */
 void slave_sim_step(slave_sim_t *sl, const sim_u_t *u, sim_y_t *y)
 {
-    double dt = sl->G.G_cfgScanTime;
-    const sim_cfg_t *sim = &sl->sim;
-
     sl->G.G_mbHeartbeat = u->heartbeat;
     sl->G.G_mbModeCode = u->modeCode;
     sl->G.G_mbMotionEnable = u->motionEnable != 0;
     sl->G.G_mbFaultReset = u->faultReset != 0;
     sl->G.G_mbReference = u->reference;
+    slave_sim_scan(sl, y);
+}
+
+void slave_sim_scan(slave_sim_t *sl, sim_y_t *y)
+{
+    double dt = sl->G.G_cfgScanTime;
+    const sim_cfg_t *sim = &sl->sim;
+
     /* Overtravel switches are normally closed: TRUE = not triggered. */
     sl->IO.MO1_DI_06 = sl->ax.x > sim->switchNegPos;
     sl->IO.MO1_DI_07 = sl->ax.x < sim->switchPosPos;
@@ -364,3 +369,63 @@ const st_name_t sim_names[] = {
     PLANT_PARAMS(PAR_ROW)
 };
 const int sim_names_count = sizeof sim_names / sizeof sim_names[0];
+
+/* ----- Modbus registers ---------------------------------------------------- */
+
+/* The bytes of a register group's area are little-endian, as the
+ * controller stores them, so the word at the lower address of a 32-bit
+ * value is its low word. */
+static const st_reg_t *group_regs(int holding, int *count)
+{
+    *count = holding ? st_holding_regs_count : st_input_regs_count;
+    return holding ? st_holding_regs : st_input_regs;
+}
+
+void slave_sim_read_registers(const slave_sim_t *sl, int holding, int start, int n,
+                              uint16_t *words)
+{
+    int count;
+    const st_reg_t *regs = group_regs(holding, &count);
+    memset(words, 0, sizeof *words * (size_t)n);
+    for (int k = 0; k < count; k++) {
+        const st_reg_t *r = &regs[k];
+        const char *p = (const char *)&sl->G + r->offset;
+        uint32_t bits = 0;
+        switch (r->type) {
+        case ST_U16: bits = *(const uint16_t *)p; break;
+        case ST_I16: bits = (uint16_t)*(const int16_t *)p; break;
+        case ST_U32: bits = *(const uint32_t *)p; break;
+        case ST_I32: bits = (uint32_t)*(const int32_t *)p; break;
+        case ST_F32: memcpy(&bits, p, 4); break;
+        }
+        for (int w = 0; w < r->words; w++) {
+            int i = r->first + w - start;
+            if (i >= 0 && i < n)
+                words[i] = (uint16_t)(bits >> (16 * w));
+        }
+    }
+}
+
+void slave_sim_write_registers(slave_sim_t *sl, int holding, int start, int n,
+                               const uint16_t *words)
+{
+    int count;
+    const st_reg_t *regs = group_regs(holding, &count);
+    for (int k = 0; k < count; k++) {
+        const st_reg_t *r = &regs[k];
+        if (r->first < start || r->first + r->words > start + n)
+            continue;                   /* only values written whole */
+        uint32_t bits = 0;
+        for (int w = 0; w < r->words; w++)
+            bits |= (uint32_t)words[r->first + w - start] << (16 * w);
+        char *p = (char *)&sl->G + r->offset;
+        switch (r->type) {
+        case ST_U16: *(uint16_t *)p = (uint16_t)bits; break;
+        case ST_I16: *(int16_t *)p = (int16_t)(uint16_t)bits; break;
+        case ST_U32: *(uint32_t *)p = bits; break;
+        case ST_I32: *(int32_t *)p = (int32_t)bits; break;
+        case ST_F32: memcpy(p, &bits, 4); break;
+        }
+    }
+}
+

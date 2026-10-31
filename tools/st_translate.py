@@ -114,10 +114,11 @@ def parse_header_decls(text, known_types):
 def parse_globals(text, known_types):
     decls = {}
     for line in text.splitlines():
-        m = re.match(r'^\s*(G_\w+)\s*(?:AT\s+%\S+\s*)?:\s*(\w+)\s*(?::=\s*([^\s(]+))?', line)
-        if m and m.group(2) in known_types:
-            decls[m.group(1)] = {'name': m.group(1), 'type': m.group(2),
-                                 'init': m.group(3), 'section': 'VAR_GLOBAL'}
+        m = re.match(r'^\s*(G_\w+)\s*(?:AT\s+%(\S+)\s*)?:\s*(\w+)\s*(?::=\s*([^\s(]+))?', line)
+        if m and m.group(3) in known_types:
+            decls[m.group(1)] = {'name': m.group(1), 'type': m.group(3),
+                                 'init': m.group(4), 'section': 'VAR_GLOBAL',
+                                 'at': m.group(2)}       # e.g. 'QD73812', or None
     return decls
 
 
