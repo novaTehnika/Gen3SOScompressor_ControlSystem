@@ -132,8 +132,8 @@ Hold Secure ______________________|‾‾‾‾‾‾‾‾‾‾‾‾
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | Following Error Update | 4 ms | Calculated each scan |
-| Position Tolerance | 0.1 mm | "At position" threshold |
-| Position Stable Time | 20 ms | Time in tolerance before "done" |
+| Position Tolerance | 0.5 mm | "At target", judged by the master from feedback (`masterConfig.posTolerance`) |
+| Position Stable Time | 100 ms | Time inside the tolerance before "at target" (`masterConfig.tArrive`) |
 
 ### Position Mode Move Timing
 
@@ -146,24 +146,25 @@ acceleration limit `A` (`G_cfgPosShaperAccelMax`). For a setpoint step of size `
 | Trapezoidal | `d > V^2/A` | `d/V + V/A` |
 | Triangular | `d <= V^2/A` | `2*SQRT(d/A)` |
 
-**Worked example at defaults** (`V` = 5 mm/s, `A` = 5 mm/s², so `V^2/A` = 5 mm):
+**Worked example at defaults** (`V` = 6 mm/s, the master's default position speed
+`masterConfig.positionSpeed` and the ceiling `G_cfgVelLimitMax`; `A` = 10 mm/s², so
+`V^2/A` = 3.6 mm):
 
 | Step Size | Profile | Move Time |
 |-----------|---------|-----------|
-| 50 mm | Trapezoidal | ≈ 11.0 s |
-| 1 mm | Triangular | ≈ 0.89 s |
+| 50 mm | Trapezoidal | ≈ 8.9 s |
+| 1 mm | Triangular | ≈ 0.63 s |
 
-`A` (`G_cfgPosShaperAccelMax`) is a commissioning parameter, started conservatively at 5 mm/s²
-and expected to be raised once bench testing confirms available torque headroom (see
-`docs/development/ConfigurationGuide.md`). The move times above therefore represent
-**upper-bound** times at the conservative starting value — actual moves will be faster once
-`A` is tuned up.
+A lower position speed from the master lengthens the trapezoidal moves by `d/V`. `A`
+(`G_cfgPosShaperAccelMax`) is a commissioning parameter, set conservatively at 10 mm/s² and
+to be raised once bench testing confirms the torque headroom (see
+`docs/slave/development/ConfigurationGuide.md`); a larger `A` shortens every move.
 
 ### Position Mode Exit
 
 When MotionEnable (HR3) drops in position mode, the command is ramped to rest under
 `G_cfgPosShaperAccelMax` before the axis is handed to `MC_Stop`, so `G_doInMotion` stays
-TRUE for up to `V/A` after the drop (1.0 s at `V` = 5 mm/s, `A` = 5 mm/s²) plus the
+TRUE for up to `V/A` after the drop (0.6 s at `V` = 6 mm/s, `A` = 10 mm/s²) plus the
 `MC_Stop` settling time.
 
 ### Velocity Mode
@@ -171,8 +172,8 @@ TRUE for up to `V/A` after the drop (1.0 s at `V` = 5 mm/s, `A` = 5 mm/s²) plus
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | Velocity Update | 4 ms | Reference applied each scan |
-| Acceleration Rate | Axis default | From axis configuration |
-| Velocity Threshold | 0.5 mm/s | "Stopped" detection threshold |
+| Acceleration Rate | 10 mm/s² | `G_cfgDirectCtrlAccel`, written to `Y_DirectControl`'s `Acceleration` (no deceleration input) |
+| Velocity Threshold | 0.1 mm/s | "In motion" threshold (`G_cfgInMotionVelThreshold`) |
 
 ### Torque Mode
 

@@ -16,7 +16,9 @@ cfg.atmPerMPa   = 9.869;
 cfg.atmAmbient  = 1;        % atm, added to the slave's gauge reading
 cfg.pressureMax = 15;       % MPa gauge, the slave's G_cfgPressureTargetMax
 
-% Master soft limits, inside the slave's configured travel.
+% Master soft limits, within the slave's soft limits (G_cfgPosSoftLimitMin
+% -2.5 mm, G_cfgPosSoftLimitMax 367 mm): posMin sits above the slave's,
+% posMax is the slave's own.
 cfg.posMin = 0;             % mm
 cfg.posMax = 367;           % mm
 
