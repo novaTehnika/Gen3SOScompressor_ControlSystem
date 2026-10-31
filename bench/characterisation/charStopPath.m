@@ -53,8 +53,11 @@ function [path, plan] = charStopPath(opts)
 %                       stop is over; each ramp's speed is the smaller of
 %                       opts.rampSpeed and what this allows at the level's
 %                       stiffness (default 0.5)
-%   opts.minRun_mm      shortest steady part of a leg (default 0.2 mm or
-%                       0.15 s at the speed, whichever is larger)
+%   opts.minRun_mm, opts.minSteady_s
+%                       shortest steady part of a leg: the larger of
+%                       minRun_mm and minSteady_s at the speed (defaults
+%                       0.2 mm and 0.15 s; 0 and 0 for stops alone, which
+%                       need no steady part)
 %   opts.fillVolume_mL  saline at the first level (default 343)
 %   opts.chargeRatio    gas charge admitted, STP volume per liquid volume
 %                       (default 2.0, air: softer than the oxygen runs, so
@@ -96,7 +99,7 @@ here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'common'));
 cfg = charConfig();
 known = {'levels_MPa', 'speeds', 'budget_MPa', 'rampSpeed', 'hold_s', 'pause_s', 'T0_s', ...
-    'latency_s', 'rampOvershoot_MPa', ...
+    'latency_s', 'rampOvershoot_MPa', 'minSteady_s', ...
     'D_mm_s2', 'minRun_mm', 'fillVolume_mL', 'chargeRatio', 'solubility', 'K_Pa', ...
     'C_hose_m3_Pa', 'stiffness', 'pressureStop', 'deadVolume_mL', 'posStop', 'P_start_MPa', ...
     'quiet'};
@@ -117,6 +120,7 @@ opts = withDefault(opts, 'latency_s', 0.2);
 opts = withDefault(opts, 'rampOvershoot_MPa', 0.5);
 opts = withDefault(opts, 'D_mm_s2', cfg.pressureDecel);
 opts = withDefault(opts, 'minRun_mm', 0.2);
+opts = withDefault(opts, 'minSteady_s', 0.15);
 opts = withDefault(opts, 'fillVolume_mL', 343);
 opts = withDefault(opts, 'chargeRatio', 2.0);
 opts = withDefault(opts, 'solubility', 0.018);
@@ -193,10 +197,28 @@ for L = 1:nL
     % the travel the model predicts from the pressure the ramp starts at
     % (the run's start for the first), plus a margin. Near atmosphere the
     % gas makes the chamber very soft, so the first ramp can be long.
-    travel = travelOf(max(Pprev, 0.02), P);
-    vRamp = rampSpeedAt(k);
-    path{end + 1} = {'ramp', vRamp, P, max(2 * travel / vRamp, 5) + 10};
-    seconds = seconds + travel / vRamp;
+    % The ramp runs in stages of a megapascal, each at the speed the
+    % stiffness at its end allows, so that it is fast while the chamber is
+    % soft and slow only near the level; stages at one speed are merged.
+    P0 = max(Pprev, 0.02);
+    edges = [P0, (ceil(P0 + 1e-9):1:P - 0.5), P];
+    edges = unique(edges(edges <= P));
+    vStage = arrayfun(@(Pe) rampSpeedAt(kOf(Pe)), edges(2:end));
+    q = 1;
+    while q <= numel(vStage)
+        r2 = q;
+        while r2 < numel(vStage) && abs(vStage(r2 + 1) - vStage(q)) < 1e-9
+            r2 = r2 + 1;
+        end
+        Pend = edges(r2 + 1);
+        vRamp = vStage(q);
+        travel = travelOf(edges(q), Pend);
+        path{end + 1} = {'ramp', vRamp, Pend, max(2 * travel / vRamp, 5) + 10};
+        seconds = seconds + travel / vRamp;
+        say('%6s ramp to %.1f MPa: about %.1f mm, %.0f s at %.2f mm/s\n', '', Pend, travel, ...
+            travel / vRamp, vRamp);
+        q = r2 + 1;
+    end
     path{end + 1} = {'dwell', opts.hold_s};
     seconds = seconds + opts.hold_s;
     x = xOf(P);
@@ -212,7 +234,7 @@ for L = 1:nL
     for v = opts.speeds(:)'
         xs = stopOf(v);
         d = allowed - xs;                                   % the leg itself
-        dmin = max(opts.minRun_mm, 0.15 * v);
+        dmin = max(opts.minRun_mm, opts.minSteady_s * v);
         if d < dmin
             say('%6.1f %10.2f %8.1f %10.2f %6g %8s\n', P, k, x, budget(L), v, 'skipped');
             continue;
@@ -231,8 +253,6 @@ for L = 1:nL
         pl.rise_MPa(end + 1) = budget(L);
         say('%6.1f %10.2f %8.1f %10.2f %6g %8.3f %8.3f %8.2f\n', P, k, x, budget(L), v, d, xs, budget(L));
     end
-    say('%6s ramp to %.1f MPa: about %.1f mm, %.0f s at %.2f mm/s\n', '', P, travel, ...
-        travel / vRamp, vRamp);
     plan(end + 1) = pl;
     Pprev = P;
 end

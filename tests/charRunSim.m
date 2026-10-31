@@ -93,8 +93,9 @@ kGas = @(Pq) (Pq + sim.atmMPa).^2 * sim.pistonArea / (sim.atmMPa * sim.chamberGa
     'rampSpeed', 0.5, 'stiffness', kGas, 'T0_s', 0.06, 'latency_s', 0.05, 'D_mm_s2', ccfg.velDecel, ...
     'hold_s', 1, 'pause_s', 3, 'quiet', true));
 nStops = plan(1).nStops;
-assert(nStops >= 6 && numel(path) == 2 * numel(plan) + 2 * nStops + nStops / 2 + 2, 'plan: %d stops, %d steps', ...
-    nStops, numel(path));
+types = cellfun(@(s) s{1}, path, 'UniformOutput', false);
+assert(nStops >= 6 && sum(strcmp(types, 'move')) == nStops && sum(strcmp(types, 'settle')) == nStops / 2, ...
+    'plan: %d stops, %d steps', nStops, numel(path));
 r = charRun('simstop', path, opts);
 assert(isempty(r.abort), r.abort);
 L = r.runLog;
