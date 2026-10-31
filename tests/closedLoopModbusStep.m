@@ -26,7 +26,7 @@ h.app = struct('op', 0, 'cmdSeq', 0, 'targetPosition', 100, 'targetVelocity', 0,
     'jogDirection', 0, 'targetPressure', 0, 'estop', 0, 'mixer', 0, ...
     'positionSpeed', cfg.positionSpeed);
 h.u = struct('heartbeat', 0, 'modeCode', 0, 'motionEnable', 0, ...
-    'faultReset', 0, 'reference', 0);
+    'faultReset', 0, 'reference', 0, 'positionSpeed', 0);
 [h.sl, h.y] = slaveStep(h.sl, h.u);
 h.mbRead = zeros(1, map.nRead);
 h.tick = 0;

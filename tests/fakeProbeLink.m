@@ -48,7 +48,7 @@ switch cmd
         S.sl.sim.switchPosPos = S.cfg.posMax + 10;
         S.sl.ax.x = S.sl.sim.chamberContactPos + 40;
         S.u = struct('heartbeat', 0, 'modeCode', 0, 'motionEnable', 0, ...
-            'faultReset', 0, 'reference', 0);
+            'faultReset', 0, 'reference', 0, 'positionSpeed', 0);
         [S.sl, S.y] = slaveStep(S.sl, S.u);
         S.tick = 0;
         S.faultAt = Inf;

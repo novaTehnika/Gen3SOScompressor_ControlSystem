@@ -323,7 +323,6 @@ ELSIF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
             G_sysConfirmedMode := E_OperatingMode#MODE_POSITION;
             stCurrentLimits.PosMax := G_cfgPosSoftLimitMax;
             stCurrentLimits.PosMin := G_cfgPosSoftLimitMin;
-            stCurrentLimits.VelMax := G_cfgVelLimitMax;
             stCurrentLimits.TorqueMax := G_cfgTorqueLimitNormal;
             bPosStopping := FALSE;
         END_IF;
@@ -692,7 +691,6 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
             G_sysConfirmedMode := E_OperatingMode#MODE_POSITION;
             stCurrentLimits.PosMax := G_cfgPosSoftLimitMax;
             stCurrentLimits.PosMin := G_cfgPosSoftLimitMin;
-            stCurrentLimits.VelMax := G_cfgVelLimitMax;
             stCurrentLimits.TorqueMax := G_cfgTorqueLimitNormal;
             bPosStopping := FALSE;
         END_IF;
@@ -951,8 +949,9 @@ IF bPositionMode THEN
        inputs therefore set no limits in this mode. fbPosShaper
        (FB_PositionPathShaper) does the path shaping, and its VelMax
        (the master's position speed, HR7-8) and AccelMax are what limit a
-       position move. *)
-    G_cmdDirectControl.Velocity := stCurrentLimits.VelMax;
+       position move. The block is given the shaper's speed, so the two
+       never disagree. *)
+    G_cmdDirectControl.Velocity := rPosShaperVelMax;
     G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
     bKeepDirectControl := TRUE;
     eKeepDirectMode := Y_ControlMode#PositionMode;
@@ -1012,6 +1011,8 @@ ELSIF (G_sysCurrentState = E_SystemState#ST_HOLD_POSITION) OR
             G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
             IF eKeepDirectMode = Y_ControlMode#VelocityTLMode THEN
                 G_cmdDirectControl.Velocity := LREAL#0.0;
+            ELSIF eKeepDirectMode = Y_ControlMode#PositionMode THEN
+                G_cmdDirectControl.Velocity := rPosShaperVelMax;
             ELSE
                 G_cmdDirectControl.Velocity := stCurrentLimits.VelMax;
             END_IF;

@@ -138,7 +138,7 @@ end
 function h = harnessInit()
 h.sl = slaveInit();
 h.u = struct('heartbeat', 0, 'modeCode', 0, 'motionEnable', 0, ...
-    'faultReset', 0, 'reference', 0);
+    'faultReset', 0, 'reference', 0, 'positionSpeed', 0);
 [h.sl, h.y] = slaveStep(h.sl, h.u);
 h.t = 0;
 h.vMax = 0;
