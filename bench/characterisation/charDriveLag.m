@@ -7,8 +7,8 @@ function r = charDriveLag(files, opts)
 %   r = charDriveLag(file)
 %   r = charDriveLag({capture1, capture2, ..., runLog}, opts)
 %
-%   Captures (PRG_StepProbe, 2 ms: t, vCmd, velocity, torque, position,
-%   pressure) give the lag at the motor: tauV and Td are fitted to the
+%   Captures (PRG_StepProbe, one row per slave scan: t, vCmd, velocity,
+%   torque, position, pressure) give the lag at the motor: tauV and Td are fitted to the
 %   velocity feedback by least squares. The feedback is the controller's
 %   axis velocity, the motor encoder differentiated and scaled through the
 %   gear ratio and screw lead, so gearbox lost motion and screw compliance
@@ -31,7 +31,11 @@ function r = charDriveLag(files, opts)
 %
 %   opts.accel, opts.decel  mm/s^2 (default charConfig: G_cfgDirectCtrlAccel/Decel)
 %   opts.fitAccel           also fit a common scale on the slew limits (default false)
-%   opts.Ts                 slave scan (default charConfig)
+%   opts.Ts                 slave scan for the run-log fits (default charConfig)
+%   opts.rowPeriod_s        s, the spacing of the capture rows, which replaces
+%                           the capture's own t column (default charConfig scan).
+%                           The 26 October captures carry a t written at 2 ms
+%                           per row; the scan was 4 ms.
 %   opts.filterTau, opts.medianSize, opts.pipelineScans
 %                           sensor chain for the pressure fit (default charConfig)
 %   opts.minStep            mm/s, smaller command changes are ignored (default 0.2)
@@ -71,6 +75,7 @@ opts = withDefault(opts, 'accel', cfg.velAccel);
 opts = withDefault(opts, 'decel', cfg.velDecel);
 opts = withDefault(opts, 'fitAccel', false);
 opts = withDefault(opts, 'Ts', cfg.scanTime);
+opts = withDefault(opts, 'rowPeriod_s', cfg.scanTime);
 opts = withDefault(opts, 'filterTau', cfg.filterTau);
 opts = withDefault(opts, 'medianSize', cfg.medianSize);
 opts = withDefault(opts, 'pipelineScans', cfg.pipelineScans);
@@ -129,7 +134,7 @@ if ~isempty(caps)
         numel(tau), 1000 * mean(tau), 1000 * std(tau), 1000 * r.Td_s);
     checks{end + 1} = check('residual', max([caps.residual]), 0, 0.05, 'capture fit residual as a fraction of the step');
     checks{end + 1} = check('tauV_ms', 1000 * [min(tau) max(tau)], 2, 100, 'plausible first-order lag');
-    checks{end + 1} = check('Td_ms', 1000 * [caps.Td], 0, 30, 'dead time within a few scans and a Modbus tick');
+    checks{end + 1} = check('Td_ms', 1000 * [caps.Td], 0, 60, 'dead time within a few scans and a Modbus tick');
     if numel(tau) > 1
         checks{end + 1} = check('spread', std(tau) / mean(tau), 0, 0.3, 'capture-to-capture spread of tauV');
     end
@@ -193,7 +198,12 @@ end
 
 % ===========================================================================
 function c = fitCapture(d, opts, say)
-Ts = median(diff(d.t));
+Ts = opts.rowPeriod_s;
+if abs(median(diff(d.t)) - Ts) > 1e-4
+    say('  %s: t column spaced %.1f ms, rows taken as %.1f ms apart\n', d.file, ...
+        1000 * median(diff(d.t)), 1000 * Ts);
+end
+d.t = d.t(1) + (0:numel(d.t) - 1)' * Ts;
 cmd = d.vCmd;
 v = d.velocity;
 [~, c.file] = fileparts(d.file);
@@ -217,12 +227,25 @@ pre = 1:j;
 v0 = mean(v(pre));
 c.stepSize = cmd(j + 1) - cmd(j);
 
-th0 = [log(0.02) 0.004];
-if opts.fitAccel
-    th0(3) = 0;
+% Several starting dead times: below a zero dead time the cost is flat in
+% Td, and a simplex started there settles on a long lag with none. The
+% dead time is searched as Td = u^2, which reaches zero smoothly, and the
+% lag and dead time are bounded to 1 ms to 0.5 s and 0 to 0.2 s.
+toTh = @(u) [u(1) u(2)^2 u(3:end)];
+cost = @(u) boundedCost(toTh(u), @(t) sum((v - velModel(t, cmd, Ts, v0, opts)).^2), opts.fitAccel);
+fmo = optimset('TolX', 1e-6, 'TolFun', 1e-9, 'MaxFunEvals', 4000, 'MaxIter', 2000);
+best = Inf;
+for Td0 = 0.004:0.008:0.052
+    u0 = [log(0.02) sqrt(Td0)];
+    if opts.fitAccel
+        u0(3) = 0;
+    end
+    uk = fminsearch(cost, u0, fmo);
+    if cost(uk) < best
+        best = cost(uk);
+        th = toTh(uk);
+    end
 end
-cost = @(th) sum((v - velModel(th, cmd, Ts, v0, opts)).^2);
-th = fminsearch(cost, th0, optimset('TolX', 1e-6, 'TolFun', 1e-9, 'MaxFunEvals', 4000, 'MaxIter', 2000));
 c.tauV = exp(th(1));
 c.Td = max(th(2), 0);
 if opts.fitAccel
@@ -273,6 +296,22 @@ if isnan(c.tauP)
 else
     txt = sprintf('; pressure: tauP %.1f ms, TdP %.1f ms, k %.2f MPa/mm, residual %.1f %%', ...
         1000 * c.tauP, 1000 * c.TdP, c.k_MPa_mm, 100 * c.residualP);
+end
+end
+
+
+function J = boundedCost(th, f, withScale)
+% The cost f(th) inside the search bounds, a steep wall outside them.
+lo = [log(0.001) 0];
+hi = [log(0.5) 0.2];
+out = max(lo - th(1:2), 0) + max(th(1:2) - hi, 0);
+if withScale && numel(th) >= 3
+    out(end + 1) = max(abs(th(3)) - 5, 0);
+end
+if any(out > 0)
+    J = 1e6 * (1 + sum(out));
+else
+    J = f(th);
 end
 end
 

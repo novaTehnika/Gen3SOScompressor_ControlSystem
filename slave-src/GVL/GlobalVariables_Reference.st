@@ -178,7 +178,7 @@
         tethered to within G_cfgPosGateMaxDeviation of actual position.
         ======================================================================== *)
 
-     G_cfgScanTime             : LREAL := 0.002       (* Task period (s). dt for the gate and the analog filter alpha.
+     G_cfgScanTime             : LREAL := 0.004       (* Task period (s). dt for the gate and the analog filter alpha.
                                                           Must match the cyclic task interval in the MWiec task
                                                           configuration (2 ms is the MP2600iec lower bound). *)
      G_cfgPosGateAccelMax      : LREAL := 10.0         (* Command accel limit (mm/s^2). Conservative start - raise on the

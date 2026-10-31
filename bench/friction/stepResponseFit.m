@@ -10,6 +10,11 @@ function r = stepResponseFit(files, opts)
 %   opts.accel, opts.decel
 %                slew of the velocity command on the slave, mm/s^2
 %                (default G_cfgDirectCtrlAccel from frictionBenchConfig)
+%   opts.rowPeriod_s
+%                spacing of the capture rows in s, replacing the capture's
+%                own t column (default G_cfgScanTime from benchGvl). The
+%                26 October captures carry a t written at 2 ms per row;
+%                the scan was 4 ms.
 %   opts.quiet   no printing
 %
 %   A capture holds about a second of the commanded velocity, the actual
@@ -47,13 +52,17 @@ if ~isfield(opts, 'quiet')
     opts.quiet = false;
 end
 here = fileparts(mfilename('fullpath'));
-addpath(fullfile(here, '..', '..', 'master-src', 'logic'));
+addpath(fullfile(here, '..', '..', 'master-src', 'logic'), fullfile(here, '..', 'common'));
 cfg = frictionBenchConfig();
 if ~isfield(opts, 'accel')
     opts.accel = cfg.accel;
 end
 if ~isfield(opts, 'decel')
     opts.decel = cfg.accel;
+end
+if ~isfield(opts, 'rowPeriod_s')
+    g = benchGvl();
+    opts.rowPeriod_s = g.G_cfgScanTime;
 end
 say = @(varargin) printUnless(opts.quiet, varargin{:});
 
@@ -71,6 +80,7 @@ for f = 1:numel(files)
     if size(d, 2) < 5
         error('%s: %d columns, expected t,vCmd,velocity,torque,position[,pressure]', files{f}, size(d, 2));
     end
+    d(:, 1) = d(1, 1) + (0:size(d, 1) - 1)' * opts.rowPeriod_s;
     t = d(:, 1); vCmd = d(:, 2); v = d(:, 3); F = d(:, 4) * k; x = d(:, 5);
     dt = median(diff(t));
     N = numel(t);
@@ -196,7 +206,7 @@ end
 function [tauV, td, best] = fitLag(vRef, v, v0, win, dt)
 % Grid search of the first-order lag and the delay on the rms error.
 taus = [0.001:0.001:0.01 0.012:0.002:0.05 0.055:0.005:0.2];
-delays = 0:30;
+delays = 0:ceil(0.15 / dt);          % up to 150 ms of dead time
 best = Inf;
 tauV = NaN;
 td = NaN;
