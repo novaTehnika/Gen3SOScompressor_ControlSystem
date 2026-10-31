@@ -13,10 +13,10 @@ This document provides a high-level overview of the slave controller's software 
 
 ## 2. Software Block Diagram
 
-The application spans two POUs: `PRG_Main` (Structured Text) contains the state machine and all custom function blocks, and a Ladder Diagram POU owns `G_sysAxis` together with every built-in motion FB (`MC_Power`, `MC_Stop`, `MC_Reset`, `MC_MoveAbsolute`, `MC_MoveVelocity`, `MC_SetPosition`, `MC_ReadActual*`, `Y_DirectControl`). The two POUs exchange data each scan through a pair of structured global families:
+The application spans two POUs: `PRG_Main` (Structured Text) contains the state machine and all custom function blocks, and a Ladder Diagram POU owns `G_sysAxis` together with every built-in motion FB (`MC_Power`, `MC_Stop`, `MC_Reset`, `MC_MoveAbsolute`, `MC_SetPosition`, `MC_ReadActual*`, Jog, `Y_DirectControl`). The two POUs exchange data each scan through a pair of structured global families:
 
-- **`G_cmd*`** — written by `PRG_Main`, read by the LD POU. Each struct mirrors the pin names of its target built-in FB (`G_cmdPower`, `G_cmdStop`, `G_cmdReset`, `G_cmdMoveAbsolute`, `G_cmdMoveVelocity`, `G_cmdDirectControl`, `G_cmdSetPosition`).
-- **`G_sta*`** — written by the LD POU, read by `PRG_Main` and by custom FBs that need built-in FB status (`G_staPower`, `G_staStop`, `G_staReset`, `G_staMoveAbsolute`, `G_staMoveVelocity`, `G_staDirectControl`, `G_staSetPosition`).
+- **`G_cmd*`** — written by `PRG_Main`, read by the LD POU. Each struct mirrors the pin names of its target built-in FB (`G_cmdPower`, `G_cmdStop`, `G_cmdReset`, `G_cmdMoveAbsolute`, `G_cmdJog`, `G_cmdDirectControl`, `G_cmdSetPosition`).
+- **`G_sta*`** — written by the LD POU, read by `PRG_Main` and by custom FBs that need built-in FB status (`G_staPower`, `G_staStop`, `G_staReset`, `G_staMoveAbsolute`, `G_staJog`, `G_staDirectControl`, `G_staSetPosition`).
 
 `PRG_Main` is structured as a series of processing stages that execute on every 2 ms scan cycle (the cyclic task interval, mirrored by `G_cfgScanTime`).
 

@@ -434,7 +434,6 @@
         DIAGNOSTICS
         ======================================================================== *)
 
-     G_sysCycleCount           : UDINT := 0       (* Main program cycle counter *)
      G_sysLastFaultCode        : E_FaultCode := FAULT_NONE    (* Last fault that occurred *)
      G_sysLastFaultState       : E_SystemState := ST_INIT     (* State when last fault occurred *)
      G_sysFaultCount           : UDINT := 0       (* Total number of faults since power-up *)
@@ -464,7 +463,6 @@
      G_cmdStop             : ST_CmdStop
      G_cmdReset            : ST_CmdReset
      G_cmdMoveAbsolute     : ST_CmdMoveAbsolute
-     G_cmdMoveVelocity     : ST_CmdMoveVelocity     (* unused after Jog conversion; retained for future use *)
      G_cmdJog              : ST_CmdJog
      G_cmdDirectControl    : ST_CmdDirectControl
      G_cmdSetPosition      : ST_CmdSetPosition
@@ -478,7 +476,6 @@
      G_staStop             : ST_StaStop
      G_staReset            : ST_StaReset
      G_staMoveAbsolute     : ST_StaMoveAbsolute
-     G_staMoveVelocity     : ST_StaMoveVelocity     (* unused after Jog conversion; retained for future use *)
      G_staJog              : ST_StaJog
      G_staDirectControl    : ST_StaDirectControl
      G_staSetPosition      : ST_StaSetPosition

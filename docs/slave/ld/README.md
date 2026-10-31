@@ -37,6 +37,15 @@ keep the table to what the picture shows.
 | ErrorID | out | not wired | |
 
 The other blocks (`MC_Power`, `MC_Stop`, `MC_Reset`, `MC_MoveAbsolute`,
-`MC_MoveVelocity`, `MC_SetPosition`, `MC_ReadActual*`, Jog) are not yet
-recorded; the top of the screenshot shows the `MC_MoveVelocity`
-instance's `Direction` and `BufferMode` pins only.
+`MC_SetPosition`, `MC_ReadActual*`, Jog) are not yet recorded; the top of
+the screenshot shows the `MC_MoveVelocity` instance's `Direction` and
+`BufferMode` pins only.
+
+## To change: remove `MC_MoveVelocity`
+
+`G_cmdMoveVelocity` and `G_staMoveVelocity` (types `ST_CmdMoveVelocity`
+and `ST_StaMoveVelocity`) no longer exist in the Structured Text, and
+nothing writes or reads them. In MotionWorks, delete the `MC_MoveVelocity`
+instance from the LD POU together with the two globals and the two types,
+and delete `MC_MoveVelocity_1.PNG`. Also delete the global `G_sysCycleCount`,
+which `PRG_Main` no longer increments.
