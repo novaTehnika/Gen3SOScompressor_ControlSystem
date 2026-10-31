@@ -24,7 +24,7 @@ opts.probe = true;
 % A capture is 500 scans, 2 s at the 4 ms scan, and its readout takes
 % about as long again, so each dwell outlasts both.
 path = {{'ramp', 0.1, 3.0, 40}, {'dwell', 4}, {'ramp', -0.1, 2.0, 40}, ...
-        {'velstep', [0.25 0], [4 4]}, {'hold', 1}};
+        {'velstep', [0.2 0], [4 4]}, {'hold', 1}};
 r = charRun('sim', path, opts);
 assert(isempty(r.abort), r.abort);
 L = r.runLog;
@@ -46,7 +46,7 @@ j = find(cap.data(:, 2) ~= 0, 1);
 assert(~isempty(j) && abs(cap.data(j, 2) - 0.1) < 1e-3 && j > 5, 'first capture not around the 0.1 mm/s command');
 assert(cap.data(min(j + 60, 500), 3) > 0.09, 'velocity did not follow the command in the capture');
 cap = r.captures{4};
-j = find(abs(cap.data(:, 2) - 0.25) < 1e-3, 1);
+j = find(abs(cap.data(:, 2) - 0.2) < 1e-3, 1);
 assert(~isempty(j) && abs(cap.data(j - 1, 2) + 0.1) < 1e-3, 'velstep capture command');
 assert(exist(r.file, 'file') == 2 && numel(r.capFiles) == 5);
 assert(r.exchangeFailures == 0 && r.probeFailures == 0);
