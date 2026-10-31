@@ -7,6 +7,7 @@ function out = fakeProbeLink(cmd, varargin)
 %
 %   fakeProbeLink('init')               fresh slave, axis 40 mm into the chamber
 %   fakeProbeLink('faultAt', t)         drive fault injected at t seconds
+%   fakeProbeLink('faultAt', t, until)  the fault clears again at until
 %   fakeProbeLink('slave', fn)          sl = fn(sl): edit the simulated slave
 %   fakeProbeLink('torqueModel', p)     report a friction torque (below)
 %   fakeProbeLink('valveAt', t, Cd)     outlet valve opens at t seconds: the
@@ -49,6 +50,7 @@ switch cmd
         [S.sl, S.y] = slaveStep(S.sl, S.u);
         S.tick = 0;
         S.faultAt = Inf;
+        S.faultUntil = Inf;
         S.torque = [];
         S.valve = struct('at', Inf, 'Cd', 0.7, 'open', false, 'collected', 0);
         S.collectLog = zeros(0, 2);
@@ -63,6 +65,10 @@ switch cmd
             'min', Inf, 'max', -Inf, 'n', 0, 'stats', zeros(1, 4), 'live', 0);
     case 'faultAt'
         S.faultAt = varargin{1};
+        S.faultUntil = Inf;
+        if numel(varargin) > 1
+            S.faultUntil = varargin{2};
+        end
     case 'slave'
         S.sl = varargin{1}(S.sl);
     case 'torqueModel'
@@ -77,8 +83,10 @@ switch cmd
     case 'wait'
         while S.tick / 1000 < varargin{1}
             S.tick = S.tick + 1;
-            if S.tick / 1000 >= S.faultAt
+            if S.tick / 1000 >= S.faultAt && S.tick / 1000 < S.faultUntil
                 S.sl.hook.driveFault = true;
+            elseif S.tick / 1000 >= S.faultUntil
+                S.sl.hook.driveFault = false;
             end
             if mod(S.tick, 2) == 0
                 if ~isempty(S.torque)

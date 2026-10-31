@@ -8,7 +8,7 @@ function sim = slaveSimConfig()
 %   overtravel switch.
 
 sim.switchNegPos   = -5.0;   % negative overtravel switch active at or below (mm)
-sim.switchPosPos   = 310.0;  % positive overtravel switch active at or above (mm)
+sim.switchPosPos   = 370.0;  % positive overtravel switch active at or above (mm), past the 367 mm soft limit
 sim.hardStopMargin = 3.0;    % travel past either switch before the hard stop (mm)
 sim.initialPos     = 40.0;   % x at power-up (mm)
 sim.bootFrameError = 0.0;    % controller position minus x at power-up (mm); 0 = retained absolute frame
@@ -26,9 +26,11 @@ sim.pistonArea        = 3431;    % mm^2
 sim.atmMPa            = 0.101325;
 
 % Transducer and shunt as wired: 4-20 mA over sensorRangeMPa, read as the
-% voltage across the shunt on the controller's analog input.
+% voltage across the shunt on the controller's analog input. The shunt is
+% the effective resistance the input reads: the 434 ohm resistor in
+% parallel with the input's own load (bench/pressure/README.md section 6).
 sim.sensorZeroMa   = 4;
 sim.sensorSpanMa   = 16;
 sim.sensorRangeMPa = 16;
-sim.sensorShuntOhm = 434;
+sim.sensorShuntOhm = 421.4;
 end

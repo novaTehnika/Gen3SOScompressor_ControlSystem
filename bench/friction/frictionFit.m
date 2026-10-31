@@ -12,6 +12,9 @@ function r = frictionFit(unloaded, loaded, opts)
 %                     the loaded logs are jog sets under a gas charge and
 %                     pressure-mode deliveries. Either may be empty.
 %   opts.quiet        no printing
+%   opts.logShuntOhms G_cfgPressureShuntOhms the logs were recorded with;
+%                     their pressure is rescaled to the present setting
+%                     (benchPressureRescale; default: present)
 %
 %   Every torque sample is converted to the force the motor would exert at
 %   the piston through a lossless drivetrain, F = T * newtonPerPct
@@ -62,6 +65,9 @@ end
 if ~isfield(opts, 'quiet')
     opts.quiet = false;
 end
+if ~isfield(opts, 'logShuntOhms')
+    opts.logShuntOhms = [];
+end
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', '..', 'master-src', 'logic'));
 cfg = frictionBenchConfig();
@@ -78,10 +84,12 @@ segs = [];
 bins = [];
 for k = 1:numel(filesU)
     L = readLog(filesU{k});
+    L.pressure = benchPressureRescale(L.pressure, opts.logShuntOhms);
     segs = [segs jogSegments(L, cfg, 'unloaded', filesU{k})]; %#ok<AGROW>
 end
 for k = 1:numel(filesL)
     L = readLog(filesL{k});
+    L.pressure = benchPressureRescale(L.pressure, opts.logShuntOhms);
     segs = [segs jogSegments(L, cfg, 'loaded', filesL{k})]; %#ok<AGROW>
     bins = [bins pressureBins(L, cfg, filesL{k})]; %#ok<AGROW>
 end

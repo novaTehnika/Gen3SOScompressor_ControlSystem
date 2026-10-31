@@ -99,12 +99,12 @@ the compliance uses the present saline volume, and the gas dissolved in
 the saline leaves in proportion, so the chamber stiffens as it empties:
 the liquid-only stiffness A·K/V_l is 11 MPa/mm with 300 mL left and
 140 MPa/mm with 25 mL left (K = 1 GPa). The piston cannot sweep the
-passages of the cylinder head, 50 mL; it reaches the limit switch
+passages of the cylinder head, 57 mL; it reaches the limit switch
 there, the machine halts, and the delivery ends. With the hose open
-the dead volume is the passages, the hose and the tube, 79 mL, so the
-deliverable solution is the saline volume less 79 mL (and the hose's
+the dead volume is the passages, the hose and the tube, 86 mL, so the
+deliverable solution is the saline volume less 86 mL (and the hose's
 own 29 mL of virgin saline, which is purged, is not solution): about
-256 mL.
+249 mL.
 
 **Oxygen charge and saturation.** The charge is given as the ratio of
 its STP volume to the saline volume (1:1, 2:1, ...) and is admitted at
@@ -200,9 +200,10 @@ force A times the target.
 
 **Sensor and timing.** The chamber gauge pressure becomes a 4-20 mA loop
 current over the configured transducer range and a voltage across the
-shunt, plus the transducer's zero error (measured −0.11 MPa with the
-chamber open) and white noise specified as an RMS pressure (measured
-2.0 mV rms on the 434 Ω shunt, 4.6 kPa, broadband; 0.8 mV with a 4.7 µF
+shunt, plus the transducer's zero error (zero once the input is
+calibrated: the slave's `G_cfgPressureShuntOhms` is the effective
+421.4 Ω the input reads, `bench/pressure/README.md` section 6) and white
+noise specified as an RMS pressure (measured 2.0 mV rms across the shunt, 4.6 kPa, broadband; 0.8 mV with a 4.7 µF
 capacitor across the shunt). The slave's median
 and low-pass block filters the voltage, with its coefficient computed as
 `PRG_Main` computes it, and the slave's scaling block converts it to MPa.
@@ -632,7 +633,7 @@ the limits (`THRESH`), the requirements and the sampler.
 |---|---|---|---|
 | K | 0.6–1.0 GPa | log | measured 0.72 (segments 0.67–0.78, gas-corrected 0.81) |
 | Vl0 | 320–360 mL | linear | fill at the 280 mm start, 343 mL from the geometry |
-| passages | 45–55 mL | linear | measured 50 mL with the hose shut |
+| passages | 52–62 mL | linear | measured 57 mL with the hose shut |
 | hose compliance | 0.12–0.36 mL/MPa | log | 0.24 mL/MPa by difference of two bulk-modulus runs |
 | tauDiss | 10–100 s | log | not measured |
 | tauV | 5–25 ms | log | 8.7 ms at the motor; below 25 ms at the piston |
@@ -641,7 +642,7 @@ the limits (`THRESH`), the requirements and the sampler.
 | supply pressure | 0.52–1.38 MPa | linear | 75–200 psi with the cylinder's charge |
 
 The ranges are the bench measurements of 2026-10-26 with their spread
-(`bench/characterisation/README.md` section 7, `bench/friction`,
+(`bench/characterisation/README.md` section 8, `bench/friction`,
 `bench/pressure`). `mr`, `b`, `Fc` and `mu` act only in torque mode and
 the stall, so they are not varied; the dead time is fixed at its
 measured 12 ms. Each
@@ -672,7 +673,7 @@ the four most influential parameters, then a Latin hypercube sample
 are the GVL (the 20 ms filter and StopVelMin 2 mm/s, which passes the
 1.4 mm/s the measured outflow needs); the earlier StopVelMin of 0.5 mm/s
 as a reference; the scheduled controller at wc = 6, 11 and 16 rad/s with
-the measured bounds (K_cfg 1.0 GPa, dead volume 74 mL, hose compliance
+the measured bounds (K_cfg 1.0 GPa, dead volume 81 mL, hose compliance
 0.12 mL/MPa); and wc = 11 with VelMax 7 mm/s. `--hose-before` runs the
 proposed procedure (the hose opened before the compression). Every
 configuration sees the same samples and noise seeds.
@@ -682,7 +683,7 @@ supply the flow, so no built-in configuration uses it.
 
 ## Measured values
 
-The bench tests of 2026-10-26 (`bench/`, branch `bench-tests`) replaced
+The bench tests of 2026-10-26 (`bench/`) replaced
 the guessed parameters. The values the model now carries, with what was
 assumed before:
 
@@ -690,7 +691,7 @@ assumed before:
 |---|---|---|---|
 | Effective bulk modulus K | 0.72 GPa (0.67–0.78; 0.81 gas-corrected) | 1 GPa | `charBulkModulus`, 3 runs at a 343 mL fill |
 | Saline volume Vl0 | 343 mL at the 280 mm start, including the dead volume | 300 mL | geometry |
-| Dead volume | 50 mL of passages (hose shut); 79 mL with the 29 mL hose and the tube (delivery) | 20–30 mL (then 10 mL in the master) | 50 g of water fills it |
+| Dead volume | 57 mL of passages (hose shut, with the present fittings); 86 mL with the 29 mL hose and the tube (delivery) | 20–30 mL (then 10 mL in the master) | 57 g of water fills it |
 | Hose compliance | 0.24 mL/MPa | not modelled | difference between bulk-modulus runs with the hose shut and open |
 | Orifice Cd | 0.85 (0.84–0.87), exponent 0.48; 4.8 mL/s at 10 MPa | 0.7; 4.0 mL/s | `charOrificeFlow`, deliveries at 2, 5 and 10 MPa |
 | Drive response | 12 ms dead time, 8.7 ms lag at the motor, no slew | 20 ms lag, slewed at the configured accel | `stepResponseFit`, 74 step captures |
@@ -700,7 +701,7 @@ assumed before:
 | Load-dependent friction mu | 0.45 (efficiency 0.69 pushing) | 0.85 efficiency | `frictionFit` |
 | Breakaway | about 24 kN | — | `frictionFit` |
 | Sensor noise | 2.0 mV rms (4.6 kPa) bare, 0.8 mV (1.8 kPa) with 4.7 µF; broadband | 5 kPa | `pressureNoiseProbe` |
-| Transducer zero | −0.11 MPa with the chamber open | 0 | every log |
+| Transducer zero | +0.002 MPa vented with the input calibrated (421.4 Ω effective shunt); with the 434 Ω setting the reading was 0.971 P − 0.104 MPa | 0 | current source, `bench/pressure` section 6 |
 
 Still to measure: the dissolution time constant tauDiss (the hold time
 before delivery depends on it) and the lag at the piston. The GVL on the
@@ -717,10 +718,14 @@ apply), stop-law stiffness 100 MPa/mm, StopVelMin 2 mm/s and the 20 ms
 filter. StopVelMin was 0.5 mm/s until this study; that setting appears
 below as "StopVelMin 0.5". The time-domain results use
 Heun's method at five steps per scan and the measured plant: K 0.72 GPa,
-343 mL of saline with 50 mL of passages and a 29 mL hose, Cd 0.85, a
+343 mL of saline with 57 mL of passages and a 29 mL hose, Cd 0.85, a
 12 ms dead time
-and 8.7 ms lag in the drive, and the −0.11 MPa transducer offset, which
-puts the true pressure 0.11 MPa above every target.
+and 8.7 ms lag in the drive, and a −0.11 MPa transducer offset, which
+puts the true pressure 0.11 MPa above every target. That offset is the
+slave's reading at zero with the 434 Ω setting; with the input
+calibrated it is zero (the `Params` default), and
+`--set P_offset=-0.11e6` reproduces the results below. The 2.9 % gain
+error of the uncalibrated reading is not in them.
 
 **Velocity versus torque command.** Velocity command wins, now more
 clearly. The drive's own velocity loop absorbs the 6 kN of Coulomb and
@@ -840,14 +845,14 @@ measurement delayed by the sensor chain, which is not yet built.
 **Delivery and the stop-law floor.** The orifice bank passes 4.8 mL/s at
 10 MPa (the bench measured it), which needs the piston at 1.4 mm/s, and
 the run from the first opening to the limit switch takes 75 s: the
-29 mL purge, the pause and 256 mL of solution. With StopVelMin at its
+29 mL purge, the pause and 249 mL of solution. With StopVelMin at its
 earlier 0.5 mm/s the loop sat low for the whole delivery: the stop law,
 which with 100 MPa/mm and 50 mm/s² admits the 1.4 mm/s the outflow
 needs only at an error of about 2 MPa, holds the integrator through its
 anti-windup. The bench saw this: the loop held 8.1 MPa for a 10 MPa
 target. `StopVelMin` of 2 mm/s, now the GVL value, removes it. With the
 hose open its compliance caps the end stiffness at 9.8 MPa/mm (K
-0.72 GPa, 79 mL, 0.24 mL/MPa), where the GVL gain keeps 71° of phase
+0.72 GPa, 86 mL, 0.24 mL/MPa), where the GVL gain keeps 71° of phase
 margin and 18 dB of gain margin, so the emptying chamber no longer
 threatens the loop.
 
@@ -863,7 +868,7 @@ valve, is the slow element. A gain the chamber allows is the remedy,
 or a procedure that stops the piston before the valve is shut.
 
 **Scheduled controller.** `ScheduledSlaveController` (equations (39) to
-(41)) with the measured bounds (K_cfg 1.0 GPa, dead volume 74 mL, hose
+(41)) with the measured bounds (K_cfg 1.0 GPa, dead volume 81 mL, hose
 compliance 0.12 mL/MPa) holds its margins constant through the run,
 69° / 16 dB at wc = 6 rad/s, 56° / 11 dB at wc = 11 and 44° / 8 dB at
 wc = 16. Nominal results, 1:1 at 10 MPa, hose opened before the
@@ -873,15 +878,15 @@ compression, all with StopVelMin 2 mm/s:
 |---|---|---|
 | StopVelMin 0.5 (earlier) | 4.8 / 0.63 | 1.96 / 4.5 / 10.8 / 22 (steady error) |
 | GVL | 4.7 / 0.73 | 1.95 / 4.5 / 12.2 / 29 (ceiling at the purge closing) |
-| scheduled, wc 6 | 3.1 / 0.13 | 1.32 / 5.1 / 11.5 / 256 (all) |
-| scheduled, wc 11 | 2.5 / 0.12 | 0.77 / 5.7 / 11.0 / 256 (all) |
-| scheduled, wc 11, Ki = Kp, VelMax 7 | 1.9 / 0.15 | 0.75 / 5.7 / 11.0 / 256 (all) |
-| scheduled, wc 16 | 2.3 / 0.11 | 0.60 / 5.9 / 10.8 / 256 (all) |
+| scheduled, wc 6 | 3.1 / 0.13 | 1.32 / 5.1 / 11.5 / 249 (all) |
+| scheduled, wc 11 | 2.5 / 0.12 | 0.77 / 5.7 / 11.0 / 249 (all) |
+| scheduled, wc 11, Ki = Kp, VelMax 7 | 1.9 / 0.15 | 0.75 / 5.7 / 11.0 / 249 (all) |
+| scheduled, wc 16 | 2.3 / 0.11 | 0.60 / 5.9 / 10.8 / 249 (all) |
 | flow feedforward (bound, not implementable) | — | 2.18 / 4.3 / 12.7 / 29 |
 
 (The 0.11 MPa "overshoot" of the scheduled arms is the transducer
 offset. V_ok is given here as solution: the metric itself counts the
-29 mL purge too, so 256 mL of solution reads as 285 mL delivered.) The
+29 mL purge too, so 249 mL of solution reads as 278 mL delivered.) The
 scheduled arms compress twice as fast as the GVL with
 no overshoot of the reading, because the stop law brakes for the
 estimated stiffness and the whole lag (measurement, dead time and
@@ -904,10 +909,10 @@ delivered before a violation at nominal parameters, 0.5 MPa margin
 
 | Charge | P_sat MPa | StopVelMin 0.5 | GVL | sched wc 6 | sched wc 11 | sched wc 16 |
 |---|---|---|---|---|---|---|
-| 1:1 | 3.6 | 0 mL (steady error) | 0 (peak 12.2) | 256 | 256 | 256 |
-| 2:1 | 7.2 | 0 | 0 (peak 12.2) | 256 (margin 1.5) | 256 (2.0) | 256 (2.2) |
+| 1:1 | 3.6 | 0 mL (steady error) | 0 (peak 12.2) | 249 | 249 | 249 |
+| 2:1 | 7.2 | 0 | 0 (peak 12.2) | 249 (margin 1.5) | 249 (2.0) | 249 (2.2) |
 | 2.5:1 at 10 MPa | 9.0 | 0 | 0 | 0 (−0.4) | 0 (0.2) | 0 (0.4) |
-| 2.5:1 at 11 MPa | 9.0 | 0 | 0 (peak 13.3) | 0 (peak 12.6) | 256 (1.2, peak 12.0) | 256 (1.3, peak 11.8) |
+| 2.5:1 at 11 MPa | 9.0 | 0 | 0 (peak 13.3) | 0 (peak 12.6) | 249 (1.2, peak 12.0) | 249 (1.3, peak 11.8) |
 | 3:1 at 11 MPa | 10.9 | 0 | 0 | 0 | 0 (−0.7) | 0 (−0.5) |
 | 2:1, hose opened after mixing | 7.2 | 0 | 0 | 0 (−0.8) | 0 (−0.8) | 0 (−0.8) |
 
@@ -978,7 +983,7 @@ compliance), where the peak crosses 12 MPa.
 | liquid, 343 mL + hose, K = 0.72 GPa, hose open | 4.5 | 24.9 dB | 73° | 2.3 | 8.9 |
 | liquid, 343 mL, hose shut | 7.2 | 20.8 dB | 73° | 3.6 | 5.6 |
 | liquid, 120 mL, hose open | 8.4 | 19.5 dB | 72° | 4.2 | 4.8 |
-| liquid, 79 mL dead volume (limit switch), hose open | 9.8 | 18.2 dB | 71° | 4.9 | 4.1 |
+| liquid, 86 mL dead volume (limit switch), hose open | 9.6 | 18.4 dB | 71° | 4.8 | 4.2 |
 | stop-law stiffness | 100 | −2.0 dB | −14° | 37 | 0.40 |
 
 With the hose open its compliance caps the stiffness at 9.8 MPa/mm, so
@@ -987,14 +992,22 @@ a soft chamber at the openings and the closing, where the fixed gain is
 four times too low for the dip and the peak. The scheduled gain
 Kp = wc/k holds 56° at wc = 11 everywhere.
 
+**Settled:**
+- The mechanical pressure ceiling is 12 MPa (15 MPa may break the
+  piston). With the 434 Ω setting the true pressure is
+  (reading + 0.104) / 0.971 MPa, so an 11 MPa target holds at 11.4 MPa;
+  with the calibrated 421.4 Ω the reading is true to the meter the
+  calibration used (about 1 %, 0.1 MPa at 10 MPa).
+- The saline volume and the oxygen charge, which the schedule's
+  stiffness bound needs, reach the slave over the protocol as holding
+  registers.
+- The proximal valve stays shut during the compression and opens after
+  mixing (`Params.hose_before` False). A switched bypass orifice is not
+  fitted.
+
 **Open questions:**
-- The mechanical pressure ceiling: 12 MPa is assumed; 15 MPa may break
-  the piston. With the true pressure 0.11 MPa above the reading, an
-  11 MPa target peaks at 11.1 MPa.
-- The transducer zero: correcting the −0.11 MPa in the slave's scaling
-  (`G_cfgPressureRangeMin`) would make the reading true; until then
-  every target is 0.11 MPa conservative for degassing and the same
-  amount optimistic for the ceiling.
+- The calibration's reference: a hand-held meter's mA range. A loop
+  calibrator would tighten it.
 - The lag at the piston (below 25 ms) and the dissolution time constant
   are the two unmeasured plant parameters; the robustness study covers
   the first, and the second sets only the hold time.
@@ -1008,11 +1021,9 @@ Kp = wc/k holds 56° at wc = 11 everywhere.
   during it (`tube_refills` in the scenario, off by default); and how
   fast the distal valve is shut (`Params.Tclose`, 0 by default, which
   is the worst case and changes the peak by 0.1 MPa).
-- Whether the proximal valve can be opened before the compression in
-  the protocol (the hose's saline is then compressed and mixed with
-  the charge; its 29 mL leave in the purge as before), or whether a
-  bypass orifice of 0.3 mm or less (Cv 0.003), opened ahead of the
-  ball valve, can be fitted and be opened at pressure.
+- Whether a bypass orifice of 0.3 mm or less (Cv 0.003), opened ahead
+  of the ball valve at pressure, is worth fitting later
+  (`study_hose_opening.py`).
 
 ## Porting the schedule
 

@@ -17,7 +17,7 @@ function r = charBulkModulus(files, opts)
 %   The liquid volume V is the chamber volume at the segment's mean
 %   position, A (posEOT - x) + deadVolume, unless opts.fillVolume_mL gives
 %   the measured fill (scalar, or one value per file). deadVolume_mL
-%   defaults to charConfig (masterConfig.deadVolume, the measured 50 mL).
+%   defaults to charConfig (masterConfig.deadVolume, the measured 57 mL).
 %
 %   With files at liquid volumes that differ by more than 20 %, the
 %   compliance dx/dP is also regressed on V: slope 1/(K A) gives the liquid
@@ -33,6 +33,9 @@ function r = charBulkModulus(files, opts)
 %   opts.chargeRatio       oxygen charge (STP volume / saline volume) of a
 %                          charged run, to compare the gas bound with the
 %                          model's free gas (default none)
+%   opts.logShuntOhms      G_cfgPressureShuntOhms the logs were recorded
+%                          with; their pressure is rescaled to the present
+%                          setting (benchPressureRescale; default: present)
 %   opts.quiet             no printing
 %
 %   r.segments  one row per segment: file, step, direction, Pmin, Pmax,
@@ -53,6 +56,7 @@ opts = withDefault(opts, 'pressureRange', [2.5 10.5]);
 opts = withDefault(opts, 'skip', 1);
 opts = withDefault(opts, 'minSpeed', 0.03);
 opts = withDefault(opts, 'chargeRatio', []);
+opts = withDefault(opts, 'logShuntOhms', []);
 opts = withDefault(opts, 'quiet', false);
 if ~isfield(opts, 'deadVolume_mL')
     opts.deadVolume_mL = cfg.deadVolume_mL;
@@ -69,6 +73,7 @@ seg = struct('file', {}, 'step', {}, 'dir', {}, 'Pmin', {}, 'Pmax', {}, 'xMean',
     'residual_MPa', {}, 'residual_x_mm', {}, 'n', {}, 'rate_MPa_s', {});
 for f = 1:numel(files)
     d = benchReadCsv(files{f});
+    d.pressure = benchPressureRescale(d.pressure, opts.logShuntOhms);
     if isfield(opts, 'fillVolume_mL')
         fill = opts.fillVolume_mL(min(f, numel(opts.fillVolume_mL))) * 1000;    % mm^3
     else

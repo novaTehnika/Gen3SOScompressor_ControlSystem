@@ -10,9 +10,11 @@ function r = pressureNoiseReport(volts, fs, stats, label)
 %   r = pressureNoiseReport('captures/<file>.csv')
 %       re-analyses a saved capture (fs from its time column)
 %
-%   Scale: 434 ohm shunt, 4-20 mA over 0-16 MPa, so 1 MPa per mA.
+%   Scale: G_cfgPressureShuntOhms (benchGvl), the volts the input reads per
+%   mA of loop current, and 4-20 mA over 0-16 MPa, so 1 MPa per mA.
 
-shuntOhm = 434;
+addpath(fullfile(fileparts(mfilename('fullpath')), '..', 'common'));
+shuntOhm = benchGvl().G_cfgPressureShuntOhms;
 mpaPerVolt = 1000 / shuntOhm;           % 1 MPa per mA
 mV = 1000;
 
@@ -28,6 +30,7 @@ N = numel(volts);
 r.label = label;
 r.fs = fs;
 r.mpaPerVolt = mpaPerVolt;
+r.shuntOhm = shuntOhm;
 
 fprintf('\n=== %s\n', label);
 if ~isempty(stats)

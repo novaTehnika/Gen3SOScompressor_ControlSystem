@@ -86,7 +86,7 @@ fname = fullfile(capDir, sprintf('%s_%s.csv', label, datestr(now, 'yyyymmdd_HHMM
 t = (0:nSamples - 1)' / fs;
 fid = fopen(fname, 'w');
 fprintf(fid, 't,volts,MPa\n');
-fprintf(fid, '%.4f,%.5f,%.5f\n', [t volts(:) r.mpaPerVolt * (volts(:) - 4 * 0.434)]');
+fprintf(fid, '%.4f,%.5f,%.5f\n', [t volts(:) r.mpaPerVolt * (volts(:) - 4 * r.shuntOhm / 1000)]');
 fclose(fid);
 fprintf('saved %s\n', fname);
 r.file = fname;

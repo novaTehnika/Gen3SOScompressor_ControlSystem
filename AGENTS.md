@@ -79,7 +79,7 @@ Each bench (`modbus`, `pressure`, `friction`, `characterisation`) is a directory
 - `closedLoopMasterSlave`: `masterStateMachine` against the generated slave in engineering units. The master steps every 25 ms, the exchange runs every 50 ms and the slave every 2 ms on a 1 ms tick.
 - `closedLoopModbusStep`: `masterStep` through the packed register vectors, including link loss on either side.
 - `st2pyParity.py` (Python, run by `run_all.sh`): every scalar-input function block translated by st2py and by st2m, driven with the same seeded random inputs; all variables must agree to 1e-9.
-- `charRunSim`, `charFitsSynthetic`: the characterisation bench (`bench/characterisation/`) against the simulated slave, and its three fits on synthetic logs with known parameters.
+- `charRunSim`, `charFitsSynthetic`: the characterisation bench (`bench/characterisation/`) against the simulated slave, including the one-pass stopping-distance path, and its four fits on synthetic logs with known parameters.
 
 ## Conventions
 

@@ -74,8 +74,8 @@ values below are the ones at the time of writing.
 | `G_cfgVelLimitMax`, `masterConfig.jogVelMax` | 5 mm/s | The highest speed point. 7 mm/s needs both raised, which this bench does not do |
 | `G_cfgDirectCtrlAccel` / `Decel` | 5 mm/s² | Velocity-mode slew: the 5 mm/s step spends 1 s and 2.5 mm reaching speed |
 | `G_cfgTorqueLimitNormal`, `G_cfgPressureTorqueLimit` | 100 % | The axis stalls there, which is 29 MPa on a sealed chamber; the run stops the axis at 90 % (`torqueAbort`) |
-| `G_cfgPosSoftLimitMax` / `Min` | 305 / -2.5 mm (reference file) | `FAULT_POSITION` beyond them. `masterConfig.posMax` is 367 mm, so the machine's GVL may differ: read it and keep every step, with its slew, inside |
-| `G_cfgPosCylinderEntry` + `G_cfgPosExitGuardMargin` | 220 mm | Below this, positive torque above 60 % while moving out is `FAULT_PISTON_EXIT`. Loaded steps stay above it |
+| `G_cfgPosSoftLimitMax` / `Min` | 367 / -2.5 mm | `FAULT_POSITION` beyond them. Keep every step, with its slew, inside |
+| `G_cfgPosCylinderEntry` + `G_cfgPosExitGuardMargin` | 196 mm | Below this, positive torque above 60 % while moving out is `FAULT_PISTON_EXIT`. Loaded steps stay above it |
 | `G_cfgHoldPositionTimeout` | 2 min | The slave returns to idle between steps only after this; the run's stops are seconds, so it does not apply |
 
 The slave has no pressure ceiling of its own in velocity mode. The run

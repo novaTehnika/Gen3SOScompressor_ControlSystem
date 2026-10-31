@@ -140,8 +140,9 @@ class Params:
     # cannot sweep, left when the piston reaches the limit switch at the
     # end of its stroke, with the proximal valve shut. The machine halts
     # there and the delivery ends; so does the simulation. Measured:
-    # 50 g of water drawn from the passages with the hose shut.
-    V_passages: float = 50e-6
+    # 57 g of water drawn from the passages with the hose shut, with the
+    # present fittings.
+    V_passages: float = 57e-6
 
     # ----- Hose ----------------------------------------------------------
     # A 3 ft hose of 1/4 in bore joins the cylinder head to the orifice
@@ -173,7 +174,7 @@ class Params:
     @property
     def V_dead(self):
         """[m^3] Dead volume with the hose open: passages, hose and
-        tube, about 79 mL"""
+        tube, about 86 mL"""
         return self.V_passages + self.V_hose + self.V_tube
 
     @property
@@ -249,13 +250,15 @@ class Params:
 
     # ----- Sensor --------------------------------------------------------
     # [Pa] RMS noise per sample, referred to pressure. Measured 2.0 mV
-    # rms on the 434 ohm shunt (4.6 kPa) bare and 0.8 mV (1.8 kPa) with
+    # rms across the shunt (4.6 kPa) bare and 0.8 mV (1.8 kPa) with
     # a 4.7 uF capacitor across the shunt; broadband, no lines.
     noise: float = 4.6e3
     # [Pa] Transducer zero offset: the reading with the chamber open.
-    # Measured -0.11 MPa. The loop regulates the reading, so the true
-    # pressure sits above the target by this much.
-    P_offset: float = -0.11e6
+    # The loop regulates the reading, so the true pressure sits above
+    # the target by minus this much. Zero with the input calibrated
+    # (G_cfgPressureShuntOhms the effective 421.4 ohm, measured
+    # +0.002 MPa vented); -0.11e6 with the 434 ohm setting.
+    P_offset: float = 0.0
     # [s] Time constant of the derivative filter in the legacy
     # controller
     Tf: float = 0.02

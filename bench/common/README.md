@@ -30,6 +30,14 @@ directory and takes these from here.
    declared, the program on the 2 ms task beside `PRG_Main`. It reads
    globals only. Only one bench program using the probe registers (this
    one, `PRG_PressureProbe` or `PRG_ModbusBench`) is loaded at a time.
+   The register group costs the controller's Modbus service whether or
+   not a program writes it: with the 3410-register group mapped, the
+   protocol exchange took 50 ms (p99 70) instead of 20 ms (p99 30), too
+   slow for the 50 ms exchange against the slave's 300 ms watchdog. Map
+   the group only for a session that captures, remove it from Hardware
+   Configuration afterwards, and if the slowdown matters during a capture
+   session shorten the capture (500 and the array bounds in the program,
+   `nScan` in `benchConfig.m`).
 
 ## How a run works
 

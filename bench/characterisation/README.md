@@ -1,11 +1,14 @@
 # Pressure Loop Characterisation Bench
 
-Measures three parameters of the pressure loop that the design model in
-`design/pressure-loop/` (`params.py`) carries as assumptions, so that the
-measured values replace them: the effective bulk modulus of the saline-filled
-chamber (`K`), the discharge coefficient of the outlet orifice bank (`Cd`, the
-outflow at a known pressure) and the lag of the drive's velocity loop as seen
-at the piston (`tauV`). The friction test is a separate bench.
+Measures four parameters of the pressure loop that the design model in
+`design/pressure-loop/` (`params.py`) and the slave's stop law carry as
+assumptions, so that the measured values replace them: the effective bulk
+modulus of the saline-filled chamber (`K`), the discharge coefficient of the
+outlet orifice bank (`Cd`, the outflow at a known pressure), the lag of the
+drive's velocity loop as seen at the piston (`tauV`) and the distance the
+piston needs to stop under load (the stop law's deceleration
+`G_cfgPressureDecel` and its delay). The friction test is a separate bench,
+but test 4 below gives friction points under load from the same run.
 
 Everything is measured through the protocol the master already uses: the
 slave reports position, velocity, torque and pressure in IR11-20 every 50 ms
@@ -27,11 +30,13 @@ position guards.
 | `charBulkModulus.m` | Test 1: K from slow ramps, with a bound on residual gas and, from two fills, the split between liquid and series compliance |
 | `charOrificeFlow.m` | Test 2: Cd and the square-root law from deliveries at held pressure, with the collected-volume check |
 | `charDriveLag.m` | Test 3: tauV and dead time from the step probe captures at the motor and, through their pressure channel, at the piston; the 50 ms log as a coarse check |
+| `charStopPath.m` | Test 4: builds the one-pass path, a staircase of pressure levels with an excursion set at each, sized to a pressure budget from the fill and the gas charge |
+| `charStopDistance.m` | Test 4: the stopping distance of every stop in the run, from the captures and the log, fitted to the stop law's two terms per direction and compared with the slave's allowance |
 
 `tests/charRunSim.m` runs `charRun` and the fits against the simulated slave
-(through the friction bench's `fakeProbeLink`), `tests/charFitsSynthetic.m`
-the fits on synthetic logs with known parameters; `tests/run_all.sh` runs
-both.
+(through the friction bench's `fakeProbeLink`), the one-pass path included,
+`tests/charFitsSynthetic.m` the fits on synthetic logs with known
+parameters; `tests/run_all.sh` runs both.
 
 ## 0. What the friction bench's runs already give
 
@@ -66,6 +71,22 @@ addpath ../common
 r = charRun('label', path);              % see sections 3 to 5 for the paths
 ```
 
+A fault still latched from an earlier run is cleared by `charRun` with the
+operator reset before its first step. The controller answers a Modbus
+request in 1 to 8 ms (`bench/modbus`), so the protocol exchange, one write
+and one read, should take under 20 ms; the run prints any exchange over
+150 ms, skips the probe transaction in that cycle, and at the end gives
+the write and read times separately. The slave's watchdog faults the run
+with `FAULT_COMM` (code 4) if the heartbeat stops for 300 ms
+(`G_cfgCommTimeout`), so exchanges of 200 ms end it. `bench/modbus/modbusRawProbe`
+times the transactions on their own, without the master, and is the
+first check: 20 ms median and 30 ms p99 for the sequential exchange is
+the controller's normal. The step probe's register group in Hardware
+Configuration more than doubles that whether or not the probe program
+runs (`bench/common/README.md` step 3); a second Modbus client (the shell
+model or the operator app still connected, another MATLAB session, an
+OPC client) and the network path are the other causes.
+
 The run ends with the axis stopped, prints a table of the steps and saves
 `../common/captures/<label>_char_<timestamp>.csv` (columns as in
 `bench/common/README.md`) and one
@@ -99,15 +120,16 @@ bench works in MPa gauge throughout, as the slave does.
 ## 2. Volumes: dead volume and fill
 
 Both fits need the liquid volume. The dead volume, what the piston cannot
-sweep, was measured at 50 mL (50 g of distilled water) and is
-`masterConfig.deadVolume`. To measure it again:
-
-1. Jog the piston to the end of travel (the position guard allows up to
-   3 mm inside the soft limit; note the position `x_EOT` reached and compare
-   it with `masterConfig.posEOT`).
-2. With the outlet valve open and the fill port open, fill the chamber from
-   a burette or syringe until liquid appears at the orifices. The volume
-   added is the dead volume `V_dead`.
+sweep, is 57 mL (`masterConfig.deadVolume`, with the present fittings),
+the cylinder passages alone, without the discharge hose. Filling the
+passages from a burette is not practical (they are small and
+convoluted); it was measured by purging the air with liquid, running the
+piston to the soft limit, opening the valves
+and drawing the liquid out of the passages into the chamber, then removing
+the liner and piston from the bottom of the cylinder, catching the liquid,
+and weighing it: 57 g of DI water. The discharge hose (3 ft of 1/4 in,
+29 mL) and the orifice tube (0.24 mL) are on top of this when the proximal
+valve is open.
 
 Then, for every liquid-only run:
 
@@ -145,7 +167,11 @@ rk = charBulkModulus(r.file, struct('deadVolume_mL', 25, 'fillVolume_mL', 300));
 ```
 
 Start the path from about 2.5 MPa (reach it with a `pressure` step or a
-first short ramp) so the first ramp begins in the fitted range. The ramps
+first short ramp) so the first ramp begins in the fitted range. Close the
+ball valve between the chamber and the discharge hose for the K runs, and
+run the same path once with it open: the difference is the hose's
+compliance (section 8), which the delivery sees and the model needs as a
+constant term. Record the valve's state in the label. The ramps
 run in one velocity session; the slave slews the command at
 `G_cfgDirectCtrlAccel`, so the 0.1 mm/s is reached within a few scans.
 
@@ -338,7 +364,111 @@ step as an ensemble and returns the lag plus dead time to about 25 ms,
 enough to say whether 20 ms is the right order but not to separate the
 two.
 
-## 6. Carrying the results into the model
+## 6. Test 4: stopping distance under load, in one pass
+
+The slave's stop law caps the piston speed so that the travel it cannot
+avoid once it decides to stop, the delay before the drive acts plus the
+ramp down at the deceleration, never carries the pressure past the target:
+it allows the speed v for which v·lag + v²/(2·D) fits in the remaining
+error at the chamber stiffness (design README, eq. (41)). The lag is
+measured (test 3). D is `G_cfgPressureDecel`, 50 mm/s², a value chosen
+to stay clear of drive alarms, not a measurement; and test 3 found that
+the drive does not slew the command at all, so the real stop is the
+velocity loop pulling the piston to rest against, or with, the pressure
+force. This test measures that travel against speed, load and direction,
+and gets the stiffness, the drive lag and the friction under load from the
+same pass.
+
+**The pass.** A staircase of pressure levels joined by ramps at a constant
+speed, with an excursion set at each level:
+
+- the ramps between levels are stiffness measurements (test 1's fit) and
+  give the torque against pressure at one speed;
+- at each level a dwell of 2 s gives the transducer noise and any creep;
+- then, for each speed v that fits the budget, a leg of d mm at +v, a
+  stop, a leg of d mm at −v and a stop. The step from rest gives the drive
+  lag under load (test 3's fit), each stop gives a stopping distance in
+  compression or on the return, the steady part of each leg gives the
+  torque at speed in both directions, and the pair returns the piston to
+  where it started. A slow `settle` step then brings the pressure back to
+  the level, since the bench's latency at the end of each leg and the gas
+  dissolving leave the pair a little off it, so the level stands for the
+  next speed.
+
+`charStopPath` builds the path from the fill and the gas charge. The
+chamber is saline with an air charge (2:1 by STP volume by default, from a
+cylinder or a pump, not oxygen), which keeps the chamber soft enough at
+pressure for the fast legs; the stopping distance depends on the load and
+not on the stiffness, so the charge is free to choose. Each leg plus the
+stop allowance must stay within the pressure budget at its level, 2 MPa
+up to 8 MPa and 1 MPa at 10 MPa, the compliance integrated across the
+excursion with the gas the liquid holds in solution at the level taken
+out; a speed is left out where the steady part of its leg would be too
+short. The allowance is v·(T0 + latency) + v²/(2·D): the drive's delay,
+the bench's own latency (a leg ends when the master sees it in one
+exchange and the stop goes out in the next, so two cycles, 50 ms on a
+clean link and 200 ms with the probe's register group mapped) and the
+configured D. The ramps between levels are slowed where the chamber is
+stiff so that the same latency cannot overshoot a level by more than
+0.5 MPa; on the first run a ramp at 2 mm/s into a 9 MPa/mm chamber with
+100 ms cycles ran 0.5 mm past 8 MPa and reached 12.6 MPa. The run's guard
+stays at 11 MPa. With the defaults the full speed sweep (1, 2, 5, 7 mm/s)
+runs at 2 and 4 MPa, 1 and 2 mm/s at 6 and 8, and 1 mm/s at 10; 8 MPa
+carries 80 % of the load, which is enough for the fit.
+
+```matlab
+opts.probe = 'stops';                                % PRG_StepProbe loaded: capture the stops
+[path, plan] = charStopPath(struct('pause_s', 3));   % prints the budget table
+r = charRun('stops', path, opts);
+rs = charStopDistance([r.capFiles {r.file}]);        % D and T0 per direction
+rl = charDriveLag([r.capFiles {r.file}]);            % the lag under load
+rk = charBulkModulus(r.file, struct('chargeRatio', 2));   % the ramps
+```
+
+`charStopPath(struct('chargeRatio', 1))` plans for a 1:1 charge, which is
+stiffer and drops the 5 and 7 mm/s legs above 2 MPa; `'levels_MPa'`,
+`'speeds'` and `'budget_MPa'` set the staircase. The plan prints, per level,
+the model's stiffness, the budget, the leg distance and the stop allowance
+for each speed; about 90 s of motion for the default 26 stops.
+
+**The fit** (`charStopDistance`). Every reference step to zero in a
+velocity session is a stop: from the 50 ms log, the travel from the row
+that sent the command to the first rows at rest, to about half an
+exchange; from a capture, the same at the scan rate. Each stop is
+reported with its speed, pressure, direction, travel, the pressure's own
+excursion during the stop, the creep (further travel in the direction of
+the motion over the second after the velocity feedback first reads zero,
+with the pressure change it causes; the drive still moving under load
+after it reports rest), the peak torque and whether a fault ended it.
+Per direction, the travel is fitted to x = T0·v + v²/(2·D) with both
+terms non-negative; with two or more stops at a level, D is also fitted
+per level with T0 held, which shows the load dependence. Every stop is
+compared with the slave's allowance at the configured D and lag; the law
+is conservative where the measured travel is below it.
+
+**Expected values.** With the drive following the command in about 30 ms
+(test 3), a stop from 5 mm/s should take 0.1 to 0.2 mm in compression,
+where the pressure force helps, and more on the return, where the drive
+brakes against it with the torque left after holding the load (34 kN at
+10 MPa is 60 % of the stall cap). The configured law allows 0.5 mm at
+5 mm/s. The log resolves a stop only on a clean link (25 ms cycles); with
+90 ms cycles the command's position cannot be placed to better than the
+stop itself, and the fit leaves such stops out when it has better ones. Three outcomes matter: measured travel below the allowance at
+every level, in which case D can be raised toward the fitted value and
+every approach gets shorter; travel above it on the return at high
+pressure, in which case D must come down there, or become a value per
+direction; or a drive alarm before the physical limit, in which case the
+alarm is the real D and the slave should carry it. Accept a fit residual
+below 20 % of the mean travel, both directions fitted, and no alarm.
+
+**Carrying it over.** `r.D_mm_s2` and `r.T0_s` are the values the stop
+law needs: the smaller D and the larger T0 of the two directions. The
+design model's compression and delivery studies then run with the
+measured allowance in place of the configured one, since the closing of
+the purge valve at the end of a delivery is also a stop against a stiff
+chamber.
+
+## 7. Carrying the results into the model
 
 `params.py` fields and the units the scripts print them in:
 
@@ -348,23 +478,55 @@ two.
 | `Vl0` | the fill of the runs (`r` prints it) | m^3 |
 | `Cd` | `charOrificeFlow` (`r.Cd`) | - |
 | `tauV` | `charDriveLag` (`r.tauV_s` at the motor; `r.tauP_s` at the piston, the value the model stands for, when it exceeds it) or `stepResponseFit` | s |
+| `G_cfgPressureDecel` (GVL, the stop law) and the model's stop allowance | `charStopDistance` (`r.D_mm_s2`, `r.T0_s`) | mm/s², s |
 
 `V_dead` is not a `Params` field; the delivery scenario stops at `V_empty`.
 Record the measured dead volume with the results so that the stroke checks
 and the master's `deadVolume` can be corrected.
 
-## 7. Results
+## 8. Results
 
-Logs of 2026-10-26 (`bench/captures/` on the `bench-tests` branch), fitted
-with the scripts of this bench. Dead volume 50 mL (measured) and the fill
-from the geometry.
+Logs of 2026-10-26 (`bench/captures/`), fitted with the scripts of this
+bench, with a dead volume of 50 mL (the passages with the fittings of
+those runs) and the fill from the geometry. The logs were recorded with `G_cfgPressureShuntOhms`
+at 434 ohm, which reads the pressure as 0.971 P - 0.104 MPa
+(`bench/pressure/README.md` section 6); the table gives the values as
+fitted from them. Refitted with `opts.logShuntOhms = 434`, which rescales
+every logged pressure to the calibrated 421.4 ohm, K (chamber closed)
+rises 3.0 % (0.736 to 0.758 GPa with the default options; 0.72 becomes
+0.74, the gas-corrected 0.81 becomes 0.83), the hose-open stiffness
+rises from 5.2 to 5.4 MPa/mm, and Cd falls from 0.85 to 0.83 (exponent
+unchanged at 0.48, with no `pressureOffset`). `params.py` carries the
+values as fitted until the tests are repeated with the calibrated input.
 
 | Parameter | Result | Runs | Notes |
 |---|---|---|---|
-| K (effective, at the piston) | 0.72 GPa, segments 0.67 to 0.78; stiffness 7.2 MPa/mm at 343 mL | `K300_char` x3 at 280 mm | Below the 1 GPa assumed. Up and down agree to 0.2 %, but the curvature gives a gas-like term of up to 0.65 mL, 23 % of the compliance, so the liquid-only K is not pinned: the gas-corrected value is 0.81 GPa. A fourth run at 299 mm (276 mL) came out softer, 0.42 GPa, which no liquid chamber does; that fill held more gas. Purge longer (section 2 step 4) and weigh the fill. |
+| K, chamber closed off from the hose (proximal valve shut) | 0.72 GPa, segments 0.67 to 0.78; stiffness 7.2 MPa/mm at 343 mL | `K300_char` x3 at 280 mm, 19:26 to 19:30 | Below the 1 GPa assumed. Up and down agree to 0.2 %, but the curvature gives a gas-like term of up to 0.65 mL, 23 % of the compliance, so the liquid-only K is not pinned: gas-corrected, 0.81 GPa. Purge longer (section 2 step 4) and weigh the fill. |
+| Discharge hose open (3 ft of 1/4 in R7 hose, 29 mL, to the orifice tube) | stiffness 5.2 MPa/mm with 305 mL of liquid; as an effective K, 0.46 GPa | `K300_char` at 299 mm, 19:36 | The hose adds about 0.24 mL/MPa of compliance beyond its own liquid (2.4 mL per 10 MPa): its wall stretching and any air it holds, the latter being what the curvature's gas term of up to 1.1 mL in this run points at. This is the chamber the delivery sees. |
 | Cd | 0.85 (0.84 to 0.87 over 1.6 to 8.3 MPa), exponent 0.48; Q = 4.8 mL/s at 10 MPa, piston 1.42 mm/s | `d2`, `d5`, `d10` deliveries and `Q10_char` x2 | With the transducer zero of -0.11 MPa corrected (`pressureOffset`). Above the 0.7 assumed: deliveries run 20 % faster than the model. The loop held 8.1 MPa for a 10 MPa target, the steady error the design study predicted. |
 | tauV at the motor | 8.7 +/- 0.5 ms lag after 12 +/- 0.6 ms dead time, the same for 0.3, 1 and 2.5 mm/s steps, up and down | `s1`, `s2` step captures, 74 | **The command is not slewed at `G_cfgDirectCtrlAccel`**: a 2.5 mm/s step is complete in 30 ms, as is a 0.3 mm/s step, so the drive follows the command at whatever rate it needs (36 mm/s^2 for a 1 mm/s step, 90 for 2.5) with a 2 to 5 % overshoot. Fit with `opts.accel` large (1e4); with the GVL slew the model cannot follow and reports a lag near zero. |
 | tauV at the piston | not resolved (below 25 ms) | `lag_wet_char` 50 ms logs, 5 steps at 8.6 to 10 MPa/mm | No captures were taken in these runs (`opts.probe` off, probe without the pressure array). Repeat with the reloaded probe. |
+| Stopping distance under load (test 4) | 0.031 s × v in both directions, 2 to 10 MPa, 1 to 6 mm/s, residual 4 µm; no deceleration term resolvable (the drive stops within a scan or two once it acts) and no travel after rest | `stops_char_20261030_232726` (16 stops, 25 ms cycles) | The slave's allowance v·0.05 s + v²/(2·50 mm/s²) is above every stop, by 3 to 4 times at 5 mm/s. The 31 ms is the drive's 12 ms dead time and 8.7 ms lag plus the slave's command pipeline and Modbus tick, the components the design model's lag already carries. Two later runs with 90 ms cycles (the probe's register group mapped) do not resolve the stops. |
+
+**Two dead volumes.** The proximal valve at the cylinder head is shut
+during compression and mixing and open during the delivery, so the
+chamber has two dead volumes: the cylinder passages alone, the measured
+57 mL (`masterConfig.deadVolume`), and the passages plus the hose (29 mL)
+and the tube (0.24 mL), 86 mL, during the delivery. The hose is prefilled
+with virgin saline, and the delivery's first 29 mL is that purge, which
+does not change Cd but is not solution.
+
+**What the hose means for the model.** A delivery runs with the hose
+open, so the compliance the loop sees is the liquid's plus a constant
+0.24 mL/MPa from the hose that does not shrink as the saline leaves. With
+the closed chamber's K, the stiffness during a delivery is about 5 MPa/mm
+with 300 mL left, 8 with 100 mL and 11 with 30 mL, against 8, 25 and 82
+for the liquid alone. The model's chamber capacitance, eq. (4), needs that
+constant term; with it the stiffening at the end of a delivery that the
+design study found destabilising is an eighth of what the liquid-only
+model predicts. The `lag_wet` runs (hose state not recorded, 283 to
+285 mm) show 8.6 to 10 MPa/mm over their short steps, closer to the
+closed value.
 
 The friction bench's own fits on the same day's runs (`frictionFit`,
 `stepResponseFit`): Coulomb 6.1 kN, viscous 2.3e6 N s/m (11 kN at

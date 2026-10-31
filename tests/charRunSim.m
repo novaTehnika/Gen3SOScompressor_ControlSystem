@@ -3,8 +3,10 @@ function charRunSim()
 %   through fakeProbeLink (the friction bench's stand-in, with its step
 %   probe emulation and an outlet valve), then the three fits on what it
 %   logged: pressure-ended ramps, a dwell, velocity steps and a hold in one
-%   velocity session with captures; a delivery through the orifice bank in
-%   pressure mode; the pressure and position guards and a slave fault.
+%   velocity session with captures; the one-pass stopping-distance path of
+%   test 4 (charStopPath) and its fit (charStopDistance); a delivery
+%   through the orifice bank in pressure mode; the pressure and position
+%   guards and a slave fault.
 %   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
 
@@ -76,6 +78,60 @@ assert(abs(bk.Vg_mL - vGas) / vGas < 0.3, 'gas volume %.2f mL, chamber holds abo
 fprintf('ok  bulk modulus fit rejects the gas spring (K %.4f GPa, gas %.1f mL of %.1f)\n', ...
     bk.K_lin_GPa, bk.Vg_mL, vGas);
 
+% --- One pass: levels, excursions in both directions, stops ---------------------
+% The path is planned on the simulated gas spring's own stiffness, so that
+% each excursion stays within its budget, and the fit must find the
+% deceleration the simulated axis slews at (G_cfgDirectCtrlDecel) in both
+% directions with no delay term, since the axis follows its command at
+% once.
+opts = linkOpts(saveDir, 255);
+opts.probe = 'stops';
+S = fakeProbeLink('state');
+sim = S.sl.sim;
+kGas = @(Pq) (Pq + sim.atmMPa).^2 * sim.pistonArea / (sim.atmMPa * sim.chamberGasVolume);
+[path, plan] = charStopPath(struct('levels_MPa', [2 3], 'speeds', [0.5 2], 'budget_MPa', 1.0, ...
+    'rampSpeed', 0.5, 'stiffness', kGas, 'T0_s', 0.06, 'latency_s', 0.05, 'D_mm_s2', ccfg.velDecel, ...
+    'hold_s', 1, 'pause_s', 3, 'quiet', true));
+nStops = plan(1).nStops;
+types = cellfun(@(s) s{1}, path, 'UniformOutput', false);
+assert(nStops >= 6 && sum(strcmp(types, 'move')) == nStops && sum(strcmp(types, 'settle')) == nStops / 2, ...
+    'plan: %d stops, %d steps', nStops, numel(path));
+r = charRun('simstop', path, opts);
+assert(isempty(r.abort), r.abort);
+L = r.runLog;
+% Every excursion stays within its budget (plus the stop beyond the leg)
+% and each pair of legs returns the piston to where the first began
+level = 0;
+for s = 1:numel(path)
+    rows = L(L(:, STEP) == s, :);
+    switch path{s}{1}
+        case 'ramp'
+            level = level + (path{s}{2} > 0);
+        case 'move'
+            if path{s}{2} > 0
+                xPair = rows(1, POS);
+                Plevel = plan(min(level, numel(plan))).P_MPa;
+                assert(max(rows(:, P)) < Plevel + 1.0 + 0.6, ...
+                    'step %d reached %.2f MPa at a %.0f MPa level', s, max(rows(:, P)), Plevel);
+            else
+                after = L(L(:, STEP) == s + 1, :);
+                assert(abs(after(end, POS) - xPair) < 0.15, ...
+                    'pair ending at step %d returned to %.3f mm from %.3f', s, after(end, POS), xPair);
+            end
+    end
+end
+rs = charStopDistance([r.capFiles {r.file}], struct('quiet', true, 'D_cfg', ccfg.velDecel, 'lag_s', 0.06));
+assert(numel(rs.stops) >= nStops, 'only %d stops found', numel(rs.stops));
+assert(sum(strcmp({rs.stops.source}, 'capture')) >= nStops - 1, 'only %d stops in the captures', ...
+    sum(strcmp({rs.stops.source}, 'capture')));
+for f = {rs.fit.comp, rs.fit.ret}
+    assert(abs(f{1}.D_mm_s2 / ccfg.velDecel - 1) < 0.05 && f{1}.T0_s < 0.01, ...
+        'fit D %.1f mm/s^2 (axis slews at %.0f), T0 %.3f s', f{1}.D_mm_s2, ccfg.velDecel, f{1}.T0_s);
+end
+assert(rs.pass, 'stopping-distance checks failed');
+fprintf('ok  one-pass path: %d steps, %d stops, D %.1f / %.1f mm/s^2 (axis %.0f), T0 %.0f ms\n', ...
+    numel(path), numel(rs.stops), rs.fit.comp.D_mm_s2, rs.fit.ret.D_mm_s2, ccfg.velDecel, 1000 * rs.T0_s);
+
 % --- Delivery: pressure mode, valve opens, the loop balances the outflow --------
 opts = linkOpts(saveDir, 250);
 fakeProbeLink('valveAt', 12, 0.68);
@@ -128,6 +184,19 @@ assert(~isempty(strfind(r.abort, 'position guard')), 'position guard did not tri
 S = fakeProbeLink('state');
 assert(S.sl.ax.x < opts.posStop + 1 && S.sl.ax.v == 0);
 fprintf('ok  pressure and position guards stop the run\n');
+
+% A fault latched before the run is cleared with the operator reset and
+% the run goes on; the drive's own fault is gone before the master is up.
+opts = linkOpts(saveDir, 240);
+fakeProbeLink('faultAt', 0.02, 0.08);
+r = charRun('simlatched', {{'jog', 1, 3}}, opts);
+assert(isempty(r.abort), 'latched fault not cleared: %s', r.abort);
+L = r.runLog;
+assert(any(L(:, STATUS) == 10) && any(L(:, STATUS) == 9) && any(L(:, STEP) == 1 & L(:, STATUS) == 4), ...
+    'reset not seen in the log');
+S = fakeProbeLink('state');
+assert(S.sl.ax.x > 241, 'jog did not run after the reset');
+fprintf('ok  latched fault cleared by the operator reset before the run\n');
 
 % A drive fault ends the run with the stop sent.
 opts = linkOpts(saveDir, 240);

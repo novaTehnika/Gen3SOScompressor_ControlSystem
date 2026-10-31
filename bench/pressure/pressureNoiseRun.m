@@ -184,7 +184,8 @@ if ~exist(opts.saveDir, 'dir')
     mkdir(opts.saveDir);
 end
 stamp = datestr(now, 'yyyymmdd_HHMMSS');
-mpaPerVolt = 1000 / 434;
+shuntOhm = benchGvl().G_cfgPressureShuntOhms;
+mpaPerVolt = 1000 / shuntOhm;
 for c = 1:numel(captures)
     cap = captures{c};
     name = sprintf('%s_%d_%s', label, cap.step, steps(cap.step).name);
@@ -197,7 +198,7 @@ for c = 1:numel(captures)
     t = (0:pr.nSamples - 1)' / fs;
     fid = fopen(fname, 'w');
     fprintf(fid, 't,volts,MPa\n');
-    fprintf(fid, '%.4f,%.5f,%.5f\n', [t cap.volts(:) mpaPerVolt * (cap.volts(:) - 4 * 0.434)]');
+    fprintf(fid, '%.4f,%.5f,%.5f\n', [t cap.volts(:) mpaPerVolt * (cap.volts(:) - 4 * shuntOhm / 1000)]');
     fclose(fid);
     cap.file = fname;
     captures{c} = cap;
