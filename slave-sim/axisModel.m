@@ -28,7 +28,7 @@ function [ax, G] = axisModel(ax, G, E, sim, hook, dt)
 %   ax.x is the physical position and ax.offset the controller frame shift:
 %   G_sysActualPosition = ax.x + ax.offset.
 %
-%   The chamber is a gas spring (slaveSimConfig): ax.P is its pressure in
+%   The chamber is a gas spring (chamberPressure): ax.P is its pressure in
 %   MPa gauge, zero until the piston passes sim.chamberContactPos. The load
 %   does not act back on the axis.
 
@@ -187,13 +187,7 @@ end
 
 % --- Chamber pressure ---------------------------------------------------------
 ax.vOut = ax.vOut + hook.outflow * dt;
-vGas = sim.chamberGasVolume - sim.pistonArea * (ax.x - sim.chamberContactPos) + ax.vOut;
-if ax.x > sim.chamberContactPos
-    vGas = max(vGas, sim.chamberMinVolume);
-    ax.P = sim.atmMPa * (sim.chamberGasVolume / vGas - 1);
-else
-    ax.P = 0;
-end
+ax.P = chamberPressure(sim, ax.x, ax.vOut);
 
 % --- Status -----------------------------------------------------------------
 G.G_staStop.Busy = stopExec && ax.v ~= 0;

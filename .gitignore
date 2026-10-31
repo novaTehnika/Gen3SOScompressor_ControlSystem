@@ -11,3 +11,4 @@ bench/modbus/captures/
 bench/pressure/captures/
 bench/pressure/SafetyHold.slx
 octave-workspace
+.test-cache/

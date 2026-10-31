@@ -7,6 +7,7 @@ function slavePressureMode()
 %   closed on it.
 %   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
 %     addpath slave-sim slave-sim/generated tests
+%   Depends on: slave-src slave-sim tools/st2m.py
 
 MODE_PRESSURE = 7;
 FAULT_PRESSURE_SENSOR = 8;

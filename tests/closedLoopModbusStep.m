@@ -10,6 +10,7 @@ function closedLoopModbusStep()
 %   widened to the bench value to match.
 %   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
+%   Depends on: master-src/logic slave-src slave-sim tools/st2m.py
 
 clear masterStep masterStateMachine
 cfg = masterConfig();

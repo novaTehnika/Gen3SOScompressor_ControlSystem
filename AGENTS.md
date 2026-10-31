@@ -16,8 +16,12 @@ The contract between them is a mode code + MotionEnable + FaultReset + reference
 Everything runs headless with `python3` and `octave-cli`. No MATLAB is needed.
 
 ```sh
-tests/run_all.sh            # regenerate the slave sim from slave-src, run all tests
+tests/run_all.sh            # regenerate the slave sim, run the tests whose inputs changed
+tests/run_all.sh --all      # run every test regardless
+tests/run_all.sh -j 2 closedLoopMasterSlave   # chosen tests, at most 2 at once
 ```
+
+`run_all.sh` runs each test in its own `octave-cli`, as many at once as there are CPUs. It skips a test whose inputs hash the same as when it last passed (recorded in the gitignored `.test-cache/`, which also holds each test's log). A test's inputs are its own file plus the paths on its `%   Depends on:` header line. Keep that line current when a test starts using another directory, or the test will be skipped when that code changes. A new test also has to be added to `ALL_TESTS` in the script.
 
 Run a single test (from the repo root, after generating):
 

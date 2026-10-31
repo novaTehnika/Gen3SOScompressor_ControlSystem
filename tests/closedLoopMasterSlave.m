@@ -10,6 +10,7 @@ function closedLoopMasterSlave(handshakeTimeout)
 %   engineering units; packing is covered by closedLoopModbusStep.
 %   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
+%   Depends on: master-src/logic slave-src slave-sim tools/st2m.py
 
 if nargin < 1
     handshakeTimeout = 0.5;

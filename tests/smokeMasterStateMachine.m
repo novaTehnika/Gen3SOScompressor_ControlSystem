@@ -6,6 +6,7 @@ function smokeMasterStateMachine()
 %   reset behaviour with a kinematic axis. It is not the slave simulator.
 %
 %   Run from the repository root:  addpath master-src/logic tests; smokeMasterStateMachine
+%   Depends on: master-src/logic
 
 h.cfg = masterConfig();
 h.dt = h.cfg.dt;
