@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Translate the slave's Structured Text into a simulation language.
 
-    python3 tools/st_translate.py --target py slave-src design/generated
+    python3 tools/st_translate.py --target py slave-src models/generated
     python3 tools/st_translate.py --target c  slave-src slave-sim/generated-c
 
 Covers the ST subset used in slave-src: assignments, IF/ELSIF/ELSE, FOR,

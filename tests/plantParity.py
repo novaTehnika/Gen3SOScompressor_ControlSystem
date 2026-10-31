@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Parity of the C plant (slave-sim/c/plant.c) with the design model's
-Plant (design/pressure-loop/plant.py).
+"""Parity of the C plant (models/c/plant.c) with the Python plant
+(models/plant.py).
 
     python3 tests/plantParity.py      (from anywhere; needs python3 and cc)
 
@@ -14,7 +14,7 @@ throttled proximal valve that logs parcels and joins the hose, torque
 mode against friction, and the legacy options (slew limit, Euler, fixed
 liquid).
 
-Depends on: design/pressure-loop slave-sim/c slave-src tools
+Depends on: models slave-src tools
 """
 
 import ctypes
@@ -25,10 +25,10 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / 'design' / 'pressure-loop'))
+sys.path.insert(0, str(ROOT / 'models'))
 from params import Params              # noqa: E402
 from plant import Plant, N_STATES      # noqa: E402
-from scenarios import Scenario         # noqa: E402
+from types import SimpleNamespace     # noqa: E402
 
 N_EXTRA = 7
 NAMES = ['x', 'v', 'P', 'n_dis', 'n_tot', 'V_l', 'n_out', 'V_out', 'V_vir', 'V_in',
@@ -43,7 +43,7 @@ TOL = 1e-9
 def build(tmp):
     so = tmp / 'libplant.so'
     subprocess.run([os.environ.get('CC', 'cc'), '-O2', '-shared', '-fPIC', '-o', str(so),
-                    str(ROOT / 'slave-sim' / 'c' / 'plant.c'), '-lm'], check=True)
+                    str(ROOT / 'models' / 'c' / 'plant.c'), '-lm'], check=True)
     lib = ctypes.CDLL(str(so))
     lib.plant_size.restype = ctypes.c_int
     lib.plant_scan.restype = ctypes.c_double
@@ -87,8 +87,8 @@ def c_state(lib, buf):
 
 
 def run(lib, names, case, par, mode, inputs, seconds):
-    sc = Scenario('parity', T=seconds, tEvent=0.0, P0=par.P_supply, ratio=1.0,
-                  hose_open0=case.get('hose_open0', False))
+    sc = SimpleNamespace(Qf=0.0, hose_open0=case.get('hose_open0', False),
+                         initial=lambda p: p.contents(p.P_supply, 1.0))
     py = Plant(par, sc, mode)
     c = c_plant(lib, names, py)
     n = int(round(seconds / par.Ts))

@@ -24,7 +24,7 @@ function out = fakeProbeLink(cmd, varargin)
 %                                       chamber] while the valve is open
 %
 %   The simulated chamber, outlet and drive are the design model's plant
-%   (slave-sim/c/plant.c), so the drive's dead time and lag and the
+%   (models/c/plant.c), so the drive's dead time and lag and the
 %   chamber's stiffness are its own (sl.plant.par). The torque model stands
 %   in for the drive's torque feedback, which the simulated slave reports as
 %   zero: it is a friction law chosen by the test, for the friction fit to
@@ -185,7 +185,7 @@ end
 function S = valveScan(S)
 % The outlet valve: from its opening, the plant's orifice bank at the
 % valve's discharge coefficient, and in the opening scan the flow that
-% fills the tube, eq. (37) of design/pressure-loop/README.md.
+% fills the tube, eq. (37) of models/README.md.
 if isinf(S.valve.at)
     return;
 end

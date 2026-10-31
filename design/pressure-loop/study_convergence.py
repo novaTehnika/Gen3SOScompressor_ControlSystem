@@ -30,12 +30,11 @@ Usage:
 
 FILE DEPENDENCY:
 ./
-    controllers.py
+    studyparams.py, controllers.py
     scenarios.py
     sim.py
     studyutil.py
-    (and the model modules they import: params.py, plant.py,
-    sensor.py, slave.py, solver.py)
+    (and the models they import, in models/)
 """
 
 import time

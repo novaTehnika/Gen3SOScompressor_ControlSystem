@@ -10,7 +10,7 @@ function closedLoopMasterSlave(handshakeTimeout)
 %   engineering units; packing is covered by closedLoopModbusStep.
 %   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
-%   Depends on: master-src/logic slave-src slave-sim tools design/pressure-loop
+%   Depends on: master-src/logic slave-src slave-sim tools models
 
 if nargin < 1
     handshakeTimeout = 0.5;

@@ -3,7 +3,7 @@
 Measures the friction of the compressor's servo axis (Tolomatic RSA64
 driven by the Sigma-7 through the MP2600iec) from the torque feedback the
 slave reports over Modbus, unloaded and under chamber pressure, so that the
-pressure loop design model (`design/pressure-loop/params.py`: `b`, `Fc`,
+pressure loop design model (`models/params.py`: `b`, `Fc`,
 `Fcap`, `veps`) can use measured values in place of its guesses. The
 operator app and the shell do not show torque; the run script below takes
 the shell's place as Modbus master, as the pressure noise bench does, and

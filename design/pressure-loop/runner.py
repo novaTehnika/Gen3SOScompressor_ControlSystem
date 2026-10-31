@@ -20,8 +20,8 @@ order. For example:
 
 The worker processes are started with the 'spawn' method, so each one
 imports the modules afresh. A Case therefore holds only objects that can
-be pickled: Params and Scenario are frozen dataclasses, and a controller
-holds only its configuration until reset() is called.
+be pickled: StudyParams and Scenario are frozen dataclasses, and a
+controller holds only its configuration until reset() is called.
 
 FILE DEPENDENCY:
 ./
@@ -41,7 +41,7 @@ import sim
 class Case:
     """One simulation run: the arguments of sim.run()."""
 
-    params: Any                 # Params
+    params: Any                 # StudyParams
     scenario: Any               # Scenario
     controller: Any             # SlaveController or LegacyController
     legacy_sensor: bool = False

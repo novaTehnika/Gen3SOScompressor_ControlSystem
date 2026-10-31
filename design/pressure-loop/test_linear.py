@@ -38,10 +38,10 @@ Usage:
 
 FILE DEPENDENCY:
 ./
-    controllers.py, linear.py, params.py, scenarios.py, sim.py
+    studyparams.py, controllers.py, linear.py, scenarios.py, sim.py
 tests/run_all.sh reruns this script when a file under these paths
 changes (paths from the repository root):
-Depends on: design/pressure-loop slave-src tools
+Depends on: design/pressure-loop models slave-src tools
 """
 
 import os
@@ -57,13 +57,13 @@ import controllers as ctl  # noqa: E402
 import linear as lin  # noqa: E402
 import scenarios  # noqa: E402
 import sim  # noqa: E402
-from params import Params  # noqa: E402
+from studyparams import StudyParams  # noqa: E402
 
 # %% ===== TEST CONDITIONS ===============================================
 # No noise and no transducer offset: the linear model is about the
 # response to a step, and the offset would shift the true pressure
 # against which the step is measured.
-PAR = Params().with_(noise=0.0, P_offset=0.0)
+PAR = StudyParams().with_(noise=0.0, P_offset=0.0)
 K_LIQ = PAR.A * PAR.K / PAR.Vl0     # [Pa/m] liquid-only chamber stiffness
 CFG = PAR.cfg()
 

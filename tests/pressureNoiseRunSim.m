@@ -6,7 +6,7 @@ function pressureNoiseRunSim()
 %   stopped.
 %   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
-%   Depends on: master-src/logic slave-src slave-sim tools design/pressure-loop bench/pressure bench/common tests/fakeProbeLink.m
+%   Depends on: master-src/logic slave-src slave-sim tools models bench/pressure bench/common tests/fakeProbeLink.m
 
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'bench', 'pressure'), fullfile(here, '..', 'bench', 'common'));

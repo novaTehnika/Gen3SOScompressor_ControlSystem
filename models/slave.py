@@ -9,13 +9,13 @@ CREATION DATE:
 10/15/2026
 
 PURPOSE/DESCRIPTION:
-This module gives the design studies access to the slave's function
-blocks and configuration, so that the studies run the slave's own code
-rather than a copy of it.
+This module gives the models and the design studies access to the
+slave's function blocks and configuration, so that they run the slave's
+own code rather than a copy of it.
 
-Importing the module does three things. It regenerates design/generated
+Importing the module does three things. It regenerates models/generated
 with tools/st_translate.py (target py) when that directory is missing
-or older than the slave sources, it puts design/generated on sys.path so
+or older than the slave sources, it puts models/generated on sys.path so
 that statements such as "from FB_PressureController import ..." work,
 and it puts tools/ on sys.path so that this module can use the
 Structured Text parser in st_translate.py.
@@ -26,11 +26,11 @@ GlobalVariables_Reference.st. TIME values are converted to seconds;
 other values keep the units given in the GVL comments.
 
 FILE DEPENDENCY:
-../../tools/
+../tools/
     st_translate.py (run as a program to regenerate the blocks, and
     imported for its parser)
     st_target_py.py
-../../slave-src/
+../slave-src/
     FB/FB_*.st
     DUT/DataTypes.st
     GVL/GlobalVariables_Reference.st
@@ -41,15 +41,15 @@ import sys
 from functools import lru_cache
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]      # repository root
+ROOT = Path(__file__).resolve().parents[1]      # repository root
 SLAVE_SRC = ROOT / 'slave-src'
-GENERATED = ROOT / 'design' / 'generated'
+GENERATED = ROOT / 'models' / 'generated'
 TOOLS = ROOT / 'tools'
 
 
 # %% ===== GENERATED FUNCTION BLOCKS =====================================
 def _sources():
-    """Return the files that design/generated is translated from."""
+    """Return the files that models/generated is translated from."""
     files = list((SLAVE_SRC / 'FB').glob('FB_*.st'))
     files.append(SLAVE_SRC / 'DUT' / 'DataTypes.st')
     files += [TOOLS / 'st_translate.py', TOOLS / 'st_target_py.py']
@@ -57,7 +57,7 @@ def _sources():
 
 
 def ensure_generated():
-    """Regenerate design/generated unless every generated file is newer
+    """Regenerate models/generated unless every generated file is newer
     than every source file."""
     out = list(GENERATED.glob('*.py'))
     missing = (not out

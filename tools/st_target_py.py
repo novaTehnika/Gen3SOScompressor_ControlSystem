@@ -1,6 +1,6 @@
 """Python target of tools/st_translate.py: the function blocks as modules.
 
-    python3 tools/st_translate.py --target py slave-src design/generated
+    python3 tools/st_translate.py --target py slave-src models/generated
 
 The ST subset and the parsing are those of tools/st_translate.py; this
 target subclasses its Translator and overrides only the target-language

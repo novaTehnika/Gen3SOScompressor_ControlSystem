@@ -11,7 +11,7 @@ function closedLoopModbusStep()
 %   widened to the bench value to match.
 %   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
-%   Depends on: master-src/logic slave-src slave-sim tools design/pressure-loop
+%   Depends on: master-src/logic slave-src slave-sim tools models
 
 clear masterStep masterStateMachine
 cfg = masterConfig();

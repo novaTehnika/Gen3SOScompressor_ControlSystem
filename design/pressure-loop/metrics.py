@@ -22,7 +22,7 @@ event time tEvent. With error e = target - P:
                if the pressure never reaches the target.
   peakErr      [MPa] Largest |e| after the event.
   tSettle      [s] Time after the event from which |e_meas| stays below
-               Params.tol, with e_meas the error of the measured
+               StudyParams.tol, with e_meas the error of the measured
                pressure. It is 0 if it never leaves the band, and NaN if
                it is still outside the band at the end of the run.
   rmsErr       [MPa] RMS of e_meas over the last 2 s.

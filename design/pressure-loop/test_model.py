@@ -16,7 +16,7 @@ It prints "ok" and a short result for each check and stops at the first
 failure. tests/run_all.sh runs it.
 
 The checks cover:
-  - reading the slave configuration and overriding Params;
+  - reading the slave configuration and overriding StudyParams;
   - the sealed liquid chamber stiffness against A K / Vl;
   - conservation of volume and gas moles, with and without outflow;
   - the agreement of the two integration methods, which bounds the
@@ -36,13 +36,14 @@ Usage:
 
 FILE DEPENDENCY:
 ./
-    controllers.py, params.py, plant.py, runner.py, scenarios.py,
-    sensor.py, sim.py, slave.py, solver.py
-../generated/
+    studyparams.py, controllers.py, runner.py, scenarios.py, sim.py
+../../models/
+    plant.py, sensor.py, slave.py
+../../models/generated/
     FB_PressureController.py
 tests/run_all.sh reruns this script when a file under these paths
 changes (paths from the repository root):
-Depends on: design/pressure-loop slave-src tools
+Depends on: design/pressure-loop models slave-src tools
 """
 
 import math
@@ -60,7 +61,8 @@ import scenarios  # noqa: E402
 import sim  # noqa: E402
 from FB_PressureController import (FB_PressureController,  # noqa: E402
                                    new_FB_PressureController)
-from params import Params  # noqa: E402
+from studyparams import StudyParams  # noqa: E402
+import modelpath  # noqa: F401, E402  (puts models/ on sys.path)
 from plant import (Plant, iy_ndis, iy_nout, iy_ntot,  # noqa: E402
                    iy_Vl, iy_Vout, iy_Vvir)
 from runner import Case, run_cases  # noqa: E402
@@ -78,25 +80,26 @@ def check_config():
     assert c['G_cfgPressureSensorFaultTime'] == 0.1, \
         c['G_cfgPressureSensorFaultTime']
     assert c['G_cfgScanTime'] == 0.004 and c['G_cfgAnalogMedianSize'] == 5
-    par = Params()
+    par = StudyParams()
     assert (par.Ts == 0.004 and par.vmax == 5e-3 and par.medN == 5
             and par.tauF == 0.02
             and par.cfg()['G_cfgPressureStopVelMin'] == 2.0)
     q = par.with_(G_cfgPressureKp=2.0, K=2e9)
     assert (q.cfg()['G_cfgPressureKp'] == 2.0 and q.K == 2e9
             and par.cfg()['G_cfgPressureKp'] == 0.5)
-    q = Params.from_overrides(['K=2e9', 'nsub=10', 'liquid_depletes=false',
-                               'G_cfgScanTime=0.001', 'solver=euler'])
+    q = StudyParams.from_overrides(['K=2e9', 'nsub=10',
+                                    'liquid_depletes=false',
+                                    'G_cfgScanTime=0.001', 'solver=euler'])
     assert (q.K == 2e9 and q.nsub == 10 and q.liquid_depletes is False
             and q.Ts == 0.001 and q.solver == 'euler')
     try:
-        Params.from_overrides(['nonsense=1'])
+        StudyParams.from_overrides(['nonsense=1'])
     except ValueError:
         pass
     else:
         raise AssertionError('unknown key accepted')
-    ok('slave_config reads the GVL (TIME in s); Params overrides route to '
-       'fields and G_cfg')
+    ok('slave_config reads the GVL (TIME in s); StudyParams overrides '
+       'route to fields and G_cfg')
 
 
 # %% ===== CHAMBER ========================================================
@@ -111,7 +114,7 @@ def liquid_plant(par, P0=10e6, Qf=0.0, hose_open0=True):
 
 
 def check_stiffness():
-    par = Params()
+    par = StudyParams()
     plant, _ = liquid_plant(par, hose_open0=False)
     for _ in range(100):                    # reach 0.1 mm/s
         plant.scan(1e-4, 0.0)
@@ -127,7 +130,7 @@ def check_stiffness():
 
 
 def check_conservation():
-    par = Params()
+    par = StudyParams()
 
     # Gas-rich chamber at the supply pressure, sealed: the volume closes
     # and no gas is lost.
@@ -183,7 +186,7 @@ def check_conservation():
 
 
 def check_outlet():
-    par = Params()
+    par = StudyParams()
     # Orifice flow at 10 MPa, eq. (36), and its pressure dependence
     Q10 = par.Q_orifice(10e6)
     expect = par.Cd * par.n_orifice * math.pi * par.d_orifice**2 / 4 \
@@ -242,7 +245,7 @@ def check_outlet():
 
 
 def check_throttled_opening():
-    par = Params()
+    par = StudyParams()
     # Hose pressure against the volume admitted, eq. (44): the admitted
     # solution and the hose's saline, stressed, fill the bore and its
     # dilation.
@@ -318,7 +321,7 @@ def check_solver():
     for name in ('compress', 'stiffstep', 'deliver'):
         r = {}
         for method in ('euler', 'heun'):
-            par = Params(solver=method)
+            par = StudyParams(solver=method)
             r[method] = sim.run(par, scenarios.make(name, par),
                                 ctl.SlaveController())
         # The delivery is compared only while the loop holds; the
@@ -333,7 +336,7 @@ def check_solver():
 
 # %% ===== ACTUATORS =====================================================
 def check_actuators():
-    par = Params()
+    par = StudyParams()
 
     # Slew limits (when enabled): 10 mm/s^2 up and 100 mm/s^2 down,
     # with no stall or dead time
@@ -395,7 +398,7 @@ def check_actuators():
 
 # %% ===== SENSOR ========================================================
 def check_sensor():
-    par = Params().with_(noise=0.0)
+    par = StudyParams().with_(noise=0.0)
     cfg = par.cfg()
     assert abs(filter_alpha(cfg) - 0.004 / 0.024) < 1e-15
     assert filter_alpha(par.cfg(G_cfgAnalogFilterTimeConst=0.0)) == 1.0
@@ -414,7 +417,7 @@ def check_sensor():
 
     # With noise, the filtered reading is unbiased and much quieter than
     # the raw samples.
-    par_n = Params()
+    par_n = StudyParams()
     s2 = SlaveSensor(par_n, cfg, 8e6)
     z = np.random.default_rng(0).standard_normal(4000)
     out = np.array([s2.read(8e6, zk) for zk in z])
@@ -428,7 +431,7 @@ def check_sensor():
 
 # %% ===== CONTROLLERS ===================================================
 def check_wiring():
-    par = Params()
+    par = StudyParams()
     sc = scenarios.stiffstep(par)
     c = ctl.SlaveController(Kp=0.8, StopStiffness=50)
     c.reset(par, sc)
@@ -475,7 +478,7 @@ def check_wiring():
 
 # %% ===== CLOSED LOOP ===================================================
 def check_scheduled():
-    par = Params()
+    par = StudyParams()
     S = ctl.ScheduledSlaveController
 
     # The stiffness estimate is an upper bound on the true stiffness
@@ -538,7 +541,7 @@ def check_legacy_reference():
     # Reference values for this case without noise or transducer offset,
     # computed with Heun at nsub = 5, a 2 ms scan and a drive lag of
     # 8.7 ms; the case pins both so that it guards the earlier model
-    par = Params().legacy().with_(noise=0.0, P_offset=0.0,
+    par = StudyParams().legacy().with_(noise=0.0, P_offset=0.0,
                                   G_cfgScanTime=0.002, tauV=0.0087)
     c = ctl.LegacyController('ref', 'V', 0.5, 0.2, 0, True, 50e-3)
     r = sim.run(par, scenarios.stiffstep(par), c, legacy_sensor=True)
@@ -550,7 +553,7 @@ def check_legacy_reference():
 
 
 def check_closed_loop():
-    par = Params()
+    par = StudyParams()
     t0 = time.time()
     r = sim.run(par, scenarios.compress(par), ctl.SlaveController())
     dt = time.time() - t0
@@ -608,7 +611,7 @@ def check_closed_loop():
 
 
 def check_runner():
-    par = Params()
+    par = StudyParams()
     cases = [Case(par, scenarios.stiffstep(par), ctl.SlaveController(Kp=k))
              for k in (0.5, 1.0)]
     serial = run_cases(cases, workers=1)

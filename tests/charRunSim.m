@@ -9,7 +9,7 @@ function charRunSim()
 %   guards and a slave fault.
 %   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
-%   Depends on: master-src/logic slave-src slave-sim tools design/pressure-loop bench/characterisation bench/common tests/fakeProbeLink.m
+%   Depends on: master-src/logic slave-src slave-sim tools models bench/characterisation bench/common tests/fakeProbeLink.m
 
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'bench', 'characterisation'), fullfile(here, '..', 'bench', 'common'));
@@ -18,7 +18,7 @@ ccfg = charConfig();
 T = 1; STEP = 2; STATUS = 3; MODE = 4; REF = 5; POS = 6; P = 9;    % log columns
 
 % --- Velocity session: ramps on the pressure, dwell, steps, then a hold ---------
-% The simulated chamber is the design model's (design/pressure-loop): the
+% The simulated chamber is the plant model's (models/): the
 % 1:1 oxygen charge over saline, about 0.5 MPa/mm at 2.5 MPa, and the
 % charge dissolves as the pressure rises, so the ramps run at 0.3 mm/s.
 opts = linkOpts(saveDir, @(sl) chamberPosition(sl, 1.7));
@@ -104,7 +104,7 @@ fprintf('ok  bulk modulus fit rejects the gas charge (K %.4f GPa, gas %.1f mL of
 
 % --- One pass: levels, excursions in both directions, stops ---------------------
 % The path is planned on the simulated chamber's own stiffness (its free
-% gas and its liquid, eqs. (4) and (10) of design/pressure-loop/README.md),
+% gas and its liquid, eqs. (4) and (10) of models/README.md),
 % so that each excursion stays within its budget.
 opts = linkOpts(saveDir, @(sl) chamberPosition(sl, 1.7));
 opts.probe = 'stops';
@@ -275,7 +275,7 @@ end
 function x = dissolvedAt(sl, P)
 % The axis position at which the chamber holds P MPa with its saline
 % saturated at P (Henry's law, eqs. (2) and (3) of
-% design/pressure-loop/README.md), after setting the dissolved gas so.
+% models/README.md), after setting the dissolved gas so.
 pl = sl.plant;
 sl.plant.n_dis = min(pl.par.kH * (P * 1e6 + pl.par.Patm) * pl.V_l, pl.n_tot);   % [mol]
 x = chamberPosition(sl, P);

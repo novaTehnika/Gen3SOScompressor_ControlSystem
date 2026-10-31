@@ -39,12 +39,11 @@ Usage:
 
 FILE DEPENDENCY:
 ./
-    controllers.py
+    studyparams.py, controllers.py
     runner.py
     scenarios.py
     studyutil.py
-    (and the model modules they import: params.py, plant.py,
-    sensor.py, sim.py, slave.py, solver.py)
+    (and the modules they import: sim.py, and models/)
 """
 
 import numpy as np
@@ -58,7 +57,7 @@ from runner import Case, run_cases
 # %% ===== STUDY VARIABLES ===============================================
 RATIOS = (1.0, 1.5, 2.0, 2.5, 3.0)      # [-] STP oxygen to saline
 TRACE_RATIO = 1.0                       # [-] ratio of the plotted traces
-# Hose procedures: Params.hose_before for each
+# Hose procedures: StudyParams.hose_before for each
 PROCEDURES = {'hose opened after mixing': False,
               'hose opened before compression': True}
 

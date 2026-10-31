@@ -47,9 +47,9 @@ Decel, StopStiffness, AnalogFilterTimeConst, ...) in GVL units.
 
 FILE DEPENDENCY:
 ./
-    robust.py
-    (and the model modules it imports: controllers.py, params.py,
-    plant.py, scenarios.py, sensor.py, sim.py, slave.py, solver.py)
+    studyparams.py, robust.py
+    (and the modules it imports: controllers.py, scenarios.py, sim.py,
+    and models/)
 """
 
 import argparse
@@ -530,7 +530,7 @@ def main(argv=None):
     ap.add_argument('--ratio', type=float, default=1.0,
                     help='oxygen charge, STP volume per saline volume')
     ap.add_argument('--target', type=float, default=None,
-                    help='target pressure in MPa (default: Params)')
+                    help='target pressure in MPa (default: StudyParams)')
     ap.add_argument('--hose-before', action='store_true',
                     help='open the proximal valve before the compression '
                          '(the proposed procedure)')

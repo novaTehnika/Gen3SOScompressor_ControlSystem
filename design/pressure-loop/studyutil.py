@@ -14,7 +14,7 @@ the study scripts. It contains no part of the model or the analysis.
 
 FILE DEPENDENCY:
 ./
-    params.py
+    studyparams.py
 """
 
 import argparse
@@ -26,7 +26,7 @@ import matplotlib
 matplotlib.use('Agg')           # write image files; no display needed
 import matplotlib.pyplot as plt  # noqa: E402
 
-from params import Params  # noqa: E402
+from studyparams import StudyParams  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 # Line colors for plots, assigned in order
@@ -43,7 +43,7 @@ def parser(description, sweeps=False):
                     help='output directory (default: out/ here)')
     ap.add_argument('--set', action='append', default=[],
                     metavar='KEY=VALUE',
-                    help='override a Params field or a G_cfg* slave '
+                    help='override a StudyParams field or a G_cfg* slave '
                          'setting; repeatable')
     ap.add_argument('--legacy', action='store_true',
                     help='use the earlier model: fixed liquid volume, '
@@ -60,9 +60,9 @@ def parser(description, sweeps=False):
 
 
 def setup(args):
-    """Return (Params, legacy sensor flag, output directory) from the
+    """Return (StudyParams, legacy sensor flag, output directory) from the
     parsed arguments, creating the output directory."""
-    par = Params.from_overrides(args.set)
+    par = StudyParams.from_overrides(args.set)
     if args.legacy:
         par = par.legacy()
     out = Path(args.out)
