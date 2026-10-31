@@ -55,6 +55,8 @@ function [path, plan] = charStopPath(opts)
 %                       position at each level (default charConfig)
 %   opts.posStop        mm, the run's position guard; every level must
 %                       sit below it (default charConfig.posStop)
+%   opts.P_start_MPa    pressure the run starts from, for the time the
+%                       first ramp is allowed (default 0, atmosphere)
 %   opts.quiet          no printing
 %
 %   path   the cell array of steps for charRun
@@ -72,7 +74,7 @@ addpath(fullfile(here, '..', 'common'));
 cfg = charConfig();
 known = {'levels_MPa', 'speeds', 'budget_MPa', 'rampSpeed', 'hold_s', 'pause_s', 'T0_s', ...
     'D_mm_s2', 'minRun_mm', 'fillVolume_mL', 'chargeRatio', 'K_Pa', 'C_hose_m3_Pa', ...
-    'stiffness', 'pressureStop', 'deadVolume_mL', 'posStop', 'quiet'};
+    'stiffness', 'pressureStop', 'deadVolume_mL', 'posStop', 'P_start_MPa', 'quiet'};
 given = fieldnames(opts);
 unknown = given(~ismember(given, known));
 if ~isempty(unknown)
@@ -96,6 +98,7 @@ opts = withDefault(opts, 'stiffness', []);
 opts = withDefault(opts, 'pressureStop', cfg.pressureStop);
 opts = withDefault(opts, 'deadVolume_mL', cfg.deadVolume_mL);
 opts = withDefault(opts, 'posStop', cfg.posStop);
+opts = withDefault(opts, 'P_start_MPa', 0);
 opts = withDefault(opts, 'quiet', false);
 say = @(varargin) sayIf(~opts.quiet, varargin{:});
 
@@ -147,13 +150,15 @@ nStops = 0;
 say('one-pass stopping-distance path: %d levels, speeds %s mm/s, charge %g:1 air, fill %g mL\n', ...
     nL, mat2str(opts.speeds), opts.chargeRatio, opts.fillVolume_mL);
 say('%6s %10s %8s %10s %6s %8s %8s %8s\n', 'P MPa', 'k MPa/mm', 'x mm', 'budget', 'v', 'd mm', 'stop mm', 'rise');
-Pprev = 0;
+Pprev = opts.P_start_MPa;
 for L = 1:nL
     P = levels(L);
     k = kOf(P);
-    % Ramp up to the level at the ramp speed; the time allowed covers twice
-    % the travel at the model's stiffness, with a floor for a soft start.
-    travel = travelOf(max(Pprev, 0.5), P);
+    % Ramp up to the level at the ramp speed; the time allowed is twice
+    % the travel the model predicts from the pressure the ramp starts at
+    % (the run's start for the first), plus a margin. Near atmosphere the
+    % gas makes the chamber very soft, so the first ramp can be long.
+    travel = travelOf(max(Pprev, 0.02), P);
     path{end + 1} = {'ramp', opts.rampSpeed, P, max(2 * travel / opts.rampSpeed, 5) + 10};
     seconds = seconds + travel / opts.rampSpeed;
     path{end + 1} = {'dwell', opts.hold_s};
@@ -189,6 +194,8 @@ for L = 1:nL
         pl.rise_MPa(end + 1) = budget(L);
         say('%6.1f %10.2f %8.1f %10.2f %6g %8.3f %8.3f %8.2f\n', P, k, x, budget(L), v, d, xs, budget(L));
     end
+    say('%6s ramp to %.0f MPa: about %.0f mm, %.0f s at %g mm/s\n', '', P, travel, ...
+        travel / opts.rampSpeed, opts.rampSpeed);
     plan(end + 1) = pl;
     Pprev = P;
 end

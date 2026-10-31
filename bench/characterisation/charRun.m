@@ -151,6 +151,7 @@ seq.resetSent = false;  % operator reset sent for a fault latched at the start
 seq.tFaultSeen = NaN;   % when that fault was first reported
 seq.abort = '';
 slowExchanges = 0;
+writeMsLog = [];
 
 probe.enabled = opts.probe;
 probe.next = 'poll';
@@ -178,8 +179,10 @@ while true
 
     % --- Protocol exchange, as the shell's Modbus blocks do it ------------
     tx = tic;
+    writeMs = NaN;
     try
         link.write(map.hr.heartbeat, mbWrite);
+        writeMs = toc(tx) * 1000;
         mbRead = link.read(1, map.nRead);
     catch err
         exchangeFailures = exchangeFailures + 1;
@@ -188,6 +191,7 @@ while true
         end
     end
     exchangeMs = toc(tx) * 1000;
+    writeMsLog(end + 1) = writeMs;                                      %#ok<AGROW>
     if exchangeMs > 150
         slowExchanges = slowExchanges + 1;
         if slowExchanges <= 3
@@ -285,6 +289,10 @@ for s = 1:nSteps
 end
 fprintf('%d captures, exchange failures %d, probe failures %d, exchange p99 %.1f ms\n', ...
     numel(captures), exchangeFailures, probe.failures, prctileOf(runLog(:, 12), 99));
+readMs = runLog(:, 12) - writeMsLog(1:size(runLog, 1))';
+fprintf('exchange: write median %.1f ms, p99 %.1f; read median %.1f ms, p99 %.1f (the controller answers in 1 to 8 ms)\n', ...
+    median(writeMsLog, 'omitnan'), prctileOf(writeMsLog(~isnan(writeMsLog)), 99), ...
+    median(readMs, 'omitnan'), prctileOf(readMs(~isnan(readMs)), 99));
 fprintf('saved %s\n', fname);
 end
 

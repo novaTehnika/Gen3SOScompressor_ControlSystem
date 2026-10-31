@@ -72,11 +72,17 @@ r = charRun('label', path);              % see sections 3 to 5 for the paths
 ```
 
 A fault still latched from an earlier run is cleared by `charRun` with the
-operator reset before its first step. The protocol exchange takes 20 to
-100 ms on this link (the run prints any exchange over 150 ms and skips the
-probe transaction in that cycle); the slave's watchdog faults the run with
-`FAULT_COMM` (code 4) if the heartbeat stops for 300 ms, so a PC that
-stalls for that long, or a second Modbus client, ends the run.
+operator reset before its first step. The controller answers a Modbus
+request in 1 to 8 ms (`bench/modbus`), so the protocol exchange, one write
+and one read, should take under 20 ms; the run prints any exchange over
+150 ms, skips the probe transaction in that cycle, and at the end gives
+the write and read times separately. The slave's watchdog faults the run
+with `FAULT_COMM` (code 4) if the heartbeat stops for 300 ms
+(`G_cfgCommTimeout`), so exchanges of 200 ms end it. Exchanges that slow
+have come from a second Modbus client on the controller (the shell model
+or the operator app still connected, another MATLAB session, an OPC
+client) or from the network path; `bench/modbus/modbusRawProbe` times the
+transactions on their own, without the master, and is the first check.
 
 The run ends with the axis stopped, prints a table of the steps and saves
 `../common/captures/<label>_char_<timestamp>.csv` (columns as in
