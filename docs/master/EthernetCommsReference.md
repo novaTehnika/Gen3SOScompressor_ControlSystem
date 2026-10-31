@@ -184,7 +184,7 @@ Limits and known issues (MotionWorks IEC 2.1.0 release notes, RN.MWIEC.14):
   - The manual recommends running communication function blocks in slower tasks
     (about 4–50 ms, or the DEFAULT task) to avoid the PLC watchdog. Whether they
     can run in the 4 ms task must be verified.
-- Socket code would sit in a POU that `tools/st2m.py` does not translate, and
+- Socket code would sit in a POU that `tools/st_translate.py` does not translate, and
   exchange data with `PRG_Main` through global structs, in the same way as the
   Ladder Diagram motion POU.
 

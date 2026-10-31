@@ -39,7 +39,7 @@ accept these options:
 | `--legacy` | Uses the earlier plant and sensor: a fixed liquid volume, a single slew limit, and the median and first-order filter applied directly to pressure. |
 | `--workers N`, `--seed N` | Set the number of processes (default one per CPU) and the sensor noise seed. |
 
-`design/generated/` holds the slave blocks translated by `tools/st2py.py`.
+`design/generated/` holds the slave blocks translated by `tools/st_translate.py --target py`.
 `slave.py` regenerates it when it is missing or older than `slave-src/FB/`.
 
 ## Files

@@ -9,9 +9,9 @@ cd /d "%~dp0.."
 set PY=python
 where py >nul 2>nul && set PY=py -3
 
-%PY% tools\st2m.py slave-src slave-sim\generated || exit /b 1
-%PY% tools\st2py.py slave-src design\generated || exit /b 1
-%PY% tests\st2pyParity.py || exit /b 1
+%PY% tools\st_translate.py --target m slave-src slave-sim\generated || exit /b 1
+%PY% tools\st_translate.py --target py slave-src design\generated || exit /b 1
+%PY% tests\stTargetParity.py || exit /b 1
 %PY% design\pressure-loop\test_model.py || exit /b 1
 %PY% design\pressure-loop\test_linear.py || exit /b 1
 %PY% design\pressure-loop\test_robust.py || exit /b 1

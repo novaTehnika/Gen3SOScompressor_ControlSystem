@@ -5,8 +5,9 @@ function slavePressureMode()
 %   through an outflow disturbance, clamp an excessive target, leave the
 %   mode, and fault on a broken transducer loop only while the loop is
 %   closed on it.
-%   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
+%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
 %     addpath slave-sim slave-sim/generated tests
+%   Depends on: slave-src slave-sim tools
 
 MODE_PRESSURE = 7;
 FAULT_PRESSURE_SENSOR = 8;
@@ -24,7 +25,10 @@ h.sl.hook.pressureVolt = NaN;
 fprintf('ok  broken loop while idle does not fault\n');
 
 % Enter pressure mode with a 10 MPa target: compresses, settles in band,
-% stays within the velocity clamp and does not overshoot the target.
+% stays within the velocity clamp and does not overshoot the target. The
+% axis starts in the chamber at 0.5 MPa: below that the gas spring is soft
+% and compressing it only adds travel at the clamp.
+h.sl.ax.x = chamberPosition(h.sl.sim, 0.5);
 h = enterMode(h, MODE_PRESSURE, 10);
 assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_PRESSURE_CTRL);
 h.vMax = 0; h.pMax = 0;

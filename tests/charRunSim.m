@@ -7,8 +7,9 @@ function charRunSim()
 %   test 4 (charStopPath) and its fit (charStopDistance); a delivery
 %   through the orifice bank in pressure mode; the pressure and position
 %   guards and a slave fault.
-%   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
+%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
+%   Depends on: master-src/logic slave-src slave-sim tools bench/characterisation bench/common tests/fakeProbeLink.m
 
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'bench', 'characterisation'), fullfile(here, '..', 'bench', 'common'));
