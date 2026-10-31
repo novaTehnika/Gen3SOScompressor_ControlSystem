@@ -43,15 +43,17 @@ assert(h.m.statusCode == 0 && h.m.doSafety == 1 && h.m.linkOk == 1);
 assert(h.y.heartbeatEcho > 0, 'heartbeat not echoed');
 fprintf('ok  start-up: waits for the slave, then idle; heartbeat echoed\n');
 
+% Homing from close to the negative overtravel switch.
+h.sl.ax.x = 10;
 h = command(h, 1);
 h = runUntil(h, 60, @(h) h.sl.G.G_flagHomingComplete && h.m.state == 1);
 assert(h.sl.G.G_flagHomingComplete && h.m.state == 1, 'homing did not complete');
 fprintf('ok  homing through the registers\n');
 
-h.app.targetPosition = 25;
+h.app.targetPosition = 5;
 h = command(h, 2);
 h = runUntil(h, 30, @(h) h.m.statusCode == 3);
-assert(h.m.statusCode == 3 && abs(h.sl.ax.x - 25) <= cfg.posTolerance);
+assert(h.m.statusCode == 3 && abs(h.sl.ax.x - 5) <= cfg.posTolerance);
 assert(abs(h.m.position - h.sl.ax.x) < 0.1);
 fprintf('ok  position move, displayed position %.3f mm\n', h.m.position);
 
@@ -78,12 +80,12 @@ fprintf('ok  go home with a slow drive start, and from home (%.1f s)\n', h.tick 
 
 % Pressure operation: the target goes to the slave in MPa gauge as mode 7,
 % the slave's transducer reading comes back in IR19-20 and is shown in atm
-% absolute. The axis is placed near the chamber once the slave has
-% released it.
+% absolute. The axis is placed in the chamber below the target once the
+% slave has released it.
 h = command(h, 0);
 h = runUntil(h, 5, @(h) h.m.state == 1 && ...
     h.sl.G.G_sysCurrentState == h.sl.E.E_SystemState.ST_IDLE);
-h.sl.ax.x = h.sl.sim.chamberContactPos + 40;
+h.sl.ax.x = chamberPosition(h.sl.sim, 1);
 h.app.targetPressure = 20 + cfg.atmAmbient;     % atm absolute
 h = command(h, 4);
 h = runUntil(h, 10, @(h) h.m.statusCode == 5);
@@ -126,7 +128,7 @@ h.app.targetVelocity = 2;
 h.app.jogDirection = 1;
 h = command(h, 3);
 h = runUntil(h, 10, @(h) h.m.statusCode == 4);
-h = runUntil(h, 2, []);
+h = runUntil(h, 2, @(h) h.sl.ax.v > 1);
 assert(h.m.statusCode == 4 && h.sl.ax.v > 1);
 h.writeLost = true;
 h = runUntil(h, 0.5, []);
@@ -147,7 +149,7 @@ fprintf('ok  slave link loss -> FAULT_COMM, reset\n');
 % stays latched after the registers resume until the operator sends Stop.
 h = command(h, 3);
 h = runUntil(h, 10, @(h) h.m.statusCode == 4);
-h = runUntil(h, 2, []);
+h = runUntil(h, 2, @(h) h.sl.ax.v > 1);
 assert(h.m.statusCode == 4 && h.sl.ax.v > 1);
 h.readLost = true;
 h = runUntil(h, 0.5, []);
@@ -161,7 +163,7 @@ assert(h.m.linkOk == 0 && h.m.statusCode == 34, 'link loss did not stay latched'
 h = command(h, 0);
 h = runUntil(h, 0.5, []);
 assert(h.m.linkOk == 1 && h.m.doSafety == 1 && h.m.state == 1);
-h.app.targetPosition = 40;
+h.app.targetPosition = round(h.m.position) + 3;
 h = command(h, 2);
 h = runUntil(h, 30, @(h) h.m.statusCode == 3);
 assert(h.m.statusCode == 3, 'position move after link loss did not reach target');

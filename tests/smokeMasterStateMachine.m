@@ -112,10 +112,8 @@ h = runFor(h, 1);
 assert(h.out.state == 1 && h.out.motionEnable == 0);
 fprintf('ok  e-stop\n');
 
-% Soft limit blocks jog beyond posMax.
-h.in.targetPosition = h.cfg.posMax;
-h = command(h, 2);
-h = runFor(h, 150);
+% Soft limit blocks jog beyond posMax. The axis is placed just inside it.
+h.sl.pos = h.cfg.posMax - 1;
 h.in.jogVelocity = 3;
 h = command(h, 3);
 h = runFor(h, 3);
