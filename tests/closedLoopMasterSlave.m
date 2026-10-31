@@ -10,7 +10,7 @@ function closedLoopMasterSlave(handshakeTimeout)
 %   engineering units; packing is covered by closedLoopModbusStep.
 %   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
-%   Depends on: master-src/logic slave-src slave-sim tools
+%   Depends on: master-src/logic slave-src slave-sim tools design/pressure-loop
 
 if nargin < 1
     handshakeTimeout = 0.5;
@@ -82,7 +82,7 @@ h.in.positionSpeed = 0;
 c = zeros(1, 2000);
 for k = 1:numel(c)
     h = runFor(h, dtS);
-    c(k) = h.y.commandedPosition;
+    c(k) = h.sl.G.G_sysCommandedPosition;     % the LREAL, not the REAL register's 8e-6 mm steps
 end
 rate = diff(c) / dtS;
 accel = diff(rate) / dtS;
@@ -131,7 +131,7 @@ fprintf('ok  position -> jog -> stop\n');
 h.in.jogVelocity = 1;
 h = command(h, 3);
 h = runUntil(h, 4, @(h) h.out.statusCode == 4);
-h.sl.ax.x = chamberPosition(h.sl.sim, 0.5);
+h.sl.ax.x = chamberPosition(h.sl, 0.5);
 h.in.targetPressure = 2;
 h = command(h, 4);
 h = runUntil(h, 10, @(h) h.out.statusCode == 5);
@@ -234,7 +234,11 @@ h = runFor(h, 1);
 assert(h.out.state == 1 && h.out.motionEnable == 0 && h.faultSeen == 0);
 fprintf('ok  e-stop\n');
 
-% Master soft limit stops a jog before the slave's own limit faults.
+% Master soft limit stops a jog before the slave's own limit faults. Both
+% limits are set below the cylinder entry for this, so the limit and not
+% the sealed chamber stops the jog.
+h.sl.G.G_cfgPosSoftLimitMax = h.sl.sim.chamberContactPos - 20;
+h.mcfg.posMax = h.sl.G.G_cfgPosSoftLimitMax - 5;
 h.sl.ax.x = h.mcfg.posMax - 3;      % place the axis near the limit
 h.faultSeen = 0;
 h = runFor(h, 0.5);

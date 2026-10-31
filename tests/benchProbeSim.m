@@ -17,7 +17,8 @@ here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'bench', 'common'));
 bcfg = benchConfig();
 pr = bcfg.probe;
-scan = 0.004;            % the slave scan (G_cfgScanTime)
+gvl = benchGvl();
+scan = gvl.G_cfgScanTime;           % [s] the slave scan, which sets the record rate
 
 % --- A lost arm is written again and acknowledged ----------------------------------
 [link, env] = freshLink(8192);
@@ -79,7 +80,8 @@ fprintf('ok  arm during a read accepted: marks %d and %d, both captures correct\
     caps{1}.mark, caps{2}.mark);
 
 % --- A stream longer than the ring --------------------------------------------------
-depth = 256;            % half the ring at half the record rate of a 2 ms scan
+depth = round(1.024 / scan);        % a ring of 1.024 s of records
+tailN = round(0.78 * depth);        % records of the stream's tail compared with the ring
 [link, env] = freshLink(depth);
 p = benchProbe('new', pr, scan);
 p = benchProbe('arm', p, struct('step', 1, 'tag', 'stream', 'nRecords', Inf));
@@ -92,7 +94,7 @@ N = size(caps{1}.data, 1);
 assert(N > 4 * depth && caps{1}.first + N <= S.sp.written, 'stream of %d records', N);
 assert(caps{1}.first + N >= S.sp.written - 40, 'stream ends %d records before the newest', ...
     S.sp.written - caps{1}.first - N);
-checkAgainstRing(struct('first', caps{1}.first + N - 200, 'data', [(0:199)' * scan caps{1}.data(end - 199:end, 2:6)], 'tag', 'tail'), S, scan);
+checkAgainstRing(struct('first', caps{1}.first + N - tailN, 'data', [(0:tailN - 1)' * scan caps{1}.data(end - tailN + 1:end, 2:6)], 'tag', 'tail'), S, scan);
 d = diff(caps{1}.data(:, 1));
 assert(all(abs(d - scan) < 1e-9), 'stream time column not continuous');
 fprintf('ok  stream of %d records through a ring of %d, read continuously every 10 ms\n', N, depth);
@@ -100,14 +102,14 @@ fprintf('ok  stream of %d records through a ring of %d, read continuously every 
 [link, env] = freshLink(depth);
 p = benchProbe('new', pr, scan);
 p = benchProbe('arm', p, struct('step', 1, 'tag', 'stream', 'nRecords', Inf));
-% 18 records per 100 ms is 180 records/s against the 250 records/s a 4 ms
-% scan records.
-[p, caps, t] = runSlots(p, link, env, 0.1, 12, @(p, caps) ~isempty(caps));
+% A window of 18 records every gap reads 0.7 of the records a scan records.
+gap = round(18 * scan / 0.7 / scan) * scan;    % [s]
+[p, caps, t] = runSlots(p, link, env, gap, 12, @(p, caps) ~isempty(caps));
 assert(numel(caps) == 1 && caps{1}.lost && p.lost == 1, 'slow reader not reported lost');
 N = size(caps{1}.data, 1);
 assert(N > 0 && N < 3 * depth, 'lost stream holds %d records', N);
 assert(t < 12, 'overrun found only at %.1f s', t);
-fprintf('ok  stream lost to a 100 ms reader after %.1f s (%d records kept)\n', t, N);
+fprintf('ok  stream lost to a %.0f ms reader after %.1f s (%d records kept)\n', 1000 * gap, t, N);
 
 % --- Drain reads everything pending ---------------------------------------------------
 [link, env] = freshLink(8192);

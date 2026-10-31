@@ -1,6 +1,6 @@
 #!/bin/sh
-# Regenerate the simulated slave and the Python function blocks from
-# slave-src and run the tests: the Python tests with python3, the
+# Build the simulated slave and regenerate the Python function blocks from
+# slave-src, and run the tests: the Python tests with python3, the
 # MATLAB-language tests in Octave or, when octave-cli is not installed, in
 # MATLAB. Tests run in parallel and are skipped while their inputs are
 # unchanged since they last passed.
@@ -14,8 +14,8 @@
 # A test's inputs are its own file, the paths on its "Depends on:" header
 # line and the interpreter version. Their hash is recorded in .test-cache/
 # when the test passes; a later run skips the test while the hash matches.
-# Needs python3 with design/requirements.txt, octave-cli or matlab, and
-# sha256sum.
+# Needs python3 with design/requirements.txt, octave-cli or matlab, a C
+# compiler (cc, and mkoctfile or one configured for mex) and sha256sum.
 set -e
 cd "$(dirname "$0")/.."
 
@@ -33,6 +33,7 @@ tests/benchProbeSim.m
 design/pressure-loop/test_model.py
 design/pressure-loop/test_robust.py
 tests/stTargetParity.py
+tests/plantParity.py
 design/pressure-loop/test_linear.py
 tests/smokeMasterStateMachine.m
 "
@@ -46,7 +47,7 @@ while [ $# -gt 0 ]; do
         --all) force=1 ;;
         -j) shift; jobs=$1 ;;
         -j*) jobs=${1#-j} ;;
-        -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,/^set -e/p' "$0" | sed -n 's/^# \{0,1\}//p'; exit 0 ;;
         -*) echo "unknown option $1" >&2; exit 2 ;;
         *) names="$names $1" ;;
     esac
@@ -66,6 +67,7 @@ else
     exit 1
 fi
 pversion=$(python3 --version)
+mkdir -p "$CACHE"
 
 tests=
 if [ -z "$names" ]; then
@@ -82,9 +84,21 @@ else
     done
 fi
 
-python3 tools/st_translate.py --target m slave-src slave-sim/generated
 python3 tools/st_translate.py --target py slave-src design/generated
-mkdir -p "$CACHE"
+
+# The simulated slave: slave-src translated to C and compiled with
+# slave-sim/c into slaveSimMex (slave-sim/buildSlaveSim.m, when stale).
+if [ $mrunner = octave ]; then
+    build="octave-cli --quiet --eval"
+else
+    build="matlab -batch"
+fi
+if ! $build "addpath('slave-sim'); buildSlaveSim" >"$CACHE/build.log" 2>&1; then
+    cat "$CACHE/build.log" >&2
+    echo "run_all.sh: could not build the simulated slave" >&2
+    exit 1
+fi
+rm -f "$CACHE/build.log"
 
 # Hash of a test's inputs. Generated directories are left out: they are
 # derived from slave-src and tools, which are inputs themselves.

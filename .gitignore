@@ -1,5 +1,7 @@
 # Generated from slave-src by tools/st_translate.py --target m
 slave-sim/generated/
+# Generated from slave-src by tools/st_translate.py --target c
+slave-sim/generated-c/
 # Generated from slave-src by tools/st_translate.py --target py
 design/generated/
 *.asv
