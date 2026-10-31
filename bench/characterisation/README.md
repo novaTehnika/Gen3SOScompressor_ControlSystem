@@ -486,18 +486,17 @@ and the master's `deadVolume` can be corrected.
 
 ## 8. Results
 
-Logs of 2026-10-26 (`bench/captures/` on the `bench-tests` branch), fitted
-with the scripts of this bench. **The scan was 4 ms, not 2**, on the 26th
-and since: the task was set to 2 ms but the program takes about 2.5 ms a
-scan, so it ran on every second motion cycle (the probe captures show
-4.00 ms per row from the position advance against the velocity, and the
-slave's scan counter advances 250 times a second). The capture files of
-the 26th carry a 2 ms time column, which the fits replace by the scan
-(`opts.rowPeriod_s`, default `G_cfgScanTime`). The task and
-`G_cfgScanTime` are now 4 ms on the controller and in the reference.
+**The scan was 4 ms, not 2**, on the 26th and since: the task was set to 2 ms but
+the program takes about 2.5 ms a scan, so it ran on every second motion cycle
+(the probe captures show 4.00 ms per row from the position advance against the
+velocity, and the slave's scan counter advances 250 times a second). The capture
+files of the 26th carry a 2 ms time column, which the fits replace by the scan
+(`opts.rowPeriod_s`, default `G_cfgScanTime`). The task and `G_cfgScanTime` are
+now 4 ms on the controller and in the reference.
 
-Dead volume 50 mL (measured) and the fill
-from the geometry. The logs were recorded with `G_cfgPressureShuntOhms`
+Logs of 2026-10-26 (`bench/captures/`), fitted with the scripts of this
+bench, with a dead volume of 50 mL (the passages with the fittings of
+those runs) and the fill from the geometry. The logs were recorded with `G_cfgPressureShuntOhms`
 at 434 ohm, which reads the pressure as 0.971 P - 0.104 MPa
 (`bench/pressure/README.md` section 6); the table gives the values as
 fitted from them. Refitted with `opts.logShuntOhms = 434`, which rescales

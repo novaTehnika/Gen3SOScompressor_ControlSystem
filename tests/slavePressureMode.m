@@ -7,7 +7,7 @@ function slavePressureMode()
 %   closed on it and, with the gain schedule
 %   (G_cfgPressureScheduleEnable), compress to 10 MPa with the gains
 %   following the stiffness bound.
-%   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
+%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
 %     addpath slave-sim slave-sim/generated tests
 %   Depends on: slave-src slave-sim tools
 
