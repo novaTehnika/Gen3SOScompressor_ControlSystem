@@ -3,7 +3,8 @@ function closedLoopModbusStep()
 %   against the simulated slave through the Modbus register vectors: the
 %   master steps every cfg.dt, the registers are exchanged every
 %   cfg.exchangePeriod as packed 16-bit words, and the slave scans every
-%   2 ms, on a 1 ms tick. Covers homing, position, pressure, fault reset
+%   G_cfgScanTime (4 ms), on a 1 ms tick. Covers homing, position, pressure,
+%   fault reset
 %   and link loss on either side.
 %
 %   masterStep uses masterConfig as it is, so the slave's soft limit is
@@ -252,7 +253,7 @@ for n = 1:round(T * 1000)
         end
     end
 
-    if mod(h.tick, 2) == 0
+    if mod(h.tick, round(1000 * h.sl.G.G_cfgScanTime)) == 0
         [h.sl, h.y] = slaveStep(h.sl, h.u);
     end
 

@@ -6,7 +6,7 @@ function closedLoopMasterSlave(handshakeTimeout)
 %   closedLoopMasterSlave(t)     slave handshake timeout t seconds
 %
 %   The master steps every 25 ms, the Modbus exchange runs every 50 ms and
-%   the slave every 2 ms, on a 1 ms tick. Registers are exchanged in
+%   the slave every scan (G_cfgScanTime, 4 ms), on a 1 ms tick. Registers are exchanged in
 %   engineering units; packing is covered by closedLoopModbusStep.
 %   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
@@ -245,7 +245,7 @@ for k = 1:round(T * 1000)
         h.ySnap = h.y;
     end
 
-    if mod(h.tick, 2) == 0
+    if mod(h.tick, round(1000 * h.sl.G.G_cfgScanTime)) == 0
         [h.sl, h.y] = slaveStep(h.sl, h.u);
         h.vMax = max(h.vMax, abs(h.sl.ax.v));
         h.xMax = max(h.xMax, h.sl.ax.x);
