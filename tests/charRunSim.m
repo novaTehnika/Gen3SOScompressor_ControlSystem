@@ -86,7 +86,7 @@ fprintf('ok  bulk modulus fit rejects the gas spring (K %.4f GPa, gas %.1f mL of
 % --- One pass: levels, excursions in both directions, stops ---------------------
 % The path is planned on the simulated gas spring's own stiffness, so that
 % each excursion stays within its budget, and the fit must find the
-% deceleration the simulated axis slews at (G_cfgDirectCtrlDecel) in both
+% deceleration the simulated axis slews at (G_cfgDirectCtrlAccel, the block's one rate) in both
 % directions with no delay term, since the axis follows its command at
 % once.
 opts = linkOpts(saveDir, 255);

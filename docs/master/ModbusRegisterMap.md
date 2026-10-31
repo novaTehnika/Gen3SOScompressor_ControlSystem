@@ -17,7 +17,7 @@ measured by the bench test in `bench/modbus`.
 | Client | Simulink shell on the lab PC |
 
 Each exchange is one **Write Multiple Registers (FC16)** of holding registers
-1–10 followed at once by one **Read Input Registers (FC04)** of input registers
+1–12 followed at once by one **Read Input Registers (FC04)** of input registers
 1–18, so both land in the same controller service tick. The exchange period is
 up to 50 ms, a multiple of the master step; see
 [EthernetCommsReference.md](EthernetCommsReference.md).
@@ -52,7 +52,9 @@ there; published application notes give other bases.
 In Hardware Configuration: Modbus slave (server) enabled, **Use %M for
 bidirectional Holding Registers** checked, **Set all outputs off when PLC
 stops**, and the four Modbus groups assigned to the cyclic task that runs
-`PRG_Main`, so the registers update once per scan. The controller services the
+`PRG_Main` (MotionWorks IEC 3 Express has only that one task), so the
+registers update once per scan. Every register in the groups is copied
+every scan, so the groups are sized to the registers in use. The controller services the
 connection on a 4 ms tick, so a transaction takes 1 to 8 ms regardless of the
 task interval.
 
@@ -67,10 +69,13 @@ task interval.
 | 3 | `%MW3.483332` | UINT | `G_mbMotionEnable` | 1 = MotionEnable |
 | 4 | `%MW3.483334` | UINT | `G_mbFaultReset` | 1 = FaultReset (level) |
 | 5–6 | `%MD3.483336` | REAL | `G_mbReference` | Position mode: mm. Velocity mode: mm/s. Torque mode: % of rated. Pressure mode (code 7): target pressure, MPa gauge |
-| 7–8 | `%MD3.483340` | REAL | `G_mbSalineVolume` | Saline volume of the fill, mL, for the pressure gain schedule. Latched by the slave on entry to pressure mode; 0 (never written) makes the schedule fall back to the configured gains |
-| 9–10 | `%MD3.483344` | REAL | `G_mbOxygenRatio` | Oxygen charge as STP volume per saline volume (1.0 for 1:1), for the pressure gain schedule. Latched on entry to pressure mode |
-| 11–20 | | | | Reserved |
+| 7–8 | `%MD3.483340` | REAL | `G_mbPositionSpeed` | Speed of a position move, mm/s. The slave limits it to `0` to `G_cfgVelLimitMax`; 0 holds position. Written every exchange |
+| 9–10 | `%MD3.483344` | REAL | `G_mbSalineVolume` | Saline volume of the fill, mL, for the pressure gain schedule. Latched by the slave on entry to pressure mode; 0 (never written) makes the schedule fall back to the configured gains |
+| 11–12 | `%MD3.483348` | REAL | `G_mbOxygenRatio` | Oxygen charge as STP volume per saline volume (1.0 for 1:1), for the pressure gain schedule. Latched on entry to pressure mode |
+| 13–20 | | | | Reserved |
 | 101–110 | | | | Bench probe area (`bench/modbus`) |
+| 111 | `%MW3.483548` | UINT | `G_mbStepArm` | Bench step probe (`bench/common/slave/PRG_StepProbe.st`): a changed value is an arm |
+| 112–113 | `%MW3.483550` | UINT ×2 | `G_mbStepReqLo`, `G_mbStepReqHi` | Bench step probe: index of the first record wanted in the window (low word first) |
 
 ---
 
@@ -93,6 +98,15 @@ task interval.
 | 17–18 | `%QD73824` | REAL | `G_mbCommandedPosition` | `G_sysCommandedPosition` (mm) |
 | 19–20 | `%QD73828` | REAL | `G_mbActualPressure` | `G_sysActualPressure` (MPa gauge): the transducer on the slave's analog input, scaled by `FB_PressureInput`. Valid in every mode; below zero or above range when the loop current is out of range |
 | 101–110 | | | | Bench probe area (`bench/modbus`) |
+| 401–402 | `%QD74592` | UDINT | `G_mbStepWritten` | Bench step probe: records written so far |
+| 403–404 | `%QD74596` | UDINT | `G_mbStepMark` | Index of the record written in the scan of the last arm |
+| 405–406 | `%QD74600` | UDINT | `G_mbStepStart` | Index of the first record in the window |
+| 407 | `%QW74604` | UINT | `G_mbStepArmEcho` | Arm value last acted on |
+| 408 | `%QW74606` | UINT | `G_mbStepCount` | Records in the window (0 to 18) |
+| 409 | `%QW74608` | UINT | `G_mbStepDepth` | Ring depth in records (8192) |
+| 410 | `%QW74610` | UINT | `G_mbStepWords` | Words per record (6) |
+| 411–518 | `%QW74612` | WORD ×108 | `G_mbStepWindow` | 18 records of vCmd, velocity, torque, position low word, position high word, pressure (0.001 mm/s, 0.001 mm/s, 0.01 %, 0.01 µm, 0.001 MPa) |
+| 519–520 | `%QD74828` | UDINT | `G_mbStepStartTail` | Copy of Start written after the window; a read with Start ≠ StartTail is torn |
 
 ---
 

@@ -46,7 +46,7 @@ function [path, plan] = charStopPath(opts)
 %                       or ramp ends when the master sees it in an
 %                       exchange and the stop goes out in the next, two
 %                       cycles of 25 ms on a clean link and of 100 ms with
-%                       the probe's register group mapped (defaults
+%                       a large register group mapped (defaults
 %                       0.05 s, charConfig.pressureDecel and 0.2 s)
 %   opts.rampOvershoot_MPa
 %                       how far a ramp may overshoot its level once its

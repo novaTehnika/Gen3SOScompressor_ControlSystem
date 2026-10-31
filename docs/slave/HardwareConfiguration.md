@@ -32,6 +32,12 @@ This document provides step-by-step instructions for configuring the hardware in
 3. Configure the Mechatrolink network for the SGD7S servo drive
 
 ### 2.3 Task Configuration
+MotionWorks IEC 3 Express has a single task. Every POU (`PRG_Input`,
+`PRG_Main`, `PRG_Output`, the LD POU and any bench program) and the
+Modbus groups' IO Task Assignment run on that one cyclic task, so work
+cannot be moved to a slower task: anything that does not need every scan
+has to be skipped or spread over scans inside its own POU.
+
 1. Assign `PRG_Main` (and the LD POU) to a cyclic task
 2. Set the task interval to **4 ms** (the program takes about 2.5 ms a scan, so a 2 ms task overruns and runs on every second motion cycle)
 3. Set `G_cfgScanTime` to the same value in seconds (`0.004`); the position command gate integrates with it

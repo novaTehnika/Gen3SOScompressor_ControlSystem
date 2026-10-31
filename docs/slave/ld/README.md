@@ -24,8 +24,8 @@ keep the table to what the picture shows.
 | Enable | in | `G_cmdDirectControl.Enable` | |
 | ControlMode | in | `G_cmdDirectControl.ControlMode` | |
 | Position | in | `G_cmdDirectControl.Position` | |
-| Velocity | in | `G_cmdDirectControl.Velocity` | |
-| Acceleration | in | `G_cmdDirectControl.Acceleration` | The bench measured no slew of the velocity reference at this value in VelocityTLMode (`bench/characterisation/README.md` section 8). |
+| Velocity | in | `G_cmdDirectControl.Velocity` | In PositionMode the block does no path shaping, so this input (and Acceleration) sets no limit; `FB_PositionPathShaper`'s `VelMax` and `AccelMax` do. |
+| Acceleration | in | `G_cmdDirectControl.Acceleration` | The block has no Deceleration pin, so `ST_CmdDirectControl` has no `Deceleration` field. The bench measured no slew of the velocity reference at this value in VelocityTLMode (`bench/characterisation/README.md` section 8). |
 | Torque | in | `G_cmdDirectControl.Torque` | |
 | FilterTimeConstant | in | `LREAL#0.05` | **To change:** wire `G_cmdDirectControl.FilterTimeConstant`, which `PRG_Main` sets from `G_cfgDirectCtrlFilterTime` (default 0.05 s), so the filter can be tuned without editing the LD. |
 | BufferMode | in | not wired | |
@@ -37,6 +37,15 @@ keep the table to what the picture shows.
 | ErrorID | out | not wired | |
 
 The other blocks (`MC_Power`, `MC_Stop`, `MC_Reset`, `MC_MoveAbsolute`,
-`MC_MoveVelocity`, `MC_SetPosition`, `MC_ReadActual*`, Jog) are not yet
-recorded; the top of the screenshot shows the `MC_MoveVelocity`
-instance's `Direction` and `BufferMode` pins only.
+`MC_SetPosition`, `MC_ReadActual*`, Jog) are not yet recorded; the top of
+the screenshot shows the `MC_MoveVelocity` instance's `Direction` and
+`BufferMode` pins only.
+
+## To change: remove `MC_MoveVelocity`
+
+`G_cmdMoveVelocity` and `G_staMoveVelocity` (types `ST_CmdMoveVelocity`
+and `ST_StaMoveVelocity`) no longer exist in the Structured Text, and
+nothing writes or reads them. In MotionWorks, delete the `MC_MoveVelocity`
+instance from the LD POU together with the two globals and the two types,
+and delete `MC_MoveVelocity_1.PNG`. Also delete the global `G_sysCycleCount`,
+which `PRG_Main` no longer increments.

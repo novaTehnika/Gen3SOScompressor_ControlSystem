@@ -105,8 +105,9 @@
      G_mbMotionEnable      AT %MW3.483332 : UINT  (* HR3: 1 = MotionEnable *)
      G_mbFaultReset        AT %MW3.483334 : UINT  (* HR4: 1 = FaultReset *)
      G_mbReference         AT %MD3.483336 : REAL  (* HR5-6: reference, mm / mm/s / % by mode *)
-     G_mbSalineVolume      AT %MD3.483340 : REAL  (* HR7-8: saline volume of the fill, mL (gain schedule) *)
-     G_mbOxygenRatio       AT %MD3.483344 : REAL  (* HR9-10: oxygen charge as STP volume per saline volume (gain schedule) *)
+     G_mbPositionSpeed     AT %MD3.483340 : REAL  (* HR7-8: position-move speed, mm/s (0 holds position) *)
+     G_mbSalineVolume      AT %MD3.483344 : REAL  (* HR9-10: saline volume of the fill, mL (gain schedule) *)
+     G_mbOxygenRatio       AT %MD3.483348 : REAL  (* HR11-12: oxygen charge as STP volume per saline volume (gain schedule) *)
    END_VAR
 
 
@@ -148,13 +149,21 @@
         VELOCITY LIMITS (mm/s)
         ======================================================================== *)
 
-     G_cfgVelLimitMax          : LREAL := 7.0         (* Maximum velocity limit *)
-     G_cfgVelLimitNormal       : LREAL := 6.0         (* Normal operating velocity *)
+     G_cfgVelLimitMax          : LREAL := 6.0         (* The one axis speed ceiling, VelMax in every mode. The mode
+                                                          speeds below (Go Home, homing, pressure) are passed through
+                                                          MIN(.., G_cfgVelLimitMax). In position mode the master sets the
+                                                          move speed (G_mbPositionSpeed), clamped to this ceiling, as
+                                                          FB_PositionPathShaper's VelMax; Y_DirectControl does no path
+                                                          shaping in PositionMode (the command reaches the drive as
+                                                          given), so its Velocity input sets no limit there.
+                                                          masterConfig.jogVelMax and positionSpeed must not exceed it *)
+     G_cfgStopDecel            : LREAL := 10.0        (* The one MC_Stop deceleration (mm/s^2): hold, fault,
+                                                          recovery and Go Home abort *)
 
 
      (* ========================================================================
-        DIRECT CONTROL ACCEL/DECEL (mm/s^2)
-        Slew limits applied by Y_DirectControl in Position/Velocity/Torque
+        DIRECT CONTROL ACCEL (mm/s^2)
+        Slew limit applied by Y_DirectControl in Position/Velocity/Torque
         operating modes. Required nonzero for the FB to ramp to commanded
         Velocity/Position; zero values leave the servo unable to move.
         ======================================================================== *)
@@ -162,9 +171,6 @@
      G_cfgDirectCtrlAccel      : LREAL := 10.0         (* Accel for Y_DirectControl operating modes (mm/s^2). A
                                                           velocity step on the machine was not slewed at this
                                                           value in VelocityTLMode (bench/characterisation) *)
-     G_cfgDirectCtrlDecel      : LREAL := 10.0         (* Decel for Y_DirectControl operating modes (mm/s^2);
-                                                          the block has no decel input, so only the stop law
-                                                          uses it *)
      G_cfgDirectCtrlFilterTime : LREAL := 0.05        (* Y_DirectControl FilterTimeConstant (s): the block's own
                                                           filter on the command it sends the drive. Wired from
                                                           G_cmdDirectControl.FilterTimeConstant in the LD POU. A
@@ -173,20 +179,21 @@
 
 
      (* ========================================================================
-        POSITION COMMAND GATE (FB_PositionCommandGate, position modes only)
-        Y_DirectControl adds no profiling in PositionMode, so the gate shapes
-        the master's setpoint into a command the axis can follow: rate limited
-        to stCurrentLimits.VelMax, accel limited to G_cfgPosGateAccelMax, and
-        tethered to within G_cfgPosGateMaxDeviation of actual position.
+        POSITION PATH SHAPER (FB_PositionPathShaper, position modes only)
+        Y_DirectControl does no path shaping in PositionMode, so the shaper
+        turns the master's setpoint into a command the axis can follow: rate
+        limited to the master's position speed (clamped to G_cfgVelLimitMax),
+        accel limited to G_cfgPosShaperAccelMax, and tethered to within
+        G_cfgPosShaperMaxDeviation of actual position.
         ======================================================================== *)
 
      G_cfgScanTime             : LREAL := 0.004       (* Task period (s). dt for the gate and the analog filter alpha.
                                                           Must match the cyclic task interval in the MWiec task
                                                           configuration (2 ms is the MP2600iec lower bound). *)
-     G_cfgPosGateAccelMax      : LREAL := 10.0         (* Command accel limit (mm/s^2). Conservative start - raise on the
+     G_cfgPosShaperAccelMax   : LREAL := 10.0         (* Command accel limit (mm/s^2). Conservative start - raise on the
                                                           bench. A master ramp at v is followed with lag v^2/(2A):
                                                           2.5 mm at 5 mm/s with A=5, 0.25 mm with A=50. *)
-     G_cfgPosGateMaxDeviation  : LREAL := 2.0         (* Tether window (mm). Command never leads actual by more than this
+     G_cfgPosShaperMaxDeviation: LREAL := 2.0         (* Tether window (mm). Command never leads actual by more than this
                                                           (stall / torque limit). Must be well below drive Pn520
                                                           (excessive deviation) and well above normal following error
                                                           (~VelMax/Kp). <= 0 disables the tether. *)
@@ -227,7 +234,8 @@
      G_cfgPressureKi             : LREAL := 0.2        (* Velocity per integrated pressure error (mm/s per MPa*s) *)
      G_cfgPressureVelMax         : LREAL := 5.0        (* Velocity clamp in pressure mode (mm/s) *)
      G_cfgPressureAccel          : LREAL := 50.0       (* Y_DirectControl accel in pressure mode (mm/s^2) *)
-     G_cfgPressureDecel          : LREAL := 50.0       (* Y_DirectControl decel in pressure mode (mm/s^2). The chamber
+     G_cfgPressureDecel          : LREAL := 50.0       (* Deceleration the pressure stop law assumes (mm/s^2); the
+                                                          Y_DirectControl block has no decel input. The chamber
                                                           stiffens by orders of magnitude as the gas dissolves; the
                                                           command must reverse within v^2/(2*decel) of travel *)
      G_cfgPressureStopStiffness  : LREAL := 100.0      (* Chamber stiffness assumed by the stop law (MPa/mm): the
@@ -325,7 +333,6 @@
      G_cfgGoHomeVelocity       : LREAL := 6.0         (* Velocity for Go Home move *)
      G_cfgGoHomeAccel          : LREAL := 5.0         (* Acceleration for Go Home move (mm/s²) *)
      G_cfgGoHomeDecel          : LREAL := 10.0         (* Deceleration for Go Home move (mm/s²) *)
-     G_cfgGoHomeStopDecel      : LREAL := 10.0         (* Deceleration for MC_Stop commands (mm/s²) *)
    END_VAR
 
 
@@ -368,17 +375,6 @@
                                                           cylinder — exit guard fires regardless
                                                           of soft-limit value. Measure and set to
                                                           the actual mechanical entry point. *)
-
-
-     (* ========================================================================
-        DYNAMIC POSITION TRACKING
-        ======================================================================== *)
-
-     (* Position at mode entry (for reference) *)
-     G_posModeEntryPosition    : LREAL := 0.0     (* Position when entering current mode *)
-
-     (* Exit guard boundary *)
-     G_posExitGuardBoundary    : LREAL := 0.0     (* Dynamic boundary for exit prevention *)
    END_VAR
 
 
@@ -395,6 +391,7 @@
      G_sysPreviousState        : E_SystemState := ST_INIT     (* Previous state *)
      G_sysRequestedMode        : E_OperatingMode := MODE_IDLE (* Mode from master *)
      G_sysReference            : LREAL := 0.0     (* Reference from master: mm, mm/s or % by mode *)
+     G_sysPositionSpeed        : LREAL := 0.0     (* Position-move speed from master (mm/s), the shaper's speed limit once clamped to [0, G_cfgVelLimitMax] *)
      G_sysSalineVolume         : LREAL := 0.0     (* Saline volume from master (mL); 0 until written *)
      G_sysOxygenRatio          : LREAL := 0.0     (* Oxygen charge per saline volume from master (STP volume ratio) *)
      G_sysScanCounter          : UINT := UINT#0   (* Incremented every scan, published in G_mbSlaveCounter *)
@@ -438,14 +435,9 @@
      G_sysDriveFault           : BOOL := FALSE    (* Drive has reported a fault *)
 
      (* Motion status *)
-     G_sysMotionActive         : BOOL := FALSE    (* Motion command is active *)
-     G_sysInPosition           : BOOL := FALSE    (* At commanded position (position mode) *)
-     G_sysAtVelocity           : BOOL := FALSE    (* At commanded velocity (velocity mode) *)
      G_sysHalted               : BOOL := FALSE    (* Halt is active (ST_HOLD_POSITION) *)
 
      (* Limit status *)
-     G_sysAtPosLimitHigh       : BOOL := FALSE    (* At or beyond high position limit *)
-     G_sysAtPosLimitLow        : BOOL := FALSE    (* At or beyond low position limit *)
      G_sysOvertravelNegActive  : BOOL := FALSE    (* Negative overtravel switch triggered *)
      G_sysOvertravelPosActive  : BOOL := FALSE    (* Positive overtravel switch triggered *)
 
@@ -461,14 +453,9 @@
         DIAGNOSTICS
         ======================================================================== *)
 
-     G_sysCycleCount           : UDINT := 0       (* Main program cycle counter *)
      G_sysLastFaultCode        : E_FaultCode := FAULT_NONE    (* Last fault that occurred *)
      G_sysLastFaultState       : E_SystemState := ST_INIT     (* State when last fault occurred *)
      G_sysFaultCount           : UDINT := 0       (* Total number of faults since power-up *)
-
-     (* Timing diagnostics *)
-     G_sysStateEntryTime       : TIME := T#0MS    (* Time when current state was entered *)
-     G_sysTimeInState          : TIME := T#0MS    (* Duration in current state *)
    END_VAR
 
 
@@ -491,7 +478,6 @@
      G_cmdStop             : ST_CmdStop
      G_cmdReset            : ST_CmdReset
      G_cmdMoveAbsolute     : ST_CmdMoveAbsolute
-     G_cmdMoveVelocity     : ST_CmdMoveVelocity     (* unused after Jog conversion; retained for future use *)
      G_cmdJog              : ST_CmdJog
      G_cmdDirectControl    : ST_CmdDirectControl
      G_cmdSetPosition      : ST_CmdSetPosition
@@ -505,7 +491,6 @@
      G_staStop             : ST_StaStop
      G_staReset            : ST_StaReset
      G_staMoveAbsolute     : ST_StaMoveAbsolute
-     G_staMoveVelocity     : ST_StaMoveVelocity     (* unused after Jog conversion; retained for future use *)
      G_staJog              : ST_StaJog
      G_staDirectControl    : ST_StaDirectControl
      G_staSetPosition      : ST_StaSetPosition

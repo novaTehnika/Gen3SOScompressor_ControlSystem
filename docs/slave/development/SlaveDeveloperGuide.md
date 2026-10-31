@@ -19,7 +19,7 @@ The MotionWorks IEC project is organized into several key folders, following sta
 
 | Folder | Name | Purpose |
 |--------|------|---------|
-| `slave-src/PRG/` | Programs | Contains the main program entry point, `PRG_Main.st` (Structured Text), which houses the core state machine. A separate Ladder Diagram POU owns `G_sysAxis` and every built-in motion FB (`MC_Power`, `MC_Stop`, `MC_Reset`, `MC_MoveAbsolute`, `MC_MoveVelocity`, `MC_SetPosition`, `MC_ReadActual*`, `Y_DirectControl`). |
+| `slave-src/PRG/` | Programs | Contains the main program entry point, `PRG_Main.st` (Structured Text), which houses the core state machine. A separate Ladder Diagram POU owns `G_sysAxis` and every built-in motion FB (`MC_Power`, `MC_Stop`, `MC_Reset`, `MC_MoveAbsolute`, `MC_SetPosition`, `MC_ReadActual*`, Jog, `Y_DirectControl`). |
 | `slave-src/FB/` | Function Blocks | Contains reusable modules of encapsulated logic (e.g., `FB_HandshakeManager`, `FB_HomeLimit`) as well as the enum-conversion helpers (`FB_IntToMode`, `FB_IsOperationalMode`, etc.). This is where most of the application logic resides. |
 | `slave-src/GVL/` | Global Variable Lists | Contains a single comment-only reference file (`GlobalVariables_Reference.st`). Variables are defined in the MWiec GUI; this file documents their names, types, and defaults. It also documents the `G_cmd*` / `G_sta*` structured globals used to connect ST and LD POUs. |
 | `slave-src/DUT/` | Data Unit Types | Contains all custom data structures (`STRUCT`) and enumerations (`ENUM`) in a single `DataTypes.st` file, including the `ST_Cmd*` / `ST_Sta*` structs that shape the ST↔LD command/status interface. |
@@ -34,8 +34,8 @@ Because `G_sysAxis` and the built-in motion FBs live in the LD POU, `PRG_Main` n
 | `G_cmdStop` | `MC_Stop` | `G_staStop` |
 | `G_cmdReset` | `MC_Reset` | `G_staReset` |
 | `G_cmdMoveAbsolute` | `MC_MoveAbsolute` | `G_staMoveAbsolute` |
-| `G_cmdMoveVelocity` | `MC_MoveVelocity` | `G_staMoveVelocity` |
-| `G_cmdDirectControl` | `Y_DirectControl` | `G_staDirectControl` |
+| `G_cmdJog` | Jog | `G_staJog` |
+| `G_cmdDirectControl` | `Y_DirectControl` (no deceleration pin, so no `Deceleration` field) | `G_staDirectControl` |
 | `G_cmdSetPosition` | `MC_SetPosition` | `G_staSetPosition` |
 
 Custom FBs that need to command or observe a built-in motion FB (`FB_HomeLimit`, `FB_GoHome`) follow the same pattern at the FB level: they emit `Cmd*` `VAR_OUTPUT` structs and receive `Sta*` `VAR_INPUT` structs. `PRG_Main` wires those to the matching globals — see §4 below.
@@ -68,7 +68,6 @@ Global variables defined in a `GVL` use a prefix to indicate their scope.
 |--------|-------|---------|-------------|
 | `cfg` | Configuration | `G_cfgDebounceTimeMode` | A static configuration parameter used for tuning. |
 | `sys` | System | `G_sysCurrentState` | A dynamic system status variable. |
-| `pos` | Position | `G_posModeEntryPosition` | A position-related value captured or derived at run time. |
 | `di` / `do` | I/O | `G_diOvertravelNeg` | A digital input (`di`) or output (`do`): the overtravel switches, the brake and the status outputs. |
 | `ai` / `ao` | I/O | `G_aiPressure` | An analog input (`ai`) or output (`ao`). The pressure transducer is the only analog input; no `G_ao*` globals exist. |
 | `mb` | Modbus | `G_mbModeCode` | A Modbus holding register (master → slave) or input register (slave → master), see `docs/master/ModbusRegisterMap.md`. |
@@ -133,8 +132,9 @@ The core logic resides in a state machine within `PRG_Main.st`. Understanding th
 - **Initialization (`ST_INIT`)**: The default enum initializer. On the first scan the state machine transitions directly to `ST_IDLE`; no homing is required before operational modes, since the absolute encoder and the controller's stored offset retain the coordinate frame.
 - **Idle (`ST_IDLE`)**: The default safe state. The drive is disabled, and the brake is engaged. It waits here for a valid handshake from the master.
 - **Activation (`ST_DRIVE_ENABLE`, `ST_BRAKE_RELEASE`)**: A transitional sequence to power on the drive and release the brake before entering an operational mode.
-- **Operational States (`ST_POSITION_CTRL`, `ST_VELOCITY_CTRL`, etc.)**: The active motion or control states. Each state writes setpoints into `G_cmdDirectControl` (read by the LD POU's `Y_DirectControl` instance each scan) and checks for a MotionEnable drop (`G_mbMotionEnable`, debounced) to exit. The position states (`ST_POSITION_CTRL`, `ST_RECOVERY_POSITION`) feed their target through `fbPosGate` (`FB_PositionCommandGate`), and on a MotionEnable drop they first ramp the command to rest under `G_cfgPosGateAccelMax` (`bPosStopping`) before leaving the state.
-- **Homing State (`ST_HOME_LIMIT`)**: This state executes the encapsulated logic inside `FB_HomeLimit`. The FB emits `Cmd*` `VAR_OUTPUT` structs (`CmdMoveVelocity`, `CmdStop`, `CmdSetPosition`, `CmdDirectControl`, `CmdMoveAbsolute`) which `PRG_Main` copies into the matching `G_cmd*` globals so the LD POU's motion FBs act on them; status comes back through `G_sta*` globals wired into the FB's `Sta*` `VAR_INPUT` structs. Deprecated homing sub-state enum members (`ST_HOME_LIM_*`) still exist in `E_SystemState` but are unused by the live state machine.
+- **Operational States (`ST_POSITION_CTRL`, `ST_VELOCITY_CTRL`, etc.)**: The active motion or control states. Each state writes setpoints into `G_cmdDirectControl` (read by the LD POU's `Y_DirectControl` instance each scan) and checks for a MotionEnable drop (`G_mbMotionEnable`, debounced) to exit. The position states (`ST_POSITION_CTRL`, `ST_RECOVERY_POSITION`) feed their target through `fbPosShaper` (`FB_PositionPathShaper`), and on a MotionEnable drop they first ramp the command to rest under `G_cfgPosShaperAccelMax` (`bPosStopping`) before leaving the state.
+- **Homing State (`ST_HOME_LIMIT`)**: This state executes the encapsulated logic inside `FB_HomeLimit`. The FB emits `Cmd*` `VAR_OUTPUT` structs (`CmdJog`, `CmdMoveAbsolute`, `CmdSetPosition`) which `PRG_Main` copies into the matching `G_cmd*` globals so the LD POU's motion FBs act on them; status comes back through `G_sta*` globals wired into the FB's `Sta*` `VAR_INPUT` structs.
+- **State properties**: `G_sysCurrentState` is classified in one place, the State Properties section of `PRG_Main` after the state machine. It computes the BOOLs the rest of the scan reads (`bPowerOn`, `bHandshakeState`, `bCommandedMotion`, `bMotionWatched`, `bInHoming`, `bInRecovery`, `bInFault`, `bPositionMode`, `bVelocityMode`, and the brake and drive-wait flags), so a state list is written once. The flags hold the state the scan's state machine ended in; the safety block at the end of the file can still move the state to `ST_FAULT`, and the outputs that must follow that move (`G_doFaultActive`) read `G_sysCurrentState` again. A new state is added to each list it belongs to there. `FB_SafetyMonitor` takes the flags it needs as inputs (`InCommandedMotion`, `InMotionWatched`, `InHoming`, `InRecovery`, `InFault`) and compares `CurrentState` itself only for `ST_HOME_LIMIT` and `ST_PRESSURE_CTRL`.
 - **Transition (`ST_HOLD_POSITION`)**: A critical intermediate state entered when MotionEnable (`G_mbMotionEnable`) drops. It brings the axis to a controlled halt (`MC_Stop`) and waits for a new mode handshake from the master. While `MC_Stop` executes, `Y_DirectControl` is held enabled in its last `ControlMode` with a zero command (`bKeepDirectControl` / `eKeepDirectMode`) until `MC_Stop` reports Busy and `Y_DirectControl.Active` drops; only an *aborted* `Y_DirectControl` returns the SERVOPACK to position control, and mode transitions wait for that hand-off. The same hand-off runs in `ST_FAULT` and `ST_RECOVERY`.
 - **Deactivation (`ST_BRAKE_ENGAGE`, `ST_DRIVE_DISABLE`)**: A transitional sequence to engage the brake and disable the drive before returning to `ST_IDLE`.
 - **Fault Handling (`ST_FAULT`, `ST_FAULT_IDLE`)**:

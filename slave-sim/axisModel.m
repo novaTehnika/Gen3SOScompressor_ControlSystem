@@ -116,12 +116,9 @@ elseif dcEnable
         xDirect = G.G_cmdDirectControl.Position - ax.offset;
     elseif mode == E.Y_ControlMode.VelocityTLMode
         vT = G.G_cmdDirectControl.Velocity;
-        if abs(vT) > abs(ax.v)
-            rate = G.G_cmdDirectControl.Acceleration;
-        else
-            rate = G.G_cmdDirectControl.Deceleration;
-        end
-        ax.v = slew(ax.v, vT, rate * dt);
+        % Y_DirectControl has a single Acceleration input, so the same
+        % rate applies in both directions.
+        ax.v = slew(ax.v, vT, G.G_cmdDirectControl.Acceleration * dt);
     else
         vLim = abs(G.G_cmdDirectControl.Velocity);
         ax.v = ax.v + G.G_cmdDirectControl.Torque * sim.torqueAccel * dt;

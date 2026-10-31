@@ -82,8 +82,10 @@ p. 305, `docs/external/MotionWorks_IEC_Toolbox_Manual.pdf`):
    slave (server).
 2. Optionally check *use %M for bidirectional Holding Registers*.
 3. Select **Set all outputs off when PLC stops**.
-4. **IO Task Assignment**: assign the four server blocks to a task. Assigning them
-   to the 4 ms task that runs `PRG_Main` updates the data in step with the scan.
+4. **IO Task Assignment**: assign the four server blocks to the task that runs
+   `PRG_Main`, so the data updates in step with the scan. MotionWorks IEC 3
+   Express has only that one task, so there is no slower task to assign
+   them to.
 5. Save the configuration and cycle power. Four Modbus groups are created in the
    Global Variables worksheet. Declare variables under them with the required
    data types and addresses.
@@ -182,8 +184,9 @@ Limits and known issues (MotionWorks IEC 2.1.0 release notes, RN.MWIEC.14):
   - Y_DeviceComm needs the controller's own IP address to select the interface.
     It can be read from a `CONTROLLER_INFO` global at `%MD3.66560`.
   - The manual recommends running communication function blocks in slower tasks
-    (about 4–50 ms, or the DEFAULT task) to avoid the PLC watchdog. Whether they
-    can run in the 4 ms task must be verified.
+    (about 4–50 ms, or the DEFAULT task) to avoid the PLC watchdog. MotionWorks
+    IEC 3 Express has a single task, so they would run in the control task
+    and its scan time.
 - Socket code would sit in a POU that `tools/st_translate.py` does not translate, and
   exchange data with `PRG_Main` through global structs, in the same way as the
   Ladder Diagram motion POU.
@@ -273,8 +276,9 @@ samples silently instead of stopping the model.
 Bench case D: a lost connection stops the model with an error from the Read
 block. Accepted as the link-loss response for now (see section 3).
 
-1. **Service tick origin**: whether the 4 ms tick follows the task the Modbus
-   groups are assigned to, or is fixed in the controller's network stack.
+1. **Service tick origin**: whether the 4 ms tick follows the scan of the
+   one task (MotionWorks IEC 3 Express has no other), or is fixed in the
+   controller's network stack.
 2. **Shared cable**: compare latency with MotionWorks online and offline.
 3. **Y_DeviceComm reference**: export from MotionWorks IEC help on the lab PC,
    only if UDP is still wanted for a faster path.

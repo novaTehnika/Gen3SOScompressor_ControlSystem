@@ -2,8 +2,10 @@ function [sl, y] = slaveStep(sl, u)
 %SLAVESTEP One controller scan (G_cfgScanTime) of the simulated slave.
 %   u  the Modbus holding registers as the master wrote them, in engineering
 %      units: heartbeat, modeCode, motionEnable, faultReset (0/1) and
-%      reference (mm, mm/s or % by mode); optionally salineVolume (mL) and
-%      oxygenRatio (STP volume per saline volume), 0 when absent
+%      reference (mm, mm/s or % by mode); positionSpeed (mm/s) is optional
+%      and defaults to the speed ceiling G_cfgVelLimitMax; salineVolume (mL)
+%      and oxygenRatio (STP volume per saline volume) are optional, 0 when
+%      absent
 %   y  the Modbus input registers in engineering units: heartbeatEcho,
 %      slaveCounter, confCode, faultCode, faultActive, inMotion,
 %      performanceStatus, homingComplete, actualPosition, actualVelocity,
@@ -24,6 +26,11 @@ sl.G.G_mbModeCode     = u.modeCode;
 sl.G.G_mbMotionEnable = u.motionEnable;
 sl.G.G_mbFaultReset   = u.faultReset;
 sl.G.G_mbReference    = u.reference;
+if isfield(u, 'positionSpeed')
+    sl.G.G_mbPositionSpeed = u.positionSpeed;
+else
+    sl.G.G_mbPositionSpeed = sl.G.G_cfgVelLimitMax;
+end
 sl.G.G_mbSalineVolume = fieldOr(u, 'salineVolume', 0);
 sl.G.G_mbOxygenRatio  = fieldOr(u, 'oxygenRatio', 0);
 sl.IO.MO1_DI_06 = sl.ax.x > sl.sim.switchNegPos;

@@ -2,7 +2,7 @@ function [mbWrite, doSafety, doMixer, position, velocity, pressure, ...
           statusCode, faultCode, state, linkOk] = masterStep( ...
           mbRead, op, cmdSeq, targetPosition, ...
           targetVelocity, jogDirection, targetPressure, estop, mixer, ...
-          salineVolume, oxygenRatio)
+          positionSpeed, salineVolume, oxygenRatio)
 %MASTERSTEP Entry point for the Simulink shell's MATLAB Function block:
 %   Modbus registers and app requests in; Modbus registers, DAQ lines and
 %   displayed values out. Called once per model step (cfg.dt). The Modbus
@@ -11,19 +11,20 @@ function [mbWrite, doSafety, doMixer, position, velocity, pressure, ...
 %   mbRead        input registers IR1..IR20 as read by the Modbus Client
 %                 Read block (modbusMap, raw 16-bit values as doubles)
 %   op, cmdSeq, targetPosition, targetVelocity, jogDirection,
-%   targetPressure, estop, mixer
+%   targetPressure, estop, mixer, positionSpeed
 %                 values of the Constant blocks the app writes;
-%                 targetPressure in atm absolute, as the app shows pressure
+%                 targetPressure in atm absolute, as the app shows pressure;
+%                 positionSpeed in mm/s, the speed of a position move
 %   salineVolume, oxygenRatio
 %                 the fill description for the slave's pressure gain
 %                 schedule: saline volume (mL) and oxygen charge as STP
 %                 volume per saline volume; cfg.salineVolume and
 %                 cfg.oxygenRatio when omitted
 %
-%   mbWrite       holding registers HR1..HR10 for the Modbus Client Write
+%   mbWrite       holding registers HR1..HR12 for the Modbus Client Write
 %                 block (heartbeat, mode code, MotionEnable, FaultReset,
-%                 reference, saline volume and oxygen ratio, each REAL as
-%                 two registers)
+%                 reference, position speed, saline volume and oxygen
+%                 ratio, each REAL as two registers)
 %   doSafety      safety relay / STO enable (P0.0): 0 on E-stop or link loss
 %   doMixer       stir bar motor (P0.4)
 %   position (mm), velocity (mm/s), pressure (atm absolute: the slave's
@@ -45,10 +46,10 @@ OP_STOP = 0;
 cfg = masterConfig();
 map = modbusMap();
 r = double(mbRead(:)');
-if nargin < 10
+if nargin < 11
     salineVolume = cfg.salineVolume;
 end
-if nargin < 11
+if nargin < 12
     oxygenRatio = cfg.oxygenRatio;
 end
 
@@ -104,6 +105,7 @@ in.cmdSeq           = cmdSeq;
 in.targetPosition   = targetPosition;
 in.jogVelocity      = abs(targetVelocity) * sign(jogDirection);
 in.targetPressure   = (targetPressure - cfg.atmAmbient) / cfg.atmPerMPa;
+in.positionSpeed    = positionSpeed;
 
 out = masterStateMachine(in, cfg, cfg.dt);
 
@@ -115,6 +117,7 @@ mbWrite(map.hr.modeCode)     = out.modeCode;
 mbWrite(map.hr.motionEnable) = out.motionEnable;
 mbWrite(map.hr.faultReset)   = out.faultReset;
 mbWrite(map.hr.reference:map.hr.reference + 1) = modbusPack(out.reference);
+mbWrite(map.hr.positionSpeed:map.hr.positionSpeed + 1) = modbusPack(out.positionSpeed);
 mbWrite(map.hr.salineVolume:map.hr.salineVolume + 1) = modbusPack(salineVolume);
 mbWrite(map.hr.oxygenRatio:map.hr.oxygenRatio + 1) = modbusPack(oxygenRatio);
 

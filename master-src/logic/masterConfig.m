@@ -29,6 +29,11 @@ cfg.posMax = 367;           % mm
 cfg.jogVelMax = 6;          % mm/s
 cfg.jogSpeeds = [0.1 0.25 0.5 1 2 5 6];   % mm/s, app presets; the largest is the default
 
+% Position-move speed sent every exchange (HR7-8). The slave limits a
+% position move to it, clamped to its own ceiling G_cfgVelLimitMax.
+cfg.positionSpeedMax = 6;   % mm/s, master-side clamp; must not exceed G_cfgVelLimitMax
+cfg.positionSpeed    = 6;   % mm/s, default
+
 % Position arrival judged from feedback.
 cfg.posTolerance = 0.5;     % mm
 cfg.tArrive      = 0.1;     % s inside tolerance before "at target"

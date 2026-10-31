@@ -102,13 +102,6 @@ TYPE
       ST_HOME_LIMIT,           (* Mode 110: Homing to negative overtravel switch - uses FB_HomeLimit *)
       ST_HOME_COMPLETE,        (* Homing finished, awaiting mode change *)
 
-      (* DEPRECATED: Homing sub-states - Limit Switch (Mode 110)
-         These states are now handled internally by FB_HomeLimit. *)
-      ST_HOME_LIM_APPROACH,    (* DEPRECATED - use FB_HomeLimit *)
-      ST_HOME_LIM_DETECT,      (* DEPRECATED - use FB_HomeLimit *)
-      ST_HOME_LIM_BACKOFF,     (* DEPRECATED - use FB_HomeLimit *)
-      ST_HOME_LIM_SETREF,      (* DEPRECATED - use FB_HomeLimit *)
-
       (* Transition State - Inter-Mode *)
       ST_HOLD_POSITION,        (* MC_Stop active, brake disengaged, awaiting handshake *)
 
@@ -242,15 +235,6 @@ TYPE
       Direction       : MC_Direction;
    END_STRUCT;
 
-   ST_CmdMoveVelocity :
-   STRUCT
-      Execute         : BOOL;
-      Velocity        : LREAL;
-      Acceleration    : LREAL;
-      Deceleration    : LREAL;
-      Direction       : MC_Direction;
-   END_STRUCT;
-
    ST_CmdJog :
    STRUCT
       Forward         : BOOL;
@@ -268,7 +252,6 @@ TYPE
       Velocity        : LREAL;
       Torque          : LREAL;
       Acceleration    : LREAL;
-      Deceleration    : LREAL;
       FilterTimeConstant : LREAL;   (* s, the block's FilterTimeConstant input *)
    END_STRUCT;
 
@@ -311,15 +294,6 @@ TYPE
    ST_StaMoveAbsolute :
    STRUCT
       Done            : BOOL;
-      Busy            : BOOL;
-      Active          : BOOL;
-      CommandAborted  : BOOL;
-      Error           : BOOL;
-   END_STRUCT;
-
-   ST_StaMoveVelocity :
-   STRUCT
-      InVelocity      : BOOL;
       Busy            : BOOL;
       Active          : BOOL;
       CommandAborted  : BOOL;
