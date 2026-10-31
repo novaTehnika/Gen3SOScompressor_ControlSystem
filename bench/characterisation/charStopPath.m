@@ -38,9 +38,18 @@ function [path, plan] = charStopPath(opts)
 %   opts.pause_s        dwell after each leg, the stop (default 2; a probe
 %                       capture and its readout need about 2 s, so run
 %                       charRun with opts.probe = 'stops' and a pause of 3)
-%   opts.T0_s, opts.D_mm_s2
-%                       stopping-distance allowance v T0 + v^2 / (2 D)
-%                       (default 0.05 s and charConfig.pressureDecel)
+%   opts.T0_s, opts.D_mm_s2, opts.creep_s
+%                       stopping-distance allowance v (T0 + creep) +
+%                       v^2 / (2 D): the delay before the drive acts, the
+%                       creep it makes after its velocity reads zero (the
+%                       machine showed 0.25 s times the speed at 8 MPa)
+%                       and the ramp down (default 0.05 s, 0.25 s and
+%                       charConfig.pressureDecel)
+%   opts.rampOvershoot_MPa
+%                       how far a ramp may overshoot its level once its
+%                       stop and creep are over; each ramp's speed is the
+%                       smaller of opts.rampSpeed and what this allows at
+%                       the level's stiffness (default 0.5)
 %   opts.minRun_mm      shortest steady part of a leg (default 0.2 mm or
 %                       0.15 s at the speed, whichever is larger)
 %   opts.fillVolume_mL  saline at the first level (default 343)
@@ -84,6 +93,7 @@ here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'common'));
 cfg = charConfig();
 known = {'levels_MPa', 'speeds', 'budget_MPa', 'rampSpeed', 'hold_s', 'pause_s', 'T0_s', ...
+    'creep_s', 'rampOvershoot_MPa', ...
     'D_mm_s2', 'minRun_mm', 'fillVolume_mL', 'chargeRatio', 'solubility', 'K_Pa', ...
     'C_hose_m3_Pa', 'stiffness', 'pressureStop', 'deadVolume_mL', 'posStop', 'P_start_MPa', ...
     'quiet'};
@@ -100,6 +110,8 @@ opts = withDefault(opts, 'rampSpeed', 2);
 opts = withDefault(opts, 'hold_s', 2);
 opts = withDefault(opts, 'pause_s', 2);
 opts = withDefault(opts, 'T0_s', 0.05);
+opts = withDefault(opts, 'creep_s', 0.25);
+opts = withDefault(opts, 'rampOvershoot_MPa', 0.5);
 opts = withDefault(opts, 'D_mm_s2', cfg.pressureDecel);
 opts = withDefault(opts, 'minRun_mm', 0.2);
 opts = withDefault(opts, 'fillVolume_mL', 343);
@@ -154,7 +166,10 @@ else
     xOf = @(P) NaN;
 end
 
-stopOf = @(v) v * opts.T0_s + v^2 / (2 * opts.D_mm_s2);     % mm
+stopOf = @(v) v * (opts.T0_s + opts.creep_s) + v^2 / (2 * opts.D_mm_s2);     % mm
+% Ramp speed a level allows: its stop and creep must not carry the
+% pressure more than rampOvershoot past the level
+rampSpeedAt = @(k) min(opts.rampSpeed, opts.rampOvershoot_MPa / (k * (opts.T0_s + opts.creep_s)));
 % Travel between two pressures: the compliance 1/k integrated over the
 % pressure, on a fine grid
 travelOf = @(P1, P2) travelBetween(kOf, P1, P2);           % mm
@@ -176,8 +191,9 @@ for L = 1:nL
     % (the run's start for the first), plus a margin. Near atmosphere the
     % gas makes the chamber very soft, so the first ramp can be long.
     travel = travelOf(max(Pprev, 0.02), P);
-    path{end + 1} = {'ramp', opts.rampSpeed, P, max(2 * travel / opts.rampSpeed, 5) + 10};
-    seconds = seconds + travel / opts.rampSpeed;
+    vRamp = rampSpeedAt(k);
+    path{end + 1} = {'ramp', vRamp, P, max(2 * travel / vRamp, 5) + 10};
+    seconds = seconds + travel / vRamp;
     path{end + 1} = {'dwell', opts.hold_s};
     seconds = seconds + opts.hold_s;
     x = xOf(P);
@@ -212,17 +228,18 @@ for L = 1:nL
         pl.rise_MPa(end + 1) = budget(L);
         say('%6.1f %10.2f %8.1f %10.2f %6g %8.3f %8.3f %8.2f\n', P, k, x, budget(L), v, d, xs, budget(L));
     end
-    say('%6s ramp to %.0f MPa: about %.0f mm, %.0f s at %g mm/s\n', '', P, travel, ...
-        travel / opts.rampSpeed, opts.rampSpeed);
+    say('%6s ramp to %.1f MPa: about %.1f mm, %.0f s at %.2f mm/s\n', '', P, travel, ...
+        travel / vRamp, vRamp);
     plan(end + 1) = pl;
     Pprev = P;
 end
 % Back down to the first level at the ramp speed: the stiffness on the way
 % out and the return-stroke torque.
 travel = travelOf(levels(1), levels(end));
-path{end + 1} = {'ramp', -opts.rampSpeed, levels(1), max(2 * travel / opts.rampSpeed, 5) + 10};
+vRamp = rampSpeedAt(kOf(levels(1)));
+path{end + 1} = {'ramp', -vRamp, levels(1), max(2 * travel / vRamp, 5) + 10};
 path{end + 1} = {'dwell', opts.hold_s};
-seconds = seconds + travel / opts.rampSpeed + opts.hold_s;
+seconds = seconds + travel / vRamp + opts.hold_s;
 plan(1).nStops = nStops;
 plan(1).seconds = seconds;
 say('%d steps, %d stops, about %.0f s of motion\n', numel(path), nStops, seconds);
