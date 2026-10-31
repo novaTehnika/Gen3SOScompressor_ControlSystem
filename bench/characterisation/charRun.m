@@ -67,7 +67,11 @@ function r = charRun(label, path, opts)
 %   opts.pressureStop  MPa gauge (charConfig.pressureStop)
 %   opts.posStop, opts.posMin
 %                      mm (charConfig: inside the slave's soft limits)
-%   opts.probe         true to arm and read the step probe (default false)
+%   opts.probe         true to arm and read the step probe at every
+%                      command change in a velocity session; 'stops' to
+%                      arm it only for commands to zero, so that a
+%                      capture and its readout (2 s) are free for the
+%                      next stop; false for no probe (default)
 %   opts.safetyModel   model that holds the safety relay ('SafetyHold';
 %                      '' when the relay is held another way)
 %   opts.saveDir       where the CSV files go (default bench/common/captures)
@@ -161,7 +165,8 @@ seq.abort = '';
 slowExchanges = 0;
 writeMsLog = [];
 
-probe.enabled = opts.probe;
+probe.stopsOnly = ischar(opts.probe) && strcmpi(opts.probe, 'stops');
+probe.enabled = probe.stopsOnly || (~ischar(opts.probe) && logical(opts.probe));
 probe.next = 'poll';
 probe.armRequest = false;
 probe.armValue = 0;
@@ -177,8 +182,15 @@ captures = {};
 runLog = zeros(0, 12);
 exchangeFailures = 0;
 
+if probe.stopsOnly
+    probeText = 'stops only';
+elseif probe.enabled
+    probeText = 'every command change';
+else
+    probeText = 'off';
+end
 fprintf('charRun %s: %d steps, guards %.1f MPa, %.1f..%.1f mm, probe %s\n', label, nSteps, ...
-    opts.pressureStop, opts.posMin, opts.posStop, mat2str(opts.probe));
+    opts.pressureStop, opts.posMin, opts.posStop, probeText);
 k = 0;
 while true
     tCycle = k * cfg.exchangePeriod;
@@ -572,7 +584,8 @@ switch s.name
         else
             v = s.target;
         end
-        if probe.enabled && ~armed && ~probe.pending && v ~= app.targetVelocity * app.jogDirection
+        if probe.enabled && ~armed && ~probe.pending && v ~= app.targetVelocity * app.jogDirection ...
+                && (~probe.stopsOnly || v == 0)
             seq.armRequest = true;
             seq.armPending = true;
             return;

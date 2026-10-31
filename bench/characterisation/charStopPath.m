@@ -36,8 +36,8 @@ function [path, plan] = charStopPath(opts)
 %                       stiffness measurement
 %   opts.hold_s         dwell at each level before the set (default 2)
 %   opts.pause_s        dwell after each leg, the stop (default 2; a probe
-%                       capture and its readout need about 2 s between
-%                       command changes, so use 3 with opts.probe)
+%                       capture and its readout need about 2 s, so run
+%                       charRun with opts.probe = 'stops' and a pause of 3)
 %   opts.T0_s, opts.D_mm_s2
 %                       stopping-distance allowance v T0 + v^2 / (2 D)
 %                       (default 0.05 s and charConfig.pressureDecel)

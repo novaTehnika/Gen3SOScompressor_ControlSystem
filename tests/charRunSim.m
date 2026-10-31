@@ -85,7 +85,7 @@ fprintf('ok  bulk modulus fit rejects the gas spring (K %.4f GPa, gas %.1f mL of
 % directions with no delay term, since the axis follows its command at
 % once.
 opts = linkOpts(saveDir, 255);
-opts.probe = true;
+opts.probe = 'stops';
 S = fakeProbeLink('state');
 sim = S.sl.sim;
 kGas = @(Pq) (Pq + sim.atmMPa).^2 * sim.pistonArea / (sim.atmMPa * sim.chamberGasVolume);
@@ -121,7 +121,8 @@ for s = 1:numel(path)
 end
 rs = charStopDistance([r.capFiles {r.file}], struct('quiet', true, 'D_cfg', ccfg.velDecel, 'lag_s', 0.06));
 assert(numel(rs.stops) >= nStops, 'only %d stops found', numel(rs.stops));
-assert(sum(strcmp({rs.stops.source}, 'capture')) >= 2, 'stops not found in the captures');   % short legs leave the probe busy for some
+assert(sum(strcmp({rs.stops.source}, 'capture')) >= nStops - 1, 'only %d stops in the captures', ...
+    sum(strcmp({rs.stops.source}, 'capture')));
 for f = {rs.fit.comp, rs.fit.ret}
     assert(abs(f{1}.D_mm_s2 / ccfg.velDecel - 1) < 0.05 && f{1}.T0_s < 0.01, ...
         'fit D %.1f mm/s^2 (axis slews at %.0f), T0 %.3f s', f{1}.D_mm_s2, ccfg.velDecel, f{1}.T0_s);

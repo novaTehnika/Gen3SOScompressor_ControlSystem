@@ -404,8 +404,8 @@ runs at 2 and 4 MPa, 1 and 2 mm/s at 6 and 8, and 1 mm/s at 10; 8 MPa
 carries 80 % of the load, which is enough for the fit.
 
 ```matlab
-opts.probe = true;                                   % PRG_StepProbe loaded
-[path, plan] = charStopPath();                       % prints the budget table
+opts.probe = 'stops';                                % PRG_StepProbe loaded: capture the stops
+[path, plan] = charStopPath(struct('pause_s', 3));   % prints the budget table
 r = charRun('stops', path, opts);
 rs = charStopDistance([r.capFiles {r.file}]);        % D and T0 per direction
 rl = charDriveLag([r.capFiles {r.file}]);            % the lag under load
