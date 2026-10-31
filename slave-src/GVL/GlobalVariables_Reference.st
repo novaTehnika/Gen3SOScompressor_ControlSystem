@@ -130,7 +130,7 @@
         ======================================================================== *)
 
      (* Soft limits - software enforced boundaries *)
-     G_cfgPosSoftLimitMax      : LREAL := 305.0       (* Soft limit - extend direction *)
+     G_cfgPosSoftLimitMax      : LREAL := 367.0       (* Soft limit - extend direction *)
      G_cfgPosSoftLimitMin      : LREAL := -2.5        (* Soft limit - retract direction. Lives midway between
                                                           position 0 (the homed retract endpoint) and the
                                                           negative overtravel switch (at -G_cfgHomeLimRetractDist,
@@ -148,7 +148,7 @@
         ======================================================================== *)
 
      G_cfgVelLimitMax          : LREAL := 7.0         (* Maximum velocity limit *)
-     G_cfgVelLimitNormal       : LREAL := 5.0         (* Normal operating velocity *)
+     G_cfgVelLimitNormal       : LREAL := 6.0         (* Normal operating velocity *)
 
 
      (* ========================================================================
@@ -182,7 +182,7 @@
      G_cfgScanTime             : LREAL := 0.002       (* Task period (s). dt for the gate and the analog filter alpha.
                                                           Must match the cyclic task interval in the MWiec task
                                                           configuration (2 ms is the MP2600iec lower bound). *)
-     G_cfgPosGateAccelMax      : LREAL := 5.0         (* Command accel limit (mm/s^2). Conservative start - raise on the
+     G_cfgPosGateAccelMax      : LREAL := 10.0        (* Command accel limit (mm/s^2). Conservative start - raise on the
                                                           bench. A master ramp at v is followed with lag v^2/(2A):
                                                           2.5 mm at 5 mm/s with A=5, 0.25 mm with A=50. *)
      G_cfgPosGateMaxDeviation  : LREAL := 2.0         (* Tether window (mm). Command never leads actual by more than this
@@ -284,7 +284,7 @@
         ======================================================================== *)
 
      (* Mode 110 - Home to Negative Overtravel Switch (two-stage approach + fixed retract) *)
-     G_cfgHomeLimFastApproachVel : LREAL := 5.0       (* Coarse approach toward switch (mm/s) *)
+     G_cfgHomeLimFastApproachVel : LREAL := 6.0       (* Coarse approach toward switch (mm/s) *)
      G_cfgHomeLimSlowApproachVel : LREAL := 1.0       (* Slow re-approach for precise switch detect (mm/s) *)
      G_cfgHomeLimBackoffVel      : LREAL := 5.0       (* Inter-approach backoff AND final retract velocity (mm/s) *)
      G_cfgHomeLimRetractDist     : LREAL := 5.0       (* Retract distance from precise switch to position 0 (mm).
@@ -328,7 +328,7 @@
    - G_cfgPosCylinderEntry        : Physical cylinder-entry point. Below this the
                                     piston is leaving the cylinder bore; the exit
                                     guard monitors torque/velocity here.
-   - G_cfgPosSoftLimitMax (305 mm): Software ceiling; end-of-stroke in compression
+   - G_cfgPosSoftLimitMax (367 mm): Software ceiling; end-of-stroke in compression
                                     direction.
 
    VAR_GLOBAL
@@ -336,7 +336,7 @@
         DEVICE DIMENSIONS (physical landmarks in the coordinate frame)
         ======================================================================== *)
 
-     G_cfgPosCylinderEntry     : LREAL := 200.0       (* Physical cylinder-entry position (mm).
+     G_cfgPosCylinderEntry     : LREAL := 176.0       (* Physical cylinder-entry position (mm).
                                                           Below this the piston is leaving the
                                                           cylinder — exit guard fires regardless
                                                           of soft-limit value. Measure and set to
