@@ -201,9 +201,10 @@ force A times the target.
 
 **Sensor and timing.** The chamber gauge pressure becomes a 4-20 mA loop
 current over the configured transducer range and a voltage across the
-shunt, plus the transducer's zero error (measured −0.11 MPa with the
-chamber open) and white noise specified as an RMS pressure (measured
-2.0 mV rms on the 434 Ω shunt, 4.6 kPa, broadband; 0.8 mV with a 4.7 µF
+shunt, plus the transducer's zero error (zero once the input is
+calibrated: the slave's `G_cfgPressureShuntOhms` is the effective
+421.4 Ω the input reads, `bench/pressure/README.md` section 6) and white
+noise specified as an RMS pressure (measured 2.0 mV rms across the shunt, 4.6 kPa, broadband; 0.8 mV with a 4.7 µF
 capacitor across the shunt). The slave's median
 and low-pass block filters the voltage, with its coefficient computed as
 `PRG_Main` computes it, and the slave's scaling block converts it to MPa.
@@ -630,7 +631,7 @@ the limits (`THRESH`), the requirements and the sampler.
 | supply pressure | 0.52–1.38 MPa | linear | 75–200 psi with the cylinder's charge |
 
 The ranges are the bench measurements of 2026-10-26 with their spread
-(`bench/characterisation/README.md` section 7, `bench/friction`,
+(`bench/characterisation/README.md` section 8, `bench/friction`,
 `bench/pressure`). `mr`, `b`, `Fc` and `mu` act only in torque mode and
 the stall, so they are not varied; the dead time is fixed at its
 measured 22.8 ms. Each
@@ -671,7 +672,7 @@ supply the flow, so no built-in configuration uses it.
 
 ## Measured values
 
-The bench tests of 2026-10-26 (`bench/`, branch `bench-tests`) replaced
+The bench tests of 2026-10-26 (`bench/`) replaced
 the guessed parameters. The values the model now carries, with what was
 assumed before:
 
@@ -689,7 +690,7 @@ assumed before:
 | Load-dependent friction mu | 0.45 (efficiency 0.69 pushing) | 0.85 efficiency | `frictionFit` |
 | Breakaway | about 24 kN | — | `frictionFit` |
 | Sensor noise | 2.0 mV rms (4.6 kPa) bare, 0.8 mV (1.8 kPa) with 4.7 µF; broadband | 5 kPa | `pressureNoiseProbe` |
-| Transducer zero | −0.11 MPa with the chamber open | 0 | every log |
+| Transducer zero | +0.002 MPa vented with the input calibrated (421.4 Ω effective shunt); with the 434 Ω setting the reading was 0.971 P − 0.104 MPa | 0 | current source, `bench/pressure` section 6 |
 
 Still to measure: the dissolution time constant tauDiss (the hold time
 before delivery depends on it) and the lag at the piston. The GVL on the
@@ -708,8 +709,12 @@ below as "StopVelMin 0.5". The time-domain results use
 Heun's method at five steps per scan and the measured plant: K 0.72 GPa,
 343 mL of saline with 57 mL of passages and a 29 mL hose, Cd 0.85, a
 22.8 ms dead time
-and 18.2 ms lag in the drive, and the −0.11 MPa transducer offset, which
-puts the true pressure 0.11 MPa above every target.
+and 18.2 ms lag in the drive, and a −0.11 MPa transducer offset, which
+puts the true pressure 0.11 MPa above every target. That offset is the
+slave's reading at zero with the 434 Ω setting; with the input
+calibrated it is zero (the `Params` default), and
+`--set P_offset=-0.11e6` reproduces the results below. The 2.9 % gain
+error of the uncalibrated reading is not in them.
 
 **Velocity versus torque command.** Velocity command wins, now more
 clearly. The drive's own velocity loop absorbs the 6 kN of Coulomb and
@@ -984,20 +989,25 @@ a soft chamber at the openings and the closing, where the fixed gain is
 four times too low for the dip and the peak. The scheduled gain
 Kp = wc/k holds 37° at wc = 11 everywhere.
 
+**Settled:**
+- The mechanical pressure ceiling is 12 MPa (15 MPa may break the
+  piston). With the 434 Ω setting the true pressure is
+  (reading + 0.104) / 0.971 MPa, so an 11 MPa target holds at 11.4 MPa;
+  with the calibrated 421.4 Ω the reading is true to the meter the
+  calibration used (about 1 %, 0.1 MPa at 10 MPa).
+- The saline volume and the oxygen charge, which the schedule's
+  stiffness bound needs, reach the slave over the protocol as holding
+  registers.
+- The proximal valve stays shut during the compression and opens after
+  mixing (`Params.hose_before` False). A switched bypass orifice is not
+  fitted.
+
 **Open questions:**
-- The mechanical pressure ceiling: 12 MPa is assumed; 15 MPa may break
-  the piston. With the true pressure 0.11 MPa above the reading, an
-  11 MPa target peaks at 11.1 MPa.
-- The transducer zero: correcting the −0.11 MPa in the slave's scaling
-  (`G_cfgPressureRangeMin`) would make the reading true; until then
-  every target is 0.11 MPa conservative for degassing and the same
-  amount optimistic for the ceiling.
+- The calibration's reference: a hand-held meter's mA range. A loop
+  calibrator would tighten it.
 - The lag at the piston (not resolved) and the dissolution time constant
   are the two unmeasured plant parameters; the robustness study covers
   the first, and the second sets only the hold time.
-- Whether the saline volume and the charge can be given to the slave
-  (as configuration or over the protocol), which the schedule's
-  stiffness bound needs.
 - The hose: how much of its 0.24 mL/MPa is wall and how much trapped
   air (air would make the proximal opening worse than eq. (43) at low
   pressure); whether the whole 29 mL is purged; how long the pause
@@ -1005,8 +1015,6 @@ Kp = wc/k holds 37° at wc = 11 everywhere.
   during it (`tube_refills` in the scenario, off by default); and how
   fast the distal valve is shut (`Params.Tclose`, 0 by default, which
   is the worst case and changes the peak by 0.1 MPa).
-- Whether the proximal valve can be opened before the compression in
-  the protocol (the hose's saline is then compressed and mixed with
-  the charge; its 29 mL leave in the purge as before), or whether a
-  bypass orifice of 0.3 mm or less (Cv 0.003), opened ahead of the
-  ball valve, can be fitted and be opened at pressure.
+- Whether a bypass orifice of 0.3 mm or less (Cv 0.003), opened ahead
+  of the ball valve at pressure, is worth fitting later
+  (`study_hose_opening.py`).

@@ -70,7 +70,7 @@ master has no brake status input.
 | Parameter | Value |
 |-----------|-------|
 | Pin | `MO1_AI_01` → `G_aiPressure` (`AT %IW0 : LREAL`, volts) |
-| Source | Voltage across the shunt (`G_cfgPressureShuntOhms`, 434 ohm) in the transducer's 4-20 mA loop |
+| Source | Voltage across the 434 ohm shunt in the transducer's 4-20 mA loop. The input's own load in parallel brings the effective resistance to 421.4 ohm (`G_cfgPressureShuntOhms`, calibrated against a current source, `bench/pressure/README.md` section 6) |
 | Input Range | -10 V to +10 V |
 | Filtering | `FB_AnalogInputFilter`: median (`G_cfgAnalogMedianSize`) then IIR low-pass (`G_cfgAnalogFilterTimeConst`) |
 | Scaling | `FB_PressureInput`: loop current from the shunt, then `G_cfgPressureZeroMa`/`G_cfgPressureSpanMa` over `G_cfgPressureRangeMin`..`G_cfgPressureRangeMax` (MPa gauge) |

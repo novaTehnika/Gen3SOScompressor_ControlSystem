@@ -40,6 +40,10 @@ function r = charDriveLag(files, opts)
 %                           sensor chain for the pressure fit (default charConfig)
 %   opts.minStep            mm/s, smaller command changes are ignored (default 0.2)
 %   opts.minPressureSwing   MPa (default 0.1)
+%   opts.logShuntOhms       G_cfgPressureShuntOhms the logs and captures were
+%                           recorded with; their pressure is rescaled to the
+%                           present setting (benchPressureRescale; default:
+%                           present)
 %   opts.quiet              no printing
 %
 %   r.captures   per capture: file, x_mm (position at the start, which says
@@ -77,6 +81,7 @@ opts = withDefault(opts, 'medianSize', cfg.medianSize);
 opts = withDefault(opts, 'pipelineScans', cfg.pipelineScans);
 opts = withDefault(opts, 'minStep', 0.2);
 opts = withDefault(opts, 'minPressureSwing', 0.1);
+opts = withDefault(opts, 'logShuntOhms', []);
 opts = withDefault(opts, 'quiet', false);
 say = @(varargin) sayIf(~opts.quiet, varargin{:});
 
@@ -91,6 +96,9 @@ caps = struct('file', {}, 'x_mm', {}, 'stepSize', {}, 'tauV', {}, 'Td', {}, 'acc
 logs = [];
 for f = 1:numel(files)
     d = benchReadCsv(files{f});
+    if isfield(d, 'pressure')
+        d.pressure = benchPressureRescale(d.pressure, opts.logShuntOhms);
+    end
     if isfield(d, 'vCmd')
         caps(end + 1) = fitCapture(d, opts, say); %#ok<AGROW>
     else

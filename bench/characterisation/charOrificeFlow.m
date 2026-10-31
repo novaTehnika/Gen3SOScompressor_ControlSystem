@@ -31,6 +31,10 @@ function r = charOrificeFlow(files, opts)
 %   opts.pressureOffset  MPa added to the logged pressure before the fit:
 %                        the transducer's reading with the chamber open,
 %                        sign reversed (default 0)
+%   opts.logShuntOhms    G_cfgPressureShuntOhms the logs were recorded with;
+%                        their pressure is rescaled to the present setting
+%                        before the offset (benchPressureRescale; default:
+%                        present)
 %   opts.settleRate      MPa/s drift limit for a steady window (default 0.05)
 %   opts.minWindow       s, shortest steady window kept (default 3)
 %   opts.subWindow       s, length of the sub-windows (default 10)
@@ -54,6 +58,7 @@ opts = withDefault(opts, 'K_Pa', 1e9);
 opts = withDefault(opts, 'deadVolume_mL', cfg.deadVolume_mL);
 opts = withDefault(opts, 'collected_mL', nan(1, numel(files)));
 opts = withDefault(opts, 'pressureOffset', 0);
+opts = withDefault(opts, 'logShuntOhms', []);
 opts = withDefault(opts, 'settleRate', 0.05);
 opts = withDefault(opts, 'minWindow', 3);
 opts = withDefault(opts, 'subWindow', 10);
@@ -80,7 +85,7 @@ win = struct('file', {}, 'step', {}, 't1', {}, 't2', {}, 'P_MPa', {}, 'Q_mL_s', 
 grav = struct('file', {}, 'collected_mL', {}, 'predicted_mL', {}, 'ratio', {});
 for f = 1:numel(files)
     d = benchReadCsv(files{f});
-    d.pressure = d.pressure + opts.pressureOffset;
+    d.pressure = benchPressureRescale(d.pressure, opts.logShuntOhms) + opts.pressureOffset;
     name = shortName(files{f});
     inP = d.mode == 7 & d.status == 5;
     steps = unique(d.step(inP));

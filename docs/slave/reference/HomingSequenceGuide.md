@@ -187,7 +187,7 @@ MASTER:
 | Parameter | Default | Units | Description |
 |-----------|---------|-------|-------------|
 | `G_cfgGoHomePosition` | 0.0 | mm | Target home position |
-| `G_cfgGoHomeVelocity` | 5.0 | mm/s | Movement velocity |
+| `G_cfgGoHomeVelocity` | 6.0 | mm/s | Movement velocity |
 
 ---
 
