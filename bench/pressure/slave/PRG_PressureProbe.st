@@ -8,12 +8,13 @@
    Serves bench/pressure/pressureNoiseProbe.m. Reads the raw voltage on the
    analog input every scan, keeps one-second statistics, and on request
    captures 250 consecutive scans so the master can see the noise at the
-   full 2 ms sample rate, which the protocol registers (filtered, read
+   full scan rate, which the protocol registers (filtered, read
    every 50 ms) cannot show. Uses only the probe registers (101 and up),
    so it runs beside PRG_Main with the transducer wired as in service. Not
    loaded together with PRG_ModbusBench, which uses the same registers.
 
-   Assign to the 2 ms cyclic task. The FC#04 input register group must
+   Runs on the cyclic task with PRG_Main (MotionWorks IEC 3 Express has
+   only the one task). The FC#04 input register group must
    extend to IR370 (see ../README.md).
 
    Variables (define in MWiec GUI):
@@ -36,6 +37,7 @@
        rMin                : LREAL
        rMax                : LREAL
        nCount              : INT := 0         (* Samples in the window so far
+       nWindow             : INT := 250       (* Scans in one second, from G_cfgScanTime
        rMean               : LREAL
        rVar                : LREAL
        nLastArm            : UINT := 0        (* Arm value already acted on
@@ -49,13 +51,14 @@ G_mbNoiseLive := LREAL_TO_REAL(rVolts);
 IF bFirstScan THEN
     bFirstScan := FALSE;
     nLastArm := G_mbNoiseArm;
+    nWindow := LREAL_TO_INT(LREAL#1.0 / G_cfgScanTime);
     rMin := rVolts;
     rMax := rVolts;
     G_mbNoiseState := UINT#0;
 END_IF;
 
 (* --------------------------------------------------------------------------
-   One-second statistics window: 500 scans at 2 ms
+   One-second statistics window: nWindow scans at the scan in force
    -------------------------------------------------------------------------- *)
 rSum := rSum + rVolts;
 rSumSq := rSumSq + rVolts * rVolts;
@@ -67,7 +70,7 @@ IF rVolts > rMax THEN
 END_IF;
 nCount := nCount + 1;
 
-IF nCount >= 500 THEN
+IF nCount >= nWindow THEN
     rMean := rSum / INT_TO_LREAL(nCount);
     rVar := rSumSq / INT_TO_LREAL(nCount) - rMean * rMean;
     IF rVar < LREAL#0.0 THEN

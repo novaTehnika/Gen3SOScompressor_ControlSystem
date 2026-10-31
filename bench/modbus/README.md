@@ -27,7 +27,8 @@ shell. It drives no DAQ output.
 
 1. Hardware Configuration, online: configure the controller as a **Modbus
    slave (server)**. Select **Set all outputs off when PLC stops**. Under
-   **IO Task Assignment**, assign the four server blocks to the 2 ms cyclic task.
+   **IO Task Assignment**, assign the four server blocks to the cyclic task (MotionWorks IEC 3
+   Express has only the one).
 2. Save and cycle power. Four Modbus groups appear in the Global Variables
    worksheet.
 3. Declare the globals listed in the header of `slave/PRG_ModbusBench.st` in the
@@ -36,7 +37,7 @@ shell. It drives no DAQ output.
    from `%QB73792`). The group address ranges shown in the worksheet are the
    reference; enabling or disabling the %M option moves the holding register
    group.
-4. Add `PRG_ModbusBench` to the project and assign it to the 2 ms cyclic task.
+4. Add `PRG_ModbusBench` to the project and assign it to the cyclic task.
    It uses only its own globals and can run alongside `PRG_Main`.
 5. Compile, download, start.
 

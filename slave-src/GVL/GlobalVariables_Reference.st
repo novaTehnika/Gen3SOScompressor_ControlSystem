@@ -219,7 +219,8 @@
 
      G_cfgScanTime             : LREAL := 0.004       (* Task period (s). dt for the position path shaper and the analog filter alpha.
                                                           Must match the cyclic task interval in the MWiec task
-                                                          configuration (2 ms is the MP2600iec lower bound). *)
+                                                          configuration, and that interval must be one the program completes
+                                                          within (4 ms; a 2 ms task overruns). *)
      G_cfgPosShaperAccelMax   : LREAL := 10.0         (* Command accel limit (mm/s^2). Conservative start - raise on the
                                                           bench. A master ramp at v is followed with lag v^2/(2A):
                                                           2.5 mm at 5 mm/s with A=5, 0.25 mm with A=50. *)

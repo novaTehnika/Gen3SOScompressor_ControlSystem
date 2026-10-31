@@ -116,7 +116,7 @@ Hold Secure ______________________|‾‾‾‾‾‾‾‾‾‾‾‾
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| Sample Rate | 500 Hz | Per scan cycle |
+| Sample Rate | 250 Hz | Per scan cycle (4 ms) |
 | Filter Time Constant | 20 ms | First-order IIR low-pass (`G_cfgAnalogFilterTimeConst`) |
 | Median Filter Size | 5 samples | `G_cfgAnalogMedianSize` (valid: 3 or 5) |
 | Step Response (10%) | 2.1 ms | Time to 10% of final value (τ = 20 ms) |

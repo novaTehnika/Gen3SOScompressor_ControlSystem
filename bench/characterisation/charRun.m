@@ -5,7 +5,7 @@ function r = charRun(label, path, opts)
 %   the protocol exchange (HR1-8 out, IR1-20 back, every 50 ms, sequenced by
 %   masterStep as in the shell) and, between exchanges, the shared step
 %   probe (slave-src/FB/FB_Probe.st, read by benchProbe), which
-%   records the velocity command and feedback at the 2 ms scan. The
+%   records the velocity command and feedback at the scan rate. The
 %   log and the captures are in frictionRun's formats, so the fits of both
 %   benches read either. The shell model must not be running: a second
 %   client stalls the shell's exchange and the slave raises FAULT_COMM while

@@ -1,5 +1,5 @@
 function r = pressureNoiseProbe(label, nWindows)
-%PRESSURENOISEPROBE Read the transducer noise statistics and a raw 2 ms
+%PRESSURENOISEPROBE Read the transducer noise statistics and a raw scan-rate
 %   capture from PRG_PressureProbe, report them, and save the capture to
 %   bench/common/captures/<label>_<yyyymmdd_HHMMSS>.csv. Runs from the MATLAB command
 %   line on the lab PC (Industrial Communication Toolbox, no Simulink).
