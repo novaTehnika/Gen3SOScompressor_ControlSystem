@@ -1060,7 +1060,7 @@ zeroing the integral after each held call.
 `check_scheduled_st` in `test_model.py` runs the reference and
 `ScheduledSlaveControllerST` in lockstep through the compression and the
 delivery and requires the commands to agree to 1e-9 m/s on every scan;
-`tests/st2pyParity.py` checks the Python translation against the Octave
+`tests/stTargetParity.py` checks the Python translation against the Octave
 one.
 
 The stiffness bound is evaluated at the present pressure (`KEst`) and
