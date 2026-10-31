@@ -45,7 +45,7 @@
        fbPistonExitGuard   : FB_PistonExitGuard
        fbGoHome            : FB_GoHome
        fbHomeLimit         : FB_HomeLimit
-       fbPosShaper           : FB_PositionPathShaper
+       fbPosShaper         : FB_PositionPathShaper
        (* Enum-helper FBs (replacing FN_* with user-enum signatures — MWIEC bug)
        fbIsOperational     : FB_IsOperationalMode
        fbIsHoming          : FB_IsHomingMode
