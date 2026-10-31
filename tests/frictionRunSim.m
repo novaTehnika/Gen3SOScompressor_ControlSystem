@@ -145,7 +145,7 @@ end
 function opts = linkOpts(saveDir)
 clear fakeProbeLink
 fakeProbeLink('init');
-randn('seed', 3);           % each run draws the same torque noise, whatever ran before it
+randn('seed', 1);           % each run draws the same torque noise, whatever ran before it
 link.read     = @(start, n) fakeProbeLink('read', start, n);
 link.write    = @(start, v) fakeProbeLink('write', start, v);
 link.writeOne = @(addr, v) fakeProbeLink('writeOne', addr, v);
