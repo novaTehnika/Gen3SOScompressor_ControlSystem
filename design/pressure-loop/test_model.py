@@ -616,15 +616,15 @@ def check_scheduled_st():
                P_offset=0.0, V_passages=1e-6, V_hose=1e-9, C_hose=0.0,
                tauDiss=1e9)
     L = Lockstep(ctl.ScheduledSlaveController(
-        'ref', wc=11.0, K_cfg=1.0e9, V_dead_cfg=1e-6, C_hose_cfg=0.0),
+        'ref', wc=6.0, K_cfg=1.0e9, V_dead_cfg=1e-6, C_hose_cfg=0.0),
         ctl.ScheduledSlaveControllerST(
             SchedBulkModulus=1.0e9, SchedDeadVolume=1.0,
-            SchedHoseCompliance=0.0, SchedCrossover=11.0,
+            SchedHoseCompliance=0.0, SchedCrossover=6.0,
             SchedSalineVolume=1.0, SchedOxygenRatio=200.0))
     r = sim.run(g, scenarios.compress(g), L)
     assert L.worst < 1e-9 and L.gain < 1e-9, (L.worst, L.gain)
     assert r['overshoot'] < 0.3, r['overshoot']             # [MPa]
-    ok(f'gas-spring compression at wc 11: overshoot '
+    ok(f'gas-spring compression at wc 6: overshoot '
        f'{r["overshoot"]:.2f} MPa, the port matches the reference')
 
 

@@ -135,5 +135,5 @@ When `G_cfgPressureScheduleEnable` is TRUE on entry to pressure mode, `FB_Pressu
 | `G_cfgPressureSchedGasTemp` | 293.0 | K | Gas temperature. |
 | `G_cfgPressureSchedPatm` | 101325.0 | Pa | Atmospheric pressure. |
 | `G_cfgPressureSchedArriveBand` | 0.5 | MPa | |error| at which the integrator is first released; it is held at zero until then. |
-| `G_cfgPressureSchedDriveDeadTime` | 0.012 | s | Drive dead time from command to response, measured on the bench (`bench/characterisation`) with `Y_DirectControl`'s FilterTimeConstant as wired. Re-measure if that pin changes. |
-| `G_cfgPressureSchedDriveLag` | 0.0087 | s | Drive velocity-loop time constant, measured as above. |
+| `G_cfgPressureSchedDriveDeadTime` | 0.0228 | s | Drive dead time from command to response, measured on the bench (`bench/characterisation`) with `Y_DirectControl`'s FilterTimeConstant as wired. Re-measure if that pin changes. |
+| `G_cfgPressureSchedDriveLag` | 0.0182 | s | Drive velocity-loop time constant, measured as above. |

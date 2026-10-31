@@ -266,8 +266,8 @@
      G_cfgPressureSchedGasTemp       : LREAL := 293.0      (* Gas temperature (K) *)
      G_cfgPressureSchedPatm          : LREAL := 101325.0   (* Atmospheric pressure (Pa) *)
      G_cfgPressureSchedArriveBand    : LREAL := 0.5        (* |error| that first releases the integrator (MPa) *)
-     G_cfgPressureSchedDriveDeadTime : LREAL := 0.012      (* Drive dead time, command to response (s), measured *)
-     G_cfgPressureSchedDriveLag      : LREAL := 0.0087     (* Drive velocity-loop time constant (s), measured *)
+     G_cfgPressureSchedDriveDeadTime : LREAL := 0.0228     (* Drive dead time, command to response (s), measured *)
+     G_cfgPressureSchedDriveLag      : LREAL := 0.0182     (* Drive velocity-loop time constant (s), measured *)
 
 
      (* ========================================================================
