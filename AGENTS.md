@@ -75,7 +75,7 @@ The slave ST is the single source of truth. `tools/st2m.py` translates it into O
 
 ### Benches (`bench/`)
 
-Each bench (`modbus`, `pressure`, `friction`, `characterisation`) is a directory with its own README, config and fits, run on the lab PC. What they share is in `bench/common/`: the controller connection (`benchConfig.m`), the slave settings parsed from the GVL reference (`benchGvl.m`), the raw Modbus link the run scripts use in place of the shell (`benchLink.m`), the safety-hold model, the step probe program and the `captures/` directory every run logs to. Bench slave programs live beside the bench that owns them and are never part of `slave-src/`.
+Each bench (`modbus`, `pressure`, `friction`, `characterisation`) is a directory with its own README, config and fits, run on the lab PC. What they share is in `bench/common/`: the controller connection (`benchConfig.m`), the slave settings parsed from the GVL reference (`benchGvl.m`), the raw Modbus link the run scripts use in place of the shell (`benchLink.m`), the safety-hold model, the step probe (`slave/PRG_StepProbe.st` records every scan into a ring in plain memory and serves it through an 18-record window in IR401-520; `benchProbe.m` arms captures and reads them out in the gaps between protocol exchanges) and the `captures/` directory every run logs to. Bench slave programs live beside the bench that owns them and are never part of `slave-src/`.
 
 ### Tests
 

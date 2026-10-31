@@ -239,29 +239,31 @@ from standing.
 
 The 50 ms log cannot show the drive's velocity-loop lag (`tauV`, 20 ms in
 the model), a breakaway shorter than one exchange, or the torque ripple
-at the motor turn. `PRG_StepProbe` records 500 consecutive scans (1 s at
-2 ms) of the commanded velocity, the actual velocity, the torque, the
-position and the chamber pressure into input registers when the run
-writes its arm register, and the run reads the block out in the gaps
-between exchanges, as the pressure noise bench does. The pressure channel
-serves the characterisation bench, which reads the lag at the piston from
-it (`bench/characterisation/README.md` section 5).
+at the motor turn. `PRG_StepProbe` records every scan (2 ms) into a ring
+of 8192 records of the commanded velocity, the actual velocity, the
+torque, the position and the chamber pressure. The run writes an arm
+register before each change it wants to see, `benchProbe` takes the
+500 records from the arm's mark (1 s at 2 ms) through an 18-record window
+in the gaps between exchanges, and the rest are read after the last step
+(`bench/common/README.md`, "The step probe"). The pressure channel serves
+the characterisation bench, which reads the lag at the piston from it
+(`bench/characterisation/README.md` section 5).
 
 Slave setup, once:
 
 1. Hardware Configuration, online: the Modbus server as in service, with
-   the **FC#04 input register group enlarged to at least 3410 registers**
-   (byte range `%QB73792` to `%QB80611`). Save and cycle power. If the
-   group cannot be made that large, shorten the capture: change the
-   bounds and the count in the program header together, and
-   `cfg.probe.nScan` in `bench/common/benchConfig.m`.
+   the **FC#04 input register group to IR520** (byte range `%QB73792` to
+   `%QB74831`) and the **holding register group to HR113**. Save and cycle
+   power. The group is small enough to stay configured (a larger group
+   slows every exchange, `bench/common/README.md` step 3).
 2. Declare the globals in the header of `bench/common/slave/PRG_StepProbe.st` in the
-   matching groups. The five arrays are located; if the editor refuses an
-   array at a direct address, declare it with a named type
-   (`ARRAY[0..499] OF INT`, `ARRAY[0..499] OF DINT`) from the Data Types
-   worksheet.
-3. Add `PRG_StepProbe` to the project and assign it to the 2 ms cyclic
-   task. It reads `G_sys*` globals only and runs beside `PRG_Main`. Do not
+   matching groups, and the ring arrays and constants of its `VAR` block.
+   If the compiler refuses the five 8192-element arrays, shrink them: the
+   constant `cDepth`, the array bounds and the value assigned to
+   `G_mbStepDepth` change together, and the master reads the depth from
+   the slave.
+3. Add `PRG_StepProbe` to the project on the cyclic task (the only one).
+   It reads `G_sys*` globals only and runs beside `PRG_Main`. Do not
    load it together with `PRG_PressureProbe` or `PRG_ModbusBench`.
 4. Compile, download, start.
 
@@ -274,8 +276,7 @@ r = frictionRun('u1', 'unloaded', struct('probe', true));   % captures in the jo
 
 A `stepv` step enters velocity mode at rest and steps the reference
 through 0, v, 2v, v, 0, −v, −2v, −v, 0, holding each level `stepHold`
-seconds (3 s; the capture and its readout take 2 s), with a capture armed
-in the exchange before every change. The steps between v and 2v are
+seconds (3 s), with a capture armed and acknowledged before every change. The steps between v and 2v are
 taken while moving and give the lag; the steps from 0 give the breakaway
 and the stick time. With `opts.probe` on a jog set, every step's command
 from rest is captured, plus one capture a second after it reaches speed

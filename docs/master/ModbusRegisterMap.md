@@ -71,6 +71,8 @@ task interval.
 | 5–6 | `%MD3.483336` | REAL | `G_mbReference` | Position mode: mm. Velocity mode: mm/s. Torque mode: % of rated. Pressure mode (code 7): target pressure, MPa gauge |
 | 7–20 | | | | Reserved |
 | 101–110 | | | | Bench probe area (`bench/modbus`) |
+| 111 | `%MW3.483548` | UINT | `G_mbStepArm` | Bench step probe (`bench/common/slave/PRG_StepProbe.st`): a changed value is an arm |
+| 112–113 | `%MW3.483550` | UINT ×2 | `G_mbStepReqLo`, `G_mbStepReqHi` | Bench step probe: index of the first record wanted in the window (low word first) |
 
 ---
 
@@ -93,6 +95,15 @@ task interval.
 | 17–18 | `%QD73824` | REAL | `G_mbCommandedPosition` | `G_sysCommandedPosition` (mm) |
 | 19–20 | `%QD73828` | REAL | `G_mbActualPressure` | `G_sysActualPressure` (MPa gauge): the transducer on the slave's analog input, scaled by `FB_PressureInput`. Valid in every mode; below zero or above range when the loop current is out of range |
 | 101–110 | | | | Bench probe area (`bench/modbus`) |
+| 401–402 | `%QD74592` | UDINT | `G_mbStepWritten` | Bench step probe: records written so far |
+| 403–404 | `%QD74596` | UDINT | `G_mbStepMark` | Index of the record written in the scan of the last arm |
+| 405–406 | `%QD74600` | UDINT | `G_mbStepStart` | Index of the first record in the window |
+| 407 | `%QW74604` | UINT | `G_mbStepArmEcho` | Arm value last acted on |
+| 408 | `%QW74606` | UINT | `G_mbStepCount` | Records in the window (0 to 18) |
+| 409 | `%QW74608` | UINT | `G_mbStepDepth` | Ring depth in records (8192) |
+| 410 | `%QW74610` | UINT | `G_mbStepWords` | Words per record (6) |
+| 411–518 | `%QW74612` | WORD ×108 | `G_mbStepWindow` | 18 records of vCmd, velocity, torque, position low word, position high word, pressure (0.001 mm/s, 0.001 mm/s, 0.01 %, 0.01 µm, 0.001 MPa) |
+| 519–520 | `%QD74828` | UDINT | `G_mbStepStartTail` | Copy of Start written after the window; a read with Start ≠ StartTail is torn |
 
 ---
 

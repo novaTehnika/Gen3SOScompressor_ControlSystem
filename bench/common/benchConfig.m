@@ -21,17 +21,23 @@ cfg.captures    = fullfile(here, 'captures');
 cfg.safetyModel = 'SafetyHold';
 cfg.safetyDir   = here;
 
-% Scan-rate capture by PRG_StepProbe (slave/PRG_StepProbe.st): registers
-% (1-based), length and scales. The five arrays are contiguous from irFirst:
-% three INT, one DINT and one INT, 6 * nScan registers in all.
+% Scan-rate capture by PRG_StepProbe (slave/PRG_StepProbe.st), read by
+% benchProbe: registers (1-based), scales and timing. The slave keeps a ring
+% of records; the master asks for a start index (HR112-113) and reads the
+% header and an 18-record window (IR401-520) in one FC04 read.
 cfg.probe.hrArm     = 111;      % HR111 G_mbStepArm
-cfg.probe.irState   = 401;      % IR401 state, 402 arm echo, 403 count, 404-405 Pos0 (REAL)
-cfg.probe.irFirst   = 411;      % IR411-910 vCmd, 911-1410 vel, 1411-1910 torque, 1911-2910 position, 2911-3410 pressure
-cfg.probe.nScan     = 500;      % scans per capture
+cfg.probe.hrReq     = 112;      % HR112-113 requested start index of the window, low word first
+cfg.probe.irFirst   = 401;      % IR401-520: Written, Mark, Start (2 each), ArmEcho, Count, Depth, Words, window, StartTail
+cfg.probe.nRegs     = 120;      % registers of that read
+cfg.probe.nWindow   = 18;       % records the window holds
+cfg.probe.nWords    = 6;        % words per record: vCmd vel torque posLo posHi pressure
+cfg.probe.nScan     = 500;      % records per capture by default (1 s at the 2 ms scan)
+cfg.probe.nPre      = 0;        % records taken before the arm's mark
 cfg.probe.velScale  = 1000;     % counts per mm/s
 cfg.probe.trqScale  = 100;      % counts per % rated
 cfg.probe.posScale  = 1e5;      % counts per mm
 cfg.probe.presScale = 1000;     % counts per MPa
-cfg.probe.blockRegs = 125;      % registers per FC04 read, one read per exchange gap
-cfg.probe.timeout   = 4;        % s from arm to ready before the capture is given up
+cfg.probe.armRetry  = 0.3;      % s before an unacknowledged arm is written again
+cfg.probe.timeout   = 4;        % s without an acknowledgement (or, when draining, without a new record) before a capture is given up
+cfg.probe.drainGap  = 0.02;     % s between transactions while draining
 end

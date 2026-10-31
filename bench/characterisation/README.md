@@ -14,7 +14,7 @@ Everything is measured through the protocol the master already uses: the
 slave reports position, velocity, torque and pressure in IR11-20 every 50 ms
 (`docs/master/ModbusRegisterMap.md`). The drive lag alone needs the 2 ms
 scan, which the shared step probe (`bench/common/slave/PRG_StepProbe.st`,
-already on the controller) provides. Nothing in `slave-src/` changes.
+read by `bench/common/benchProbe.m`) provides. Nothing in `slave-src/` changes.
 
 This bench shares the friction bench's conventions: the same Modbus master
 pattern (`bench/common/`), the same log columns and capture format, the
@@ -25,7 +25,7 @@ position guards.
 
 | File | Contents |
 |------|----------|
-| `charRun.m` | The master for a run: drives a path of steps through `masterStep` as the shell does, logs every exchange in `frictionRun`'s format, stops the axis when the pressure or the position leaves the envelope, and reads the step probe between exchanges |
+| `charRun.m` | The master for a run: drives a path of steps through `masterStep` as the shell does, logs every exchange in `frictionRun`'s format, stops the axis when the pressure or the position leaves the envelope, and arms and reads the step probe between exchanges (`benchProbe`) |
 | `charConfig.m` | Chamber and outlet geometry, the pressure limits and the slave settings read from `slave-src/GVL/GlobalVariables_Reference.st` |
 | `charBulkModulus.m` | Test 1: K from slow ramps, with a bound on residual gas and, from two fills, the split between liquid and series compliance |
 | `charOrificeFlow.m` | Test 2: Cd and the square-root law from deliveries at held pressure, with the collected-volume check |
@@ -75,15 +75,16 @@ A fault still latched from an earlier run is cleared by `charRun` with the
 operator reset before its first step. The controller answers a Modbus
 request in 1 to 8 ms (`bench/modbus`), so the protocol exchange, one write
 and one read, should take under 20 ms; the run prints any exchange over
-150 ms, skips the probe transaction in that cycle, and at the end gives
+150 ms, skips the probe transactions in that cycle, and at the end gives
 the write and read times separately. The slave's watchdog faults the run
 with `FAULT_COMM` (code 4) if the heartbeat stops for 300 ms
 (`G_cfgCommTimeout`), so exchanges of 200 ms end it. `bench/modbus/modbusRawProbe`
 times the transactions on their own, without the master, and is the
 first check: 20 ms median and 30 ms p99 for the sequential exchange is
-the controller's normal. The step probe's register group in Hardware
-Configuration more than doubles that whether or not the probe program
-runs (`bench/common/README.md` step 3); a second Modbus client (the shell
+the controller's normal. A large register group in Hardware
+Configuration slows it whether or not a program uses the group; the step
+probe's is IR401-520 and HR111-113, which does not
+(`bench/common/README.md` step 3). A second Modbus client (the shell
 model or the operator app still connected, another MATLAB session, an
 OPC client) and the network path are the other causes.
 
@@ -101,7 +102,8 @@ override them for a run and cannot be set above the ceiling.
 
 No change for tests 1 and 2. Test 3 uses `PRG_StepProbe`, set up as in
 `bench/friction/README.md` section 4.5; `charRun` arms it before every
-command change in a velocity session when `opts.probe` is true. Without it,
+command change in a velocity session when `opts.probe` is true, and
+applies the command once the slave has acknowledged the arm. Without it,
 run test 3 anyway: the 50 ms log gives the lag to about 25 ms.
 
 ### Settings that matter
@@ -309,8 +311,9 @@ squares, so either script gives tauV at the motor; they should agree
 within a millisecond or two. Keep the step
 size at or below 0.2 s times the slew (`G_cfgDirectCtrlAccel`: 1 mm/s at
 5 mm/s^2) so the ramp fits in the capture, and hold each command at least
-3 s so the capture (1 s) and its readout (1 s) finish before the next
-change. Raising the slew to the pressure-mode values (50 mm/s^2) for the
+1.5 s so the 1 s capture is recorded before the next change. Reading a
+500-record capture takes 28 gaps (1.4 s), so shorter holds queue captures
+that are read in the later gaps and after the last step. Raising the slew to the pressure-mode values (50 mm/s^2) for the
 test separates the lag from the ramp more sharply.
 
 **Closed, liquid-filled chamber: the lag at the piston** (purged, at 3 to
@@ -407,7 +410,7 @@ out; a speed is left out where the steady part of its leg would be too
 short. The allowance is v·(T0 + latency) + v²/(2·D): the drive's delay,
 the bench's own latency (a leg ends when the master sees it in one
 exchange and the stop goes out in the next, so two cycles, 50 ms on a
-clean link and 200 ms with the probe's register group mapped) and the
+clean link) and the
 configured D. The ramps between levels are slowed where the chamber is
 stiff so that the same latency cannot overshoot a level by more than
 0.5 MPa; on the first run a ramp at 2 mm/s into a 9 MPa/mm chamber with
