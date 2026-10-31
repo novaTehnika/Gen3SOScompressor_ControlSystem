@@ -23,6 +23,11 @@ function r = charRun(label, path, opts)
 %                                       command, downward for a negative one)
 %                                       or maxSec elapse
 %     {'dwell', seconds}                velocity mode, zero command
+%     {'move', mm_per_s, mm, maxSec}    velocity mode until the position
+%                                       has moved mm from where the step
+%                                       began (either sign) or maxSec
+%                                       elapse; a following dwell is the
+%                                       stop, captured by the probe
 %     {'velstep', [v1 v2 ...], [s1 s2 ...]}
 %                                       velocity mode; each command held for
 %                                       its seconds, the step probe armed
@@ -32,7 +37,7 @@ function r = charRun(label, path, opts)
 %     {'hold', seconds}                 position mode at the position where
 %                                       the step starts
 %     {'pressure', MPa, seconds}        pressure mode (target in MPa gauge)
-%   Consecutive steps of the same mode (jog, ramp, dwell, velstep; position,
+%   Consecutive steps of the same mode (jog, ramp, dwell, move, velstep; position,
 %   hold; pressure) run in one session: the command changes without a stop
 %   and a handshake in between. A step of another mode stops the axis first.
 %   A velocity session is entered at rest and its first command sent once
@@ -134,6 +139,7 @@ seq.sub = 0;            % velstep sub-step
 seq.tSub = 0;
 seq.armPending = false; % reference change waits one cycle for the probe arm
 seq.firstPending = false; % a velocity session's first command waits for the mode to run
+seq.xStart = NaN;       % position when a move step's command went out
 seq.abort = '';
 
 probe.enabled = opts.probe;
@@ -401,6 +407,7 @@ switch seq.phase
             seq.phase = 'run';
             seq.tPhase = tNow;
             seq.tSub = tNow;
+            seq.xStart = m.position;
             if seq.firstPending
                 seq.firstPending = false;
                 [app, seq] = applyCommand(app, seq, s, 1, m, probe, cfg);
@@ -427,6 +434,13 @@ switch seq.phase
                 if crossed
                     fprintf('  step %d: %.3f MPa reached at %.3f mm after %.1f s\n', ...
                         seq.idx, m.pressure, m.position, inPhase);
+                end
+            case 'move'
+                moved = abs(m.position - seq.xStart);
+                done = moved >= s.distance || inPhase >= s.seconds;
+                if moved >= s.distance
+                    fprintf('  step %d: moved %.3f mm to %.3f mm at %.3f MPa after %.2f s\n', ...
+                        seq.idx, moved, m.position, m.pressure, inPhase);
                 end
             case 'velstep'
                 if ~seq.armPending && tNow - seq.tSub >= s.seconds(seq.sub)
@@ -478,7 +492,7 @@ seq.armPending = false;
 switch s.name
     case 'idle'
         app.op = 0;
-    case {'jog', 'ramp', 'dwell', 'velstep'}
+    case {'jog', 'ramp', 'dwell', 'move', 'velstep'}
         if strcmp(s.name, 'velstep')
             v = s.target(sub);
         elseif strcmp(s.name, 'dwell')
@@ -604,11 +618,13 @@ end
 
 function steps = parsePath(path)
 C = codes();
-steps = struct('name', {}, 'op', {}, 'target', {}, 'seconds', {}, 'pressureEnd', {}, 'targetText', {});
+steps = struct('name', {}, 'op', {}, 'target', {}, 'seconds', {}, 'pressureEnd', {}, ...
+    'distance', {}, 'targetText', {});
 for k = 1:numel(path)
     p = path{k};
     name = lower(p{1});
-    s = struct('name', name, 'op', C.OP_STOP, 'target', 0, 'seconds', 0, 'pressureEnd', NaN, 'targetText', '');
+    s = struct('name', name, 'op', C.OP_STOP, 'target', 0, 'seconds', 0, 'pressureEnd', NaN, ...
+        'distance', NaN, 'targetText', '');
     switch name
         case 'idle'
             s.seconds = p{2};
@@ -622,6 +638,10 @@ for k = 1:numel(path)
         case 'dwell'
             s.op = C.OP_JOG; s.seconds = p{2};
             s.targetText = '0 mm/s';
+        case 'move'
+            s.op = C.OP_JOG; s.target = p{2}; s.distance = abs(p{3}); s.seconds = p{4};
+            assert(p{2} ~= 0 && s.distance > 0, 'move needs a nonzero velocity and distance');
+            s.targetText = sprintf('%g mm/s for %g mm', p{2}, s.distance);
         case 'velstep'
             s.op = C.OP_JOG; s.target = p{2}(:)'; s.seconds = p{3}(:)';
             assert(numel(s.target) == numel(s.seconds), 'velstep needs one duration per velocity');
@@ -636,7 +656,7 @@ for k = 1:numel(path)
             s.op = C.OP_PRESSURE; s.target = p{2}; s.seconds = p{3};
             s.targetText = sprintf('%g MPa', p{2});
         otherwise
-            error('unknown step type "%s" (idle, jog, ramp, dwell, velstep, position, hold, pressure)', p{1});
+            error('unknown step type "%s" (idle, jog, ramp, dwell, move, velstep, position, hold, pressure)', p{1});
     end
     steps(end + 1) = s;
 end

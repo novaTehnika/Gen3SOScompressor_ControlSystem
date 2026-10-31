@@ -3,8 +3,10 @@ function charRunSim()
 %   through fakeProbeLink (the friction bench's stand-in, with its step
 %   probe emulation and an outlet valve), then the three fits on what it
 %   logged: pressure-ended ramps, a dwell, velocity steps and a hold in one
-%   velocity session with captures; a delivery through the orifice bank in
-%   pressure mode; the pressure and position guards and a slave fault.
+%   velocity session with captures; the one-pass stopping-distance path of
+%   test 4 (charStopPath) and its fit (charStopDistance); a delivery
+%   through the orifice bank in pressure mode; the pressure and position
+%   guards and a slave fault.
 %   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
 
@@ -75,6 +77,58 @@ vGas = S.sl.sim.chamberGasVolume * S.sl.sim.atmMPa / (2.5 + S.sl.sim.atmMPa) / 1
 assert(abs(bk.Vg_mL - vGas) / vGas < 0.3, 'gas volume %.2f mL, chamber holds about %.2f mL', bk.Vg_mL, vGas);
 fprintf('ok  bulk modulus fit rejects the gas spring (K %.4f GPa, gas %.1f mL of %.1f)\n', ...
     bk.K_lin_GPa, bk.Vg_mL, vGas);
+
+% --- One pass: levels, excursions in both directions, stops ---------------------
+% The path is planned on the simulated gas spring's own stiffness, so that
+% each excursion stays within its budget, and the fit must find the
+% deceleration the simulated axis slews at (G_cfgDirectCtrlDecel) in both
+% directions with no delay term, since the axis follows its command at
+% once.
+opts = linkOpts(saveDir, 255);
+opts.probe = true;
+S = fakeProbeLink('state');
+sim = S.sl.sim;
+kGas = @(Pq) (Pq + sim.atmMPa).^2 * sim.pistonArea / (sim.atmMPa * sim.chamberGasVolume);
+[path, plan] = charStopPath(struct('levels_MPa', [2 3], 'speeds', [0.5 2], 'budget_MPa', 1.0, ...
+    'rampSpeed', 0.5, 'stiffness', kGas, 'T0_s', 0.06, 'D_mm_s2', ccfg.velDecel, ...
+    'hold_s', 1, 'pause_s', 1.5, 'quiet', true));
+nStops = plan(1).nStops;
+assert(nStops >= 6 && numel(path) == 2 * numel(plan) + 2 * nStops + 2, 'plan: %d stops, %d steps', ...
+    nStops, numel(path));
+r = charRun('simstop', path, opts);
+assert(isempty(r.abort), r.abort);
+L = r.runLog;
+% Every excursion stays within its budget (plus the stop beyond the leg)
+% and each pair of legs returns the piston to where the first began
+level = 0;
+for s = 1:numel(path)
+    rows = L(L(:, STEP) == s, :);
+    switch path{s}{1}
+        case 'ramp'
+            level = level + (path{s}{2} > 0);
+        case 'move'
+            if path{s}{2} > 0
+                xPair = rows(1, POS);
+                Plevel = plan(min(level, numel(plan))).P_MPa;
+                assert(max(rows(:, P)) < Plevel + 1.0 + 0.6, ...
+                    'step %d reached %.2f MPa at a %.0f MPa level', s, max(rows(:, P)), Plevel);
+            else
+                after = L(L(:, STEP) == s + 1, :);
+                assert(abs(after(end, POS) - xPair) < 0.15, ...
+                    'pair ending at step %d returned to %.3f mm from %.3f', s, after(end, POS), xPair);
+            end
+    end
+end
+rs = charStopDistance([r.capFiles {r.file}], struct('quiet', true, 'D_cfg', ccfg.velDecel, 'lag_s', 0.06));
+assert(numel(rs.stops) >= nStops, 'only %d stops found', numel(rs.stops));
+assert(sum(strcmp({rs.stops.source}, 'capture')) >= 2, 'stops not found in the captures');   % short legs leave the probe busy for some
+for f = {rs.fit.comp, rs.fit.ret}
+    assert(abs(f{1}.D_mm_s2 / ccfg.velDecel - 1) < 0.05 && f{1}.T0_s < 0.01, ...
+        'fit D %.1f mm/s^2 (axis slews at %.0f), T0 %.3f s', f{1}.D_mm_s2, ccfg.velDecel, f{1}.T0_s);
+end
+assert(rs.pass, 'stopping-distance checks failed');
+fprintf('ok  one-pass path: %d steps, %d stops, D %.1f / %.1f mm/s^2 (axis %.0f), T0 %.0f ms\n', ...
+    numel(path), numel(rs.stops), rs.fit.comp.D_mm_s2, rs.fit.ret.D_mm_s2, ccfg.velDecel, 1000 * rs.T0_s);
 
 % --- Delivery: pressure mode, valve opens, the loop balances the outflow --------
 opts = linkOpts(saveDir, 250);
