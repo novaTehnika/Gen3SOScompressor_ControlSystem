@@ -13,8 +13,8 @@ This document provides step-by-step guidance for implementing the Simulink Deskt
 
 ```
 +-------------------+      Modbus TCP, port 502        +-------------------+
-|                   |  == HR1-6: heartbeat, mode,  ==> |                   |
-|  Simulink DTRT    |     enable, reset, reference     |  MP2600iec Slave  |
+|                   |  == HR1-8: heartbeat, mode,  ==> |                   |
+|  Simulink DTRT    | enable, reset, reference, speed  |  MP2600iec Slave  |
 |  Master           |  <= IR1-20: echo, counter, ===== |  (Modbus server)  |
 |                   |  confirm, fault, status, feedback|                   |
 +-------------------+                                  +-------------------+
@@ -42,6 +42,7 @@ This document provides step-by-step guidance for implementing the Simulink Deskt
 | HR3 | `G_mbMotionEnable` | 1 = MotionEnable |
 | HR4 | `G_mbFaultReset` | 1 = FaultReset (level) |
 | HR5-6 | `G_mbReference` | REAL reference: mm, mm/s or % by mode |
+| HR7-8 | `G_mbPositionSpeed` | REAL speed of a position move, mm/s (0 holds position) |
 
 The slave debounces HR2 (`G_cfgDebounceTimeMode`, 50 ms), HR3
 (`G_cfgDebounceTimeMotion`, 20 ms) and HR4 (`G_cfgDebounceTimeFault`, 20 ms)
@@ -81,6 +82,19 @@ not treat 0 during operation as loss of mode.
 
 A dropped TCP connection stops the Simulink model, which sets the DAQ
 outputs to their final values (safety relay off).
+
+### Step Probe (optional side channel)
+
+Beside the protocol the slave carries a scan-rate data recorder, `FB_Probe`,
+for experiments and benches: IR401-524 and HR111-114, read and written by
+`bench/common/benchProbe.m` in the gaps between exchanges. It records the
+commanded and actual velocity, torque, position, pressure, the raw pressure
+input and a status word every scan into a ring of 8192 records, and marks the
+record of the scan the slave entered `ST_FAULT`, so the history up to a fault
+can be read back. Nothing in the protocol depends on it: the shell does not
+read or write these registers, no master state or timeout depends on them, and
+with `G_cfgProbeEnable` FALSE the slave records nothing. The registers and
+state machines are in [ModbusRegisterMap.md](ModbusRegisterMap.md), section 6.
 
 ---
 
@@ -190,7 +204,7 @@ HANDSHAKE_TIMEOUT:
 When changing between operational modes (e.g., Position to Velocity):
 
 1. **Drop MotionEnable to 0** - signals mode change request. The slave checks the level, not the falling edge: MotionEnable at 0 in an operational or homing state stops the mode on the next scan, including when it dropped while the slave was still starting the mode (drive reset, enable, brake release)
-2. **Wait for InMotion (IR6) = 0** - slave performs controlled halt (from Position mode the command is first ramped to rest at `G_cfgPosGateAccelMax`, up to 1.0 s at defaults, before the halt)
+2. **Wait for InMotion (IR6) = 0** - slave performs controlled halt (from Position mode the command is first ramped to rest at `G_cfgPosShaperAccelMax`, up to 1.0 s at defaults, before the halt)
 3. **Write the new mode code** - while MotionEnable is still 0
 4. **Wait for confirmation** - slave confirms the new mode in IR3 while MotionEnable is still 0
 5. **Raise MotionEnable to 1** - only after confirmation, completing the handshake for the new mode
@@ -312,10 +326,23 @@ FAULT_PERSISTENT:
 
 | Mode | Unit | Limits applied by the slave |
 |------|------|-----------------------------|
-| Position | mm | Soft limits, position gate (velocity and acceleration) |
-| Velocity | mm/s | `G_cfgVelLimitNormal` (6 mm/s) |
+| Position | mm | Soft limits, position path shaper (speed from HR7-8, acceleration `G_cfgPosShaperAccelMax`) |
+| Velocity | mm/s | `G_cfgVelLimitMax` (6 mm/s) |
 | Torque | % of rated | `G_cfgTorqueLimitNormal` |
 | Pressure | MPa gauge | `0` to `G_cfgPressureTargetMax` (15 MPa); velocity within `G_cfgPressureVelMax` (5 mm/s) and the stop law; torque within `G_cfgPressureTorqueLimit` |
+
+### Position Speed (Master to Slave): HR7-8
+
+**Signal**: `G_mbPositionSpeed`, a REAL in mm/s, copied to `G_sysPositionSpeed` by
+`PRG_Input`. The master writes it every exchange, with HR1-6 in the same FC16 write.
+In `ST_POSITION_CTRL` and `ST_RECOVERY_POSITION` the slave evaluates
+`LIMIT(0, G_sysPositionSpeed, G_cfgVelLimitMax)` every scan as the speed limit of
+`FB_PositionPathShaper`, so a change takes effect mid-move: a lower speed slows
+the command at `G_cfgPosShaperAccelMax`, a higher one speeds it up. A speed of 0
+decelerates the command to rest at `G_cfgPosShaperAccelMax` and holds position;
+restoring the speed resumes the move. Other modes ignore it. The master limits it
+to `0` to `cfg.positionSpeedMax` (not above `G_cfgVelLimitMax`); the operator app
+sets it in its move-speed field.
 
 The reference is read by the slave at most every 50 ms plus one 4 ms
 service tick. The master sends the next value with the same write that
@@ -353,15 +380,17 @@ position is **executed as a move**. A reference left at 0 mm with the piston ret
 commands a full stroke the moment motion is enabled.
 
 **Setpoint behavior**: Position setpoints (steps in the reference) are executed as
-trapezoidal-velocity moves at the slave's configured limits — velocity `G_cfgVelLimitNormal`
-(6 mm/s default) and acceleration `G_cfgPosGateAccelMax` — landing on the setpoint without
+trapezoidal-velocity moves by `FB_PositionPathShaper`: `Y_DirectControl` does no path
+shaping in PositionMode (the command reaches the drive as given), so the shaper's
+speed (the position speed in HR7-8, at most `G_cfgVelLimitMax`) and acceleration
+(`G_cfgPosShaperAccelMax`) limits are what bound a move — landing on the setpoint without
 overshoot. If the master instead ramps the reference itself, the slave's command follows with
 a small lag of approximately `v^2 / (2*A)`, where `v` is the reference's rate of change and
-`A` is `G_cfgPosGateAccelMax`.
+`A` is `G_cfgPosShaperAccelMax`.
 
 **Stall behavior**: If the axis cannot follow the reference (e.g., the torque limit is
 reached during compression, or the axis is mechanically blocked), the slave holds its
-internal command no more than `G_cfgPosGateMaxDeviation` (2.0mm default) ahead of the actual
+internal command no more than `G_cfgPosShaperMaxDeviation` (2.0mm default) ahead of the actual
 position rather than faulting. Motion resumes automatically once the axis catches up or the
 reference reverses direction. The master should judge arrival using position feedback
 (IR11-12), not elapsed time.
@@ -456,7 +485,7 @@ reference reverses direction. The master should judge arrival using position fee
 2. Slave: Sets confirmation = 2
 3. Master: Verifies confirmation == mode code, raises MotionEnable = 1
 4. Slave: Handshake complete; enables drive, releases brake, enters ST_POSITION_CTRL
-5. Master: Writes the position reference (HR5-6, mm)
+5. Master: Writes the position reference (HR5-6, mm) and the move speed (HR7-8, mm/s)
 6. Slave: Follows position, publishes feedback
 7. Master: Reads position from IR11-12
 ```

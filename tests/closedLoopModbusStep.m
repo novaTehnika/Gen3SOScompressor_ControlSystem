@@ -9,9 +9,9 @@ function closedLoopModbusStep()
 %
 %   masterStep uses masterConfig as it is, so the slave's soft limit is
 %   widened to the bench value to match.
-%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
+%   Run from the repository root after  addpath slave-sim; buildSlaveSim
 %     addpath master-src/logic slave-sim slave-sim/generated tests
-%   Depends on: master-src/logic slave-src slave-sim tools
+%   Depends on: master-src/logic slave-src slave-sim tools design/pressure-loop
 
 clear masterStep masterStateMachine
 cfg = masterConfig();
@@ -24,9 +24,10 @@ h.map = map;
 h.cfg = cfg;
 
 h.app = struct('op', 0, 'cmdSeq', 0, 'targetPosition', 100, 'targetVelocity', 0, ...
-    'jogDirection', 0, 'targetPressure', 0, 'estop', 0, 'mixer', 0);
+    'jogDirection', 0, 'targetPressure', 0, 'estop', 0, 'mixer', 0, ...
+    'positionSpeed', cfg.positionSpeed);
 h.u = struct('heartbeat', 0, 'modeCode', 0, 'motionEnable', 0, ...
-    'faultReset', 0, 'reference', 0);
+    'faultReset', 0, 'reference', 0, 'positionSpeed', 0);
 [h.sl, h.y] = slaveStep(h.sl, h.u);
 h.mbRead = zeros(1, map.nRead);
 h.tick = 0;
@@ -59,6 +60,28 @@ assert(h.m.statusCode == 3 && abs(h.sl.ax.x - 5) <= cfg.posTolerance);
 assert(abs(h.m.position - h.sl.ax.x) < 0.1);
 fprintf('ok  position move, displayed position %.3f mm\n', h.m.position);
 
+% Position speed through HR7-8: the packed value reaches the slave, a move
+% runs at it, 0 mid-move holds position and the speed above the ceiling is
+% limited.
+assert(h.u.positionSpeed == cfg.positionSpeed);
+h.app.positionSpeed = 2;
+h.app.targetPosition = 25;
+h = command(h, 2);
+h = runUntil(h, 30, @(h) abs(h.sl.ax.v) > 1.9);
+assert(abs(h.u.positionSpeed - 2) < 1e-6 && abs(h.sl.ax.v - 2) < 0.1);
+h.app.positionSpeed = 0;
+h = runUntil(h, 3, []);
+xHold = h.sl.ax.x;
+h = runUntil(h, 1, []);
+assert(h.u.positionSpeed == 0 && abs(h.sl.ax.v) < 0.01 && abs(h.sl.ax.x - xHold) < 0.01);
+assert(h.y.faultActive == 0 && h.m.statusCode == 2 && xHold < 24);
+h.app.positionSpeed = 100;
+h = runUntil(h, 30, @(h) h.m.statusCode == 3);
+assert(h.m.statusCode == 3 && h.u.positionSpeed == cfg.positionSpeedMax);
+h.app.positionSpeed = cfg.positionSpeed;
+fprintf('ok  position speed through HR7-8: 2 mm/s, 0 holds at %.2f mm, 100 limited to %g mm/s\n', ...
+    xHold, h.u.positionSpeed);
+
 % Go Home with a slow drive start. The link carries no BrakeDisengage, so
 % the master enters the operation tEnableMax after raising MotionEnable,
 % possibly before the axis moves; rest before any motion must not end it.
@@ -87,7 +110,7 @@ fprintf('ok  go home with a slow drive start, and from home (%.1f s)\n', h.tick 
 h = command(h, 0);
 h = runUntil(h, 5, @(h) h.m.state == 1 && ...
     h.sl.G.G_sysCurrentState == h.sl.E.E_SystemState.ST_IDLE);
-h.sl.ax.x = chamberPosition(h.sl.sim, 1);
+h.sl.ax.x = chamberPosition(h.sl, 1);
 h.app.targetPressure = 20 + cfg.atmAmbient;     % atm absolute
 h = command(h, 4);
 h = runUntil(h, 10, @(h) h.m.statusCode == 5);
@@ -229,6 +252,7 @@ u.modeCode     = w(map.hr.modeCode);
 u.motionEnable = w(map.hr.motionEnable);
 u.faultReset   = w(map.hr.faultReset);
 u.reference    = modbusUnpack(w(map.hr.reference), w(map.hr.reference + 1));
+u.positionSpeed = modbusUnpack(w(map.hr.positionSpeed), w(map.hr.positionSpeed + 1));
 end
 
 
@@ -243,7 +267,8 @@ for n = 1:round(T * 1000)
         [m.mbWrite, m.doSafety, m.doMixer, m.position, m.velocity, m.pressure, ...
             m.statusCode, m.faultCode, m.state, m.linkOk] = masterStep(h.mbRead, ...
             a.op, a.cmdSeq, a.targetPosition, ...
-            a.targetVelocity, a.jogDirection, a.targetPressure, a.estop, a.mixer);
+            a.targetVelocity, a.jogDirection, a.targetPressure, a.estop, a.mixer, ...
+            a.positionSpeed);
         h.m = m;
     end
 

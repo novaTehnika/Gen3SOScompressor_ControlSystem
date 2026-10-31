@@ -43,21 +43,21 @@ These define the safe operating envelope of the machine.
 | `G_cfgPosSoftLimitMax` | 367.0 | mm | Software-enforced maximum extension position. A `FAULT_POSITION` occurs if exceeded. |
 | `G_cfgPosSoftLimitMin` | -2.5 | mm | Software-enforced minimum retraction position. It sits between position 0 (the homed retract endpoint) and the negative overtravel switch at `-G_cfgHomeLimRetractDist`; keep it bracketed by the two if `G_cfgHomeLimRetractDist` changes. A `FAULT_POSITION` occurs if exceeded. |
 | `G_cfgPosExitGuardMargin`| 20.0 | mm | Safety margin for the piston exit guard. The guard's torque/velocity danger-zone monitoring is active below `G_cfgPosCylinderEntry + G_cfgPosExitGuardMargin`. |
-| `G_cfgVelLimitMax` | 7.0 | mm/s | Absolute maximum velocity allowed in any mode. |
-| `G_cfgVelLimitNormal` | 6.0 | mm/s | The velocity limit used during standard Position Control mode. |
+| `G_cfgVelLimitMax` | 6.0 | mm/s | The one axis speed ceiling: `stCurrentLimits.VelMax` in velocity, torque and velocity recovery, and the upper bound of the position speed. The mode speeds (`G_cfgGoHomeVelocity`, the three `G_cfgHomeLim*Vel`, `G_cfgPressureVelMax`) reach their blocks through `MIN(.., G_cfgVelLimitMax)`, so none can exceed it, and `masterConfig.jogVelMax` must not either (checked in `tests/closedLoopMasterSlave.m`). `Y_DirectControl` does no path shaping in PositionMode (the position command reaches the drive as given), so its `Velocity` and `Acceleration` inputs set no limits there; `FB_PositionPathShaper` does the path shaping, and its `VelMax` and `AccelMax` (`G_cfgPosShaperAccelMax`) limit a position move. `VelMax` is the master's position speed (HR7-8, `G_mbPositionSpeed`) limited to `0..G_cfgVelLimitMax`, evaluated every scan; a speed of 0 brakes the command to rest and holds. `Y_DirectControl`'s `Velocity` input is given the same value in position mode, so the two never disagree. `masterConfig.positionSpeedMax` must not exceed the ceiling either (checked in `tests/closedLoopMasterSlave.m`). |
+| `G_cfgStopDecel` | 10.0 | mm/s² | The one `MC_Stop` deceleration: hold, fault, recovery and the Go Home abort. |
 | `G_cfgInMotionVelThreshold`| 0.1 | mm/s | The velocity above which the `G_doInMotion` output is considered active. **Tuning:** Increase if motor vibration at rest causes the flag to flicker. |
 
-### Position Command Gate
+### Position Path Shaper
 
-Parameters for `fbPosGate` (`FB_PositionCommandGate`), which shapes the direct-control position command in `ST_POSITION_CTRL` and `ST_RECOVERY_POSITION`. Velocity mode and torque mode are unaffected.
+Parameters for `fbPosShaper` (`FB_PositionPathShaper`), which shapes the direct-control position command in `ST_POSITION_CTRL` and `ST_RECOVERY_POSITION`. Velocity mode and torque mode are unaffected.
 
 | Parameter | Default Value | Units | Description & Tuning Considerations |
 |---|---|---|---|
-| `G_cfgScanTime` | 0.004 | s | Cyclic task period (`LREAL`), used as `dt` by the position command gate and as the basis for the analog input filter's time-constant alpha. **Must equal the cyclic task interval set in the MotionWorks IEC task configuration**, and that interval must be one the program completes within: the present program takes about 2.5 ms a scan, so a 2 ms task overruns and runs on every second motion cycle, 4 ms, with nothing reported unless the task watchdog is enabled. A mismatch scales the filter time constant and every scan-based delay by the same ratio. |
-| `G_cfgPosGateAccelMax` | 10.0 | mm/s² | Acceleration limit applied to the gated position command. Conservative starting value — raise during commissioning once bench testing shows torque headroom. **Tuning:** This is the transparency knob for an incidental master ramp: the gate lags a ramp at velocity `v` by `v²/(2·A)`, e.g. 0.9 mm at 3 mm/s with `A` = 5 mm/s², vs. 0.09 mm with `A` = 50 mm/s². |
-| `G_cfgDirectCtrlAccel` / `G_cfgDirectCtrlDecel` | 10.0 | mm/s² | Written to `Y_DirectControl`'s `Acceleration` input (the block has no decel input) in every direct-control state except pressure mode, which uses `G_cfgPressureAccel`. A velocity-step test on the machine (`bench/characterisation/README.md` section 8) found the velocity reference followed within 60 ms whatever the step, so in VelocityTLMode this value does not slew the command; confirm by repeating a step at 1 and at 100 mm/s². |
+| `G_cfgScanTime` | 0.004 | s | Cyclic task period (`LREAL`), used as `dt` by the position path shaper and as the basis for the analog input filter's time-constant alpha. **Must equal the cyclic task interval set in the MotionWorks IEC task configuration**, and that interval must be one the program completes within: the present program takes about 2.5 ms a scan, so a 2 ms task overruns and runs on every second motion cycle, 4 ms, with nothing reported unless the task watchdog is enabled. A mismatch scales the filter time constant and every scan-based delay by the same ratio. |
+| `G_cfgPosShaperAccelMax` | 10.0 | mm/s² | Acceleration limit applied to the shaped position command. Conservative starting value — raise during commissioning once bench testing shows torque headroom. **Tuning:** This is the transparency knob for an incidental master ramp: the shaper lags a ramp at velocity `v` by `v²/(2·A)`, e.g. 0.9 mm at 3 mm/s with `A` = 5 mm/s², vs. 0.09 mm with `A` = 50 mm/s². |
+| `G_cfgDirectCtrlAccel` | 10.0 | mm/s² | Written to `Y_DirectControl`'s `Acceleration` input (the block has no decel input, so the one rate applies in both directions) in every direct-control state except pressure mode, which uses `G_cfgPressureAccel`. A velocity-step test on the machine (`bench/characterisation/README.md` section 8) found the velocity reference followed within 60 ms whatever the step, so in VelocityTLMode this value does not slew the command; confirm by repeating a step at 1 and at 100 mm/s². |
 | `G_cfgDirectCtrlFilterTime` | 0.05 | s | `Y_DirectControl`'s `FilterTimeConstant`, the block's own filter on the command it sends the drive, wired from `G_cmdDirectControl.FilterTimeConstant` (`docs/slave/ld/`). It is a lag inside the pressure loop, so it belongs with the loop's tuning; the same step test found no 50 ms lag in the velocity response, so which modes it acts on is to be established on the bench. |
-| `G_cfgPosGateMaxDeviation` | 2.0 | mm | Tether window: once the gated command leads `G_sysActualPosition` by this much in the direction of travel, the command holds until the axis catches up or the target reverses. **Tuning:** Must sit comfortably below the drive's `Pn520` excessive-deviation level so the tether acts first, and comfortably above normal following error. |
+| `G_cfgPosShaperMaxDeviation` | 2.0 | mm | Tether window: once the shaped command leads `G_sysActualPosition` by this much in the direction of travel, the command holds until the axis catches up or the target reverses. **Tuning:** Must sit comfortably below the drive's `Pn520` excessive-deviation level so the tether acts first, and comfortably above normal following error. |
 
 ---
 
@@ -110,4 +110,14 @@ These parameters define the behavior of the homing (110) and Go Home (101) modes
 | `G_cfgGoHomeVelocity` | 6.0 | mm/s | The velocity used for the move-to-home motion. |
 | `G_cfgGoHomeAccel` | 5.0 | mm/s² | Acceleration for the Go Home move. |
 | `G_cfgGoHomeDecel` | 10.0 | mm/s² | Deceleration for the Go Home move. |
-| `G_cfgGoHomeStopDecel` | 10.0 | mm/s² | Deceleration for `MC_Stop` commands. |
+
+---
+
+## 7. Step Probe
+
+The scan-rate recorder `FB_Probe` (ModbusRegisterMap.md, section 6). Nothing in the protocol depends on it.
+
+| Parameter | Default Value | Units | Description & Tuning Considerations |
+|---|---|---|---|
+| `G_cfgProbeEnable` | TRUE | | FALSE stops the probe: nothing is recorded, arms are not acted on and `G_mbProbeState` reads `PROBE_OFF`. The Modbus groups still span IR524 and HR114. |
+| `G_cfgProbeFillPerScan` | 6 | records | Records `FB_Probe` copies into the window per scan (limited to 1-13), 8 words each: the bound on the cost a transfer adds to one scan. A window of 13 records takes 3 scans at 6 and 13 at 1. **Tuning:** Lower it if scan time is tight; raise it if a stream reader needs the window refilled faster than every 6 ms. |

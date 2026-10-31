@@ -10,13 +10,13 @@
    the handshake protocol with the master controller.
 
    All built-in motion FBs (MC_Power, MC_Stop, MC_Reset, MC_MoveAbsolute,
-   MC_MoveVelocity, MC_ReadActual*, Y_DirectControl, MC_SetPosition) and
+   MC_ReadActual*, Y_DirectControl, MC_SetPosition) and
    the PLCopen Toolbox Jog FB are instantiated in the LD POU and communicate
-   via G_cmd*/G_sta* structured globals.
-   Note: MC_MoveVelocity is retained in the LD POU but currently unused;
-   homing (ST_HOME_LIMIT) now uses Jog.
+   via G_cmd*/G_sta* structured globals. Homing (ST_HOME_LIMIT) uses Jog.
 
    Every user-defined FB is called exactly once at the end of this file.
+   The step probe (fbProbe) is called last, after the state of the scan is
+   final, so its record and its fault mark see the scan's end state.
 
    State Machine Groups:
    - Idle: ST_IDLE (first scan goes directly here)
@@ -47,7 +47,7 @@
        fbPistonExitGuard   : FB_PistonExitGuard
        fbGoHome            : FB_GoHome
        fbHomeLimit         : FB_HomeLimit
-       fbPosGate           : FB_PositionCommandGate
+       fbPosShaper         : FB_PositionPathShaper
        (* Enum-helper FBs (replacing FN_* with user-enum signatures — MWIEC bug)
        fbIsOperational     : FB_IsOperationalMode
        fbIsHoming          : FB_IsHomingMode
@@ -55,6 +55,9 @@
        fbFaultToInt        : FB_FaultToInt
        fbConfModeToInt     : FB_ModeToInt
        fbCommWatchdog      : FB_CommWatchdog
+       (* Step probe: scan-rate data capture, called last
+       fbProbe             : FB_Probe
+       nProbeWord          : INT              (* Index of the window copy out of fbProbe.Stage
        (* Timers — each has exactly one call site (see end of body)
        tStateTimer         : TON
        tBrakeTimer         : TON
@@ -87,13 +90,29 @@
        bBlockPos           : BOOL             (* Positive travel blocked by pos switch or above SoftLimitMax
        bLimitConditionActive : BOOL           (* Either direction blocked - a limit is currently active
        bRecoveryPending    : BOOL             (* Latched at ST_FAULT_IDLE reset; routes activation to ST_RECOVERY at brake release
-       (* Position command gate (ST_POSITION_CTRL / ST_RECOVERY_POSITION)
-       rPosTarget          : LREAL            (* Soft-limit-clamped position target from the master, input to fbPosGate
-       bPosGateActive      : BOOL             (* Set by a position state body this scan; gates fbPosGate.Enable
-       bPosStopping        : BOOL             (* Motion enable dropped; braking under the gate before ST_HOLD_POSITION
+       (* Position path shaper (ST_POSITION_CTRL / ST_RECOVERY_POSITION)
+       rPosShaperVelMax    : LREAL            (* Shaper speed limit (mm/s): the master's position speed clamped to [0, G_cfgVelLimitMax], set every scan by a position state body
+       rPosTarget          : LREAL            (* Soft-limit-clamped position target from the master, input to fbPosShaper
+       bPosShaperActive    : BOOL             (* Set by a position state body this scan; gates fbPosShaper.Enable
+       bPosStopping        : BOOL             (* Motion enable dropped; braking under the shaper before ST_HOLD_POSITION
        (* Pressure loop (ST_PRESSURE_CTRL)
        rPressureTarget     : LREAL            (* Clamped target from the master, input to fbPressureCtrl
        bPressureCtrlActive : BOOL             (* Set by the pressure state body this scan; gates fbPressureCtrl.Enable
+       (* State properties (computed once per scan after the state machine, see State Properties)
+       bPowerOn            : BOOL             (* Drive energised: MC_Power enabled (ST_FAULT_IDLE handled separately)
+       bDriveStartup       : BOOL             (* ST_DRIVE_RESET / ST_DRIVE_ENABLE: waiting on the drive
+       bBrakeReleasing     : BOOL             (* ST_BRAKE_RELEASE: brake release delay
+       bBrakeEngaging      : BOOL             (* ST_BRAKE_ENGAGE / ST_FAULT_IDLE: brake engage delay
+       bHandshakeState     : BOOL             (* States that accept a new mode request from the master
+       bCommandedMotion    : BOOL             (* States that command motion from the master's reference
+       bMotionWatched      : BOOL             (* States where either overtravel switch is a fault
+       bInHoming           : BOOL             (* ST_HOME_LIMIT / ST_HOME_COMPLETE
+       bInGoHome           : BOOL             (* ST_GO_HOME
+       bInHomeLimit        : BOOL             (* ST_HOME_LIMIT
+       bInRecovery         : BOOL             (* ST_RECOVERY / ST_RECOVERY_POSITION / ST_RECOVERY_VELOCITY
+       bInFault            : BOOL             (* ST_FAULT / ST_FAULT_IDLE
+       bPositionMode       : BOOL             (* ST_POSITION_CTRL / ST_RECOVERY_POSITION: Y_DirectControl in position mode
+       bVelocityMode       : BOOL             (* ST_VELOCITY_CTRL / ST_RECOVERY_VELOCITY: Y_DirectControl in velocity mode
        (* Y_DirectControl hand-off to MC_Stop (see Command Arbitration)
        bKeepDirectControl  : BOOL             (* Keep Y_DirectControl enabled (zero command) until MC_Stop aborts it
        eKeepDirectMode     : Y_ControlMode    (* ControlMode of the direct-control session being stopped
@@ -131,7 +150,7 @@ END_IF;
 (* --------------------------------------------------------------------------
    Input Processing
    Read filtered values from FB outputs (FBs called at end of file).
-   Values reflect previous scan's filter outputs — negligible at 1ms cycle.
+   Values reflect the previous scan's filter outputs.
    -------------------------------------------------------------------------- *)
 
 bFilteredMotionEnable := fbFilterMotionEnable.FilteredOutput;
@@ -169,9 +188,9 @@ bLimitConditionActive := bBlockNeg OR bBlockPos;
 
 (* Cleared every scan; a position state body sets it when it has produced a
    fresh rPosTarget. On the scan a transition lands in a position state the
-   body has not yet run, so the gate stays disabled and commands actual
+   body has not yet run, so the shaper stays disabled and commands actual
    position for that scan rather than a stale target. *)
-bPosGateActive := FALSE;
+bPosShaperActive := FALSE;
 
 (* Likewise for the pressure loop. The in-band status output is only
    meaningful in pressure mode and is recomputed there. *)
@@ -309,7 +328,6 @@ ELSIF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
             G_sysConfirmedMode := E_OperatingMode#MODE_POSITION;
             stCurrentLimits.PosMax := G_cfgPosSoftLimitMax;
             stCurrentLimits.PosMin := G_cfgPosSoftLimitMin;
-            stCurrentLimits.VelMax := G_cfgVelLimitNormal;
             stCurrentLimits.TorqueMax := G_cfgTorqueLimitNormal;
             bPosStopping := FALSE;
         END_IF;
@@ -319,22 +337,25 @@ ELSIF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
         END_IF;
 
         IF bPosStopping THEN
-            (* Brake under the gate's accel limit before handing off to
+            (* Brake under the shaper's accel limit before handing off to
                MC_Stop: pinning the target to the current command makes the
                distance-to-go zero, so the rate ramps down at AccelMax. *)
-            rPosTarget := fbPosGate.CommandedPosition;
+            rPosTarget := fbPosShaper.CommandedPosition;
         ELSE
-            (* Raw target only; fbPosGate shapes it into G_sysCommandedPosition *)
-            rPosTarget := G_sysReference;
+            (* Raw target only; fbPosShaper shapes it into G_sysCommandedPosition *)
             rPosTarget := LIMIT(stCurrentLimits.PosMin,
-                                rPosTarget,
+                                G_sysReference,
                                 stCurrentLimits.PosMax);
         END_IF;
-        bPosGateActive := TRUE;
+        (* Position-move speed from the master (HR7-8), re-read every scan so
+           a change acts mid-move. 0 decelerates the command to rest at
+           G_cfgPosShaperAccelMax and holds. *)
+        rPosShaperVelMax := LIMIT(LREAL#0.0, G_sysPositionSpeed, G_cfgVelLimitMax);
+        bPosShaperActive := TRUE;
 
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
-        IF bPosStopping AND (ABS(fbPosGate.CommandedRate) < LREAL#0.001) THEN
+        IF bPosStopping AND (ABS(fbPosShaper.CommandedRate) < LREAL#0.001) THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
         END_IF;
 
@@ -347,10 +368,9 @@ ELSIF G_sysCurrentState = E_SystemState#ST_VELOCITY_CTRL THEN
             stCurrentLimits.TorqueMax := G_cfgTorqueLimitNormal;
         END_IF;
 
-        G_sysCommandedVelocity := G_sysReference;
         G_sysCommandedVelocity := LIMIT(-stCurrentLimits.VelMax,
-                                      G_sysCommandedVelocity,
-                                      stCurrentLimits.VelMax);
+                                        G_sysReference,
+                                        stCurrentLimits.VelMax);
 
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
@@ -367,10 +387,9 @@ ELSIF G_sysCurrentState = E_SystemState#ST_TORQUE_CTRL THEN
             stCurrentLimits.VelMax := G_cfgVelLimitMax;
         END_IF;
 
-        G_sysCommandedTorque := G_sysReference;
         G_sysCommandedTorque := LIMIT(-stCurrentLimits.TorqueMax,
-                                    G_sysCommandedTorque,
-                                    stCurrentLimits.TorqueMax);
+                                      G_sysReference,
+                                      stCurrentLimits.TorqueMax);
 
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
@@ -389,7 +408,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL THEN
            ---------------------------------------------------------------- *)
         IF bEnterState THEN
             G_sysConfirmedMode := E_OperatingMode#MODE_PRESSURE;
-            stCurrentLimits.VelMax := G_cfgPressureVelMax;
+            stCurrentLimits.VelMax := MIN(G_cfgPressureVelMax, G_cfgVelLimitMax);
             stCurrentLimits.TorqueMax := G_cfgPressureTorqueLimit;
         END_IF;
 
@@ -457,12 +476,6 @@ ELSIF G_sysCurrentState = E_SystemState#ST_HOME_LIMIT THEN
         ELSIF NOT bFilteredMotionEnable THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
         END_IF;
-
-
-    (* Deprecated sub-states - kept for E_SystemState compatibility *)
-ELSIF G_sysCurrentState = E_SystemState#ST_HOME_LIM_APPROACH OR G_sysCurrentState = E_SystemState#ST_HOME_LIM_DETECT OR
-      G_sysCurrentState = E_SystemState#ST_HOME_LIM_BACKOFF OR G_sysCurrentState = E_SystemState#ST_HOME_LIM_SETREF THEN
-        G_sysCurrentState := E_SystemState#ST_HOME_LIMIT;
 
 
 ELSIF G_sysCurrentState = E_SystemState#ST_HOME_COMPLETE THEN
@@ -683,7 +696,6 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
             G_sysConfirmedMode := E_OperatingMode#MODE_POSITION;
             stCurrentLimits.PosMax := G_cfgPosSoftLimitMax;
             stCurrentLimits.PosMin := G_cfgPosSoftLimitMin;
-            stCurrentLimits.VelMax := G_cfgVelLimitNormal;
             stCurrentLimits.TorqueMax := G_cfgTorqueLimitNormal;
             bPosStopping := FALSE;
         END_IF;
@@ -693,13 +705,12 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
         END_IF;
 
         IF bPosStopping THEN
-            (* Brake under the gate's accel limit before handing off to MC_Stop *)
-            rPosTarget := fbPosGate.CommandedPosition;
+            (* Brake under the shaper's accel limit before handing off to MC_Stop *)
+            rPosTarget := fbPosShaper.CommandedPosition;
         ELSE
-            (* Raw target only; fbPosGate shapes it into G_sysCommandedPosition *)
-            rPosTarget := G_sysReference;
+            (* Raw target only; fbPosShaper shapes it into G_sysCommandedPosition *)
             rPosTarget := LIMIT(stCurrentLimits.PosMin,
-                                rPosTarget,
+                                G_sysReference,
                                 stCurrentLimits.PosMax);
 
             (* Block any target that would drive further toward the active limit *)
@@ -710,11 +721,15 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
                 rPosTarget := G_sysActualPosition;
             END_IF;
         END_IF;
-        bPosGateActive := TRUE;
+        (* Position-move speed from the master (HR7-8), re-read every scan so
+           a change acts mid-move. 0 decelerates the command to rest at
+           G_cfgPosShaperAccelMax and holds. *)
+        rPosShaperVelMax := LIMIT(LREAL#0.0, G_sysPositionSpeed, G_cfgVelLimitMax);
+        bPosShaperActive := TRUE;
 
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
-        IF bPosStopping AND (ABS(fbPosGate.CommandedRate) < LREAL#0.001) THEN
+        IF bPosStopping AND (ABS(fbPosShaper.CommandedRate) < LREAL#0.001) THEN
             IF bLimitConditionActive THEN
                 G_sysCurrentState := E_SystemState#ST_RECOVERY;
             ELSE
@@ -734,10 +749,9 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_VELOCITY THEN
             stCurrentLimits.TorqueMax := G_cfgTorqueLimitNormal;
         END_IF;
 
-        G_sysCommandedVelocity := G_sysReference;
         G_sysCommandedVelocity := LIMIT(-stCurrentLimits.VelMax,
-                                      G_sysCommandedVelocity,
-                                      stCurrentLimits.VelMax);
+                                        G_sysReference,
+                                        stCurrentLimits.VelMax);
 
         (* Block velocity that would drive further toward the active limit *)
         IF bBlockNeg AND (G_sysCommandedVelocity < LREAL#0.0) THEN
@@ -761,22 +775,100 @@ END_IF;
 
 
 (* --------------------------------------------------------------------------
+   State Properties
+   The one place G_sysCurrentState is classified. Computed here, after the
+   state machine has made this scan's transitions, so the timers, command
+   arbitration, FB enables and fbSafetyMonitor below all see the state the
+   scan ended the state machine in. The safety block at the end of the file
+   can still move the state to ST_FAULT; these flags keep the state the
+   scan ran in, and the outputs that must follow that move read
+   G_sysCurrentState again.
+   -------------------------------------------------------------------------- *)
+
+(* Drive energised (MC_Power enabled). ST_FAULT_IDLE is not in the list: it
+   keeps the drive on only until the brake has engaged (Command Arbitration). *)
+bPowerOn := (G_sysCurrentState = E_SystemState#ST_DRIVE_ENABLE) OR
+            (G_sysCurrentState = E_SystemState#ST_BRAKE_RELEASE) OR
+            (G_sysCurrentState = E_SystemState#ST_BRAKE_HOLD) OR
+            (G_sysCurrentState = E_SystemState#ST_POSITION_CTRL) OR
+            (G_sysCurrentState = E_SystemState#ST_VELOCITY_CTRL) OR
+            (G_sysCurrentState = E_SystemState#ST_TORQUE_CTRL) OR
+            (G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL) OR
+            (G_sysCurrentState = E_SystemState#ST_GO_HOME) OR
+            (G_sysCurrentState = E_SystemState#ST_HOME_LIMIT) OR
+            (G_sysCurrentState = E_SystemState#ST_HOME_COMPLETE) OR
+            (G_sysCurrentState = E_SystemState#ST_HOLD_POSITION) OR
+            (G_sysCurrentState = E_SystemState#ST_BRAKE_ENGAGE) OR
+            (G_sysCurrentState = E_SystemState#ST_RECOVERY) OR
+            (G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION) OR
+            (G_sysCurrentState = E_SystemState#ST_RECOVERY_VELOCITY) OR
+            (G_sysCurrentState = E_SystemState#ST_FAULT);
+
+(* Activation and deactivation waits *)
+bDriveStartup := (G_sysCurrentState = E_SystemState#ST_DRIVE_RESET) OR
+                 (G_sysCurrentState = E_SystemState#ST_DRIVE_ENABLE);
+bBrakeReleasing := (G_sysCurrentState = E_SystemState#ST_BRAKE_RELEASE);
+bBrakeEngaging := (G_sysCurrentState = E_SystemState#ST_BRAKE_ENGAGE) OR
+                  (G_sysCurrentState = E_SystemState#ST_FAULT_IDLE);
+
+(* States in which the master may request a new mode (fbHandshake enable) *)
+bHandshakeState := (G_sysCurrentState = E_SystemState#ST_IDLE) OR
+                   (G_sysCurrentState = E_SystemState#ST_BRAKE_HOLD) OR
+                   (G_sysCurrentState = E_SystemState#ST_HOLD_POSITION) OR
+                   (G_sysCurrentState = E_SystemState#ST_RECOVERY);
+
+(* States that move the axis from the master's reference: a stale heartbeat
+   is a fault only here (fbSafetyMonitor, FaultComm) *)
+bCommandedMotion := (G_sysCurrentState = E_SystemState#ST_POSITION_CTRL) OR
+                    (G_sysCurrentState = E_SystemState#ST_VELOCITY_CTRL) OR
+                    (G_sysCurrentState = E_SystemState#ST_TORQUE_CTRL) OR
+                    (G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL) OR
+                    (G_sysCurrentState = E_SystemState#ST_GO_HOME) OR
+                    (G_sysCurrentState = E_SystemState#ST_HOME_LIMIT) OR
+                    (G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION) OR
+                    (G_sysCurrentState = E_SystemState#ST_RECOVERY_VELOCITY);
+
+(* States in which an active overtravel switch is a fault (fbSafetyMonitor).
+   Homing and recovery have their own rules and are not in the list. *)
+bMotionWatched := (G_sysCurrentState = E_SystemState#ST_POSITION_CTRL) OR
+                  (G_sysCurrentState = E_SystemState#ST_VELOCITY_CTRL) OR
+                  (G_sysCurrentState = E_SystemState#ST_TORQUE_CTRL) OR
+                  (G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL) OR
+                  (G_sysCurrentState = E_SystemState#ST_GO_HOME) OR
+                  (G_sysCurrentState = E_SystemState#ST_HOLD_POSITION);
+
+bInGoHome := (G_sysCurrentState = E_SystemState#ST_GO_HOME);
+bInHomeLimit := (G_sysCurrentState = E_SystemState#ST_HOME_LIMIT);
+bInHoming := bInHomeLimit OR (G_sysCurrentState = E_SystemState#ST_HOME_COMPLETE);
+
+bInRecovery := (G_sysCurrentState = E_SystemState#ST_RECOVERY) OR
+               (G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION) OR
+               (G_sysCurrentState = E_SystemState#ST_RECOVERY_VELOCITY);
+
+bInFault := (G_sysCurrentState = E_SystemState#ST_FAULT) OR
+            (G_sysCurrentState = E_SystemState#ST_FAULT_IDLE);
+
+(* Y_DirectControl mode of the states that drive it from a position or a
+   velocity command; the recovery states share the normal states' commands *)
+bPositionMode := (G_sysCurrentState = E_SystemState#ST_POSITION_CTRL) OR
+                 (G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION);
+bVelocityMode := (G_sysCurrentState = E_SystemState#ST_VELOCITY_CTRL) OR
+                 (G_sysCurrentState = E_SystemState#ST_RECOVERY_VELOCITY);
+
+
+(* --------------------------------------------------------------------------
    Timer calls — exactly one call site per timer per scan.
    bEnterState is used as a 1-scan reset gate so the TON sees IN=FALSE
    on the state-entry scan, then IN=TRUE on subsequent scans.
    -------------------------------------------------------------------------- *)
 
-bDriveReadyTimerIN := ((G_sysCurrentState = E_SystemState#ST_DRIVE_RESET) OR
-                        (G_sysCurrentState = E_SystemState#ST_DRIVE_ENABLE)) AND NOT bEnterState;
+bDriveReadyTimerIN := bDriveStartup AND NOT bEnterState;
 
-bBrakeTimerIN := ((G_sysCurrentState = E_SystemState#ST_BRAKE_RELEASE) OR
-                  (G_sysCurrentState = E_SystemState#ST_BRAKE_ENGAGE) OR
-                  (G_sysCurrentState = E_SystemState#ST_FAULT_IDLE)) AND NOT bEnterState;
+bBrakeTimerIN := (bBrakeReleasing OR bBrakeEngaging) AND NOT bEnterState;
 
-IF G_sysCurrentState = E_SystemState#ST_BRAKE_RELEASE THEN
+IF bBrakeReleasing THEN
     tBrakeTimerPT := G_cfgBrakeDisengageDelay;
-ELSIF (G_sysCurrentState = E_SystemState#ST_BRAKE_ENGAGE) OR
-      (G_sysCurrentState = E_SystemState#ST_FAULT_IDLE) THEN
+ELSIF bBrakeEngaging THEN
     tBrakeTimerPT := G_cfgBrakeEngageDelay;
 ELSE
     tBrakeTimerPT := T#0MS;
@@ -802,62 +894,43 @@ G_cmdPower.Enable := FALSE;
 G_cmdPower.EnablePositive := FALSE;
 G_cmdPower.EnableNegative := FALSE;
 G_cmdStop.Execute := FALSE;
-G_cmdStop.Deceleration := G_cfgGoHomeDecel;
+(* Every command default below is the value of the block that may still be
+   running after the owning state is left; the owning FB or state overwrites
+   it while it commands. A Execute/Forward/Reverse that has dropped does not
+   stop the block (MC_MoveAbsolute is not aborted by Execute falling; Jog
+   decelerates on its Deceleration pin), so the rates keep real values.
+   Targets and velocities cannot matter while the enable is FALSE and are
+   zeroed. *)
+G_cmdStop.Deceleration := G_cfgStopDecel;   (* the one MC_Stop deceleration: hold, fault, recovery *)
 G_cmdReset.Execute := FALSE;
 G_cmdMoveAbsolute.Execute := FALSE;
 G_cmdMoveAbsolute.Position := LREAL#0.0;
 G_cmdMoveAbsolute.Velocity := LREAL#0.0;
-G_cmdMoveAbsolute.Acceleration := G_cfgGoHomeAccel;
+G_cmdMoveAbsolute.Acceleration := G_cfgGoHomeAccel;   (* Go Home's move, the one a hold or fault can interrupt before MC_Stop takes the axis *)
 G_cmdMoveAbsolute.Deceleration := G_cfgGoHomeDecel;
 G_cmdMoveAbsolute.Direction := MC_Direction#Current_Direction;
-G_cmdMoveVelocity.Execute := FALSE;
-G_cmdMoveVelocity.Velocity := LREAL#0.0;
-G_cmdMoveVelocity.Acceleration := G_cfgHomeLimAccel;
-G_cmdMoveVelocity.Deceleration := G_cfgHomeLimDecel;
-G_cmdMoveVelocity.Direction := MC_Direction#Current_Direction;
 G_cmdJog.Forward := FALSE;
 G_cmdJog.Reverse := FALSE;
 G_cmdJog.Velocity := LREAL#0.0;
-G_cmdJog.Acceleration := G_cfgHomeLimAccel;
-G_cmdJog.Deceleration := G_cfgHomeLimDecel;
+G_cmdJog.Acceleration := G_cfgHomeLimAccel;   (* homing is the only user of Jog; an abort into ST_HOLD_POSITION drops Forward/Reverse and *)
+G_cmdJog.Deceleration := G_cfgHomeLimDecel;   (* the block then stops on this Deceleration, as it did under FB_HomeLimit *)
 G_cmdDirectControl.Enable := FALSE;
 G_cmdDirectControl.ControlMode := Y_ControlMode#VelocityTLMode;
 G_cmdDirectControl.Position := LREAL#0.0;
 G_cmdDirectControl.Velocity := LREAL#0.0;
 G_cmdDirectControl.Torque := LREAL#0.0;
-G_cmdDirectControl.Acceleration := G_cfgDirectCtrlAccel;
-G_cmdDirectControl.Deceleration := G_cfgDirectCtrlDecel;
+G_cmdDirectControl.Acceleration := G_cfgDirectCtrlAccel;   (* kept through the MC_Stop hand-off, where Enable stays TRUE *)
 G_cmdDirectControl.FilterTimeConstant := G_cfgDirectCtrlFilterTime;
 G_cmdSetPosition.Execute := FALSE;
 G_cmdSetPosition.Position := LREAL#0.0;
 G_cmdSetPosition.Mode := FALSE;
 
-(* MC_Power: enable for all drive-active states *)
-IF (G_sysCurrentState = E_SystemState#ST_DRIVE_ENABLE) OR
-   (G_sysCurrentState = E_SystemState#ST_BRAKE_RELEASE) OR
-   (G_sysCurrentState = E_SystemState#ST_BRAKE_HOLD) OR
-   (G_sysCurrentState = E_SystemState#ST_POSITION_CTRL) OR
-   (G_sysCurrentState = E_SystemState#ST_VELOCITY_CTRL) OR
-   (G_sysCurrentState = E_SystemState#ST_TORQUE_CTRL) OR
-   (G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL) OR
-   (G_sysCurrentState = E_SystemState#ST_GO_HOME) OR
-   (G_sysCurrentState = E_SystemState#ST_HOME_LIMIT) OR
-   (G_sysCurrentState = E_SystemState#ST_HOME_COMPLETE) OR
-   (G_sysCurrentState = E_SystemState#ST_HOLD_POSITION) OR
-   (G_sysCurrentState = E_SystemState#ST_BRAKE_ENGAGE) OR
-   (G_sysCurrentState = E_SystemState#ST_RECOVERY) OR
-   (G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION) OR
-   (G_sysCurrentState = E_SystemState#ST_RECOVERY_VELOCITY) OR
-   (G_sysCurrentState = E_SystemState#ST_FAULT) THEN
+(* MC_Power: enable for all drive-active states. In ST_FAULT_IDLE the drive
+   stays on only until the brake has engaged. *)
+IF bPowerOn OR ((G_sysCurrentState = E_SystemState#ST_FAULT_IDLE) AND NOT tBrakeTimer.Q) THEN
     G_cmdPower.Enable := TRUE;
     G_cmdPower.EnablePositive := TRUE;
     G_cmdPower.EnableNegative := TRUE;
-ELSIF G_sysCurrentState = E_SystemState#ST_FAULT_IDLE THEN
-    IF NOT tBrakeTimer.Q THEN
-        G_cmdPower.Enable := TRUE;
-        G_cmdPower.EnablePositive := TRUE;
-        G_cmdPower.EnableNegative := TRUE;
-    END_IF;
 END_IF;
 
 (* State-direct commands for built-in FBs.
@@ -872,16 +945,23 @@ END_IF;
    its mode in eKeepDirectMode and sets bKeepDirectControl; the stopping
    states keep Y_DirectControl enabled with a zero command until MC_Stop is
    Busy and Y_DirectControl.Active drops (Done/Error as fallbacks). *)
-IF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
+IF bPositionMode THEN
     G_cmdDirectControl.Enable := TRUE;
     G_cmdDirectControl.ControlMode := Y_ControlMode#PositionMode;
-    G_cmdDirectControl.Position := G_sysCommandedPosition;   (* previous scan; overridden by fbPosGate in Route Active FB Command Outputs *)
-    G_cmdDirectControl.Velocity := stCurrentLimits.VelMax;
+    G_cmdDirectControl.Position := G_sysCommandedPosition;   (* previous scan; overridden by fbPosShaper in Route Active FB Command Outputs *)
+    (* Y_DirectControl does no path shaping in PositionMode: the position
+       command reaches the drive as given. Its Velocity (and Acceleration)
+       inputs therefore set no limits in this mode. fbPosShaper
+       (FB_PositionPathShaper) does the path shaping, and its VelMax
+       (the master's position speed, HR7-8) and AccelMax are what limit a
+       position move. The block is given the shaper's speed, so the two
+       never disagree. *)
+    G_cmdDirectControl.Velocity := rPosShaperVelMax;
     G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
     bKeepDirectControl := TRUE;
     eKeepDirectMode := Y_ControlMode#PositionMode;
 
-ELSIF G_sysCurrentState = E_SystemState#ST_VELOCITY_CTRL THEN
+ELSIF bVelocityMode THEN
     G_cmdDirectControl.Enable := TRUE;
     G_cmdDirectControl.ControlMode := Y_ControlMode#VelocityTLMode;
     G_cmdDirectControl.Velocity := G_sysCommandedVelocity;
@@ -907,24 +987,6 @@ ELSIF G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL THEN
     G_cmdDirectControl.Velocity := G_sysCommandedVelocity;
     G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
     G_cmdDirectControl.Acceleration := G_cfgPressureAccel;
-    G_cmdDirectControl.Deceleration := G_cfgPressureDecel;
-    bKeepDirectControl := TRUE;
-    eKeepDirectMode := Y_ControlMode#VelocityTLMode;
-
-ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
-    G_cmdDirectControl.Enable := TRUE;
-    G_cmdDirectControl.ControlMode := Y_ControlMode#PositionMode;
-    G_cmdDirectControl.Position := G_sysCommandedPosition;   (* previous scan; overridden by fbPosGate in Route Active FB Command Outputs *)
-    G_cmdDirectControl.Velocity := stCurrentLimits.VelMax;
-    G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
-    bKeepDirectControl := TRUE;
-    eKeepDirectMode := Y_ControlMode#PositionMode;
-
-ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_VELOCITY THEN
-    G_cmdDirectControl.Enable := TRUE;
-    G_cmdDirectControl.ControlMode := Y_ControlMode#VelocityTLMode;
-    G_cmdDirectControl.Velocity := G_sysCommandedVelocity;
-    G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
     bKeepDirectControl := TRUE;
     eKeepDirectMode := Y_ControlMode#VelocityTLMode;
 
@@ -954,6 +1016,8 @@ ELSIF (G_sysCurrentState = E_SystemState#ST_HOLD_POSITION) OR
             G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
             IF eKeepDirectMode = Y_ControlMode#VelocityTLMode THEN
                 G_cmdDirectControl.Velocity := LREAL#0.0;
+            ELSIF eKeepDirectMode = Y_ControlMode#PositionMode THEN
+                G_cmdDirectControl.Velocity := rPosShaperVelMax;
             ELSE
                 G_cmdDirectControl.Velocity := stCurrentLimits.VelMax;
             END_IF;
@@ -1013,10 +1077,7 @@ fbModeDecoder(
 
 (* Handshake manager *)
 fbHandshake(
-    Enable := (G_sysCurrentState = E_SystemState#ST_IDLE) OR
-              (G_sysCurrentState = E_SystemState#ST_BRAKE_HOLD) OR
-              (G_sysCurrentState = E_SystemState#ST_HOLD_POSITION) OR
-              (G_sysCurrentState = E_SystemState#ST_RECOVERY),
+    Enable := bHandshakeState,
     RequestedMode := G_sysRequestedMode,
     ModeStable := fbModeDecoder.ModeStable,
     MotionEnable := bFilteredMotionEnable,
@@ -1039,8 +1100,7 @@ END_IF;
 fbIntToFaultCode(Value := G_mbModeCode);
 
 fbFaultReset(
-    Enable := (G_sysCurrentState = E_SystemState#ST_FAULT) OR
-              (G_sysCurrentState = E_SystemState#ST_FAULT_IDLE),
+    Enable := bInFault,
     FaultReset := bFilteredFaultReset,
     MotionEnable := bFilteredMotionEnable,
     InFaultState := bFaultResetInFaultState,
@@ -1051,12 +1111,13 @@ fbFaultReset(
 
 (* Go Home handler *)
 fbGoHome(
-    Enable := (G_sysCurrentState = E_SystemState#ST_GO_HOME),
-    Execute := (G_sysCurrentState = E_SystemState#ST_GO_HOME),
+    Enable := bInGoHome,
+    Execute := bInGoHome,
     HomePosition := G_cfgGoHomePosition,
-    HomeVelocity := G_cfgGoHomeVelocity,
+    HomeVelocity := MIN(G_cfgGoHomeVelocity, G_cfgVelLimitMax),
     Acceleration := G_cfgGoHomeAccel,
     Deceleration := G_cfgGoHomeDecel,
+    StopDeceleration := G_cfgStopDecel,
     Abort := NOT bFilteredMotionEnable,
     StaMoveAbsolute := G_staMoveAbsolute,
     StaStop := G_staStop
@@ -1064,11 +1125,11 @@ fbGoHome(
 
 (* Home to Negative Overtravel / Home Reference handler (two-stage + retract) *)
 fbHomeLimit(
-    Enable := (G_sysCurrentState = E_SystemState#ST_HOME_LIMIT),
-    Execute := (G_sysCurrentState = E_SystemState#ST_HOME_LIMIT),
-    FastApproachVelocity := G_cfgHomeLimFastApproachVel,
-    SlowApproachVelocity := G_cfgHomeLimSlowApproachVel,
-    BackoffVelocity := G_cfgHomeLimBackoffVel,
+    Enable := bInHomeLimit,
+    Execute := bInHomeLimit,
+    FastApproachVelocity := MIN(G_cfgHomeLimFastApproachVel, G_cfgVelLimitMax),
+    SlowApproachVelocity := MIN(G_cfgHomeLimSlowApproachVel, G_cfgVelLimitMax),
+    BackoffVelocity := MIN(G_cfgHomeLimBackoffVel, G_cfgVelLimitMax),
     RetractDist := G_cfgHomeLimRetractDist,
     Acceleration := G_cfgHomeLimAccel,
     Deceleration := G_cfgHomeLimDecel,
@@ -1107,23 +1168,28 @@ fbSafetyMonitor(
     SoftLimitMax := G_cfgPosSoftLimitMax,
     DriveFault := G_sysDriveFault,
     CurrentState := G_sysCurrentState,
+    InCommandedMotion := bCommandedMotion,
+    InMotionWatched := bMotionWatched,
+    InHoming := bInHoming,
+    InRecovery := bInRecovery,
+    InFault := bInFault,
     ExitGuardTriggered := fbPistonExitGuard.FaultTriggered,
     CommLost := fbCommWatchdog.Lost,
     PressureSensorFault := fbPressureInput.SensorFault
 );
 
-(* Position command gate - shapes rPosTarget into the Y_DirectControl command.
-   Enable is bPosGateActive (set only by a position state body that ran this
+(* Position path shaper - shapes rPosTarget into the Y_DirectControl command.
+   Enable is bPosShaperActive (set only by a position state body that ran this
    scan), not the state itself, so the transition scan commands actual position.
    While disabled it seeds from actual, so every entry is bumpless. *)
-fbPosGate(
-    Enable := bPosGateActive,
-    Reset := bEnterState AND bPosGateActive,
+fbPosShaper(
+    Enable := bPosShaperActive,
+    Reset := bEnterState AND bPosShaperActive,
     Target := rPosTarget,
     ActualPosition := G_sysActualPosition,
-    VelMax := stCurrentLimits.VelMax,
-    AccelMax := G_cfgPosGateAccelMax,
-    MaxDeviation := G_cfgPosGateMaxDeviation,
+    VelMax := rPosShaperVelMax,
+    AccelMax := G_cfgPosShaperAccelMax,
+    MaxDeviation := G_cfgPosShaperMaxDeviation,
     CycleTime := G_cfgScanTime
 );
 
@@ -1151,20 +1217,19 @@ fbPressureCtrl(
    where a user FB owns the motion command.
    -------------------------------------------------------------------------- *)
 
-IF G_sysCurrentState = E_SystemState#ST_GO_HOME THEN
+IF bInGoHome THEN
     G_cmdMoveAbsolute := fbGoHome.CmdMoveAbsolute;
     G_cmdStop := fbGoHome.CmdStop;
 
-ELSIF G_sysCurrentState = E_SystemState#ST_HOME_LIMIT THEN
+ELSIF bInHomeLimit THEN
     G_cmdJog := fbHomeLimit.CmdJog;
     G_cmdMoveAbsolute := fbHomeLimit.CmdMoveAbsolute;
     G_cmdSetPosition := fbHomeLimit.CmdSetPosition;
 
-ELSIF (G_sysCurrentState = E_SystemState#ST_POSITION_CTRL) OR
-      (G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION) THEN
-    (* Gated command (= actual position on the transition scan) *)
-    G_sysCommandedPosition := fbPosGate.CommandedPosition;
-    G_cmdDirectControl.Position := fbPosGate.CommandedPosition;
+ELSIF bPositionMode THEN
+    (* Shaped command (= actual position on the transition scan) *)
+    G_sysCommandedPosition := fbPosShaper.CommandedPosition;
+    G_cmdDirectControl.Position := fbPosShaper.CommandedPosition;
 
 END_IF;
 
@@ -1177,9 +1242,7 @@ END_IF;
 G_sysExitGuardActive := fbPistonExitGuard.GuardActive;
 G_sysInCylinderZone := NOT fbPistonExitGuard.InDangerZone;
 
-IF fbSafetyMonitor.FaultDetected AND
-   (G_sysCurrentState <> E_SystemState#ST_FAULT) AND
-   (G_sysCurrentState <> E_SystemState#ST_FAULT_IDLE) THEN
+IF fbSafetyMonitor.FaultDetected AND NOT bInFault THEN
     IF NOT (G_sysCurrentState = E_SystemState#ST_DRIVE_RESET AND
             fbSafetyMonitor.FaultCode = E_FaultCode#FAULT_DRIVE) THEN
         G_sysActiveFault := fbSafetyMonitor.FaultCode;
@@ -1192,6 +1255,7 @@ END_IF;
    Update Outputs
    -------------------------------------------------------------------------- *)
 
+(* Reads the state again: the safety block above may have just entered ST_FAULT *)
 G_doFaultActive := (G_sysCurrentState = E_SystemState#ST_FAULT) OR
                    (G_sysCurrentState = E_SystemState#ST_FAULT_IDLE);
 
@@ -1206,4 +1270,50 @@ ELSE
     G_sysScanCounter := G_sysScanCounter + UINT#1;
 END_IF;
 
-G_sysCycleCount := G_sysCycleCount + UDINT#1;
+
+(* --------------------------------------------------------------------------
+   Step Probe
+   Records this scan's values in the probe's ring and serves the master's
+   window requests (see FB_Probe). Last in the file: the state, the status
+   outputs and the confirmed mode code are final for this scan, and a fault
+   entered by the safety monitor above marks this scan's record. A completed
+   window is copied to G_sysProbeStage, which PRG_Output publishes.
+   -------------------------------------------------------------------------- *)
+fbProbe(
+    Enable := G_cfgProbeEnable,
+    FillPerScan := G_cfgProbeFillPerScan,
+    VelCmd := G_sysCommandedVelocity,
+    Vel := G_sysActualVelocity,
+    Torque := G_sysActualTorque,
+    Position := G_sysActualPosition,
+    Pressure := G_sysActualPressure,
+    Volts := G_aiPressure,
+    InMotion := G_doInMotion,
+    Performance := G_doPerformanceStatus,
+    FaultActive := G_doFaultActive,
+    HomingComplete := G_doHomingComplete,
+    ModeCode := G_sysConfirmedModeCode,
+    FaultState := (G_sysCurrentState = E_SystemState#ST_FAULT),
+    Arm := G_mbProbeArm,
+    Length := G_mbProbeLength,
+    ReqLo := G_mbProbeReqLo,
+    ReqHi := G_mbProbeReqHi
+);
+(* A completed window is copied out of the block only in the scan it is
+   published, so the copy costs nothing in the other scans *)
+IF fbProbe.Publish THEN
+    FOR nProbeWord := 0 TO 103 DO
+        G_sysProbeStage[nProbeWord] := fbProbe.Stage[nProbeWord];
+    END_FOR;
+END_IF;
+G_sysProbePublish := fbProbe.Publish;
+G_sysProbeWritten := fbProbe.Written;
+G_sysProbeMark := fbProbe.Mark;
+G_sysProbeFaultMark := fbProbe.FaultMark;
+G_sysProbeStart := fbProbe.Start;
+G_sysProbeCount := fbProbe.Count;
+G_sysProbeArmEcho := fbProbe.ArmEcho;
+G_sysProbeDepth := fbProbe.Depth;
+G_sysProbeWords := fbProbe.Words;
+G_sysProbeState := fbProbe.StateCode;
+G_sysProbeXfer := fbProbe.XferCode;

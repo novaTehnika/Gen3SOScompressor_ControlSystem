@@ -21,17 +21,39 @@ cfg.captures    = fullfile(here, 'captures');
 cfg.safetyModel = 'SafetyHold';
 cfg.safetyDir   = here;
 
-% Scan-rate capture by PRG_StepProbe (slave/PRG_StepProbe.st): registers
-% (1-based), length and scales. The five arrays are contiguous from irFirst:
-% three INT, one DINT and one INT, 6 * nScan registers in all.
-cfg.probe.hrArm     = 111;      % HR111 G_mbStepArm
-cfg.probe.irState   = 401;      % IR401 state, 402 arm echo, 403 count, 404-405 Pos0 (REAL)
-cfg.probe.irFirst   = 411;      % IR411-910 vCmd, 911-1410 vel, 1411-1910 torque, 1911-2910 position, 2911-3410 pressure
-cfg.probe.nScan     = 500;      % scans per capture
+% Scan-rate capture by the slave's step probe (slave-src/FB/FB_Probe.st),
+% read by benchProbe: registers (1-based), scales and timing. The slave keeps
+% a ring of records; the master asks for a start index (HR112-113) and reads
+% the header, a 13-record window and the state registers (IR401-524) in one
+% FC04 read. An arm is written with the current request and the capture
+% length in one FC16 write of HR111-114.
+cfg.probe.hrArm     = 111;      % HR111 G_mbProbeArm, then HR112-113 the request and HR114 the length
+cfg.probe.hrReq     = 112;      % HR112-113 requested start index of the window, low word first
+cfg.probe.hrLength  = 114;      % HR114 G_mbProbeLength: records the arm wants, 0 = open ended
+cfg.probe.irFirst   = 401;      % first register of the read
+cfg.probe.nRegs     = 124;      % registers of that read: IR401-524
+cfg.probe.off.written   = 1;    % offsets in that read (1-based): Written, Mark, Start (2 words each)
+cfg.probe.off.mark      = 3;
+cfg.probe.off.start     = 5;
+cfg.probe.off.echo      = 7;    % ArmEcho
+cfg.probe.off.count     = 8;    % records in the window
+cfg.probe.off.depth     = 9;    % ring depth in records
+cfg.probe.off.words     = 10;   % words per record
+cfg.probe.off.window    = 11;   % the window, nWindowWords registers
+cfg.probe.off.tail      = 119;  % StartTail (2 words), IR519-520
+cfg.probe.off.state     = 121;  % E_ProbeState code, IR521
+cfg.probe.off.xfer      = 122;  % E_ProbeXferState code, IR522
+cfg.probe.off.faultMark = 123;  % FaultMark (2 words), IR523-524
+cfg.probe.nWindowWords = 104;   % registers of the window (13 records of 8 words)
+cfg.probe.nWords    = 8;        % words per record the decoder knows: vCmd vel torque posLo posHi pressure raw status
+cfg.probe.nScan     = 500;      % records per capture by default (2 s at the 4 ms scan)
+cfg.probe.nPre      = 0;        % records taken before the arm's mark
 cfg.probe.velScale  = 1000;     % counts per mm/s
 cfg.probe.trqScale  = 100;      % counts per % rated
 cfg.probe.posScale  = 1e5;      % counts per mm
 cfg.probe.presScale = 1000;     % counts per MPa
-cfg.probe.blockRegs = 125;      % registers per FC04 read, one read per exchange gap
-cfg.probe.timeout   = 4;        % s from arm to ready before the capture is given up
+cfg.probe.voltScale = 5000;     % counts per V of the raw pressure input (0.2 mV per count)
+cfg.probe.armRetry  = 0.3;      % s before an unacknowledged arm is written again
+cfg.probe.timeout   = 4;        % s without an acknowledgement (or, when draining, without a new record) before a capture is given up
+cfg.probe.drainGap  = 0.02;     % s between transactions while draining
 end

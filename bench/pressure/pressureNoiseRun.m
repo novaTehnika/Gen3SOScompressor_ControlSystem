@@ -1,7 +1,7 @@
 function r = pressureNoiseRun(label, path, opts)
 %PRESSURENOISERUN Drive the axis along a path and probe the transducer
 %   while it moves. The script is the master for the run: one Modbus TCP
-%   connection carries the protocol exchange (HR1-6 out, IR1-20 back,
+%   connection carries the protocol exchange (HR1-8 out, IR1-20 back,
 %   every 50 ms, sequenced by masterStep as in the shell) and, between
 %   exchanges, the probe registers of PRG_PressureProbe. The shell model
 %   must not be running: a second client on the controller stalls the
@@ -93,7 +93,8 @@ cleanup = onCleanup(@() shutdown(link, map, safety));
 
 % --- Run state --------------------------------------------------------------
 app = struct('op', C.OP_STOP, 'cmdSeq', 0, 'targetPosition', 0, ...
-    'targetVelocity', 0, 'jogDirection', 0, 'targetPressure', 0, 'estop', 0, 'mixer', 0);
+    'targetVelocity', 0, 'jogDirection', 0, 'targetPressure', 0, 'estop', 0, 'mixer', 0, ...
+    'positionSpeed', masterConfig().positionSpeed);
 mbWrite = zeros(1, map.nWrite);
 mbRead = zeros(1, map.nRead);
 m = struct('statusCode', C.STATUS_LINK_WAIT, 'state', 0, 'position', 0, ...
@@ -239,7 +240,7 @@ function [mbWrite, m] = stepMaster(mbRead, app, map)
 [mbWrite, ~, ~, m.position, m.velocity, m.pressure, m.statusCode, ...
     m.faultCode, m.state, m.linkOk] = masterStep(mbRead, app.op, app.cmdSeq, ...
     app.targetPosition, app.targetVelocity, app.jogDirection, ...
-    app.targetPressure, app.estop, app.mixer);
+    app.targetPressure, app.estop, app.mixer, app.positionSpeed);
 mbWrite = double(mbWrite(:)');
 end
 

@@ -1,9 +1,8 @@
-function x = chamberPosition(sim, P)
-%CHAMBERPOSITION Axis position x (mm) at which the simulated chamber holds
-%   gauge pressure P (MPa) with no liquid removed: the inverse of
-%   chamberPressure. Tests use it to start a pressure scenario close to
-%   its target.
+function x = chamberPosition(sl, P)
+%CHAMBERPOSITION Axis position x (mm) at which the simulated chamber, with
+%   its present contents, holds gauge pressure P (MPa) at rest. Tests use
+%   it to start a pressure scenario close to its target:
+%     sl.ax.x = chamberPosition(sl, 0.5);
 
-vGas = sim.chamberGasVolume * sim.atmMPa / (P + sim.atmMPa);
-x = sim.chamberContactPos + (sim.chamberGasVolume - vGas) / sim.pistonArea;
+x = slaveSimMex('chamberPosition', sl.id, P);
 end
