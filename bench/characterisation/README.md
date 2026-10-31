@@ -1,11 +1,14 @@
 # Pressure Loop Characterisation Bench
 
-Measures three parameters of the pressure loop that the design model in
-`design/pressure-loop/` (`params.py`) carries as assumptions, so that the
-measured values replace them: the effective bulk modulus of the saline-filled
-chamber (`K`), the discharge coefficient of the outlet orifice bank (`Cd`, the
-outflow at a known pressure) and the lag of the drive's velocity loop as seen
-at the piston (`tauV`). The friction test is a separate bench.
+Measures four parameters of the pressure loop that the design model in
+`design/pressure-loop/` (`params.py`) and the slave's stop law carry as
+assumptions, so that the measured values replace them: the effective bulk
+modulus of the saline-filled chamber (`K`), the discharge coefficient of the
+outlet orifice bank (`Cd`, the outflow at a known pressure), the lag of the
+drive's velocity loop as seen at the piston (`tauV`) and the distance the
+piston needs to stop under load (the stop law's deceleration
+`G_cfgPressureDecel` and its delay). The friction test is a separate bench,
+but test 4 below gives friction points under load from the same run.
 
 Everything is measured through the protocol the master already uses: the
 slave reports position, velocity, torque and pressure in IR11-20 every 50 ms
@@ -27,11 +30,13 @@ position guards.
 | `charBulkModulus.m` | Test 1: K from slow ramps, with a bound on residual gas and, from two fills, the split between liquid and series compliance |
 | `charOrificeFlow.m` | Test 2: Cd and the square-root law from deliveries at held pressure, with the collected-volume check |
 | `charDriveLag.m` | Test 3: tauV and dead time from the step probe captures at the motor and, through their pressure channel, at the piston; the 50 ms log as a coarse check |
+| `charStopPath.m` | Test 4: builds the one-pass path, a staircase of pressure levels with an excursion set at each, sized to a pressure budget from the fill and the gas charge |
+| `charStopDistance.m` | Test 4: the stopping distance of every stop in the run, from the captures and the log, fitted to the stop law's two terms per direction and compared with the slave's allowance |
 
 `tests/charRunSim.m` runs `charRun` and the fits against the simulated slave
-(through the friction bench's `fakeProbeLink`), `tests/charFitsSynthetic.m`
-the fits on synthetic logs with known parameters; `tests/run_all.sh` runs
-both.
+(through the friction bench's `fakeProbeLink`), the one-pass path included,
+`tests/charFitsSynthetic.m` the fits on synthetic logs with known
+parameters; `tests/run_all.sh` runs both.
 
 ## 0. What the friction bench's runs already give
 
@@ -342,7 +347,95 @@ step as an ensemble and returns the lag plus dead time to about 25 ms,
 enough to say whether 20 ms is the right order but not to separate the
 two.
 
-## 6. Carrying the results into the model
+## 6. Test 4: stopping distance under load, in one pass
+
+The slave's stop law caps the piston speed so that the travel it cannot
+avoid once it decides to stop, the delay before the drive acts plus the
+ramp down at the deceleration, never carries the pressure past the target:
+it allows the speed v for which v·lag + v²/(2·D) fits in the remaining
+error at the chamber stiffness (design README, eq. (41)). The lag is
+measured (test 3). D is `G_cfgPressureDecel`, 50 mm/s², a value chosen
+to stay clear of drive alarms, not a measurement; and test 3 found that
+the drive does not slew the command at all, so the real stop is the
+velocity loop pulling the piston to rest against, or with, the pressure
+force. This test measures that travel against speed, load and direction,
+and gets the stiffness, the drive lag and the friction under load from the
+same pass.
+
+**The pass.** A staircase of pressure levels joined by ramps at a constant
+speed, with an excursion set at each level:
+
+- the ramps between levels are stiffness measurements (test 1's fit) and
+  give the torque against pressure at one speed;
+- at each level a dwell of 2 s gives the transducer noise and any creep;
+- then, for each speed v that fits the budget, a leg of d mm at +v, a
+  stop, a leg of d mm at −v and a stop. The step from rest gives the drive
+  lag under load (test 3's fit), each stop gives a stopping distance in
+  compression or on the return, the steady part of each leg gives the
+  torque at speed in both directions, and the pair returns the piston to
+  where it started, so the level stands for the next speed.
+
+`charStopPath` builds the path from the fill and the gas charge. The
+chamber is saline with an air charge (2:1 by STP volume by default, from a
+cylinder or a pump, not oxygen), which keeps the chamber soft enough at
+pressure for the fast legs; the stopping distance depends on the load and
+not on the stiffness, so the charge is free to choose. Each leg plus the
+stop allowance (v·T0 + v²/(2·D) at 0.05 s and the configured D) must stay
+within the pressure budget at its level, 2 MPa up to 8 MPa and 1 MPa at
+10 MPa, the compliance integrated across the excursion; a speed is left
+out where the steady part of its leg would be too short. The run's guard
+stays at 11 MPa. With the defaults the full speed sweep (1, 2, 5, 7 mm/s)
+runs at 2 and 4 MPa, 1 and 2 mm/s at 6 and 8, and 1 mm/s at 10; 8 MPa
+carries 80 % of the load, which is enough for the fit.
+
+```matlab
+opts.probe = true;                                   % PRG_StepProbe loaded
+[path, plan] = charStopPath();                       % prints the budget table
+r = charRun('stops', path, opts);
+rs = charStopDistance([r.capFiles {r.file}]);        % D and T0 per direction
+rl = charDriveLag([r.capFiles {r.file}]);            % the lag under load
+rk = charBulkModulus(r.file, struct('chargeRatio', 2));   % the ramps
+```
+
+`charStopPath(struct('chargeRatio', 1))` plans for a 1:1 charge, which is
+stiffer and drops the 5 and 7 mm/s legs above 2 MPa; `'levels_MPa'`,
+`'speeds'` and `'budget_MPa'` set the staircase. The plan prints, per level,
+the model's stiffness, the budget, the leg distance and the stop allowance
+for each speed; about 90 s of motion for the default 26 stops.
+
+**The fit** (`charStopDistance`). Every reference step to zero in a
+velocity session is a stop: from the 50 ms log, the travel from the row
+that sent the command to the first rows at rest, to about half an
+exchange; from a capture, the same at the scan rate. Each stop is
+reported with its speed, pressure, direction, travel, the pressure's own
+excursion during the stop, the peak torque and whether a fault ended it.
+Per direction, the travel is fitted to x = T0·v + v²/(2·D) with both
+terms non-negative; with two or more stops at a level, D is also fitted
+per level with T0 held, which shows the load dependence. Every stop is
+compared with the slave's allowance at the configured D and lag; the law
+is conservative where the measured travel is below it.
+
+**Expected values.** With the drive following the command in about 30 ms
+(test 3), a stop from 5 mm/s should take 0.1 to 0.2 mm in compression,
+where the pressure force helps, and more on the return, where the drive
+brakes against it with the torque left after holding the load (34 kN at
+10 MPa is 60 % of the stall cap). The configured law allows 0.5 mm at
+5 mm/s. Three outcomes matter: measured travel below the allowance at
+every level, in which case D can be raised toward the fitted value and
+every approach gets shorter; travel above it on the return at high
+pressure, in which case D must come down there, or become a value per
+direction; or a drive alarm before the physical limit, in which case the
+alarm is the real D and the slave should carry it. Accept a fit residual
+below 20 % of the mean travel, both directions fitted, and no alarm.
+
+**Carrying it over.** `r.D_mm_s2` and `r.T0_s` are the values the stop
+law needs: the smaller D and the larger T0 of the two directions. The
+design model's compression and delivery studies then run with the
+measured allowance in place of the configured one, since the closing of
+the purge valve at the end of a delivery is also a stop against a stiff
+chamber.
+
+## 7. Carrying the results into the model
 
 `params.py` fields and the units the scripts print them in:
 
@@ -352,12 +445,13 @@ two.
 | `Vl0` | the fill of the runs (`r` prints it) | m^3 |
 | `Cd` | `charOrificeFlow` (`r.Cd`) | - |
 | `tauV` | `charDriveLag` (`r.tauV_s` at the motor; `r.tauP_s` at the piston, the value the model stands for, when it exceeds it) or `stepResponseFit` | s |
+| `G_cfgPressureDecel` (GVL, the stop law) and the model's stop allowance | `charStopDistance` (`r.D_mm_s2`, `r.T0_s`) | mm/s², s |
 
 `V_dead` is not a `Params` field; the delivery scenario stops at `V_empty`.
 Record the measured dead volume with the results so that the stroke checks
 and the master's `deadVolume` can be corrected.
 
-## 7. Results
+## 8. Results
 
 Logs of 2026-10-26 (`bench/captures/`), fitted
 with the scripts of this bench. Dead volume 50 mL (measured) and the fill
