@@ -249,13 +249,15 @@ class Params:
 
     # ----- Sensor --------------------------------------------------------
     # [Pa] RMS noise per sample, referred to pressure. Measured 2.0 mV
-    # rms on the 434 ohm shunt (4.6 kPa) bare and 0.8 mV (1.8 kPa) with
+    # rms across the shunt (4.6 kPa) bare and 0.8 mV (1.8 kPa) with
     # a 4.7 uF capacitor across the shunt; broadband, no lines.
     noise: float = 4.6e3
     # [Pa] Transducer zero offset: the reading with the chamber open.
-    # Measured -0.11 MPa. The loop regulates the reading, so the true
-    # pressure sits above the target by this much.
-    P_offset: float = -0.11e6
+    # The loop regulates the reading, so the true pressure sits above
+    # the target by minus this much. Zero with the input calibrated
+    # (G_cfgPressureShuntOhms the effective 421.4 ohm, measured
+    # +0.002 MPa vented); -0.11e6 with the 434 ohm setting.
+    P_offset: float = 0.0
     # [s] Time constant of the derivative filter in the legacy
     # controller
     Tf: float = 0.02

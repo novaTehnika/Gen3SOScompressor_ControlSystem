@@ -210,7 +210,10 @@
         assumed chamber stiffness.
         ======================================================================== *)
 
-     G_cfgPressureShuntOhms      : LREAL := 434.0      (* Shunt across the loop (ohm) *)
+     G_cfgPressureShuntOhms      : LREAL := 421.4      (* Volts the input reads per A of loop current (ohm): the
+                                                          434 ohm shunt in parallel with the input's own load,
+                                                          calibrated end to end against a current source
+                                                          (bench/pressure/README.md section 6) *)
      G_cfgPressureZeroMa         : LREAL := 4.0        (* Loop current at RangeMin (mA) *)
      G_cfgPressureSpanMa         : LREAL := 16.0       (* Loop current span (mA) *)
      G_cfgPressureRangeMin       : LREAL := 0.0        (* Pressure at ZeroMa (MPa gauge) *)

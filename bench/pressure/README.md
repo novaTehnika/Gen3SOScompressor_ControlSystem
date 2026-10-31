@@ -18,8 +18,8 @@ median and low-pass filters, read every 50 ms.
 
 ## 1. Slave setup
 
-The transducer is wired as in service: loop shunt (`G_cfgPressureShuntOhms`,
-434 ohm) and, when fitted, the capacitor at the controller terminals, shunt
+The transducer is wired as in service: loop shunt (434 ohm; with the
+input's load, 421.4 ohm effective, `G_cfgPressureShuntOhms`) and, when fitted, the capacitor at the controller terminals, shunt
 low side to the controller's analog ground, `MO1_AI_01` across the shunt.
 
 1. Hardware Configuration, online: the Modbus server setup from
@@ -100,7 +100,7 @@ with MotionEnable low, and if the script dies the slave's own watchdog stops
 the axis within 300 ms. `tests/pressureNoiseRunSim` runs the script against
 the simulated slave.
 
-The scale is 1 MPa per mA and 434 ohm per mA: 1 mV is 0.0023 MPa, and the
+The scale is 1 MPa per mA and 421.4 ohm per mA: 1 mV is 0.0024 MPa, and the
 transducer's own 0.2 % of span is 0.03 MPa, about 14 mV.
 
 ## 3. Conditions

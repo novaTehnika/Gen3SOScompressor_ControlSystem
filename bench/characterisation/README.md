@@ -361,7 +361,16 @@ and the master's `deadVolume` can be corrected.
 
 Logs of 2026-10-26 (`bench/captures/`), fitted
 with the scripts of this bench. Dead volume 50 mL (measured) and the fill
-from the geometry.
+from the geometry. The logs were recorded with `G_cfgPressureShuntOhms`
+at 434 ohm, which reads the pressure as 0.971 P - 0.104 MPa
+(`bench/pressure/README.md` section 6); the table gives the values as
+fitted from them. Refitted with `opts.logShuntOhms = 434`, which rescales
+every logged pressure to the calibrated 421.4 ohm, K (chamber closed)
+rises 3.0 % (0.736 to 0.758 GPa with the default options; 0.72 becomes
+0.74, the gas-corrected 0.81 becomes 0.83), the hose-open stiffness
+rises from 5.2 to 5.4 MPa/mm, and Cd falls from 0.85 to 0.83 (exponent
+unchanged at 0.48, with no `pressureOffset`). `params.py` carries the
+values as fitted until the tests are repeated with the calibrated input.
 
 | Parameter | Result | Runs | Notes |
 |---|---|---|---|
