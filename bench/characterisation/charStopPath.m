@@ -12,11 +12,11 @@ function [path, plan] = charStopPath(opts)
 %     {'move', +v, d, maxSec}  {'dwell', pause}  {'move', -v, d, maxSec}  {'dwell', pause}
 %     {'settle', 0.5, P, maxSec}
 %   The move runs d mm at v and the dwell that follows is the stop, which
-%   the step probe captures (charRun arms it before every command change
-%   in a velocity session when opts.probe is set). The pair returns the
-%   piston to where it started; the settle then brings the pressure back
-%   to the level at a slow speed, since the drive's creep after each stop
-%   and the chamber's hysteresis leave the pair a little off it.
+%   the step probe captures (charRun arms it for every command to zero
+%   with opts.probe = 'stops'). The pair returns the piston to where it
+%   started; the settle then brings the pressure back to the level at a
+%   slow speed, since the bench's latency at the end of each leg and the
+%   gas dissolving leave the pair a little off it.
 %
 %   The distance d is set by the pressure budget at the level: the leg
 %   plus the stopping distance the slave's own law allows (v T0 + v^2 /
@@ -38,18 +38,21 @@ function [path, plan] = charStopPath(opts)
 %   opts.pause_s        dwell after each leg, the stop (default 2; a probe
 %                       capture and its readout need about 2 s, so run
 %                       charRun with opts.probe = 'stops' and a pause of 3)
-%   opts.T0_s, opts.D_mm_s2, opts.creep_s
-%                       stopping-distance allowance v (T0 + creep) +
-%                       v^2 / (2 D): the delay before the drive acts, the
-%                       creep it makes after its velocity reads zero (the
-%                       machine showed 0.25 s times the speed at 8 MPa)
-%                       and the ramp down (default 0.05 s, 0.25 s and
-%                       charConfig.pressureDecel)
+%   opts.T0_s, opts.D_mm_s2, opts.latency_s
+%                       stopping-distance allowance v (T0 + latency) +
+%                       v^2 / (2 D): T0 the delay before the drive acts on
+%                       a command (31 ms measured), D its ramp down (none
+%                       measurable), and latency the bench's own: a move
+%                       or ramp ends when the master sees it in an
+%                       exchange and the stop goes out in the next, two
+%                       cycles of 25 ms on a clean link and of 100 ms with
+%                       the probe's register group mapped (defaults
+%                       0.05 s, charConfig.pressureDecel and 0.2 s)
 %   opts.rampOvershoot_MPa
 %                       how far a ramp may overshoot its level once its
-%                       stop and creep are over; each ramp's speed is the
-%                       smaller of opts.rampSpeed and what this allows at
-%                       the level's stiffness (default 0.5)
+%                       stop is over; each ramp's speed is the smaller of
+%                       opts.rampSpeed and what this allows at the level's
+%                       stiffness (default 0.5)
 %   opts.minRun_mm      shortest steady part of a leg (default 0.2 mm or
 %                       0.15 s at the speed, whichever is larger)
 %   opts.fillVolume_mL  saline at the first level (default 343)
@@ -93,7 +96,7 @@ here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'common'));
 cfg = charConfig();
 known = {'levels_MPa', 'speeds', 'budget_MPa', 'rampSpeed', 'hold_s', 'pause_s', 'T0_s', ...
-    'creep_s', 'rampOvershoot_MPa', ...
+    'latency_s', 'rampOvershoot_MPa', ...
     'D_mm_s2', 'minRun_mm', 'fillVolume_mL', 'chargeRatio', 'solubility', 'K_Pa', ...
     'C_hose_m3_Pa', 'stiffness', 'pressureStop', 'deadVolume_mL', 'posStop', 'P_start_MPa', ...
     'quiet'};
@@ -110,7 +113,7 @@ opts = withDefault(opts, 'rampSpeed', 2);
 opts = withDefault(opts, 'hold_s', 2);
 opts = withDefault(opts, 'pause_s', 2);
 opts = withDefault(opts, 'T0_s', 0.05);
-opts = withDefault(opts, 'creep_s', 0.25);
+opts = withDefault(opts, 'latency_s', 0.2);
 opts = withDefault(opts, 'rampOvershoot_MPa', 0.5);
 opts = withDefault(opts, 'D_mm_s2', cfg.pressureDecel);
 opts = withDefault(opts, 'minRun_mm', 0.2);
@@ -166,10 +169,10 @@ else
     xOf = @(P) NaN;
 end
 
-stopOf = @(v) v * (opts.T0_s + opts.creep_s) + v^2 / (2 * opts.D_mm_s2);     % mm
-% Ramp speed a level allows: its stop and creep must not carry the
-% pressure more than rampOvershoot past the level
-rampSpeedAt = @(k) min(opts.rampSpeed, opts.rampOvershoot_MPa / (k * (opts.T0_s + opts.creep_s)));
+stopOf = @(v) v * (opts.T0_s + opts.latency_s) + v^2 / (2 * opts.D_mm_s2);   % mm
+% Ramp speed a level allows: its stop, after the bench's latency, must
+% not carry the pressure more than rampOvershoot past the level
+rampSpeedAt = @(k) min(opts.rampSpeed, opts.rampOvershoot_MPa / (k * (opts.T0_s + opts.latency_s)));
 % Travel between two pressures: the compliance 1/k integrated over the
 % pressure, on a fine grid
 travelOf = @(P1, P2) travelBetween(kOf, P1, P2);           % mm

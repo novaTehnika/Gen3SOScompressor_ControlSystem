@@ -12,10 +12,15 @@ function r = charStopDistance(files, opts)
 %   position, velocity, torque, pressure, ...) give every stop: the row
 %   whose reference went to zero from a speed, in velocity mode, is the
 %   command; the piston is at rest when the velocity has stayed below
-%   opts.vRest for opts.restSamples rows. Captures (PRG_StepProbe, 2 ms:
-%   t, vCmd, velocity, torque, position, pressure) give the same stops at
-%   the scan rate where the probe was armed for them; the log resolves a
-%   stop to about half an exchange, the capture to a scan.
+%   opts.vRest for opts.restSamples rows. The command leaves at the
+%   start of its exchange and the row's position is read at the end of
+%   it, by which time the slave has acted, so the position at the
+%   command is taken from the row before, advanced at its velocity to
+%   the command row's time. Captures (PRG_StepProbe, 2 ms: t, vCmd,
+%   velocity, torque, position, pressure) give the same stops at the
+%   scan rate where the probe was armed for them, with no such
+%   correction; the log resolves a stop to about half an exchange, the
+%   capture to a scan.
 %
 %   The fit, per direction (compression, the pressure force against the
 %   motion; return, with it), is the two-term law the slave uses,
@@ -36,6 +41,8 @@ function r = charStopDistance(files, opts)
 %   opts.D_cfg         mm/s^2 for the comparison (default charConfig:
 %                      G_cfgPressureDecel)
 %   opts.A_mm2         piston area for the load column (charConfig)
+%   opts.maxCycle_s    longest log exchange cycle whose stops are fitted
+%                      alongside better ones (default 0.04)
 %   opts.quiet         no printing
 %
 %   r.stops      one per stop: source ('log' or 'capture'), file, t0,
@@ -45,9 +52,17 @@ function r = charStopDistance(files, opts)
 %                the motion), torquePeak, t_stop_s, x_cfg_mm (the slave's
 %                allowance), creep_mm (further travel in the direction of
 %                the motion over the second after rest, with dPcreep_MPa
-%                the pressure change over it: the drive still moving under
-%                load after its velocity feedback reads zero), and alarm (a
+%                the pressure change over it; the machine showed none),
+%                resolved (false for a log stop whose exchange cycle was
+%                too long to place the command, which the fit leaves out
+%                when captures or resolved stops exist), and alarm (a
 %                fault status within the stop)
+%
+%   A log resolves a stop only when its exchange cycle is short against
+%   the stop: the command's position is extrapolated over one cycle, so
+%   a cycle of 90 ms puts 0.09 mm of uncertainty on a stop of 0.03 mm at
+%   1 mm/s. Log stops from cycles over opts.maxCycle_s are listed but not
+%   fitted when anything better exists.
 %   r.fit.comp, r.fit.ret
 %                per direction: T0_s, D_mm_s2, n, residual_mm (rms), and
 %                perLevel (P_MPa, D_mm_s2, n) where fitted
@@ -71,6 +86,7 @@ opts = withDefault(opts, 'minSpeed', 0.3);
 opts = withDefault(opts, 'lag_s', 0.05);
 opts = withDefault(opts, 'D_cfg', cfg.pressureDecel);
 opts = withDefault(opts, 'A_mm2', cfg.pistonArea_mm2);
+opts = withDefault(opts, 'maxCycle_s', 0.04);
 opts = withDefault(opts, 'quiet', false);
 say = @(varargin) sayIf(~opts.quiet, varargin{:});
 
@@ -111,11 +127,24 @@ if any(~isnan(creep))
 end
 
 % --- Fit per direction -----------------------------------------------------------
+% Unresolved log stops are left out when resolved stops or captures exist
+resolved = [stops.resolved];
+if any(resolved)
+    fitSet = stops(resolved);
+    if ~all(resolved)
+        say('%d log stops from exchange cycles over %.0f ms are not fitted\n', ...
+            sum(~resolved), 1000 * opts.maxCycle_s);
+    end
+else
+    fitSet = stops;
+    say('every stop comes from a log with exchange cycles over %.0f ms: the fit is coarse\n', ...
+        1000 * opts.maxCycle_s);
+end
 r.fit = struct();
 names = {'comp', 'ret'};
 dirs = [1 -1];
 for j = 1:2
-    sel = stops([stops.dir] == dirs(j) & ~[stops.alarm]);
+    sel = fitSet([fitSet.dir] == dirs(j) & ~[fitSet.alarm]);
     fit = struct('T0_s', NaN, 'D_mm_s2', NaN, 'n', numel(sel), 'residual_mm', NaN, ...
         'perLevel', struct('P_MPa', {}, 'D_mm_s2', {}, 'n', {}));
     if numel(sel) >= 2
@@ -184,16 +213,18 @@ end
 stops = emptyStops();
 inVel = d.mode == 3;
 n = numel(d.t);
+cycle = median(diff(d.t));                                  % [s]
 for i = 2:n
     if ~(inVel(i - 1) && inVel(i)) || d.ref(i) ~= 0 || abs(d.ref(i - 1)) < opts.minSpeed
         continue;
     end
-    s = stopFrom(d.t, d.position, d.velocity, d.torque, d.pressure, i, d.ref(i - 1), rest, opts);
+    s = stopFrom(d.t, d.position, d.velocity, d.torque, d.pressure, i, d.ref(i - 1), rest, opts, true);
     if isempty(s)
         continue;
     end
     j = i:min(n, i + 60);
     s.alarm = any(d.status(j) == 10);
+    s.resolved = cycle <= opts.maxCycle_s;
     s.source = 'log';
     s.file = d.file;
     stops(end + 1) = s;                                     %#ok<AGROW>
@@ -215,22 +246,33 @@ end
 if ~isfield(d, 'pressure')
     d.pressure = zeros(size(d.t));
 end
-s = stopFrom(d.t, d.position, d.velocity, d.torque, d.pressure, i, d.vCmd(i - 1), rest, opts);
+s = stopFrom(d.t, d.position, d.velocity, d.torque, d.pressure, i, d.vCmd(i - 1), rest, opts, false);
 if isempty(s)
     return;
 end
 s.alarm = false;
+s.resolved = true;
 s.source = 'capture';
 s.file = d.file;
 stops(end + 1) = s;
 end
 
 
-function s = stopFrom(t, x, v, trq, P, i, vCmd, rest, opts)
+function s = stopFrom(t, x, v, trq, P, i, vCmd, rest, opts, fromLog)
 % The stop commanded at sample i from the speed vCmd: travel to rest, the
 % pressure excursion with the motion, the peak torque and the stop time.
-% Empty when the piston does not come to rest in the record.
+% Empty when the piston does not come to rest in the record. From a log
+% the position at the command is the previous row's, advanced at that
+% row's velocity to the command row's time (the row's own position was
+% read after the slave had acted).
 n = numel(t);
+if fromLog && i > 1 && abs(v(i - 1)) >= 0.5 * abs(vCmd)
+    x0 = x(i - 1) + v(i - 1) * (t(i) - t(i - 1));
+    P0 = P(i - 1);
+else
+    x0 = x(i);
+    P0 = P(i);
+end
 j = i;
 below = 0;
 while j < n
@@ -254,10 +296,10 @@ s.source = '';
 s.file = '';
 s.t0 = t(i);
 s.v_mm_s = vCmd;
-s.P_MPa = P(i);
+s.P_MPa = P0;
 s.dir = dirSign;
-s.x_mm = dirSign * (x(jRest) - x(i));
-s.dP_MPa = dirSign * (P(jRest) - P(i));
+s.x_mm = dirSign * (x(jRest) - x0);
+s.dP_MPa = dirSign * (P(jRest) - P0);
 s.torquePeak = max(abs(trq(i:j)));
 s.t_stop_s = t(jRest) - t(i);
 s.x_cfg_mm = NaN;
@@ -274,6 +316,7 @@ else
     s.creep_mm = NaN;
     s.dPcreep_MPa = NaN;
 end
+s.resolved = true;
 s.alarm = false;
 end
 
@@ -281,7 +324,7 @@ end
 function stops = emptyStops()
 stops = struct('source', {}, 'file', {}, 't0', {}, 'v_mm_s', {}, 'P_MPa', {}, ...
     'dir', {}, 'x_mm', {}, 'dP_MPa', {}, 'torquePeak', {}, 't_stop_s', {}, ...
-    'x_cfg_mm', {}, 'creep_mm', {}, 'dPcreep_MPa', {}, 'alarm', {});
+    'x_cfg_mm', {}, 'creep_mm', {}, 'dPcreep_MPa', {}, 'resolved', {}, 'alarm', {});
 end
 
 
