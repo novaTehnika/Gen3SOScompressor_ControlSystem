@@ -16,7 +16,7 @@ keep the table to what the picture shows.
 
 ## Y_DirectControl_1
 
-![Y_DirectControl_1](Y_DirectControl_1.jpg)
+![Y_DirectControl_1](Y_DirectControl_1.PNG)
 
 | Pin | Direction | Wired to | Note |
 |---|---|---|---|
@@ -27,19 +27,18 @@ keep the table to what the picture shows.
 | Velocity | in | `G_cmdDirectControl.Velocity` | In PositionMode the block does no path shaping, so this input (and Acceleration) sets no limit; `FB_PositionPathShaper`'s `VelMax` and `AccelMax` do. |
 | Acceleration | in | `G_cmdDirectControl.Acceleration` | The block has no Deceleration pin, so `ST_CmdDirectControl` has no `Deceleration` field. The bench measured no slew of the velocity reference at this value in VelocityTLMode (`bench/characterisation/README.md` section 8). |
 | Torque | in | `G_cmdDirectControl.Torque` | |
-| FilterTimeConstant | in | `LREAL#0.05` | **To change:** wire `G_cmdDirectControl.FilterTimeConstant`, which `PRG_Main` sets from `G_cfgDirectCtrlFilterTime` (default 0.05 s), so the filter can be tuned without editing the LD. |
+| FilterTimeConstant | in | `G_cmdDirectControl.FilterTimeConstant` | `PRG_Main` sets it from `G_cfgDirectCtrlFilterTime` (default 0.05 s), so the filter is tuned in the GVL. |
 | BufferMode | in | not wired | |
 | Axis | out | `AXIS1` | |
 | Busy | out | not wired | |
 | Active | out | `G_staDirectControl.Active` | |
 | CommandAborted | out | not wired | |
-| Error | out | `G_staDirectControl.Active` | **Wrong:** should be `G_staDirectControl.Error`, which `PRG_Main` reads (`PRG_Main.st`, stop path). As wired, a block error is never reported and `Active` is overwritten by the `Error` output. |
+| Error | out | `G_staDirectControl.Error` | Read by `PRG_Main` in the hand-off to `MC_Stop`. |
 | ErrorID | out | not wired | |
 
 The other blocks (`MC_Power`, `MC_Stop`, `MC_Reset`, `MC_MoveAbsolute`,
-`MC_SetPosition`, `MC_ReadActual*`, Jog) are not yet recorded; the top of
-the screenshot shows the `MC_MoveVelocity` instance's `Direction` and
-`BufferMode` pins only.
+`MC_SetPosition`, `MC_ReadActual*`, Jog) have their screenshots in this
+directory; their pin tables are not yet written.
 
 ## To change: remove `MC_MoveVelocity`
 
