@@ -140,8 +140,9 @@ class Params:
     # cannot sweep, left when the piston reaches the limit switch at the
     # end of its stroke, with the proximal valve shut. The machine halts
     # there and the delivery ends; so does the simulation. Measured:
-    # 50 g of water drawn from the passages with the hose shut.
-    V_passages: float = 50e-6
+    # 57 g of water drawn from the passages with the hose shut, with the
+    # present fittings.
+    V_passages: float = 57e-6
 
     # ----- Hose ----------------------------------------------------------
     # A 3 ft hose of 1/4 in bore joins the cylinder head to the orifice
@@ -173,7 +174,7 @@ class Params:
     @property
     def V_dead(self):
         """[m^3] Dead volume with the hose open: passages, hose and
-        tube, about 79 mL"""
+        tube, about 86 mL"""
         return self.V_passages + self.V_hose + self.V_tube
 
     @property

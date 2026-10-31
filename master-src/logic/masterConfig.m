@@ -9,7 +9,7 @@ cfg.commTimeout    = 0.3;       % slave counter unchanged this long = link lost 
 % travel (posEOT) and volume is swept volume from there plus deadVolume.
 cfg.posEOT       = 365;             % mm, position at the end of travel (compression end)
 cfg.boreDiameter = 2.602 * 25.4;    % mm (2.602 in)
-cfg.deadVolume   = 50;              % mL, volume left at the end of travel (measured: 50 g of water fills it)
+cfg.deadVolume   = 57;              % mL, volume left at the end of travel (measured: 57 g of water fills it, with the present fittings)
 
 % Pressure: the app works in atm absolute, the slave in MPa gauge.
 cfg.atmPerMPa   = 9.869;

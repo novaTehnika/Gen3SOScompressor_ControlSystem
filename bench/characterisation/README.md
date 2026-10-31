@@ -104,7 +104,7 @@ bench works in MPa gauge throughout, as the slave does.
 ## 2. Volumes: dead volume and fill
 
 Both fits need the liquid volume. The dead volume, what the piston cannot
-sweep, was measured at 50 mL (50 g of distilled water) and is
+sweep, was measured at 57 mL (57 g of water, with the present fittings) and is
 `masterConfig.deadVolume`. To measure it again:
 
 1. Jog the piston to the end of travel (the position guard allows up to

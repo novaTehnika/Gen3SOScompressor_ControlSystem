@@ -51,12 +51,18 @@ function [path, plan] = charStopPath(opts)
 %                       above (the simulator test gives its gas spring)
 %   opts.pressureStop   MPa, the run's guard; levels plus budget must stay
 %                       below it (default charConfig.pressureStop)
+%   opts.deadVolume_mL  passages at the end of travel, for the piston
+%                       position at each level (default charConfig)
+%   opts.posStop        mm, the run's position guard; every level must
+%                       sit below it (default charConfig.posStop)
 %   opts.quiet          no printing
 %
 %   path   the cell array of steps for charRun
-%   plan   per level: P_MPa, k_MPa_mm, budget_MPa, speeds, d_mm (the move
-%          distance), stop_mm (the allowance) and rise_MPa (the predicted
-%          excursion); plan.nStops; plan.seconds (an estimate of the run)
+%   plan   per level: P_MPa, k_MPa_mm, x_mm (the piston position the
+%          model puts the level at, with the hose shut), budget_MPa,
+%          speeds, d_mm (the move distance), stop_mm (the allowance) and
+%          rise_MPa (the predicted excursion); plan.nStops; plan.seconds
+%          (an estimate of the run)
 
 if nargin < 1
     opts = struct();
@@ -79,6 +85,8 @@ opts = withDefault(opts, 'K_Pa', 0.72e9);
 opts = withDefault(opts, 'C_hose_m3_Pa', 0);
 opts = withDefault(opts, 'stiffness', []);
 opts = withDefault(opts, 'pressureStop', cfg.pressureStop);
+opts = withDefault(opts, 'deadVolume_mL', cfg.deadVolume_mL);
+opts = withDefault(opts, 'posStop', cfg.posStop);
 opts = withDefault(opts, 'quiet', false);
 say = @(varargin) sayIf(~opts.quiet, varargin{:});
 
@@ -109,19 +117,27 @@ if isempty(opts.stiffness)
 else
     kOf = opts.stiffness;
 end
+% Piston position at a level, mm: the chamber holds the saline and the
+% charge compressed isothermally; NaN with a stiffness function given
+if isempty(opts.stiffness)
+    xOf = @(P) cfg.posEOT - (opts.fillVolume_mL + opts.chargeRatio * opts.fillVolume_mL ...
+        * cfg.Patm_MPa / (P + cfg.Patm_MPa) - opts.deadVolume_mL) * 1000 / cfg.pistonArea_mm2;
+else
+    xOf = @(P) NaN;
+end
 
 stopOf = @(v) v * opts.T0_s + v^2 / (2 * opts.D_mm_s2);     % mm
 % Travel between two pressures: the compliance 1/k integrated over the
 % pressure, on a fine grid
 travelOf = @(P1, P2) travelBetween(kOf, P1, P2);           % mm
 path = {};
-plan = struct('P_MPa', {}, 'k_MPa_mm', {}, 'budget_MPa', {}, 'speeds', {}, ...
+plan = struct('P_MPa', {}, 'k_MPa_mm', {}, 'x_mm', {}, 'budget_MPa', {}, 'speeds', {}, ...
     'd_mm', {}, 'stop_mm', {}, 'rise_MPa', {});
 seconds = 0;
 nStops = 0;
 say('one-pass stopping-distance path: %d levels, speeds %s mm/s, charge %g:1 air, fill %g mL\n', ...
     nL, mat2str(opts.speeds), opts.chargeRatio, opts.fillVolume_mL);
-say('%6s %10s %10s %6s %8s %8s %8s\n', 'P MPa', 'k MPa/mm', 'budget', 'v', 'd mm', 'stop mm', 'rise');
+say('%6s %10s %8s %10s %6s %8s %8s %8s\n', 'P MPa', 'k MPa/mm', 'x mm', 'budget', 'v', 'd mm', 'stop mm', 'rise');
 Pprev = 0;
 for L = 1:nL
     P = levels(L);
@@ -133,7 +149,14 @@ for L = 1:nL
     seconds = seconds + travel / opts.rampSpeed;
     path{end + 1} = {'dwell', opts.hold_s};
     seconds = seconds + opts.hold_s;
-    pl = struct('P_MPa', P, 'k_MPa_mm', k, 'budget_MPa', budget(L), 'speeds', [], ...
+    x = xOf(P);
+    if x > opts.posStop
+        error('charStopPath:position', ['the %.0f MPa level sits at %.0f mm, beyond the %.0f mm ' ...
+            'position guard: add saline (the chamber at the top level must hold more than ' ...
+            '%.0f mL) or raise opts.posStop if the slave''s soft limit allows'], P, x, opts.posStop, ...
+            cfg.pistonArea_mm2 * (cfg.posEOT - opts.posStop) / 1000 + opts.deadVolume_mL);
+    end
+    pl = struct('P_MPa', P, 'k_MPa_mm', k, 'x_mm', x, 'budget_MPa', budget(L), 'speeds', [], ...
         'd_mm', [], 'stop_mm', [], 'rise_MPa', []);
     allowed = travelOf(P, P + budget(L));                   % mm within the budget
     for v = opts.speeds(:)'
@@ -141,7 +164,7 @@ for L = 1:nL
         d = allowed - xs;                                   % the leg itself
         dmin = max(opts.minRun_mm, 0.15 * v);
         if d < dmin
-            say('%6.1f %10.2f %10.2f %6g %8s\n', P, k, budget(L), v, 'skipped');
+            say('%6.1f %10.2f %8.1f %10.2f %6g %8s\n', P, k, x, budget(L), v, 'skipped');
             continue;
         end
         maxSec = 2 * d / v + 2;
@@ -155,7 +178,7 @@ for L = 1:nL
         pl.d_mm(end + 1) = d;
         pl.stop_mm(end + 1) = xs;
         pl.rise_MPa(end + 1) = budget(L);
-        say('%6.1f %10.2f %10.2f %6g %8.3f %8.3f %8.2f\n', P, k, budget(L), v, d, xs, budget(L));
+        say('%6.1f %10.2f %8.1f %10.2f %6g %8.3f %8.3f %8.2f\n', P, k, x, budget(L), v, d, xs, budget(L));
     end
     plan(end + 1) = pl;
     Pprev = P;
