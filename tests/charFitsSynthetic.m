@@ -6,7 +6,10 @@ function charFitsSynthetic()
 %   deliveries at three pressures; charDriveLag recovers tauV and the dead
 %   time from 2 ms step probe captures, and roughly from 50 ms run logs,
 %   including the piston-side lag from the pressure column through the
-%   sensor chain. The logs are in frictionRun's formats.
+%   sensor chain; charStopDistance recovers the delay and the
+%   deceleration of the stopping-distance law from captures and a run
+%   log of stops in both directions. The logs are in frictionRun's
+%   formats.
 %   Run from the repository root:  addpath master-src/logic tests
 
 here = fileparts(mfilename('fullpath'));
@@ -128,7 +131,90 @@ assert(abs(r.runLog.k_MPa_mm - 11) / 11 < 0.1, 'stiffness %.2f, set 11', r.runLo
 fprintf('ok  drive lag from the 50 ms log: dry %.0f ms (set %.0f), piston side %.0f ms (set 46), stiffness %.1f MPa/mm\n', ...
     1000 * r.tauV_s, 1000 * (tau + Td), 1000 * r.tauP_s, r.runLog.k_MPa_mm);
 
+% --- Stopping distance ------------------------------------------------------------
+% Stops from three speeds in both directions, the piston decelerating at D
+% after a delay T0, in captures and in one run log; the fit recovers both.
+T0 = 0.03;
+D = 80;
+speeds = [1 2 5];
+files = {};
+for v = speeds
+    for dirSign = [1 -1]
+        f = fullfile(dir, sprintf('stop_%g_%d.csv', v, dirSign));
+        writeStopCapture(f, dirSign * v, T0, D, 5.0, cfg);
+        files{end + 1} = f;                                             %#ok<AGROW>
+    end
+end
+fl = fullfile(dir, 'stop_log.csv');
+writeStopLog(fl, speeds, T0, D, 5.0, cfg);
+files{end + 1} = fl;
+rs = charStopDistance(files, struct('quiet', true));
+assert(numel(rs.stops) == 12, '%d stops found, 12 written', numel(rs.stops));
+for f = {rs.fit.comp, rs.fit.ret}
+    assert(abs(f{1}.D_mm_s2 / D - 1) < 0.1 && abs(f{1}.T0_s - T0) < 0.01, ...
+        'fit D %.1f (set %.0f), T0 %.3f (set %.3f)', f{1}.D_mm_s2, D, f{1}.T0_s, T0);
+end
+caps = rs.stops(strcmp({rs.stops.source}, 'capture'));
+for s = caps
+    v = abs(s.v_mm_s);
+    assert(abs(s.x_mm - (v * T0 + v^2 / (2 * D))) < 0.01, 'capture stop %.3f mm at %g mm/s', s.x_mm, v);
+end
+assert(rs.pass, 'stopping-distance checks failed on the synthetic stops');
+fprintf('ok  stopping distance: D %.1f / %.1f mm/s^2 (set %.0f), T0 %.0f / %.0f ms (set %.0f)\n', ...
+    rs.fit.comp.D_mm_s2, rs.fit.ret.D_mm_s2, D, 1000 * rs.fit.comp.T0_s, 1000 * rs.fit.ret.T0_s, 1000 * T0);
+
 fprintf('all passed\n');
+end
+
+
+function [t, cmd, v, x] = stopTrace(Ts, tEnd, v0, tStop, T0, D)
+% Velocity at speed v0 until tStop, then, after T0, a ramp to rest at D.
+t = (0:Ts:tEnd)';
+cmd = v0 * ones(size(t));
+cmd(t >= tStop) = 0;
+v = v0 * ones(size(t));
+after = t >= tStop + T0;
+v(after) = sign(v0) * max(abs(v0) - D * (t(after) - tStop - T0), 0);
+x = 250 + cumsum(v) * Ts;
+end
+
+
+function writeStopCapture(file, v0, T0, D, P0, cfg)
+% PRG_StepProbe capture of a stop: 500 scans at 2 ms, the command to zero
+% at 0.1 s, at a stiffness of 3 MPa/mm.
+[t, cmd, v, x] = stopTrace(cfg.scanTime, 499 * cfg.scanTime, v0, 0.1, T0, D);
+P = P0 + 3 * (x - x(1));
+fid = fopen(file, 'w');
+fprintf(fid, 't,vCmd,velocity,torque,position,pressure\n');
+fprintf(fid, '%.3f,%.3f,%.3f,%.2f,%.5f,%.4f\n', [t cmd v + 0.002 * randn(size(t)) ...
+    20 * ones(size(t)) x P]');
+fclose(fid);
+end
+
+
+function writeStopLog(file, speeds, T0, D, P0, cfg)
+% 50 ms run log of a velocity session: for each speed a leg at +v, a stop,
+% a leg at -v and a stop, the reference logged in the row of the exchange
+% that sent it and the slave acting a service tick later.
+Ts = cfg.scanTime;
+dtEx = 0.05;
+rows = zeros(0, 12);
+tBase = 0;
+for v = speeds
+    for dirSign = [1 -1]
+        [tg, ~, vg, xg] = stopTrace(Ts, 3.0, dirSign * v, 1.5, T0 + 0.004, D);
+        tr = (0.013:dtEx:2.9)';
+        ref = dirSign * v * ones(size(tr));
+        ref(tr >= 1.5) = 0;
+        n = numel(tr);
+        rows = [rows; tBase + tr ones(n, 1) 4 * ones(n, 1) 3 * ones(n, 1) ref ...
+            interp1(tg, xg, tr) interp1(tg, vg, tr) + 0.002 * randn(n, 1) 20 * ones(n, 1) ...
+            P0 + 3 * (interp1(tg, xg, tr) - xg(1)) double(abs(interp1(tg, vg, tr)) > 0.1) ...
+            zeros(n, 1) 12 * ones(n, 1)];                                  %#ok<AGROW>
+        tBase = tBase + 3.0;
+    end
+end
+writeRun(file, rows);
 end
 
 
