@@ -52,7 +52,9 @@ there; published application notes give other bases.
 In Hardware Configuration: Modbus slave (server) enabled, **Use %M for
 bidirectional Holding Registers** checked, **Set all outputs off when PLC
 stops**, and the four Modbus groups assigned to the cyclic task that runs
-`PRG_Main`, so the registers update once per scan. The controller services the
+`PRG_Main` (MotionWorks IEC 3 Express has only that one task), so the
+registers update once per scan. Every register in the groups is copied
+every scan, so the groups are sized to the registers in use. The controller services the
 connection on a 4 ms tick, so a transaction takes 1 to 8 ms regardless of the
 task interval.
 
