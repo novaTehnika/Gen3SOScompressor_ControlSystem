@@ -608,6 +608,23 @@ def check_scheduled_st():
             b.step(P, 10.5e6, k * par.Ts, sc)
     ok('ScheduledSlaveControllerST with the switch off is the GVL loop')
 
+    # Gas spring: the stiffness grows as the pressure squared, so the
+    # bound at the target pressure keeps the stop law from braking late.
+    g = Params(Vl0=1e-6, ratio=200.0, P_supply=1e3, noise=0.0,
+               P_offset=0.0, V_passages=1e-6, V_hose=1e-9, C_hose=0.0,
+               tauDiss=1e9)
+    L = Lockstep(ctl.ScheduledSlaveController(
+        'ref', wc=11.0, K_cfg=1.0e9, V_dead_cfg=1e-6, C_hose_cfg=0.0),
+        ctl.ScheduledSlaveControllerST(
+            SchedBulkModulus=1.0e9, SchedDeadVolume=1.0,
+            SchedHoseCompliance=0.0, SchedCrossover=11.0,
+            SchedSalineVolume=1.0, SchedOxygenRatio=200.0))
+    r = sim.run(g, scenarios.compress(g), L)
+    assert L.worst < 1e-9 and L.gain < 1e-9, (L.worst, L.gain)
+    assert r['overshoot'] < 0.3, r['overshoot']             # [MPa]
+    ok(f'gas-spring compression at wc 11: overshoot '
+       f'{r["overshoot"]:.2f} MPa, the port matches the reference')
+
 
 def check_legacy_reference():
     # Reference values for this case without noise or transducer offset,

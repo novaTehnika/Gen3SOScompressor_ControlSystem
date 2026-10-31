@@ -136,7 +136,6 @@ fprintf('ok  sensor fault in pressure mode, mirror and reset\n');
 % without overshoot, and the switch is latched on entry.
 sim = h.sl.sim;
 h.sl.G.G_cfgPressureScheduleEnable = true;
-h.sl.G.G_cfgPressureVelMax = 2;           % mm/s, approach slow enough for the lagged estimate
 h.sl.G.G_cfgPressureSchedSalineVolume = 1.0;          % mL, negligible liquid
 h.sl.G.G_cfgPressureSchedHenry = 0;
 h.sl.G.G_cfgPressureSchedHoseCompliance = 0;
@@ -147,7 +146,7 @@ h.sl.G.G_cfgPressureSchedPatm = sim.atmMPa * 1e6;
 % n R T = ratio * Vl * Patm * T / 273.15 = Patm * V0.
 h.sl.G.G_cfgPressureSchedOxygenRatio = (sim.chamberGasVolume / 1e3) * 273.15 ...
     / h.sl.G.G_cfgPressureSchedGasTemp / h.sl.G.G_cfgPressureSchedSalineVolume;
-h.sl.ax.x = sim.chamberContactPos + 40;
+h.sl.ax.x = sim.chamberContactPos - 5;
 h = enterMode(h, MODE_PRESSURE, 10);
 assert(h.sl.s.bPressureSchedActive && h.sl.s.fbPressureSched.IntegHold);
 h.pMax = 0;

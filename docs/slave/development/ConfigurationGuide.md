@@ -116,7 +116,7 @@ These parameters define the behavior of the homing (110) and Go Home (101) modes
 
 ## 7. Pressure Loop Gain Schedule
 
-When `G_cfgPressureScheduleEnable` is TRUE on entry to pressure mode, `FB_PressureSchedule` sets the pressure loop's Kp, Ki and stop-law velocity limit every scan from an upper bound on the chamber stiffness, so the loop's crossover stays at or below `G_cfgPressureSchedCrossover`. The choice is latched on entry. If a setting is out of range (`ParamError`), the loop runs on the fixed `G_cfgPressureKp`, `G_cfgPressureKi` and `G_cfgPressureStopStiffness`, which are unchanged and remain the fallback when the schedule is off.
+When `G_cfgPressureScheduleEnable` is TRUE on entry to pressure mode, `FB_PressureSchedule` sets the pressure loop's Kp, Ki and stop-law velocity limit every scan from an upper bound on the chamber stiffness, so the loop's crossover stays at or below `G_cfgPressureSchedCrossover`. The stiffness bound is evaluated at the present pressure and at the larger of the present and the target pressure, and the larger value is used. The choice is latched on entry. If a setting is out of range (`ParamError`), the loop runs on the fixed `G_cfgPressureKp`, `G_cfgPressureKi` and `G_cfgPressureStopStiffness`, which are unchanged and remain the fallback when the schedule is off.
 
 | Parameter | Default Value | Units | Description & Tuning Considerations |
 |---|---|---|---|

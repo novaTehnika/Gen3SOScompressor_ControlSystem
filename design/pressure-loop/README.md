@@ -238,7 +238,11 @@ modulus, eq. (39). The free gas is taken as the least there can be
 seen), the saline volume as the configured value or the chamber volume
 when that is smaller, and the bulk modulus as the largest plausible, so
 the bound never falls below the true stiffness while the configured
-saline volume is at or below the true one. The gain is Kp = wc/k_est for
+saline volume is at or below the true one. The bound is taken at the
+present pressure and again at the larger of the present and the target
+pressure, with the highest pressure as it stands; a gas-dominated
+chamber is stiffest at the target, so the larger of the two, k_sched,
+is used for the gain and the stop law. The gain is Kp = wc/k_sched for
 a chosen crossover wc, eq. (40), with Ki in a fixed ratio to Kp, so the
 loop's crossover is at most wc whatever the chamber is doing: soft on
 the approach, stiffening as the gas dissolves, and stiffening again as
@@ -482,16 +486,19 @@ P_ref the highest absolute pressure seen in the run:
                  + C_hose_cfg
          k_est = A / C_est
 
+The same expression evaluated with P_abs taken at max(P, P_target) (and
+P_ref unchanged) gives k_target, and k_sched = max(k_est, k_target).
+
 Scheduled gains for a target crossover wc, bounded, with Ki in a fixed
 ratio to Kp:
 
-    (40) Kp = clamp(wc / k_est, Kp_min, Kp_max),   Ki = r_i Kp
+    (40) Kp = clamp(wc / k_sched, Kp_min, Kp_max),   Ki = r_i Kp
 
 Stop law with the measurement lag: the piston travels for the lag at its
 speed and then decelerates at D, and must stop within the error at the
-estimated stiffness, v lag + v^2 / (2 D) <= |e| / k_est, so
+estimated stiffness, v lag + v^2 / (2 D) <= |e| / k_sched, so
 
-    (41) v_stop = -D lag + sqrt((D lag)^2 + 2 D |e| / k_est)
+    (41) v_stop = -D lag + sqrt((D lag)^2 + 2 D |e| / k_sched)
          v_lim = min(VelMax, max(StopVelMin, v_stop))
 
 The block's own stop law, eq. (19), is this with lag = Ts and a fixed
@@ -1041,6 +1048,13 @@ zeroing the integral after each held call.
 delivery and requires the commands to agree to 1e-9 m/s on every scan;
 `tests/st2pyParity.py` checks the Python translation against the Octave
 one.
+
+The stiffness bound is evaluated at the present pressure (`KEst`) and
+at the larger of the present and the target pressure (`KEstTarget`);
+the larger is used for Kp and the stop law, and the pressure history
+that sets the dissolved oxygen is updated from the measurement only.
+`check_scheduled_st` compares Kp, Ki and the stop-law limit as well as
+the command, and includes a gas-spring compression.
 
 Left for commissioning: the dead volume against the machine's soft
 limit, the hose compliance against the procedure (0 when the hose is
