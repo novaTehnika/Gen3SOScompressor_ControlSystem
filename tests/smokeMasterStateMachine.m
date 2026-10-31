@@ -15,7 +15,7 @@ h.y = slaveOutputs(h.sl);
 h.in = struct('reset', 1, 'confCode', 0, 'faultActive', 0, 'inMotion', 0, ...
     'homingComplete', 0, 'brakeDisengage', 0, 'position', 0, 'estop', 0, ...
     'op', 0, 'cmdSeq', 0, 'targetPosition', 300, 'jogVelocity', 0, ...
-    'targetPressure', 0);
+    'targetPressure', 0, 'positionSpeed', h.cfg.positionSpeed);
 h.out = [];
 
 h = runFor(h, 0.5);
@@ -28,6 +28,15 @@ h = runFor(h, 10);
 assert(h.out.statusCode == 3);
 assert(abs(h.sl.pos - 30) <= h.cfg.posTolerance);
 fprintf('ok  position move without homing\n');
+
+% The position speed is passed on in every mode and limited to [0, ceiling].
+for v = [2.5, 0, 100, -3]
+    h.in.positionSpeed = v;
+    h = runFor(h, 0.1);
+    assert(h.out.positionSpeed == min(max(v, 0), h.cfg.positionSpeedMax));
+end
+h.in.positionSpeed = h.cfg.positionSpeed;
+fprintf('ok  position speed passed on and limited\n');
 
 % Homing, requested from position control.
 h = command(h, 1);

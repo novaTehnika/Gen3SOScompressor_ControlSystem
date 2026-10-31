@@ -57,7 +57,7 @@ This plan does **not** cover the testing of the Simulink master controller softw
 ### 3.1 I/O Verification
 -   **Objective:** Verify the Modbus TCP link between the master and slave and the slave's field I/O are correctly configured and functioning.
 -   **Procedure:**
-    -   Write each holding register from the master (HR1-HR6) and verify the matching `G_mb*` global seen by the slave.
+    -   Write each holding register from the master (HR1-HR8) and verify the matching `G_mb*` global seen by the slave.
     -   Verify each input register read by the master (IR1-IR20) matches the slave's source value, including `REAL` word order.
     -   Apply known loop currents to the pressure input and verify `G_aiPressure` and the scaled pressure in IR19-20.
 -   **Acceptance Criteria:** All registers and signals must match their expected values (`ModbusRegisterMap.md`, `IOReference.md`).

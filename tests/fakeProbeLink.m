@@ -1,6 +1,6 @@
 function out = fakeProbeLink(cmd, varargin)
 %FAKEPROBELINK Stand-in for the bench runs' Modbus link and clock: the
-%   simulated slave behind the protocol registers (IR1-20, HR1-6), an
+%   simulated slave behind the protocol registers (IR1-20, HR1-8), an
 %   emulation of PRG_PressureProbe behind the probe registers (HR101,
 %   IR101-113, IR121-370) and one of PRG_StepProbe behind its registers
 %   (HR111-113, IR401-520): the ring of records, the arm latch, the
@@ -148,12 +148,13 @@ switch cmd
             S.sp.req = w(1) + 65536 * w(2);
             return;
         end
-        assert(varargin{1} == 1 && numel(w) == S.map.nWrite, 'write is not HR1-6 or HR112-113');
+        assert(varargin{1} == 1 && numel(w) == S.map.nWrite, 'write is not HR1-8 or HR112-113');
         S.u.heartbeat    = w(S.map.hr.heartbeat);
         S.u.modeCode     = w(S.map.hr.modeCode);
         S.u.motionEnable = w(S.map.hr.motionEnable);
         S.u.faultReset   = w(S.map.hr.faultReset);
         S.u.reference    = modbusUnpack(w(S.map.hr.reference), w(S.map.hr.reference + 1));
+        S.u.positionSpeed = modbusUnpack(w(S.map.hr.positionSpeed), w(S.map.hr.positionSpeed + 1));
     case 'writeOne'
         switch varargin{1}
             case 101

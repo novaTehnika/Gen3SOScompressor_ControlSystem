@@ -28,6 +28,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         PositionGoButton                matlab.ui.control.Button
         TargetPositionSpinner           matlab.ui.control.Spinner
         TargetPositionmmSpinnerLabel    matlab.ui.control.Label
+        PositionSpeedField              matlab.ui.control.NumericEditField
+        PositionSpeedLabel              matlab.ui.control.Label
         GoHomeButton                    matlab.ui.control.Button
         HomeButton                      matlab.ui.control.Button
         ManualControlButton            matlab.ui.control.StateButton
@@ -460,6 +462,11 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.JogSpeedDropDown.Items = compose("%g mm/s", speeds);
             app.JogSpeedDropDown.ItemsData = speeds;
             app.JogSpeedDropDown.Value = speeds(end);
+
+            % Position-move speed, 0 to the master's ceiling, starting at
+            % the default.
+            app.PositionSpeedField.Limits = [0 app.cfg.positionSpeedMax];
+            app.PositionSpeedField.Value = app.cfg.positionSpeed;
         end
 
         % A spinner rejects a value outside its limits and limits that
@@ -567,6 +574,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                         setBlock(app, "CommandSeq", app.commandSeq);
                         setBlock(app, "ESTOP", app.ESTOP.Value);
                         setBlock(app, "Mixer", app.MixerButton.Value);
+                        setBlock(app, "PositionSpeed", app.PositionSpeedField.Value);
                         app.StatusLabel.Text = "Connected to Simulink";
                     else
                         app.StatusLabel.Text = append(...
@@ -587,6 +595,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.TargetPressureSpinner.Enable = value;
             app.TargetPressureatmSpinnerLabel.Enable = value;
             app.JogSpeedDropDown.Enable = value;
+            app.PositionSpeedField.Enable = value;
+            app.PositionSpeedLabel.Enable = value;
             app.MixerButton.Enable = value;
             updateButtons(app);
         end
@@ -660,6 +670,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 return
             end
             setBlock(app, "TargetPosition", app.cfg.posEOT - target);
+            setBlock(app, "PositionSpeed", app.PositionSpeedField.Value);
             if requestOp(app, app.OP_POSITION)
                 app.activeTarget = target;
             end
@@ -691,6 +702,16 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         function JogSpeedChanged(app, event)
             if app.activeOp == app.OP_JOG && isRunning(app)
                 setBlock(app, "TargetVelocity", app.JogSpeedDropDown.Value);
+            end
+        end
+
+        % Value changed function: PositionSpeedField
+        % The model reads PositionSpeed continuously and sends it every
+        % exchange, so a running position move takes the new speed at once
+        % (0 holds position).
+        function PositionSpeedChanged(app, event)
+            if isRunning(app)
+                setBlock(app, "PositionSpeed", app.PositionSpeedField.Value);
             end
         end
 
@@ -750,7 +771,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
             % Create UIFigure and hide until all components are created
             app.UIFigure = uifigure('Visible', 'off');
-            app.UIFigure.Position = [100 100 1008 432];
+            app.UIFigure.Position = [100 100 1208 432];
             app.UIFigure.Name = 'SOS Gen3 Compressor';
             app.UIFigure.CloseRequestFcn = createCallbackFcn(app, @UIFigureCloseRequest, true);
 
@@ -1023,7 +1044,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             % Create ControlsPanel
             app.ControlsPanel = uipanel(app.UIFigure);
             app.ControlsPanel.Title = 'Controls';
-            app.ControlsPanel.Position = [1 22 1007 94];
+            app.ControlsPanel.Position = [1 22 1207 94];
 
             % Create ConnectToCompressorButton
             app.ConnectToCompressorButton = uibutton(app.ControlsPanel, 'push');
@@ -1080,6 +1101,22 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.PositionGoButton.Enable = 'off';
             app.PositionGoButton.Position = [657 40 100 23];
             app.PositionGoButton.Text = 'Go';
+
+            % Create PositionSpeedLabel
+            app.PositionSpeedLabel = uilabel(app.ControlsPanel);
+            app.PositionSpeedLabel.HorizontalAlignment = 'right';
+            app.PositionSpeedLabel.Enable = 'off';
+            app.PositionSpeedLabel.Position = [990 40 110 22];
+            app.PositionSpeedLabel.Text = 'Move speed (mm/s)';
+
+            % Create PositionSpeedField
+            app.PositionSpeedField = uieditfield(app.ControlsPanel, 'numeric');
+            app.PositionSpeedField.ValueChangedFcn = createCallbackFcn(app, @PositionSpeedChanged, true);
+            app.PositionSpeedField.Limits = [0 6];   % replaced by applyConfig
+            app.PositionSpeedField.Enable = 'off';
+            app.PositionSpeedField.Tooltip = {'Speed of position moves; 0 holds position'};
+            app.PositionSpeedField.Position = [1105 40 90 22];
+            app.PositionSpeedField.Value = 6;        % replaced by applyConfig
 
             % Create JogUpButton
             app.JogUpButton = uibutton(app.ControlsPanel, 'state');

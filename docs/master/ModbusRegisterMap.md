@@ -17,7 +17,7 @@ measured by the bench test in `bench/modbus`.
 | Client | Simulink shell on the lab PC |
 
 Each exchange is one **Write Multiple Registers (FC16)** of holding registers
-1–6 followed at once by one **Read Input Registers (FC04)** of input registers
+1–8 followed at once by one **Read Input Registers (FC04)** of input registers
 1–18, so both land in the same controller service tick. The exchange period is
 up to 50 ms, a multiple of the master step; see
 [EthernetCommsReference.md](EthernetCommsReference.md).
@@ -69,7 +69,8 @@ task interval.
 | 3 | `%MW3.483332` | UINT | `G_mbMotionEnable` | 1 = MotionEnable |
 | 4 | `%MW3.483334` | UINT | `G_mbFaultReset` | 1 = FaultReset (level) |
 | 5–6 | `%MD3.483336` | REAL | `G_mbReference` | Position mode: mm. Velocity mode: mm/s. Torque mode: % of rated. Pressure mode (code 7): target pressure, MPa gauge |
-| 7–20 | | | | Reserved |
+| 7–8 | `%MD3.483340` | REAL | `G_mbPositionSpeed` | Speed of a position move, mm/s. The slave limits it to `0` to `G_cfgVelLimitMax`; 0 holds position. Written every exchange |
+| 9–20 | | | | Reserved |
 | 101–110 | | | | Bench probe area (`bench/modbus`) |
 | 111 | `%MW3.483548` | UINT | `G_mbStepArm` | Bench step probe (`bench/common/slave/PRG_StepProbe.st`): a changed value is an arm |
 | 112–113 | `%MW3.483550` | UINT ×2 | `G_mbStepReqLo`, `G_mbStepReqHi` | Bench step probe: index of the first record wanted in the window (low word first) |

@@ -137,9 +137,9 @@ Hold Secure ______________________|‾‾‾‾‾‾‾‾‾‾‾‾
 
 ### Position Mode Move Timing
 
-`FB_PositionCommandGate` shapes each position setpoint as a trapezoidal (or, for small steps,
-triangular) velocity move at the configured velocity limit `V` (`G_cfgVelLimitMax`) and
-acceleration limit `A` (`G_cfgPosGateAccelMax`). For a setpoint step of size `d`, move time is:
+`FB_PositionPathShaper` shapes each position setpoint as a trapezoidal (or, for small steps,
+triangular) velocity move at the position speed `V` (HR7-8, `G_sysPositionSpeed`, limited to `G_cfgVelLimitMax`) and
+acceleration limit `A` (`G_cfgPosShaperAccelMax`). For a setpoint step of size `d`, move time is:
 
 | Profile | Condition | Move Time |
 |---------|-----------|-----------|
@@ -153,7 +153,7 @@ acceleration limit `A` (`G_cfgPosGateAccelMax`). For a setpoint step of size `d`
 | 50 mm | Trapezoidal | ≈ 11.0 s |
 | 1 mm | Triangular | ≈ 0.89 s |
 
-`A` (`G_cfgPosGateAccelMax`) is a commissioning parameter, started conservatively at 5 mm/s²
+`A` (`G_cfgPosShaperAccelMax`) is a commissioning parameter, started conservatively at 5 mm/s²
 and expected to be raised once bench testing confirms available torque headroom (see
 `docs/development/ConfigurationGuide.md`). The move times above therefore represent
 **upper-bound** times at the conservative starting value — actual moves will be faster once
@@ -162,7 +162,7 @@ and expected to be raised once bench testing confirms available torque headroom 
 ### Position Mode Exit
 
 When MotionEnable (HR3) drops in position mode, the command is ramped to rest under
-`G_cfgPosGateAccelMax` before the axis is handed to `MC_Stop`, so `G_doInMotion` stays
+`G_cfgPosShaperAccelMax` before the axis is handed to `MC_Stop`, so `G_doInMotion` stays
 TRUE for up to `V/A` after the drop (1.0 s at `V` = 5 mm/s, `A` = 5 mm/s²) plus the
 `MC_Stop` settling time.
 
@@ -240,7 +240,7 @@ Modbus service tick  |..|..|..|..|..|..|..|..|..|..|..|..|  (4 ms)
 MP2600iec scan       ||||||||||||||||||||||||||||||||||||||  (2 ms)
 ```
 
-The master writes holding registers HR1-HR6 and reads input registers IR1-IR20
+The master writes holding registers HR1-HR8 and reads input registers IR1-IR20
 once per exchange. The slave's Modbus server services the connection on its own
 tick, independent of the PLC task; `PRG_Main` sees new holding register values
 at its next scan. See `docs/master/ModbusRegisterMap.md`.

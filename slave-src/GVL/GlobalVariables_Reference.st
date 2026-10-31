@@ -105,6 +105,7 @@
      G_mbMotionEnable      AT %MW3.483332 : UINT  (* HR3: 1 = MotionEnable *)
      G_mbFaultReset        AT %MW3.483334 : UINT  (* HR4: 1 = FaultReset *)
      G_mbReference         AT %MD3.483336 : REAL  (* HR5-6: reference, mm / mm/s / % by mode *)
+     G_mbPositionSpeed     AT %MD3.483340 : REAL  (* HR7-8: position-move speed, mm/s (0 holds position) *)
    END_VAR
 
 
@@ -148,11 +149,12 @@
 
      G_cfgVelLimitMax          : LREAL := 6.0         (* The one axis speed ceiling, VelMax in every mode. The mode
                                                           speeds below (Go Home, homing, pressure) are passed through
-                                                          MIN(.., G_cfgVelLimitMax). In position mode the master sends
-                                                          only the position; FB_PositionCommandGate's VelMax is the
-                                                          limit that governs the move, as Y_DirectControl does
-                                                          no path shaping in PositionMode. masterConfig.jogVelMax must
-                                                          not exceed it *)
+                                                          MIN(.., G_cfgVelLimitMax). In position mode the master sets the
+                                                          move speed (G_mbPositionSpeed), clamped to this ceiling, as
+                                                          FB_PositionPathShaper's VelMax; Y_DirectControl does no path
+                                                          shaping in PositionMode (the command reaches the drive as
+                                                          given), so its Velocity input sets no limit there.
+                                                          masterConfig.jogVelMax and positionSpeed must not exceed it *)
      G_cfgStopDecel            : LREAL := 10.0        (* The one MC_Stop deceleration (mm/s^2): hold, fault,
                                                           recovery and Go Home abort *)
 
@@ -175,20 +177,21 @@
 
 
      (* ========================================================================
-        POSITION COMMAND GATE (FB_PositionCommandGate, position modes only)
-        Y_DirectControl adds no profiling in PositionMode, so the gate shapes
-        the master's setpoint into a command the axis can follow: rate limited
-        to stCurrentLimits.VelMax, accel limited to G_cfgPosGateAccelMax, and
-        tethered to within G_cfgPosGateMaxDeviation of actual position.
+        POSITION PATH SHAPER (FB_PositionPathShaper, position modes only)
+        Y_DirectControl does no path shaping in PositionMode, so the shaper
+        turns the master's setpoint into a command the axis can follow: rate
+        limited to the master's position speed (clamped to G_cfgVelLimitMax),
+        accel limited to G_cfgPosShaperAccelMax, and tethered to within
+        G_cfgPosShaperMaxDeviation of actual position.
         ======================================================================== *)
 
      G_cfgScanTime             : LREAL := 0.002       (* Task period (s). dt for the gate and the analog filter alpha.
                                                           Must match the cyclic task interval in the MWiec task
                                                           configuration (2 ms is the MP2600iec lower bound). *)
-     G_cfgPosGateAccelMax      : LREAL := 10.0         (* Command accel limit (mm/s^2). Conservative start - raise on the
+     G_cfgPosShaperAccelMax   : LREAL := 10.0         (* Command accel limit (mm/s^2). Conservative start - raise on the
                                                           bench. A master ramp at v is followed with lag v^2/(2A):
                                                           2.5 mm at 5 mm/s with A=5, 0.25 mm with A=50. *)
-     G_cfgPosGateMaxDeviation  : LREAL := 2.0         (* Tether window (mm). Command never leads actual by more than this
+     G_cfgPosShaperMaxDeviation: LREAL := 2.0         (* Tether window (mm). Command never leads actual by more than this
                                                           (stall / torque limit). Must be well below drive Pn520
                                                           (excessive deviation) and well above normal following error
                                                           (~VelMax/Kp). <= 0 disables the tether. *)
@@ -363,6 +366,7 @@
      G_sysPreviousState        : E_SystemState := ST_INIT     (* Previous state *)
      G_sysRequestedMode        : E_OperatingMode := MODE_IDLE (* Mode from master *)
      G_sysReference            : LREAL := 0.0     (* Reference from master: mm, mm/s or % by mode *)
+     G_sysPositionSpeed        : LREAL := 0.0     (* Position-move speed from master (mm/s), the shaper's speed limit once clamped to [0, G_cfgVelLimitMax] *)
      G_sysScanCounter          : UINT := UINT#0   (* Incremented every scan, published in G_mbSlaveCounter *)
      G_sysActiveFaultCode      : UINT := UINT#0   (* G_sysActiveFault as an integer, published in G_mbFaultCode *)
      G_sysConfirmedModeCode    : UINT := UINT#0   (* Handshake confirmed mode as an integer, published in G_mbConfCode *)

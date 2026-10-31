@@ -27,7 +27,7 @@ import st2m  # noqa: E402
 STEPS = 3000                # calls for the blocks named in CORE, STEPS_OTHER for the rest
 STEPS_OTHER = 800
 CORE = {'FB_PressureController', 'FB_AnalogInputFilter', 'FB_PressureInput',
-        'FB_PositionCommandGate', 'FB_DigitalInputFilter'}
+        'FB_PositionPathShaper', 'FB_DigitalInputFilter'}
 TOL = 1e-9
 SIGNALS = {'Target', 'Actual', 'Volts', 'RawInput', 'ActualPosition', 'Position',
            'Pressure', 'Velocity'}

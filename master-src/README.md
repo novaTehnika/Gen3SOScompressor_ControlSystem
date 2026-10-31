@@ -50,7 +50,10 @@ The app writes `RequestedMode` (0 stop, 1 home to the limit switch, 2 position,
 3 jog, 4 pressure, 5 reset fault, 6 go home) and then increments `CommandSeq`; the model acts on an operation
 only when `CommandSeq` changes, except that `RequestedMode = 0` always stops.
 `TargetPosition`, `TargetVelocity`, `JogDirection` and `TargetPressure` are read
-continuously while their operation is active. `TargetPressure` is in atm absolute;
+continuously while their operation is active. `PositionSpeed` (mm/s, the app's
+"Move speed" field, default `cfg.positionSpeed`, limited to `0..cfg.positionSpeedMax`) is the
+speed of position moves; it is sent to the slave in HR7-8 every exchange, takes
+effect mid-move, and 0 holds position. `TargetPressure` is in atm absolute;
 the model sends it to the slave in MPa gauge, and the slave closes the loop on its
 own transducer. `ESTOP` and `Mixer` act at once.
 

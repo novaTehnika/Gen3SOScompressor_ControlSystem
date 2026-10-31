@@ -45,7 +45,7 @@
        fbPistonExitGuard   : FB_PistonExitGuard
        fbGoHome            : FB_GoHome
        fbHomeLimit         : FB_HomeLimit
-       fbPosGate           : FB_PositionCommandGate
+       fbPosShaper           : FB_PositionPathShaper
        (* Enum-helper FBs (replacing FN_* with user-enum signatures — MWIEC bug)
        fbIsOperational     : FB_IsOperationalMode
        fbIsHoming          : FB_IsHomingMode
@@ -85,10 +85,11 @@
        bBlockPos           : BOOL             (* Positive travel blocked by pos switch or above SoftLimitMax
        bLimitConditionActive : BOOL           (* Either direction blocked - a limit is currently active
        bRecoveryPending    : BOOL             (* Latched at ST_FAULT_IDLE reset; routes activation to ST_RECOVERY at brake release
-       (* Position command gate (ST_POSITION_CTRL / ST_RECOVERY_POSITION)
-       rPosTarget          : LREAL            (* Soft-limit-clamped position target from the master, input to fbPosGate
-       bPosGateActive      : BOOL             (* Set by a position state body this scan; gates fbPosGate.Enable
-       bPosStopping        : BOOL             (* Motion enable dropped; braking under the gate before ST_HOLD_POSITION
+       (* Position path shaper (ST_POSITION_CTRL / ST_RECOVERY_POSITION)
+       rPosShaperVelMax    : LREAL            (* Shaper speed limit (mm/s): the master's position speed clamped to [0, G_cfgVelLimitMax], set every scan by a position state body
+       rPosTarget          : LREAL            (* Soft-limit-clamped position target from the master, input to fbPosShaper
+       bPosShaperActive    : BOOL             (* Set by a position state body this scan; gates fbPosShaper.Enable
+       bPosStopping        : BOOL             (* Motion enable dropped; braking under the shaper before ST_HOLD_POSITION
        (* Pressure loop (ST_PRESSURE_CTRL)
        rPressureTarget     : LREAL            (* Clamped target from the master, input to fbPressureCtrl
        bPressureCtrlActive : BOOL             (* Set by the pressure state body this scan; gates fbPressureCtrl.Enable
@@ -182,9 +183,9 @@ bLimitConditionActive := bBlockNeg OR bBlockPos;
 
 (* Cleared every scan; a position state body sets it when it has produced a
    fresh rPosTarget. On the scan a transition lands in a position state the
-   body has not yet run, so the gate stays disabled and commands actual
+   body has not yet run, so the shaper stays disabled and commands actual
    position for that scan rather than a stale target. *)
-bPosGateActive := FALSE;
+bPosShaperActive := FALSE;
 
 (* Likewise for the pressure loop. The in-band status output is only
    meaningful in pressure mode and is recomputed there. *)
@@ -332,21 +333,25 @@ ELSIF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
         END_IF;
 
         IF bPosStopping THEN
-            (* Brake under the gate's accel limit before handing off to
+            (* Brake under the shaper's accel limit before handing off to
                MC_Stop: pinning the target to the current command makes the
                distance-to-go zero, so the rate ramps down at AccelMax. *)
-            rPosTarget := fbPosGate.CommandedPosition;
+            rPosTarget := fbPosShaper.CommandedPosition;
         ELSE
-            (* Raw target only; fbPosGate shapes it into G_sysCommandedPosition *)
+            (* Raw target only; fbPosShaper shapes it into G_sysCommandedPosition *)
             rPosTarget := LIMIT(stCurrentLimits.PosMin,
                                 G_sysReference,
                                 stCurrentLimits.PosMax);
         END_IF;
-        bPosGateActive := TRUE;
+        (* Position-move speed from the master (HR7-8), re-read every scan so
+           a change acts mid-move. 0 decelerates the command to rest at
+           G_cfgPosShaperAccelMax and holds. *)
+        rPosShaperVelMax := LIMIT(LREAL#0.0, G_sysPositionSpeed, G_cfgVelLimitMax);
+        bPosShaperActive := TRUE;
 
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
-        IF bPosStopping AND (ABS(fbPosGate.CommandedRate) < LREAL#0.001) THEN
+        IF bPosStopping AND (ABS(fbPosShaper.CommandedRate) < LREAL#0.001) THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
         END_IF;
 
@@ -697,10 +702,10 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
         END_IF;
 
         IF bPosStopping THEN
-            (* Brake under the gate's accel limit before handing off to MC_Stop *)
-            rPosTarget := fbPosGate.CommandedPosition;
+            (* Brake under the shaper's accel limit before handing off to MC_Stop *)
+            rPosTarget := fbPosShaper.CommandedPosition;
         ELSE
-            (* Raw target only; fbPosGate shapes it into G_sysCommandedPosition *)
+            (* Raw target only; fbPosShaper shapes it into G_sysCommandedPosition *)
             rPosTarget := LIMIT(stCurrentLimits.PosMin,
                                 G_sysReference,
                                 stCurrentLimits.PosMax);
@@ -713,11 +718,15 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
                 rPosTarget := G_sysActualPosition;
             END_IF;
         END_IF;
-        bPosGateActive := TRUE;
+        (* Position-move speed from the master (HR7-8), re-read every scan so
+           a change acts mid-move. 0 decelerates the command to rest at
+           G_cfgPosShaperAccelMax and holds. *)
+        rPosShaperVelMax := LIMIT(LREAL#0.0, G_sysPositionSpeed, G_cfgVelLimitMax);
+        bPosShaperActive := TRUE;
 
         G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
-        IF bPosStopping AND (ABS(fbPosGate.CommandedRate) < LREAL#0.001) THEN
+        IF bPosStopping AND (ABS(fbPosShaper.CommandedRate) < LREAL#0.001) THEN
             IF bLimitConditionActive THEN
                 G_sysCurrentState := E_SystemState#ST_RECOVERY;
             ELSE
@@ -936,13 +945,13 @@ END_IF;
 IF bPositionMode THEN
     G_cmdDirectControl.Enable := TRUE;
     G_cmdDirectControl.ControlMode := Y_ControlMode#PositionMode;
-    G_cmdDirectControl.Position := G_sysCommandedPosition;   (* previous scan; overridden by fbPosGate in Route Active FB Command Outputs *)
+    G_cmdDirectControl.Position := G_sysCommandedPosition;   (* previous scan; overridden by fbPosShaper in Route Active FB Command Outputs *)
     (* Y_DirectControl does no path shaping in PositionMode: the position
        command reaches the drive as given. Its Velocity (and Acceleration)
-       inputs therefore set no limits in this mode. fbPosGate
-       (FB_PositionCommandGate) does the path shaping, and its VelMax and
-       AccelMax are what limit a position move. The master sends only the
-       target position (HR5-6). *)
+       inputs therefore set no limits in this mode. fbPosShaper
+       (FB_PositionPathShaper) does the path shaping, and its VelMax
+       (the master's position speed, HR7-8) and AccelMax are what limit a
+       position move. *)
     G_cmdDirectControl.Velocity := stCurrentLimits.VelMax;
     G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
     bKeepDirectControl := TRUE;
@@ -1163,18 +1172,18 @@ fbSafetyMonitor(
     PressureSensorFault := fbPressureInput.SensorFault
 );
 
-(* Position command gate - shapes rPosTarget into the Y_DirectControl command.
-   Enable is bPosGateActive (set only by a position state body that ran this
+(* Position path shaper - shapes rPosTarget into the Y_DirectControl command.
+   Enable is bPosShaperActive (set only by a position state body that ran this
    scan), not the state itself, so the transition scan commands actual position.
    While disabled it seeds from actual, so every entry is bumpless. *)
-fbPosGate(
-    Enable := bPosGateActive,
-    Reset := bEnterState AND bPosGateActive,
+fbPosShaper(
+    Enable := bPosShaperActive,
+    Reset := bEnterState AND bPosShaperActive,
     Target := rPosTarget,
     ActualPosition := G_sysActualPosition,
-    VelMax := stCurrentLimits.VelMax,
-    AccelMax := G_cfgPosGateAccelMax,
-    MaxDeviation := G_cfgPosGateMaxDeviation,
+    VelMax := rPosShaperVelMax,
+    AccelMax := G_cfgPosShaperAccelMax,
+    MaxDeviation := G_cfgPosShaperMaxDeviation,
     CycleTime := G_cfgScanTime
 );
 
@@ -1212,9 +1221,9 @@ ELSIF bInHomeLimit THEN
     G_cmdSetPosition := fbHomeLimit.CmdSetPosition;
 
 ELSIF bPositionMode THEN
-    (* Gated command (= actual position on the transition scan) *)
-    G_sysCommandedPosition := fbPosGate.CommandedPosition;
-    G_cmdDirectControl.Position := fbPosGate.CommandedPosition;
+    (* Shaped command (= actual position on the transition scan) *)
+    G_sysCommandedPosition := fbPosShaper.CommandedPosition;
+    G_cmdDirectControl.Position := fbPosShaper.CommandedPosition;
 
 END_IF;
 
