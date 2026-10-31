@@ -40,6 +40,9 @@ FILE DEPENDENCY:
     sensor.py, sim.py, slave.py, solver.py
 ../generated/
     FB_PressureController.py, FB_PressureSchedule.py
+tests/run_all.sh reruns this script when a file under these paths
+changes (paths from the repository root):
+Depends on: design/pressure-loop slave-src tools
 """
 
 import math
