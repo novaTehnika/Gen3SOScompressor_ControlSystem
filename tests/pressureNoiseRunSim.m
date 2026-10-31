@@ -6,10 +6,10 @@ function pressureNoiseRunSim()
 %   stopped.
 %   Run from the repository root after  python3 tools/st2m.py slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
-%   Depends on: master-src/logic slave-src slave-sim tools/st2m.py bench/pressure bench/modbus tests/fakeProbeLink.m
+%   Depends on: master-src/logic slave-src slave-sim tools bench/pressure bench/common tests/fakeProbeLink.m
 
 here = fileparts(mfilename('fullpath'));
-addpath(fullfile(here, '..', 'bench', 'pressure'), fullfile(here, '..', 'bench', 'modbus'));
+addpath(fullfile(here, '..', 'bench', 'pressure'), fullfile(here, '..', 'bench', 'common'));
 saveDir = tempname();
 
 opts = linkOpts(saveDir);

@@ -1,14 +1,15 @@
 function buildSafetyHold()
 %BUILDSAFETYHOLD Generate SafetyHold.slx: a Simulink Desktop Real-Time model
 %   that holds the safety relay (P0.0) on and the stir bar (P0.4) off, for
-%   runs that take the shell's place as Modbus master, such as
-%   pressureNoiseRun. The relay drops when the model stops (final value 0).
+%   runs that take the shell's place as Modbus master (pressureNoiseRun,
+%   frictionRun, charRun). The relay drops when the model stops (final
+%   value 0).
 %   Run with Simulink and Simulink Desktop Real-Time from any folder:
 %
 %       buildSafetyHold
 %
 %   Then open the model, select Connected IO on the Desktop Real-Time tab
-%   and save it, as for the shell. pressureNoiseRun starts and stops it.
+%   and save it, as for the shell. The run scripts start and stop it.
 
 mdl = 'SafetyHold';
 here = fileparts(mfilename('fullpath'));

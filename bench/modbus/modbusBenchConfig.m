@@ -5,13 +5,14 @@ function cfg = modbusBenchConfig()
 %   slave/PRG_ModbusBench.st.
 
 here = fileparts(mfilename('fullpath'));
-addpath(fullfile(here, '..', '..', 'master-src', 'logic'));
+addpath(fullfile(here, '..', '..', 'master-src', 'logic'), fullfile(here, '..', 'common'));
 master = masterConfig();
+shared = benchConfig();
 
-% Connection
-cfg.address   = '192.168.1.1';    % controller IP: the address MotionWorks connects to
-cfg.port      = 502;
-cfg.serverId  = 1;
+% Connection (bench/common/benchConfig.m)
+cfg.address   = shared.address;   % controller IP: the address MotionWorks connects to
+cfg.port      = shared.port;
+cfg.serverId  = shared.serverId;
 cfg.timeout   = 0.020;            % s, per transaction in the bench model; modbusProbe reports the share of cycles slower than this
 cfg.wordOrder = 'little-endian';  % low word first, as measured by modbusProbe
 
@@ -27,5 +28,5 @@ cfg.hrProbe         = 101;        % HR101-102 G_mbProbeDintIn
 cfg.irProbe         = 101;        % IR101-108 probe block
 
 % Slave
-cfg.slaveScan = 0.002;            % s, cyclic task interval
+cfg.slaveScan = shared.slaveScan; % s, cyclic task interval
 end

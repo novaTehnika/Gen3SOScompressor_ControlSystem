@@ -1,89 +1,146 @@
 #!/bin/sh
-# Regenerate the simulated slave from slave-src and run the tests, in
-# parallel, skipping those whose inputs are unchanged since they last passed.
+# Regenerate the simulated slave and the Python function blocks from
+# slave-src and run the tests: the Python tests with python3, the
+# MATLAB-language tests in Octave or, when octave-cli is not installed, in
+# MATLAB. Tests run in parallel and are skipped while their inputs are
+# unchanged since they last passed.
 #
 # Usage: tests/run_all.sh [--all] [-j N] [test ...]   (from anywhere)
 #   --all   run every selected test, ignoring the record of passes
-#   -j N    run at most N tests at once (default: the number of CPUs)
-#   test    run only these tests (default: all of them)
+#   -j N    run at most N tests at once (default: the number of CPUs with
+#           Octave, 1 with MATLAB)
+#   test    run only these tests, by name without extension (default: all)
 #
 # A test's inputs are its own file, the paths on its "Depends on:" header
-# line and the Octave version. Their hash is recorded in .test-cache/ when
-# the test passes; a later run skips the test while the hash matches.
-# Needs python3, octave-cli and sha256sum.
+# line and the interpreter version. Their hash is recorded in .test-cache/
+# when the test passes; a later run skips the test while the hash matches.
+# Needs python3 with design/requirements.txt, octave-cli or matlab, and
+# sha256sum.
 set -e
 cd "$(dirname "$0")/.."
 
-# Longest first, so the parallel run finishes as early as it can.
-ALL_TESTS="closedLoopMasterSlave closedLoopModbusStep slavePressureMode pressureNoiseRunSim smokeMasterStateMachine"
+# Longest first, so the parallel run finishes as early as it can. The
+# MATLAB-language tests are also listed in tests/runAll.m.
+ALL_TESTS="
+tests/frictionRunSim.m
+tests/charRunSim.m
+tests/closedLoopMasterSlave.m
+tests/closedLoopModbusStep.m
+tests/slavePressureMode.m
+tests/charFitsSynthetic.m
+tests/pressureNoiseRunSim.m
+design/pressure-loop/test_model.py
+design/pressure-loop/test_robust.py
+tests/st2pyParity.py
+design/pressure-loop/test_linear.py
+tests/smokeMasterStateMachine.m
+"
 CACHE=.test-cache
 
 force=0
-jobs=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
-tests=
+jobs=
+names=
 while [ $# -gt 0 ]; do
     case $1 in
         --all) force=1 ;;
         -j) shift; jobs=$1 ;;
         -j*) jobs=${1#-j} ;;
-        -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*) echo "unknown option $1" >&2; exit 2 ;;
-        *) tests="$tests $1" ;;
+        *) names="$names $1" ;;
     esac
     shift
 done
-[ -n "$tests" ] || tests=$ALL_TESTS
+
+if command -v octave-cli >/dev/null 2>&1; then
+    mrunner=octave
+    mversion=$(octave-cli --version | head -n 1)
+    [ -n "$jobs" ] || jobs=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
+elif command -v matlab >/dev/null 2>&1; then
+    mrunner=matlab
+    mversion=matlab
+    [ -n "$jobs" ] || jobs=1
+else
+    echo "run_all.sh: neither octave-cli nor matlab found on the PATH" >&2
+    exit 1
+fi
+pversion=$(python3 --version)
+
+tests=
+if [ -z "$names" ]; then
+    tests=$ALL_TESTS
+else
+    for n in $names; do
+        match=
+        for t in $ALL_TESTS; do
+            b=${t##*/}
+            [ "${b%.*}" = "$n" ] && match=$t
+        done
+        [ -n "$match" ] || { echo "no test named $n" >&2; exit 2; }
+        tests="$tests $match"
+    done
+fi
 
 python3 tools/st2m.py slave-src slave-sim/generated
+python3 tools/st2py.py slave-src design/generated
 mkdir -p "$CACHE"
-octaveVersion=$(octave-cli --version | head -n 1)
 
-# Hash of a test's inputs. slave-sim/generated is left out: it is derived
-# from slave-src and tools, which are inputs themselves.
+# Hash of a test's inputs. Generated directories are left out: they are
+# derived from slave-src and tools, which are inputs themselves.
 inputHash() {
-    t=tests/$1.m
-    [ -f "$t" ] || { echo "no test $t" >&2; return 1; }
-    deps=$(sed -n 's/^%   Depends on: //p' "$t")
+    deps=$(sed -n 's/^[%#[:space:]]*Depends on: //p' "$1" | head -n 1)
+    [ -n "$deps" ] || { echo "$1 has no Depends on: line" >&2; return 1; }
     for d in $deps; do
-        [ -e "$d" ] || { echo "$t depends on missing $d" >&2; return 1; }
+        [ -e "$d" ] || { echo "$1 depends on missing $d" >&2; return 1; }
     done
-    {
-        echo "$octaveVersion"
-        find "$t" $deps -type f ! -path '*/generated/*' | LC_ALL=C sort | xargs sha256sum
-    } | sha256sum | cut -d ' ' -f 1
+    case $1 in *.py) echo "$pversion" ;; *) echo "$mversion" ;; esac
+    find "$1" $deps -type f ! -path '*/generated/*' ! -path '*/__pycache__/*' \
+        | LC_ALL=C sort | xargs sha256sum
 }
 
 torun=
 for t in $tests; do
-    h=$(inputHash "$t")
-    if [ $force -eq 0 ] && [ -f "$CACHE/$t.pass" ] && [ "$(cat "$CACHE/$t.pass")" = "$h" ]; then
+    key=$(echo "$t" | tr / _)
+    h=$(inputHash "$t" | sha256sum | cut -d ' ' -f 1)
+    if [ $force -eq 0 ] && [ -f "$CACHE/$key.pass" ] && [ "$(cat "$CACHE/$key.pass")" = "$h" ]; then
         echo "skip $t (unchanged since it passed)"
     else
-        rm -f "$CACHE/$t.pass" "$CACHE/$t.fail"
-        echo "$h" > "$CACHE/$t.hash"
+        rm -f "$CACHE/$key.pass" "$CACHE/$key.fail"
+        echo "$h" > "$CACHE/$key.hash"
         torun="$torun $t"
     fi
 done
 [ -n "$torun" ] || { echo "nothing to run"; exit 0; }
 
-echo "running$torun ($jobs at a time)"
-# Each test runs in its own octave-cli; its output is printed in one piece
+echo "running $(echo $torun | wc -w) tests, $jobs at a time"
+# Each test runs in its own process; its output is printed in one piece
 # when it ends.
 printf '%s\n' $torun | xargs -P "$jobs" -I {} sh -c '
-    t=$1; c=$2
+    t=$1; c=$2; mrunner=$3
+    key=$(echo "$t" | tr / _)
+    b=${t##*/}; name=${b%.*}
+    paths="addpath(\"master-src/logic\", \"slave-sim\", \"slave-sim/generated\", \"tests\")"
     start=$(date +%s)
-    if octave-cli --quiet --eval "addpath(\"master-src/logic\", \"slave-sim\", \"slave-sim/generated\", \"tests\"); $t" \
-        > "$c/$t.log" 2>&1; then
-        mv "$c/$t.hash" "$c/$t.pass"; result=passed
+    case $t in
+        *.py) set -- python3 "$t" ;;
+        *) if [ "$mrunner" = octave ]; then
+               set -- octave-cli --quiet --eval "$paths; $name"
+           else
+               set -- matlab -batch "$(echo "$paths" | tr \" \047); $name"
+           fi ;;
+    esac
+    if "$@" > "$c/$key.log" 2>&1; then
+        mv "$c/$key.hash" "$c/$key.pass"; result=passed
     else
-        touch "$c/$t.fail"; result=FAILED
+        touch "$c/$key.fail"; result=FAILED
     fi
-    { echo "== $t"; cat "$c/$t.log"; echo "== $t $result in $(( $(date +%s) - start )) s"; echo; }
-' sh {} "$CACHE"
+    { echo "== $t"; cat "$c/$key.log"; echo "== $t $result in $(( $(date +%s) - start )) s"; echo; }
+' sh {} "$CACHE" "$mrunner"
 
 failed=
 for t in $torun; do
-    [ -f "$CACHE/$t.fail" ] && failed="$failed $t"
+    key=$(echo "$t" | tr / _)
+    [ -f "$CACHE/$key.fail" ] && failed="$failed $t"
 done
 if [ -n "$failed" ]; then
     echo "FAILED:$failed (logs in $CACHE/)"

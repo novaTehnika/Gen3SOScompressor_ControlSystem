@@ -269,6 +269,7 @@ TYPE
       Torque          : LREAL;
       Acceleration    : LREAL;
       Deceleration    : LREAL;
+      FilterTimeConstant : LREAL;   (* s, the block's FilterTimeConstant input *)
    END_STRUCT;
 
    ST_CmdSetPosition :
@@ -350,6 +351,8 @@ TYPE
     (* ============================================================================
        ARRAY5LREAL - Array of 5 LREALs
        ============================================================================ *)
-    ARRAY5LREAL : ARRAY[0..4] OF LREAL;
-
+   ARRAY5LREAL : ARRAY[0..4] OF LREAL;
+   ARRAY250UINT : ARRAY[0..249] OF UINT;
+   ARRAY500INT : ARRAY[0..499] OF INT;
+   ARRAY500DINT : ARRAY[0..499] OF DINT;
 END_TYPE
