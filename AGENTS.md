@@ -88,7 +88,7 @@ Each bench (`modbus`, `pressure`, `friction`, `characterisation`) is a directory
 ### Tests
 
 - `smokeMasterStateMachine`: master state machine against a protocol-level stand-in slave (not the ST sim).
-- `closedLoopMasterSlave`: `masterStateMachine` against the generated slave in engineering units. The master steps every 25 ms, the exchange runs every 50 ms and the slave every 2 ms on a 1 ms tick.
+- `closedLoopMasterSlave`: `masterStateMachine` against the generated slave in engineering units. The master steps every 25 ms, the exchange runs every 50 ms and the slave every 4 ms (its scan) on a 1 ms tick.
 - `closedLoopModbusStep`: `masterStep` through the packed register vectors, including link loss on either side.
 - `slaveSimParity`: the compiled and the generated Octave slave side by side through every mode, fault hook, link loss and reset; the input registers must agree every scan and every variable of `G`, `IO`, the axis and PRG_Main every 50 ms (the REAL registers after rounding to single precision).
 - `stTargetParity.py` (Python, run by `run_all.sh`): every scalar-input function block translated by the py and m targets, driven with the same seeded random inputs; all variables must agree to 1e-9.

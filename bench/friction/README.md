@@ -237,10 +237,10 @@ from standing.
 
 ### 4.5 Velocity steps at the scan rate
 
-The 50 ms log cannot show the drive's velocity-loop lag (`tauV`, 20 ms in
+The 50 ms log cannot show the drive's velocity-loop lag (`tauV`, 18 ms in
 the model), a breakaway shorter than one exchange, or the torque ripple
-at the motor turn. `PRG_StepProbe` records 500 consecutive scans (1 s at
-2 ms) of the commanded velocity, the actual velocity, the torque, the
+at the motor turn. `PRG_StepProbe` records 500 consecutive scans (2 s at
+4 ms) of the commanded velocity, the actual velocity, the torque, the
 position and the chamber pressure into input registers when the run
 writes its arm register, and the run reads the block out in the gaps
 between exchanges, as the pressure noise bench does. The pressure channel
@@ -260,7 +260,7 @@ Slave setup, once:
    array at a direct address, declare it with a named type
    (`ARRAY[0..499] OF INT`, `ARRAY[0..499] OF DINT`) from the Data Types
    worksheet.
-3. Add `PRG_StepProbe` to the project and assign it to the 2 ms cyclic
+3. Add `PRG_StepProbe` to the project and assign it to the 4 ms cyclic
    task. It reads `G_sys*` globals only and runs beside `PRG_Main`. Do not
    load it together with `PRG_PressureProbe` or `PRG_ModbusBench`.
 4. Compile, download, start.
@@ -423,6 +423,18 @@ deliveries should lie on one line in `F - P A` against `P A`.
   breakaway, which removes it, for loaded starts.
 
 ## 8. Results
+
+Velocity steps of 26 October (`s1_cap_steps_*`, `s2_cap_steps_*`, 74
+captures, 55 of them taken while moving), fitted with
+`stepResponseFit(files, struct('accel', 1e4, 'decel', 1e4))`. The files
+carry a `t` column written at 2 ms per row; the scan was 4 ms, and
+`stepResponseFit` takes the row spacing from `G_cfgScanTime`
+(`opts.rowPeriod_s` overrides it). The grid search gives tauV 16.0 ms
+after a 28 ms delay (4 ms grid) and the model-free tracking lag at
+mid-step is 40 ms. `charDriveLag` on the same files, by least squares
+from several starting delays, gives 18.2 ms after 22.8 ms; the two agree
+on the sum to within the delay grid (44 and 41 ms). With the time column
+as written the same files fit to half these values.
 
 | Label | Condition | Fc (N) | b (N s/m) | Fs, vs | mu | Breakaway (N) | tauV (ms) | Notes |
 |-------|-----------|--------|-----------|--------|----|---------------|-----------|-------|
