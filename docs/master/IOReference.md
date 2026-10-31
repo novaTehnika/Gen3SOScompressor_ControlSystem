@@ -91,14 +91,14 @@ The scaled pressure is `G_sysActualPressure`, published in IR19-20.
 | FaultReset (HR4) | 20 ms | `G_cfgDebounceTimeFault` |
 | OvertravelNeg (DI6) | 10 ms | `G_cfgDebounceTimeOvertravelNeg` |
 | OvertravelPos (DI7) | 10 ms | `G_cfgDebounceTimeOvertravelPos` |
-| Output Update | 2 ms | Scan cycle time |
+| Output Update | 4 ms | Scan cycle time |
 
 ### Analog Input
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
 | AI Filter Time Constant | 20 ms | `G_cfgAnalogFilterTimeConst` (IIR low-pass after the median) |
-| AI Sample Rate | 2 ms | Scan cycle time |
+| AI Sample Rate | 4 ms | Scan cycle time |
 
 ---
 

@@ -9,10 +9,10 @@
 
 | Category | Parameter | Value | Notes |
 |----------|-----------|-------|-------|
-| PLC Scan | Cycle Time | 2 ms | Cyclic task interval (MP2600iec minimum); `G_cfgScanTime` must match |
-| Motion | Position Loop | 2 ms | Synchronized with scan |
-| I/O | Digital Update | 2 ms | Per scan cycle |
-| I/O | Analog Update | 2 ms | Per scan cycle |
+| PLC Scan | Cycle Time | 4 ms | Cyclic task interval (the program takes about 2.5 ms a scan, so a 2 ms task overruns); `G_cfgScanTime` must match |
+| Motion | Position Loop | 4 ms | Synchronized with scan |
+| I/O | Digital Update | 4 ms | Per scan cycle |
+| I/O | Analog Update | 4 ms | Per scan cycle |
 
 ---
 
@@ -131,7 +131,7 @@ Hold Secure ______________________|‾‾‾‾‾‾‾‾‾‾‾‾
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| Following Error Update | 2 ms | Calculated each scan |
+| Following Error Update | 4 ms | Calculated each scan |
 | Position Tolerance | 0.1 mm | "At position" threshold |
 | Position Stable Time | 20 ms | Time in tolerance before "done" |
 
@@ -170,7 +170,7 @@ TRUE for up to `V/A` after the drop (1.0 s at `V` = 5 mm/s, `A` = 5 mm/s²) plus
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| Velocity Update | 2 ms | Reference applied each scan |
+| Velocity Update | 4 ms | Reference applied each scan |
 | Acceleration Rate | Axis default | From axis configuration |
 | Velocity Threshold | 0.5 mm/s | "Stopped" detection threshold |
 
@@ -178,7 +178,7 @@ TRUE for up to `V/A` after the drop (1.0 s at `V` = 5 mm/s, `A` = 5 mm/s²) plus
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| Torque Update | 2 ms | Reference applied each scan |
+| Torque Update | 4 ms | Reference applied each scan |
 | Torque Ramp | Axis default | From axis configuration |
 
 ---
@@ -210,7 +210,7 @@ operational mode handled by `FB_PressureController`, not a homing mode.
 
 | Fault Type | Detection Time | Description |
 |------------|----------------|-------------|
-| Drive Fault | 1 scan (2 ms) | Direct from drive status (includes encoder alarms A.810/A.CC0/A.830) |
+| Drive Fault | 1 scan (4 ms) | Direct from drive status (includes encoder alarms A.810/A.CC0/A.830) |
 | Overtravel Switch | 1 scan + 10 ms debounce | Unexpected activation |
 | Position Limit | 1 scan | Software limit exceeded |
 | Piston Exit | 1 scan | Guard condition met |
@@ -237,7 +237,7 @@ Exchange (50 ms)     | FC16+FC04       | FC16+FC04       |
                      v                 v
 Modbus service tick  |..|..|..|..|..|..|..|..|..|..|..|..|  (4 ms)
                      v
-MP2600iec scan       ||||||||||||||||||||||||||||||||||||||  (2 ms)
+MP2600iec scan       ||||||||||||||||||||||||||||||||||||||  (4 ms)
 ```
 
 The master writes holding registers HR1-HR6 and reads input registers IR1-IR20
@@ -251,7 +251,7 @@ at its next scan. See `docs/master/ModbusRegisterMap.md`.
 | Exchange Period | 50 ms | One FC16 write + one FC04 read |
 | Modbus Service Tick | 4 ms | One request answered per tick |
 | Transaction Time | 1-8 ms | Request to reply |
-| Slave Scan Rate | 2 ms | PLC task period |
+| Slave Scan Rate | 4 ms | PLC task period |
 | Link Watchdog | 300 ms | Each side faults when the other's counter stops (slave only while motion is commanded) |
 
 ---

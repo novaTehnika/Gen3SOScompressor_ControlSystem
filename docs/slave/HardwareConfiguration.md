@@ -33,8 +33,8 @@ This document provides step-by-step instructions for configuring the hardware in
 
 ### 2.3 Task Configuration
 1. Assign `PRG_Main` (and the LD POU) to a cyclic task
-2. Set the task interval to **2 ms** (the MP2600iec minimum)
-3. Set `G_cfgScanTime` to the same value in seconds (`0.002`); the position command gate integrates with it
+2. Set the task interval to **4 ms** (the program takes about 2.5 ms a scan, so a 2 ms task overruns and runs on every second motion cycle)
+3. Set `G_cfgScanTime` to the same value in seconds (`0.004`); the position command gate integrates with it
 
 ---
 

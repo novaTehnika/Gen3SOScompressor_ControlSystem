@@ -567,31 +567,23 @@ the step and at the Euler prediction:
 
 **Convergence.** `study_convergence.py` compares both methods at 1 to 50
 steps per scan with a reference of Heun at 100 steps per scan
-(dt = 0.02 ms). The largest pressure difference from the reference, with
+(dt = 0.04 ms). The largest pressure difference from the reference, with
 the slave controller:
 
 | Scenario | Euler, nsub 1 / 5 / 50 | Heun, nsub 1 / 5 / 50 |
 |---|---|---|
-| compress | 65 / 13 / 1.4 kPa | 9.0 / 1.7 / 0.07 kPa |
-| stiffstep | 10.5 / 2.0 / 0.10 kPa | 10.5 / 2.0 / 0.11 kPa |
-| discharge | 0.29 / 0.05 / 0.02 kPa | 0.04 / 0.04 / 0.02 kPa |
-| valve | 0.16 / 0.03 / 0.01 kPa | 0.02 / 0.01 / 0.01 kPa |
+| compress | 34 / 6.6 / 0.66 kPa | 0.053 / 0.002 / 0.000 kPa |
+| stiffstep | 5.9 / 1.1 / 0.11 kPa | 0.46 / 0.016 / 0.000 kPa |
+| deliver | 4.7 / 0.88 / 0.087 kPa | 0.38 / 0.013 / 0.000 kPa |
 
-(The table was made with the earlier gas-rich compress from atmosphere
-and prescribed-flow discharge and valve cases; the present cases are
-less demanding, and `test_model.py` checks that the two methods agree to
-5 kPa on them.) Euler converges at first order, halving its error with
-each halving of the step. At the default of five Heun steps per scan
-(dt = 0.4 ms) the largest error is 1.7 kPa, during the gas-rich
-compression, and the metrics change by less than 0.001 MPa of overshoot
-and 0.002 s of settling time between the default and the reference. On stiffstep both
-methods give the same error, because the slew limit, eq. (11), is
-applied once per step and converges at first order whatever the
-integrator; this is the behaviour of the drive's own discrete profile
-generator. Heun at five steps costs about 15 % more than Euler at five
-and is eight times more accurate on compress, which is why it is the
-default. The volume closure, eq. (9), holds to within 2e-9 m^3 over 6 s
-of compression.
+Euler converges at first order, halving its error with each halving of
+the step; Heun at second order. At the default of five Heun steps per
+scan (dt = 0.8 ms) the largest error is 0.016 kPa, and the metrics
+change by less than 0.001 MPa of overshoot and 0.001 s of settling time
+between the default and the reference. Heun at five steps costs about
+50 % more than Euler at five and is hundreds of times more accurate on
+these cases, which is why it is the default. The volume closure,
+eq. (9), holds to within 2e-9 m^3 over 6 s of compression.
 
 ## Linear analysis
 
@@ -728,9 +720,9 @@ force command cannot place the pressure at all. Torque remains only as
 the stall cap, about 20 MPa at 100 % rated torque.
 
 **Compression** (1:1 charge from a 1 MPa supply, hose open): the piston
-sweeps 12 mm, and the GVL loop arrives in band after 4.7 s with
+sweeps 12 mm, and the GVL loop arrives in band after 4.8 s with
 0.73 MPa of overshoot; the scheduled loop at wc = 11 rad/s arrives in
-2.5 s with 0.12 MPa, which is the transducer offset, not an overshoot
+2.4 s with 0.11 MPa, which is the transducer offset, not an overshoot
 of the reading. The chamber stiffness rises from 0.1 to 4.2 MPa/mm
 (6.5 with the hose shut). The legacy controllers without the configured
 stop law overshoot to 13–20 MPa; the stop law is what makes the
@@ -764,19 +756,19 @@ the time the fill takes:
 
 | Bore | Fill | 2:1 at 10 MPa: GVL / wc 11 / wc 16 | 2.5:1 at 11 MPa: GVL / wc 11 / wc 16 |
 |---|---|---|---|
-| 6.35 mm (ball valve) | 0.5 s | 6.4 / 6.4 / 6.4 | 7.0 / 7.0 / 7.0 |
-| 1.0 mm | 0.5–0.8 s | 6.9 / 7.8 / 8.0 | 7.6 / 8.6 / 8.8 |
-| 0.5 mm | 0.7–1.1 s | 7.7 / 8.8 / 9.2 | 8.5 / 9.7 / 10.0 |
-| 0.3 mm | 1.3–1.8 s | 8.1 / 9.2 / 9.4 | 8.9 / 10.2 / 10.4 |
-| 0.2 mm | 2.4–2.9 s | 8.1 / 9.2 / 9.4 | 8.9 / 10.2 / 10.4 |
-| 0.1 mm | 8.5–9.1 s | 8.1 / 9.2 / 9.4 | 8.9 / 10.2 / 10.4 |
+| 6.35 mm (ball valve) | 0.5–0.9 s | 6.4 / 6.4 / 6.4 | 7.0 / 7.0 / 7.0 |
+| 1.0 mm | 0.5–1.0 s | 6.7 / 7.3 / 7.4 | 7.4 / 8.0 / 8.1 |
+| 0.5 mm | 0.7–1.2 s | 7.5 / 8.6 / 9.0 | 8.3 / 9.5 / 9.8 |
+| 0.3 mm | 1.3–1.8 s | 8.0 / 9.1 / 9.2 | 8.9 / 10.0 / 10.2 |
+| 0.2 mm | 2.4–2.9 s | 8.0 / 9.1 / 9.2 | 8.9 / 10.0 / 10.2 |
+| 0.1 mm | 8.5–9.1 s | 8.0 / 9.1 / 9.2 | 8.9 / 10.0 / 10.2 |
 
 Below a 0.3 mm bore (an effective area of 0.04 mm², a Cv of about
 0.003) the fill is a flow the loop follows, the chamber floor is set
-by the loop's own dip (the same as at the distal opening: 1.9 MPa for
-the GVL gains, 0.8 at wc = 11, 0.6 at wc = 16), and the fill takes one
+by the loop's own dip (the same as at the distal opening: 2.0 MPa for
+the GVL gains, 0.9 at wc = 11, 0.8 at wc = 16), and the fill takes one
 to nine seconds. At 2:1 that keeps every arm above saturation with the
-required margin (0.8 MPa for the GVL, 2.0 and 2.2 for the scheduled
+required margin (0.8 MPa for the GVL, 1.9 and 2.0 for the scheduled
 arms); at 2.5:1 and 11 MPa only the scheduled arms clear it. The
 saturation floor plus the 0.5 MPa margin is the dotted line of
 `hose_opening.png`.
@@ -788,7 +780,7 @@ whichever controller. It is the first solution through the valve, so
 by plug flow it lies right behind the virgin saline, in the first
 6 cm of hose at the cylinder end (the 29 mL of virgin saline fill the
 other 92 cm), and about 0.9 mL of sound solution follows it. The purge
-that carries it out is 31 mL at 2:1 and 32 mL at 2.5:1 instead of 29,
+that carries it out is 31 mL at 2:1 and 32 mL (31.6) at 2.5:1 instead of 29,
 and the scenario sizes it so (`V_purge` of None). Against the
 procedural remedy this costs 2 to 3 mL of solution and needs a
 metering path; it leaves the compression and mixing as they are now.
@@ -845,17 +837,17 @@ needs only at an error of about 2 MPa, holds the integrator through its
 anti-windup. The bench saw this: the loop held 8.1 MPa for a 10 MPa
 target. `StopVelMin` of 2 mm/s, now the GVL value, removes it. With the
 hose open its compliance caps the end stiffness at 9.8 MPa/mm (K
-0.72 GPa, 86 mL, 0.24 mL/MPa), where the GVL gain keeps 71° of phase
-margin and 18 dB of gain margin, so the emptying chamber no longer
+0.72 GPa, 86 mL, 0.24 mL/MPa), where the GVL gain keeps 62° of phase
+margin and 13 dB of gain margin, so the emptying chamber no longer
 threatens the loop.
 
 **Closing the purge valve is the second limit.** When the distal valve
 is shut at the end of the purge the piston is running at 1.4 mm/s into
 a chamber of 4.8 MPa/mm, and the pressure rises at 7 MPa/s until the
 loop has stopped it. The GVL loop, with Kp 0.5 mm/s per MPa and an
-integral time of 2.5 s, lets it rise 2.2 MPa, to 12.2 MPa from a 10 MPa
+integral time of 2.5 s, lets it rise 2.3 MPa, to 12.3 MPa from a 10 MPa
 target: through the ceiling. The scheduled loop at wc = 11 stops it in
-1.0 MPa, at wc = 16 in 0.75 MPa. A slow hand on the valve helps little
+1.1 MPa, at wc = 16 in 0.9 MPa. A slow hand on the valve helps little
 (a 1 s closing takes 0.1 MPa off the peak), because the loop, not the
 valve, is the slow element. A gain the chamber allows is the remedy,
 or a procedure that stops the piston before the valve is shut.
@@ -863,37 +855,39 @@ or a procedure that stops the piston before the valve is shut.
 **Scheduled controller.** `ScheduledSlaveController` (equations (39) to
 (41)) with the measured bounds (K_cfg 1.0 GPa, dead volume 81 mL, hose
 compliance 0.12 mL/MPa) holds its margins constant through the run,
-69° / 16 dB at wc = 6 rad/s, 56° / 11 dB at wc = 11 and 44° / 8 dB at
-wc = 16. Nominal results, 1:1 at 10 MPa, hose opened before the
+58° / 11 dB at wc = 6 rad/s, 37° / 5.8 dB at wc = 11 and 19° / 2.6 dB at
+wc = 16 (the 44 ms of pure delay in the loop leaves little phase at a
+crossover of 16 rad/s). Nominal results, 1:1 at 10 MPa, hose opened before the
 compression, all with StopVelMin 2 mm/s:
 
 | Arm | Compress: arrive s / overshoot MPa | Delivery: dip MPa / margin MPa / peak MPa / V_ok mL |
 |---|---|---|
-| StopVelMin 0.5 (earlier) | 4.8 / 0.63 | 1.96 / 4.5 / 10.8 / 22 (steady error) |
-| GVL | 4.7 / 0.73 | 1.95 / 4.5 / 12.2 / 29 (ceiling at the purge closing) |
-| scheduled, wc 6 | 3.1 / 0.13 | 1.32 / 5.1 / 11.5 / 249 (all) |
-| scheduled, wc 11 | 2.5 / 0.12 | 0.77 / 5.7 / 11.0 / 249 (all) |
-| scheduled, wc 11, Ki = Kp, VelMax 7 | 1.9 / 0.15 | 0.75 / 5.7 / 11.0 / 249 (all) |
-| scheduled, wc 16 | 2.3 / 0.11 | 0.60 / 5.9 / 10.8 / 249 (all) |
-| flow feedforward (bound, not implementable) | — | 2.18 / 4.3 / 12.7 / 29 |
+| StopVelMin 0.5 (earlier) | 5.0 / 0.55 | 2.01 / 4.4 / 10.6 / 22 (steady error) |
+| GVL | 4.8 / 0.73 | 2.00 / 4.5 / 12.3 / 29 (ceiling at the purge closing) |
+| scheduled, wc 6 | 3.0 / 0.13 | 1.38 / 5.1 / 11.6 / 249 (all) |
+| scheduled, wc 11 | 2.4 / 0.11 | 0.91 / 5.5 / 11.1 / 249 (all) |
+| scheduled, wc 11, Ki = Kp, VelMax 7 | 2.0 / 0.14 | 0.90 / 5.5 / 11.2 / 249 (all) |
+| scheduled, wc 16 | 2.4 / 0.18 | 0.78 / 5.7 / 10.9 / 249 (all) |
+| flow feedforward (bound, not implementable) | — | 2.24 / 4.2 / 12.7 / 29 |
 
-(The 0.11 MPa "overshoot" of the scheduled arms is the transducer
-offset. V_ok is given here as solution: the metric itself counts the
+(The 0.11 MPa "overshoot" of the scheduled arms at wc = 6 and 11 is the
+transducer offset; at wc = 16 the loop overshoots the reading by a
+further 0.07 MPa, the sign of its thin phase margin. V_ok is given here as solution: the metric itself counts the
 29 mL purge too, so 249 mL of solution reads as 278 mL delivered.) The
 scheduled arms compress twice as fast as the GVL with
-no overshoot of the reading, because the stop law brakes for the
+no overshoot of the reading (wc = 16 aside), because the stop law brakes for the
 estimated stiffness and the whole lag (measurement, dead time and
 drive) and the integrator is held until arrival; they cut the opening
-dip to a third, because the gain at the opening is set by the measured
+dip to under half, because the gain at the opening is set by the measured
 stiffness, hose included, rather than a fixed worst case; and they are
 the only arms that keep the purge closing under the ceiling. VelMax
-7 mm/s shortens the compression by 0.6 s and does not change the dip;
+7 mm/s shortens the compression by 0.5 s and does not change the dip;
 the drive does not slew, so accel and decel settings do nothing.
 
 **The dip and the closing peak set the charge.** The dip at an opening
 is the 0.3 MPa tube step plus the quasi-static Q/(A·Kp) of eq. (33),
-recovered over the integral time: 1.95 MPa at Kp 0.5, 0.77 at wc 11
-(Kp 2.3 at 4.8 MPa/mm), 0.60 at wc 16. The saturation pressure is
+recovered over the integral time: 2.00 MPa at Kp 0.5, 0.91 at wc 11
+(Kp 2.3 at 4.8 MPa/mm), 0.78 at wc 16. The saturation pressure is
 3.7 MPa per unit of ratio in saline, so each megapascal of dip costs
 about 0.27 in the ratio, and a higher target buys 0.27 per megapascal
 the other way, until the closing peak meets the ceiling. Solution
@@ -902,20 +896,20 @@ delivered before a violation at nominal parameters, 0.5 MPa margin
 
 | Charge | P_sat MPa | StopVelMin 0.5 | GVL | sched wc 6 | sched wc 11 | sched wc 16 |
 |---|---|---|---|---|---|---|
-| 1:1 | 3.6 | 0 mL (steady error) | 0 (peak 12.2) | 249 | 249 | 249 |
-| 2:1 | 7.2 | 0 | 0 (peak 12.2) | 249 (margin 1.5) | 249 (2.0) | 249 (2.2) |
-| 2.5:1 at 10 MPa | 9.0 | 0 | 0 | 0 (−0.4) | 0 (0.2) | 0 (0.4) |
-| 2.5:1 at 11 MPa | 9.0 | 0 | 0 (peak 13.3) | 0 (peak 12.6) | 249 (1.2, peak 12.0) | 249 (1.3, peak 11.8) |
-| 3:1 at 11 MPa | 10.9 | 0 | 0 | 0 | 0 (−0.7) | 0 (−0.5) |
+| 1:1 | 3.6 | 0 mL (steady error) | 0 (peak 12.3) | 249 | 249 | 249 |
+| 2:1 | 7.2 | 0 | 0 (peak 12.3) | 249 (margin 1.4) | 249 (1.9) | 249 (2.0) |
+| 2.5:1 at 10 MPa | 9.0 | 0 | 0 | 0 (−0.4) | 0 (0.1) | 0 (0.2) |
+| 2.5:1 at 11 MPa | 9.0 | 0 | 0 (peak 13.3) | 0 (peak 12.7) | 0 (1.0, peak 12.1) | 249 (1.1, peak 12.0) |
+| 3:1 at 11 MPa | 10.9 | 0 | 0 | 0 | 0 (−0.8) | 0 (−0.7) |
 | 2:1, hose opened after mixing | 7.2 | 0 | 0 | 0 (−0.8) | 0 (−0.8) | 0 (−0.8) |
 
 So 2:1 is deliverable at 10 MPa by the scheduled controller at any of
 the three crossovers, 2.5:1 needs wc = 16 and an 11 MPa target (where
-the closing peak reaches 11.8 MPa, at the ceiling; wc = 11 peaks at
-12.0 and fails most plausible chambers), and 3:1 is saturated at
+the closing peak reaches 12.0 MPa, at the ceiling; wc = 11 peaks at
+12.1 and fails), and 3:1 is saturated at
 10.9 MPa and out of reach below the ceiling. The
 GVL gains deliver nothing without a violation, because the purge
-closing takes the pressure to 12.2 MPa; were the ceiling 12.5 MPa they
+closing takes the pressure to 12.3 MPa; were the ceiling 12.5 MPa they
 would deliver 1:1 and 2:1 (margin 0.8). The target is a stronger lever
 than the gains for the dip, and the closing peak is what caps it:
 `--set P_target=11e6` runs any study at another target, and
@@ -929,23 +923,26 @@ pass rate for every requirement, in percent):
 | 1:1 at 10 MPa, hose before | 0 | **100** | **100** |
 | 2:1 at 10 MPa, hose before | 0 | **100** | **100** |
 | 2.5:1 at 10 MPa, hose before | 0 | 0 | 0 |
-| 2.5:1 at 11 MPa, hose before | 0 | 29 | 98 |
-| 1:1 at 10 MPa, hose after mixing | 0 | **100** | **100** |
+| 2.5:1 at 11 MPa, hose before | 0 | 0 | 33 |
+| 1:1 at 10 MPa, hose after mixing | 0 | **100** | 98 |
 | 2:1 at 10 MPa, hose after mixing | 0 | 0 | 0 |
 
 The GVL fails every sample on the ceiling at the purge closing (its
-peak is 12.2 MPa at nominal and rises with K and the hose compliance's
+peak is 12.3 MPa at nominal and rises with K and the hose compliance's
 lower end); it passes every sample on degassing at 1:1 and 2:1 with the
 hose opened before the compression. The scheduled arms pass every
 sample at 1:1 and 2:1 with that procedure: the measured ranges are
 narrow enough that nothing in them threatens the saturation margin,
 the ceiling or the end of the delivery. With the hose opened after
 mixing, every arm degasses every sample at 2:1, by the equalisation
-drop, and 1:1 passes. At 2.5:1 the 10 MPa target leaves 1.0 MPa to
-saturation, less than any arm's dip plus the margin; at 11 MPa the
-closing peak sits at the ceiling, so wc = 16 passes 98 % and wc = 11
-only 29 %, the failures being the stiffest chambers (high K, low hose
-compliance), where the peak crosses 12 MPa.
+drop, and 1:1 passes with wc = 11; wc = 16 ends the compression outside
+the band in two samples (98 %), both with a drive lag of 45 ms or more,
+where its 19° of nominal phase margin is gone. At 2.5:1 the 10 MPa
+target leaves 1.0 MPa to saturation, less than any arm's dip plus the
+margin; at 11 MPa the closing peak sits at the ceiling, so wc = 16
+passes 33 % and wc = 11 none; for wc = 16 the failures fall from 100 %
+in the slowest third of the drive lags to 41 % in the fastest, and are
+more frequent at low hose compliance (94 % against 41 %).
 
 **What this means for the machine.**
 - Open the proximal valve before the compression. Opened at pressure,
@@ -953,16 +950,18 @@ compliance), where the peak crosses 12 MPa.
   can prevent and which degasses any charge above about 1.8:1.
 - `G_cfgPressureStopVelMin` is now 2 mm/s. That alone removes the
   steady error the bench saw (8.1 MPa for a 10 MPa target).
-- The GVL gains let the purge closing carry the pressure to 12.2 MPa,
+- The GVL gains let the purge closing carry the pressure to 12.3 MPa,
   through the 12 MPa ceiling, in every case; until the gain is raised,
   stop the piston before shutting the distal valve, or confirm that
   the mechanical ceiling allows 12.5 MPa.
-- The scheduled controller cuts the opening dip to a third (0.8 MPa at
-  wc = 11 against 2.0), holds the closing peak to 11.0 MPa and
+- The scheduled controller cuts the opening dip to under half (0.9 MPa
+  at wc = 11 against 2.0), holds the closing peak to 11.1 MPa and
   compresses twice as fast with no overshoot; it delivers 2:1 at 10 MPa
-  in every plausible case and, at wc = 16 and an 11 MPa target, 2.5:1
-  in 98 % of them, with the closing peak at the ceiling. Its margin is
-  the same at every point of the run.
+  in every plausible case. Its margin is the same at every point of the
+  run, but with 44 ms of loop delay it is 37° at wc = 11 and 19° at
+  wc = 16: wc = 11 is the crossover to take, and 2.5:1 at 11 MPa is out
+  of reach (wc = 16 delivers it in a third of the plausible cases, with
+  the closing peak at the ceiling).
 - 3:1 is saturated at 10.9 MPa and cannot be delivered without bubbles
   below the 12 MPa ceiling by any controller.
 - The drive does not apply the accel and decel settings, so they are not
@@ -973,17 +972,17 @@ compliance), where the peak crosses 12 MPa.
 
 | Chamber | k (MPa/mm) | Gain margin | Phase margin | Crossover (rad/s) | Max stable Kp |
 |---|---|---|---|---|---|
-| liquid, 343 mL + hose, K = 0.72 GPa, hose open | 4.5 | 24.9 dB | 73° | 2.3 | 8.9 |
-| liquid, 343 mL, hose shut | 7.2 | 20.8 dB | 73° | 3.6 | 5.6 |
-| liquid, 120 mL, hose open | 8.4 | 19.5 dB | 72° | 4.2 | 4.8 |
-| liquid, 86 mL dead volume (limit switch), hose open | 9.6 | 18.4 dB | 71° | 4.8 | 4.2 |
-| stop-law stiffness | 100 | −2.0 dB | −14° | 37 | 0.40 |
+| liquid, 343 mL + hose, K = 0.72 GPa, hose open | 4.5 | 19.6 dB | 69° | 2.3 | 4.9 |
+| liquid, 343 mL, hose shut | 7.2 | 15.5 dB | 66° | 3.6 | 3.0 |
+| liquid, 120 mL, hose open | 8.4 | 14.2 dB | 64° | 4.2 | 2.6 |
+| liquid, 86 mL dead volume (limit switch), hose open | 9.6 | 13.0 dB | 62° | 4.8 | 2.3 |
+| stop-law stiffness | 100 | −7.3 dB | −65° | 34 | 0.21 |
 
 With the hose open its compliance caps the stiffness at 9.8 MPa/mm, so
 the GVL gain keeps most of its margin to the limit switch; the price is
 a soft chamber at the openings and the closing, where the fixed gain is
 four times too low for the dip and the peak. The scheduled gain
-Kp = wc/k holds 56° at wc = 11 everywhere.
+Kp = wc/k holds 37° at wc = 11 everywhere.
 
 **Open questions:**
 - The mechanical pressure ceiling: 12 MPa is assumed; 15 MPa may break
@@ -993,7 +992,7 @@ Kp = wc/k holds 56° at wc = 11 everywhere.
   (`G_cfgPressureRangeMin`) would make the reading true; until then
   every target is 0.11 MPa conservative for degassing and the same
   amount optimistic for the ceiling.
-- The lag at the piston (below 25 ms) and the dissolution time constant
+- The lag at the piston (not resolved) and the dissolution time constant
   are the two unmeasured plant parameters; the robustness study covers
   the first, and the second sets only the hold time.
 - Whether the saline volume and the charge can be given to the slave
