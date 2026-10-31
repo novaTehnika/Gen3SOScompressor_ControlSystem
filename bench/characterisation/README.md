@@ -487,20 +487,21 @@ and since: the task was set to 2 ms but the program takes about 2.5 ms a
 scan, so it ran on every second motion cycle (the probe captures show
 4.00 ms per row from the position advance against the velocity, and the
 slave's scan counter advances 250 times a second). The capture files of
-the 26th carry a 2 ms time column; every time read from them below is
-half its real value until the captures are refitted at 4 ms, which
-doubles the drive's dead time and lag to about 23 and 16 ms. The task
-and `G_cfgScanTime` are now 4 ms on the controller and in the reference. Dead volume 50 mL (measured) and the fill
+the 26th carry a 2 ms time column, which the fits replace by the scan
+(`opts.rowPeriod_s`, default `G_cfgScanTime`). The task and
+`G_cfgScanTime` are now 4 ms on the controller and in the reference.
+
+Dead volume 50 mL (measured) and the fill
 from the geometry.
 
 | Parameter | Result | Runs | Notes |
 |---|---|---|---|
 | K (effective, at the piston) | 0.72 GPa, segments 0.67 to 0.78; stiffness 7.2 MPa/mm at 343 mL | `K300_char` x3 at 280 mm | Below the 1 GPa assumed. Up and down agree to 0.2 %, but the curvature gives a gas-like term of up to 0.65 mL, 23 % of the compliance, so the liquid-only K is not pinned: the gas-corrected value is 0.81 GPa. A fourth run at 299 mm (276 mL) came out softer, 0.42 GPa, which no liquid chamber does; that fill held more gas. Purge longer (section 2 step 4) and weigh the fill. |
 | Cd | 0.85 (0.84 to 0.87 over 1.6 to 8.3 MPa), exponent 0.48; Q = 4.8 mL/s at 10 MPa, piston 1.42 mm/s | `d2`, `d5`, `d10` deliveries and `Q10_char` x2 | With the transducer zero of -0.11 MPa corrected (`pressureOffset`). Above the 0.7 assumed: deliveries run 20 % faster than the model. The loop held 8.1 MPa for a 10 MPa target, the steady error the design study predicted. |
-| tauV at the motor | 8.7 +/- 0.5 ms lag after 12 +/- 0.6 ms dead time, the same for 0.3, 1 and 2.5 mm/s steps, up and down | `s1`, `s2` step captures, 74 | **The command is not slewed at `G_cfgDirectCtrlAccel`**: a 2.5 mm/s step is complete in 30 ms, as is a 0.3 mm/s step, so the drive follows the command at whatever rate it needs (36 mm/s^2 for a 1 mm/s step, 90 for 2.5) with a 2 to 5 % overshoot. Fit with `opts.accel` large (1e4); with the GVL slew the model cannot follow and reports a lag near zero. |
+| tauV at the motor | 18.2 +/- 0.03 ms lag after 22.8 +/- 0.02 ms dead time (sum 41 ms), the same for 0.3, 1 and 2.5 mm/s steps, up and down; `stepResponseFit`'s grid gives 16 ms after 28 ms | `s1`, `s2` step captures, 74 | **The command is not slewed at `G_cfgDirectCtrlAccel`**: a 2.5 mm/s step is complete in 30 ms, as is a 0.3 mm/s step, so the drive follows the command at whatever rate it needs (36 mm/s^2 for a 1 mm/s step, 90 for 2.5) with a 2 to 5 % overshoot. Fit with `opts.accel` large (1e4) and the 4 ms row spacing, from several starting dead times; with the GVL slew the model cannot follow and reports a lag near zero. |
 | tauV at the piston | not resolved (below 25 ms) | `lag_wet_char` 50 ms logs, 5 steps at 8.6 to 10 MPa/mm | No captures were taken in these runs (`opts.probe` off, probe without the pressure array). Repeat with the reloaded probe. |
 
-| Stopping distance under load (test 4) | 0.031 s × v in both directions, 2 to 10 MPa, 1 to 6 mm/s, residual 4 µm; no deceleration term resolvable (the drive stops within a scan or two once it acts) and no travel after rest | `stops_char_20261030_232726` (16 stops, 25 ms cycles) | The slave's allowance v·0.05 s + v²/(2·50 mm/s²) is above every stop, by 3 to 4 times at 5 mm/s. The 31 ms is the drive's 12 ms dead time and 8.7 ms lag plus the slave's command pipeline and Modbus tick, the components the design model's lag already carries. Two later runs with 90 ms cycles (the probe's register group mapped) do not resolve the stops. |
+| Stopping distance under load (test 4) | 0.031 s × v in both directions, 2 to 10 MPa, 1 to 6 mm/s, residual 4 µm; no deceleration term resolvable (the drive stops within a scan or two once it acts) and no travel after rest | `stops_char_20261030_232726` (16 stops, 25 ms cycles) | The slave's allowance v·0.05 s + v²/(2·50 mm/s²) is above every stop, by 3 to 4 times at 5 mm/s. The 31 ms is 10 ms less than the drive's 22.8 ms dead time and 18.2 ms lag of the velocity steps, so the stop is not explained by the step response plus the command pipeline and Modbus tick; the stop reaches rest earlier than a first-order lag after a dead time would, and the difference is not resolved. Two later runs with 90 ms cycles (the probe's register group mapped) do not resolve the stops. |
 
 The friction bench's own fits on the same day's runs (`frictionFit`,
 `stepResponseFit`): Coulomb 6.1 kN, viscous 2.3e6 N s/m (11 kN at
