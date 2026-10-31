@@ -6,13 +6,15 @@ function sl = slaveInit()
 %   sl.IO  controller I/O image (MO1_* in PRG_Input / PRG_Output)
 %   sl.s   PRG_Main variables and function block instances
 %   sl.ax  simulated axis
-%   sl.sim physical parameters (slaveSimConfig)
+%   sl.plant  the design model's plant (state, and parameters in .par)
+%   sl.sim axis geometry and transducer (slaveSimConfig)
 %   sl.E   enumerations
 %   Test hooks, read every scan by slaveStep:
 %   sl.hook.driveFault  sets G_sysDriveFault
 %   sl.hook.blocked     axis cannot move (mechanical stall)
 %   sl.hook.torque      reported actual torque (%)
 %   sl.hook.outflow     liquid leaving the chamber (mm^3/s)
+%   sl.hook.valve       outlet valve area fraction (the orifice bank)
 %   sl.hook.pressureVolt  analog input override (V); NaN = transducer model
 
 sl = SlaveSim();

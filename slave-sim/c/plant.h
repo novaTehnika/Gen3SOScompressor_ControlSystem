@@ -62,6 +62,10 @@ void plant_init(plant_t *pl, const plant_par_t *par, bool velocity_mode,
 /* Plant.scan: one slave scan with u ([m/s] or [N]) held; returns P [Pa]. */
 double plant_scan(plant_t *pl, double u, double valve, double Q_tube, double prox);
 
+/* Simulated slave only: one scan with the piston velocity v [m/s]
+ * prescribed (see plant.c); returns P [Pa]. */
+double plant_scan_prescribed(plant_t *pl, double v, double valve, double Q_tube);
+
 void plant_open_hose(plant_t *pl);
 double plant_equalise(plant_t *pl);
 double plant_volume_closure(const plant_t *pl);

@@ -11,6 +11,7 @@
  *   v  = slaveSimMex('get', id, path)       'ax.x', 'G.G_cfgScanTime', 'sim', ...
  *   slaveSimMex('set', id, path, value)
  *   E  = slaveSimMex('enums')               struct of the enumerations
+ *   x  = slaveSimMex('chamberPosition', id, P)  axis mm where the chamber holds P MPa
  *   c  = slaveSimMex('names')               every readable path, sorted
  *   c  = slaveSimMex('values', id)          their values, in the same order
  *
@@ -276,6 +277,9 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
             mxSetField(sub, 0, dot + 1, mxCreateDoubleScalar(st_enums[k].value));
         }
         plhs[0] = E;
+    } else if (!strcmp(cmd, "chamberPosition")) {
+        plhs[0] = mxCreateDoubleScalar(slave_sim_chamber_position(instance(prhs[1]),
+                                                                  mxGetScalar(prhs[2])));
     } else if (!strcmp(cmd, "values")) {
         slave_sim_t *sl = instance(prhs[1]);
         plhs[0] = mxCreateCellMatrix(index_count, 1);

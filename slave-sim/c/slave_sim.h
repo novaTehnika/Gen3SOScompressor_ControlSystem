@@ -12,6 +12,7 @@
 #include <stdbool.h>
 #include "st_slave.h"
 #include "st_names.h"
+#include "plant.h"
 
 /* Roots of the hand-written groups, after ST_ROOT_G/IO/S of st_names.h. */
 enum { SIM_ROOT_AX = 3, SIM_ROOT_SIM, SIM_ROOT_HOOK, SIM_ROOT_TOP };
@@ -34,8 +35,9 @@ enum { SIM_ROOT_AX = 3, SIM_ROOT_SIM, SIM_ROOT_HOOK, SIM_ROOT_TOP };
     X(bool, ST_BOOL, moveDone)      \
     X(bool, ST_BOOL, moveAborted)   \
     X(bool, ST_BOOL, jogBusy)       \
-    X(double, ST_F64, P)            /* chamber pressure (MPa gauge) */ \
-    X(double, ST_F64, vOut)         /* liquid removed through hook.outflow (mm^3) */
+    X(double, ST_F64, P)            /* chamber pressure read (MPa gauge), 0 out of the cylinder */ \
+    X(double, ST_F64, vOut)         /* saline delivered through the outlet (mm^3) */ \
+    X(double, ST_F64, xSync)        /* x the plant was last placed at (mm) */
 
 /* Physical parameters (slaveSimConfig.m sets every one at creation). */
 #define SIM_FIELDS(X) \
@@ -45,12 +47,8 @@ enum { SIM_ROOT_AX = 3, SIM_ROOT_SIM, SIM_ROOT_HOOK, SIM_ROOT_TOP };
     X(double, ST_F64, initialPos)        \
     X(double, ST_F64, bootFrameError)    \
     X(double, ST_F64, powerOnDelay)      \
-    X(double, ST_F64, torqueAccel)       \
     X(double, ST_F64, chamberContactPos) \
-    X(double, ST_F64, chamberGasVolume)  \
-    X(double, ST_F64, chamberMinVolume)  \
-    X(double, ST_F64, pistonArea)        \
-    X(double, ST_F64, atmMPa)            \
+    X(double, ST_F64, plantStartPos)     \
     X(double, ST_F64, sensorZeroMa)      \
     X(double, ST_F64, sensorSpanMa)      \
     X(double, ST_F64, sensorRangeMPa)    \
@@ -61,7 +59,8 @@ enum { SIM_ROOT_AX = 3, SIM_ROOT_SIM, SIM_ROOT_HOOK, SIM_ROOT_TOP };
     X(bool, ST_BOOL, driveFault)     \
     X(bool, ST_BOOL, blocked)        \
     X(double, ST_F64, torque)        \
-    X(double, ST_F64, outflow)       \
+    X(double, ST_F64, outflow)       /* extra outflow (mm^3/s) */ \
+    X(double, ST_F64, valve)         /* outlet valve area fraction (orifice bank) */ \
     X(double, ST_F64, pressureVolt)  /* NaN: the transducer model */
 
 #define SIM_DECLARE(ctype, code, name) ctype name;
@@ -92,6 +91,7 @@ typedef struct {
     sim_ax_t ax;
     sim_cfg_t sim;
     sim_hook_t hook;
+    plant_t plant;      /* chamber, outlet and drive (plant.h) */
     double t;
 } slave_sim_t;
 
@@ -100,8 +100,9 @@ void slave_sim_reset(slave_sim_t *sl);
 /* One controller scan of G_cfgScanTime. */
 void slave_sim_step(slave_sim_t *sl, const sim_u_t *u, sim_y_t *y);
 
-/* Chamber gauge pressure (MPa) with the piston at x and vOut removed. */
-double chamber_pressure(const sim_cfg_t *sim, double x, double vOut);
+/* Axis position (mm) at which the chamber, with its present contents,
+ * holds gauge pressure P (MPa) at rest. */
+double slave_sim_chamber_position(const slave_sim_t *sl, double P);
 
 /* Name rows of the hand-written groups, in the format of st_names[]. */
 extern const st_name_t sim_names[];

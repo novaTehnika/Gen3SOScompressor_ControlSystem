@@ -275,6 +275,35 @@ double plant_scan(plant_t *pl, double u, double valve, double Q_tube, double pro
     return pl->y[IY_P];
 }
 
+/* Not in plant.py: a scan with the piston velocity prescribed, for the
+ * simulated slave's motion function blocks that set the motion themselves
+ * (position control, MoveAbsolute, Jog, Stop). v [m/s] is held over the
+ * scan with no dead time or lag; the chamber integrates along it and the
+ * stall of eq. (13) still stops the piston, for the rest of the scan. The
+ * dead-time queue is filled with v, so that a velocity-mode scan that
+ * follows continues from it. Built from the parts tests/plantParity.py
+ * covers: the velocity-mode derivatives with the command equal to the
+ * velocity (dv = 0), the step and the constraints. */
+double plant_scan_prescribed(plant_t *pl, double v, double valve, double Q_tube)
+{
+    for (int k = 0; k < pl->n_dead; k++)
+        pl->queue[k] = v;
+    bool velocity_mode = pl->velocity_mode;
+    pl->velocity_mode = true;
+    pl->y[IY_V] = v;
+    for (int k = 0; k < (int)pl->p.nsub; k++) {
+        pl->v_ref = pl->y[IY_V];
+        step(pl, pl->y, pl->y[IY_V], valve, Q_tube, 0.0);
+        apply_constraints(pl, pl->y);
+    }
+    pl->velocity_mode = velocity_mode;
+    if (pl->hose_open)
+        pl->Q = outflow(pl, pl->y[IY_P], pl->y[IY_VL] + pl->y[IY_VVIR], valve, 0.0);
+    else
+        pl->Q = 0.0;
+    return pl->y[IY_P];
+}
+
 /* ----- Outputs --------------------------------------------------------------- */
 
 static double capacitance(const plant_t *pl)

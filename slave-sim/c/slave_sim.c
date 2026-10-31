@@ -3,15 +3,57 @@
 #include <stddef.h>
 #include <string.h>
 #include "slave_sim.h"
+#include "plant_defaults.h"
 
-double chamber_pressure(const sim_cfg_t *sim, double x, double vOut)
+/* Plant position (m) of the axis at x (mm). */
+static double plant_x(const sim_cfg_t *sim, double x)
 {
-    if (x <= sim->chamberContactPos)
-        return 0;
-    double vGas = sim->chamberGasVolume - sim->pistonArea * (x - sim->chamberContactPos) + vOut;
-    if (vGas < sim->chamberMinVolume)
-        vGas = sim->chamberMinVolume;
-    return sim->atmMPa * (sim->chamberGasVolume / vGas - 1);
+    return (x - sim->plantStartPos) * 1e-3;                     /* [mm -> m] */
+}
+
+/* Set the plant's pressure to the one at which its contents fill the
+ * system, the volume balance of eq. (9), by bisection over vacuum to
+ * 200 MPa. (plant_equalise searches only below the present pressure, as
+ * the design model needs when a valve opens.) Returns P [Pa]. */
+static double settle(plant_t *pl)
+{
+    double lo = 1.0 - pl->p.Patm, hi = 200e6;
+    for (int k = 0; k < 100; k++) {
+        pl->y[IY_P] = 0.5 * (lo + hi);
+        if (plant_volume_closure(pl) < 0)       /* contents exceed the system */
+            lo = pl->y[IY_P];
+        else
+            hi = pl->y[IY_P];
+    }
+    pl->y[IY_P] = 0.5 * (lo + hi);
+    return pl->y[IY_P];
+}
+
+/* Place the plant's piston at the axis position x (mm), at rest, and
+ * settle the chamber pressure there. */
+static void place_plant(slave_sim_t *sl, double x)
+{
+    sl->plant.y[IY_X] = plant_x(&sl->sim, x);
+    sl->plant.y[IY_V] = 0;
+    settle(&sl->plant);
+    sl->ax.xSync = x;
+}
+
+double slave_sim_chamber_position(const slave_sim_t *sl, double P)
+{
+    static plant_t pl;
+    double lo = sl->sim.chamberContactPos;
+    double hi = sl->sim.switchPosPos + sl->sim.hardStopMargin;
+    for (int k = 0; k < 60; k++) {
+        double mid = 0.5 * (lo + hi);
+        pl = sl->plant;
+        pl.y[IY_X] = plant_x(&sl->sim, mid);
+        if (settle(&pl) * 1e-6 < P)                             /* [Pa -> MPa] */
+            lo = mid;
+        else
+            hi = mid;
+    }
+    return 0.5 * (lo + hi);
 }
 
 void slave_sim_reset(slave_sim_t *sl)
@@ -26,6 +68,10 @@ void slave_sim_reset(slave_sim_t *sl)
     sl->ax.offset = sl->sim.bootFrameError;
     memset(&sl->hook, 0, sizeof sl->hook);
     sl->hook.pressureVolt = NAN;
+    plant_init(&sl->plant, &plant_default_par, true, plant_default_y0, plant_default_Vch0,
+               plant_default_hose_open);
+    place_plant(sl, sl->ax.x);
+    sl->ax.P = sl->ax.x < sl->sim.chamberContactPos ? 0 : sl->plant.y[IY_P] * 1e-6;
     sl->t = 0;
 }
 
@@ -103,6 +149,11 @@ static void axis_model(slave_sim_t *sl, double dt)
     bool dcActive = false;
     double xDirect = ax->x;
     bool directPosition = false;
+    /* What drives the piston this scan: the motion profile above (v, or a
+     * position for directPosition), or the plant's drive model for the
+     * velocity and torque modes of Y_DirectControl. */
+    enum { DRIVE_PROFILE, DRIVE_VELOCITY, DRIVE_TORQUE } drive = DRIVE_PROFILE;
+    double uDrive = 0;
 
     if (!powered) {
         ax->v = 0;
@@ -127,14 +178,16 @@ static void axis_model(slave_sim_t *sl, double dt)
             directPosition = true;
             xDirect = G->G_cmdDirectControl.Position - ax->offset;
         } else if (mode == Y_ControlMode__VelocityTLMode) {
-            double vT = G->G_cmdDirectControl.Velocity;
-            double rate = fabs(vT) > fabs(ax->v) ? G->G_cmdDirectControl.Acceleration
-                                                 : G->G_cmdDirectControl.Deceleration;
-            ax->v = slew(ax->v, vT, rate * dt);
+            /* The drive follows the command after its dead time and lag,
+             * eqs. (11) and (12), and stalls at its torque, eq. (13). */
+            drive = DRIVE_VELOCITY;
+            uDrive = G->G_cmdDirectControl.Velocity * 1e-3;     /* [mm/s -> m/s] */
         } else {
-            double vLim = fabs(G->G_cmdDirectControl.Velocity);
-            ax->v = ax->v + G->G_cmdDirectControl.Torque * sim->torqueAccel * dt;
-            ax->v = fmin(fmax(ax->v, -vLim), vLim);
+            /* Torque against the chamber and friction, eq. (14), at the
+             * command's velocity limit. */
+            drive = DRIVE_TORQUE;
+            uDrive = G->G_cmdDirectControl.Torque * 0.01 * sl->plant.p.Fcap;  /* [% -> N] */
+            sl->plant.p.vmax = fabs(G->G_cmdDirectControl.Velocity) * 1e-3;   /* [mm/s -> m/s] */
         }
     } else if (ax->moveActive) {
         double dist = ax->moveTarget - ax->x;
@@ -168,26 +221,51 @@ static void axis_model(slave_sim_t *sl, double dt)
         ax->v = 0;
     }
 
-    /* Integrate, mechanical stall and hard stops */
+    /* Integrate through the plant: the chamber, and the drive in the
+     * velocity and torque modes. A position set from outside (a test
+     * placing the axis) moves the plant's piston there first. */
+    plant_t *pl = &sl->plant;
+    if (ax->x != ax->xSync)
+        place_plant(sl, ax->x);
     double xPrev = ax->x;
-    if (hook->blocked)
-        ax->v = 0;
-    else if (directPosition)
-        ax->x = xDirect;
-    else
-        ax->x = ax->x + ax->v * dt;
+    double valve = hook->valve;
+    double Q_tube = hook->outflow * 1e-9;                       /* [mm^3/s -> m^3/s] */
+    if (hook->blocked || drive == DRIVE_PROFILE) {
+        double vProfile = 0;                                    /* [mm/s] */
+        if (!hook->blocked)
+            vProfile = directPosition ? (xDirect - ax->x) / dt : ax->v;
+        plant_scan_prescribed(pl, vProfile * 1e-3, valve, Q_tube);
+        if (pl->y[IY_V] != 0 || vProfile == 0) {
+            /* Not stalled: the axis is where the profile put it, exactly
+             * (the status logic compares velocities), and the plant with it. */
+            ax->x = directPosition && !hook->blocked ? xDirect : xPrev + vProfile * dt;
+            ax->v = vProfile;
+            pl->y[IY_X] = plant_x(sim, ax->x);
+        } else {
+            ax->x = pl->y[IY_X] * 1e3 + sim->plantStartPos;     /* [m -> mm] */
+            ax->v = 0;
+        }
+    } else {
+        pl->velocity_mode = drive == DRIVE_VELOCITY;
+        plant_scan(pl, uDrive, valve, Q_tube, 0.0);
+        ax->x = pl->y[IY_X] * 1e3 + sim->plantStartPos;         /* [m -> mm] */
+        ax->v = pl->y[IY_V] * 1e3;                              /* [m/s -> mm/s] */
+    }
     double xMin = sim->switchNegPos - sim->hardStopMargin;
     double xMax = sim->switchPosPos + sim->hardStopMargin;
     if (ax->x < xMin || ax->x > xMax) {
-        ax->x = fmin(fmax(ax->x, xMin), xMax);
+        place_plant(sl, fmin(fmax(ax->x, xMin), xMax));
+        ax->x = ax->xSync;
         ax->v = 0;
     }
-    if (directPosition)
+    if (directPosition && !hook->blocked)
         ax->v = (ax->x - xPrev) / dt;
+    ax->xSync = ax->x;
 
-    /* Chamber pressure */
-    ax->vOut = ax->vOut + hook->outflow * dt;
-    ax->P = chamber_pressure(sim, ax->x, ax->vOut);
+    /* Chamber pressure as read: the cylinder is open before the piston
+     * enters it. */
+    ax->vOut = pl->y[IY_VOUT] * 1e9;                            /* [m^3 -> mm^3] */
+    ax->P = ax->x < sim->chamberContactPos ? 0 : pl->y[IY_P] * 1e-6;   /* [Pa -> MPa] */
 
     /* Status */
     G->G_staStop.Busy = stopExec && ax->v != 0;
@@ -269,5 +347,20 @@ const st_name_t sim_names[] = {
     SIM_FIELDS(CFG_ROW)
     HOOK_FIELDS(HOOK_ROW)
     {"t", SIM_ROOT_TOP, ST_F64, offsetof(slave_sim_t, t), 1},
+    /* The plant's state in SI units (plant.h) */
+    {"plant.x", SIM_ROOT_TOP, ST_F64, offsetof(slave_sim_t, plant.y[IY_X]), 1},
+    {"plant.v", SIM_ROOT_TOP, ST_F64, offsetof(slave_sim_t, plant.y[IY_V]), 1},
+    {"plant.P", SIM_ROOT_TOP, ST_F64, offsetof(slave_sim_t, plant.y[IY_P]), 1},
+    {"plant.n_dis", SIM_ROOT_TOP, ST_F64, offsetof(slave_sim_t, plant.y[IY_NDIS]), 1},
+    {"plant.n_tot", SIM_ROOT_TOP, ST_F64, offsetof(slave_sim_t, plant.y[IY_NTOT]), 1},
+    {"plant.V_l", SIM_ROOT_TOP, ST_F64, offsetof(slave_sim_t, plant.y[IY_VL]), 1},
+    {"plant.V_out", SIM_ROOT_TOP, ST_F64, offsetof(slave_sim_t, plant.y[IY_VOUT]), 1},
+    {"plant.V_vir", SIM_ROOT_TOP, ST_F64, offsetof(slave_sim_t, plant.y[IY_VVIR]), 1},
+    {"plant.Q", SIM_ROOT_TOP, ST_F64, offsetof(slave_sim_t, plant.Q), 1},
+    {"plant.v_ref", SIM_ROOT_TOP, ST_F64, offsetof(slave_sim_t, plant.v_ref), 1},
+    {"plant.n_dead", SIM_ROOT_TOP, ST_I32, offsetof(slave_sim_t, plant.n_dead), 1},
+    /* Its parameters (PLANT_PARAMS of plant.h, SI units) */
+#define PAR_ROW(name) {"plant.par." #name, SIM_ROOT_TOP, ST_F64, offsetof(slave_sim_t, plant.p.name), 1},
+    PLANT_PARAMS(PAR_ROW)
 };
 const int sim_names_count = sizeof sim_names / sizeof sim_names[0];

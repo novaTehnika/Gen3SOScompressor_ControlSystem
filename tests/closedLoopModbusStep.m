@@ -11,7 +11,7 @@ function closedLoopModbusStep()
 %   widened to the bench value to match.
 %   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
 %     addpath master-src/logic slave-sim slave-sim/generated tests
-%   Depends on: master-src/logic slave-src slave-sim tools
+%   Depends on: master-src/logic slave-src slave-sim tools design/pressure-loop
 
 clear masterStep masterStateMachine
 cfg = masterConfig();
@@ -87,7 +87,7 @@ fprintf('ok  go home with a slow drive start, and from home (%.1f s)\n', h.tick 
 h = command(h, 0);
 h = runUntil(h, 5, @(h) h.m.state == 1 && ...
     h.sl.G.G_sysCurrentState == h.sl.E.E_SystemState.ST_IDLE);
-h.sl.ax.x = chamberPosition(h.sl.sim, 1);
+h.sl.ax.x = chamberPosition(h.sl, 1);
 h.app.targetPressure = 20 + cfg.atmAmbient;     % atm absolute
 h = command(h, 4);
 h = runUntil(h, 10, @(h) h.m.statusCode == 5);

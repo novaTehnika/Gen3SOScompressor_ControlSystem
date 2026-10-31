@@ -11,29 +11,31 @@ function out = fakeProbeLink(cmd, varargin)
 %   fakeProbeLink('slave', fn)          sl = fn(sl): edit the simulated slave
 %   fakeProbeLink('torqueModel', p)     report a friction torque (below)
 %   fakeProbeLink('valveAt', t, Cd)     outlet valve opens at t seconds: the
-%                                       chamber drains through the orifice
-%                                       bank, Q = Cd A_o sqrt(2P/rho), after
-%                                       losing the tube's 0.236 mL at once
+%                                       plant's orifice bank (32 of 40 um,
+%                                       discharge coefficient Cd) drains the
+%                                       chamber, after the tube fills
 %   t    = fakeProbeLink('now')
 %          fakeProbeLink('wait', t)     run the slave until t
 %   regs = fakeProbeLink('read', start, n)
 %          fakeProbeLink('write', start, values)
 %          fakeProbeLink('writeOne', address, value)
-%   S    = fakeProbeLink('state')       S.collectLog is [t, mm^3 that left]
-%                                       while the valve is open
+%   S    = fakeProbeLink('state')       S.collectLog is [t, mm^3 collected at
+%                                       the orifices, mol of free gas in the
+%                                       chamber] while the valve is open
 %
-%   The torque model stands in for the drive's torque feedback, which the
-%   axis model reports as zero. With p a struct of F0, Fc, dFs, vs, b, mu,
+%   The simulated chamber, outlet and drive are the design model's plant
+%   (slave-sim/c/plant.c), so the drive's dead time and lag and the
+%   chamber's stiffness are its own (sl.plant.par). The torque model stands
+%   in for the drive's torque feedback, which the simulated slave reports as
+%   zero: it is a friction law chosen by the test, for the friction fit to
+%   recover. With p a struct of F0, Fc, dFs, vs, b, mu,
 %   noisePct and tStick, the reported torque (% rated) is the piston force
 %     F0 + sign(v) (Fc + dFs exp(-(|v|/vs)^2) + mu P A) + b v + P A
 %   in N divided by newtonPerPct, plus white noise, with v the axis
 %   velocity (mm/s), P the chamber pressure (MPa) and A the piston area
 %   (mm^2). A nonzero tStick holds the axis still for that long after each
 %   command from rest while the torque ramps to F0 + sign (Fc + dFs) + P A,
-%   which is what breakaway looks like in the log. A field tauV lags the
-%   velocity the registers report behind the axis by that time constant,
-%   standing in for the drive's velocity loop, which the axis model does
-%   not have.
+%   which is what breakaway looks like in the log.
 
 persistent S
 out = [];
@@ -52,10 +54,9 @@ switch cmd
         S.faultAt = Inf;
         S.faultUntil = Inf;
         S.torque = [];
-        S.valve = struct('at', Inf, 'Cd', 0.7, 'open', false, 'collected', 0);
-        S.collectLog = zeros(0, 2);
+        S.valve = struct('at', Inf, 'Cd', 0.7, 'open', false, 'vOut0', 0, 'tube', 0);
+        S.collectLog = zeros(0, 3);
         S.stick = struct('until', -Inf, 'sign', 0, 'armed', true);
-        S.vLag = 0;
         S.sp = struct('arm', 0, 'lastArm', 0, 'state', 0, 'echo', 0, 'idx', 0, 'pos0', 0, ...
             'vCmd', zeros(1, 500), 'vel', zeros(1, 500), 'trq', zeros(1, 500), 'pos', zeros(1, 500), ...
             'pres', zeros(1, 500));
@@ -94,7 +95,6 @@ switch cmd
                 end
                 S = valveScan(S);
                 [S.sl, S.y] = slaveStep(S.sl, S.u);
-                S = lagScan(S);
                 S = probeScan(S);
                 S = stepProbeScan(S);
             end
@@ -104,9 +104,6 @@ switch cmd
         n = varargin{2};
         regs = zeros(1, 3410);
         regs(1:S.map.nRead) = packRead(S.y, S.map);
-        if ~isempty(S.torque)
-            regs(S.map.ir.velocity:S.map.ir.velocity + 1) = modbusPack(S.vLag);
-        end
         regs(101:102) = modbusPack(S.p.stats(1));
         regs(103:104) = modbusPack(S.p.stats(2));
         regs(105:106) = modbusPack(S.p.stats(3));
@@ -170,7 +167,7 @@ if commanded && S.stick.armed && abs(sl.ax.v) < 0.05 && p.tStick > 0
     S.stick.sign = sign(cmd.Velocity);
 end
 v = sl.ax.v;
-PA = sl.ax.P * sl.sim.pistonArea;               % MPa * mm^2 = N
+PA = sl.ax.P * 1e6 * sl.plant.par.A;            % MPa * m^2 -> N
 if t < S.stick.until
     sl.hook.blocked = true;
     frac = 1 - (S.stick.until - t) / p.tStick;
@@ -186,34 +183,26 @@ end
 
 
 function S = valveScan(S)
-% Orifice outflow once the valve is open: 32 orifices of 40 um discharging
-% to atmosphere, after the air in the 1 mm bore tube has left.
+% The outlet valve: from its opening, the plant's orifice bank at the
+% valve's discharge coefficient, and in the opening scan the flow that
+% fills the tube, eq. (37) of design/pressure-loop/README.md.
 if isinf(S.valve.at)
     return;
 end
 t = S.tick / 1000;
+dt = S.sl.G.G_cfgScanTime;
 if ~S.valve.open && t >= S.valve.at
     S.valve.open = true;
-    S.sl.ax.vOut = S.sl.ax.vOut + 236;                        % mm^3, the tube
-end
-if S.valve.open
     Ao = 32 * pi / 4 * (40e-6)^2;                             % m^2
-    Q = S.valve.Cd * Ao * sqrt(2 * max(S.sl.ax.P, 0) * 1e6 / 1000) * 1e9;    % mm^3/s
-    S.sl.hook.outflow = Q;
-    S.valve.collected = S.valve.collected + Q * S.sl.G.G_cfgScanTime;
-    S.collectLog(end + 1, :) = [t S.valve.collected];
-end
-end
-
-
-function S = lagScan(S)
-% The velocity the registers report: the axis velocity through a
-% first-order lag when the torque model asks for one.
-dt = S.sl.G.G_cfgScanTime;
-if ~isempty(S.torque) && isfield(S.torque, 'tauV') && S.torque.tauV > 0
-    S.vLag = S.vLag + (S.sl.ax.v - S.vLag) * dt / (S.torque.tauV + dt);
-else
-    S.vLag = S.sl.ax.v;
+    S.sl.plant.par.k_orifice = S.valve.Cd * Ao * sqrt(2 / 1000);
+    S.valve.vOut0 = S.sl.ax.vOut;
+    S.valve.tube = 236;                                       % mm^3
+    S.sl.hook.valve = 1;
+    S.sl.hook.outflow = S.valve.tube / dt;
+elseif S.valve.open
+    S.sl.hook.outflow = 0;
+    S.collectLog(end + 1, :) = [t, S.sl.ax.vOut - S.valve.vOut0 - S.valve.tube, ...
+        S.sl.plant.n_tot - S.sl.plant.n_dis];
 end
 end
 
@@ -230,7 +219,7 @@ end
 if sp.state == 1
     sp.idx = sp.idx + 1;
     sp.vCmd(sp.idx) = S.sl.G.G_sysCommandedVelocity;
-    sp.vel(sp.idx) = S.vLag;
+    sp.vel(sp.idx) = S.sl.ax.v;
     sp.trq(sp.idx) = S.sl.hook.torque;
     sp.pos(sp.idx) = S.sl.G.G_sysActualPosition - sp.pos0;
     sp.pres(sp.idx) = S.sl.G.G_sysActualPressure;
