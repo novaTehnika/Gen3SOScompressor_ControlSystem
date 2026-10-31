@@ -1,7 +1,7 @@
 # Pressure Transducer Noise Bench
 
 Measures the noise on the pressure transducer input at the slave's full
-2 ms sample rate, to size the sensor filter (`G_cfgAnalogFilterTimeConst`)
+4 ms sample rate, to size the sensor filter (`G_cfgAnalogFilterTimeConst`)
 and to decide whether a capacitor across the loop shunt is needed. The
 protocol registers cannot show this: IR19-20 carry the pressure after the
 median and low-pass filters, read every 50 ms.
@@ -31,7 +31,7 @@ low side to the controller's analog ground, `MO1_AI_01` across the shunt.
    in the matching groups. `G_mbProbeSamples` is a located array; if the
    editor refuses an array at a direct address, declare it with a named
    type `ARRAY[0..249] OF UINT` from the Data Types worksheet.
-3. Add `PRG_PressureProbe` to the project and assign it to the 2 ms cyclic
+3. Add `PRG_PressureProbe` to the project and assign it to the 4 ms cyclic
    task. It uses only its own globals and runs beside `PRG_Main`. Do not
    load it together with `PRG_ModbusBench`, which uses the same registers.
 4. Compile, download, start.
@@ -157,7 +157,7 @@ noise is broadband, and neither jogging nor pressure control adds to it.
 Through the slave's median-5 and 20 ms filters it is 0.001 MPa rms bare
 and 0.0005 MPa with 4.7 uF, against the 0.1 MPa in-band threshold.
 Fitted: 4.7 uF electrolytic with 10 nF ceramic in parallel, corner 78 Hz,
-as the anti-alias for the 2 ms sampling. Sensor filter: 20 ms.
+as the anti-alias for the 4 ms sampling. Sensor filter: 20 ms.
 
 Link during the runs (raw frames): exchange median 12.9 ms, p99 22.5 ms;
 longest gap between cycles 108 ms.

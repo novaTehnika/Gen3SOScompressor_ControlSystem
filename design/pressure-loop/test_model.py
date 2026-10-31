@@ -74,7 +74,7 @@ def check_config():
     c = slave_config()
     assert c['G_cfgPressureSensorFaultTime'] == 0.1, \
         c['G_cfgPressureSensorFaultTime']
-    assert c['G_cfgScanTime'] == 0.002 and c['G_cfgAnalogMedianSize'] == 5
+    assert c['G_cfgScanTime'] == 0.004 and c['G_cfgAnalogMedianSize'] == 5
     par = Params()
     assert (par.Ts == 0.002 and par.vmax == 5e-3 and par.medN == 5
             and par.tauF == 0.02

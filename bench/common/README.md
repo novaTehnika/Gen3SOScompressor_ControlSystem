@@ -3,7 +3,7 @@
 What every bench under `bench/` uses: the controller connection, the raw
 Modbus link the run scripts drive the slave with, the model that holds the
 safety relay while a script takes the shell's place as Modbus master, the
-step probe that captures the axis at the 2 ms scan, and the directory the
+step probe that captures the axis at the 4 ms scan, and the directory the
 runs log to. Each bench keeps its own constants and fits in its own
 directory and takes these from here.
 
@@ -27,7 +27,7 @@ directory and takes these from here.
 3. For scan-rate captures, load `slave/PRG_StepProbe.st` as described in
    `bench/friction/README.md` section 4.5: the FC#04 input register group
    enlarged to at least 3410 registers, the globals of the program header
-   declared, the program on the 2 ms task beside `PRG_Main`. It reads
+   declared, the program on the 4 ms task beside `PRG_Main`. It reads
    globals only. Only one bench program using the probe registers (this
    one, `PRG_PressureProbe` or `PRG_ModbusBench`) is loaded at a time.
    The register group costs the controller's Modbus service whether or

@@ -12,7 +12,7 @@ here = fileparts(mfilename('fullpath'));
 cfg.address   = '192.168.1.1';
 cfg.port      = 502;
 cfg.serverId  = 1;
-cfg.slaveScan = 0.002;            % s, cyclic task interval (G_cfgScanTime)
+cfg.slaveScan = 0.004;            % s, cyclic task interval (G_cfgScanTime)
 
 % Where the run scripts write their logs and captures (gitignored), and
 % the Desktop Real-Time model that holds the safety relay while a script

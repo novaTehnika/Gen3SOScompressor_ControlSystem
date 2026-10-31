@@ -260,7 +260,7 @@ Slave setup, once:
    array at a direct address, declare it with a named type
    (`ARRAY[0..499] OF INT`, `ARRAY[0..499] OF DINT`) from the Data Types
    worksheet.
-3. Add `PRG_StepProbe` to the project and assign it to the 2 ms cyclic
+3. Add `PRG_StepProbe` to the project and assign it to the 4 ms cyclic
    task. It reads `G_sys*` globals only and runs beside `PRG_Main`. Do not
    load it together with `PRG_PressureProbe` or `PRG_ModbusBench`.
 4. Compile, download, start.

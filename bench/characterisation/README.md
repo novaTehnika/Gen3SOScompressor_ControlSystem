@@ -12,7 +12,7 @@ but test 4 below gives friction points under load from the same run.
 
 Everything is measured through the protocol the master already uses: the
 slave reports position, velocity, torque and pressure in IR11-20 every 50 ms
-(`docs/master/ModbusRegisterMap.md`). The drive lag alone needs the 2 ms
+(`docs/master/ModbusRegisterMap.md`). The drive lag alone needs the 4 ms
 scan, which the shared step probe (`bench/common/slave/PRG_StepProbe.st`,
 already on the controller) provides. Nothing in `slave-src/` changes.
 
@@ -328,7 +328,7 @@ change) and passed through the slave's median filter (two scans for a
 smooth signal), the low-pass (`G_cfgAnalogFilterTimeConst`, 20 ms on the
 machine, 50 ms earlier) and the two-scan pipeline, eqs. 16 to 18. The
 filter constant must be the one loaded. The result is the lag at the
-piston plus its dead time, at the 2 ms scan: behind the sensor chain the
+piston plus its dead time, at the 4 ms scan: behind the sensor chain the
 two trade against each other, so the fit determines their sum, which is
 also the value a model without a dead time needs. The 50 ms log is fitted
 the same way as a check, to about 25 ms; the `ramp` starts of test 1 are
@@ -482,7 +482,15 @@ and the master's `deadVolume` can be corrected.
 ## 8. Results
 
 Logs of 2026-10-26 (`bench/captures/` on the `bench-tests` branch), fitted
-with the scripts of this bench. Dead volume 50 mL (measured) and the fill
+with the scripts of this bench. **The scan was 4 ms, not 2**, on the 26th
+and since: the task was set to 2 ms but the program takes about 2.5 ms a
+scan, so it ran on every second motion cycle (the probe captures show
+4.00 ms per row from the position advance against the velocity, and the
+slave's scan counter advances 250 times a second). The capture files of
+the 26th carry a 2 ms time column; every time read from them below is
+half its real value until the captures are refitted at 4 ms, which
+doubles the drive's dead time and lag to about 23 and 16 ms. The task
+and `G_cfgScanTime` are now 4 ms on the controller and in the reference. Dead volume 50 mL (measured) and the fill
 from the geometry.
 
 | Parameter | Result | Runs | Notes |
