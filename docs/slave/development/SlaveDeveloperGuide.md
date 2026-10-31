@@ -68,7 +68,6 @@ Global variables defined in a `GVL` use a prefix to indicate their scope.
 |--------|-------|---------|-------------|
 | `cfg` | Configuration | `G_cfgDebounceTimeMode` | A static configuration parameter used for tuning. |
 | `sys` | System | `G_sysCurrentState` | A dynamic system status variable. |
-| `pos` | Position | `G_posModeEntryPosition` | A position-related value captured or derived at run time. |
 | `di` / `do` | I/O | `G_diOvertravelNeg` | A digital input (`di`) or output (`do`): the overtravel switches, the brake and the status outputs. |
 | `ai` / `ao` | I/O | `G_aiPressure` | An analog input (`ai`) or output (`ao`). The pressure transducer is the only analog input; no `G_ao*` globals exist. |
 | `mb` | Modbus | `G_mbModeCode` | A Modbus holding register (master → slave) or input register (slave → master), see `docs/master/ModbusRegisterMap.md`. |

@@ -343,17 +343,6 @@
                                                           cylinder — exit guard fires regardless
                                                           of soft-limit value. Measure and set to
                                                           the actual mechanical entry point. *)
-
-
-     (* ========================================================================
-        DYNAMIC POSITION TRACKING
-        ======================================================================== *)
-
-     (* Position at mode entry (for reference) *)
-     G_posModeEntryPosition    : LREAL := 0.0     (* Position when entering current mode *)
-
-     (* Exit guard boundary *)
-     G_posExitGuardBoundary    : LREAL := 0.0     (* Dynamic boundary for exit prevention *)
    END_VAR
 
 
@@ -411,14 +400,9 @@
      G_sysDriveFault           : BOOL := FALSE    (* Drive has reported a fault *)
 
      (* Motion status *)
-     G_sysMotionActive         : BOOL := FALSE    (* Motion command is active *)
-     G_sysInPosition           : BOOL := FALSE    (* At commanded position (position mode) *)
-     G_sysAtVelocity           : BOOL := FALSE    (* At commanded velocity (velocity mode) *)
      G_sysHalted               : BOOL := FALSE    (* Halt is active (ST_HOLD_POSITION) *)
 
      (* Limit status *)
-     G_sysAtPosLimitHigh       : BOOL := FALSE    (* At or beyond high position limit *)
-     G_sysAtPosLimitLow        : BOOL := FALSE    (* At or beyond low position limit *)
      G_sysOvertravelNegActive  : BOOL := FALSE    (* Negative overtravel switch triggered *)
      G_sysOvertravelPosActive  : BOOL := FALSE    (* Positive overtravel switch triggered *)
 
@@ -437,10 +421,6 @@
      G_sysLastFaultCode        : E_FaultCode := FAULT_NONE    (* Last fault that occurred *)
      G_sysLastFaultState       : E_SystemState := ST_INIT     (* State when last fault occurred *)
      G_sysFaultCount           : UDINT := 0       (* Total number of faults since power-up *)
-
-     (* Timing diagnostics *)
-     G_sysStateEntryTime       : TIME := T#0MS    (* Time when current state was entered *)
-     G_sysTimeInState          : TIME := T#0MS    (* Duration in current state *)
    END_VAR
 
 
