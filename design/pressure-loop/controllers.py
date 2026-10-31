@@ -470,14 +470,23 @@ class ScheduledSlaveController(SlaveController):
         self.P_ref = 0.0                    # [Pa] highest pressure seen
         self.arrived = False
         self.k_est = math.nan
+        self.k_target = math.nan
         self.v_lim = math.nan
         return u0
 
     def estimate_stiffness(self, P_meas, x):
         """[Pa/m] Upper bound on the chamber stiffness from the measured
-        pressure P_meas [Pa] and piston position x [m], eq. (39)."""
+        pressure P_meas [Pa] and piston position x [m], eq. (39). The
+        highest pressure seen is updated here, once per scan."""
         P_abs = max(P_meas, 0.0) + self.Patm                    # [Pa]
         self.P_ref = max(self.P_ref, P_abs)                     # [Pa]
+        return self.stiffness_at(P_meas, x)
+
+    def stiffness_at(self, P, x):
+        """[Pa/m] The bound of eq. (39) at the gauge pressure P [Pa] and
+        piston position x [m], with the highest pressure seen as it
+        stands. It does not update that pressure."""
+        P_abs = max(P, 0.0) + self.Patm                         # [Pa]
         V_ch = (max(self.A * (self.x_limit - x), 0.0)
                 + self.V_dead_run)                              # [m^3]
         V_l = min(self.V_l_cfg_run, V_ch)                       # [m^3]
@@ -499,8 +508,14 @@ class ScheduledSlaveController(SlaveController):
 
     def step(self, P_meas, target, t, scenario, x=0.0):
         fb = self.fb
-        k = self.estimate_stiffness(P_meas, x)                  # [Pa/m]
-        self.k_est = k
+        k_now = self.estimate_stiffness(P_meas, x)              # [Pa/m]
+        self.k_est = k_now
+        # The bound at the target pressure, where a gas-dominated
+        # chamber is stiffest on the way there, eq. (39a).
+        tgt = min(max(target * 1e-6, 0.0), self.target_max)     # [MPa]
+        self.k_target = self.stiffness_at(
+            max(P_meas, tgt * 1e6), x)                          # [Pa/m]
+        k = max(k_now, self.k_target)                           # [Pa/m]
         k_mm = k / 1e9                          # [Pa/m -> MPa/mm]
         # Scheduled gain, eq. (40): [rad/s / (MPa/mm) -> (mm/s)/MPa]
         Kp = min(max(self.wc / k_mm, self.kp_min), self.kp_max)

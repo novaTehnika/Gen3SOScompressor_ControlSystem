@@ -569,7 +569,7 @@ def check_scheduled_st():
             u = self.ref.reset(p, sc)
             assert self.port.reset(p, sc) == u
             self.accel, self.decel = self.ref.accel, self.ref.decel
-            self.worst, self.kp = 0.0, []
+            self.worst, self.kp, self.gain = 0.0, [], 0.0
             return u
 
         def step(self, P, tg, t, sc, x=0.0):
@@ -577,6 +577,10 @@ def check_scheduled_st():
             b = self.port.step(P, tg, t, sc, x)
             self.worst = max(self.worst, abs(a - b))
             self.kp.append(self.port.fb.Kp)
+            for r, q in ((self.ref.fb, self.port.fb),):
+                self.gain = max(self.gain, abs(r.Kp - q.Kp),
+                                abs(r.Ki - q.Ki),
+                                abs(r.VelMax - q.VelMax))
             return a
 
     q = par.with_(hose_before=True)     # the hose is open throughout
@@ -584,6 +588,7 @@ def check_scheduled_st():
         L = Lockstep(reference(), ctl.ScheduledSlaveControllerST())
         r = sim.run(q, scenarios.make(name, q), L)
         assert L.worst < 1e-9, (name, L.worst)            # [m/s]
+        assert L.gain < 1e-9, (name, L.gain)  # [mm/s per MPa]
         assert L.port.sched.Enable and not L.port.sched.ParamError
         assert not L.port.sched.IntegHold                  # arrived
         assert max(L.kp) > 1.5 * min(L.kp)                 # scheduled

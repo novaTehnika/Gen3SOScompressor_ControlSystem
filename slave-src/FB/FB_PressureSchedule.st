@@ -20,14 +20,18 @@
      C = Vgas / Pabs + min(Vsaline, Vchamber) / BulkModulus + HoseCompliance
      KEst = PistonArea / C
    is never below the true stiffness while SalineVolume and DeadVolume are
-   at or below the true values.
+   at or below the true values. The bound is evaluated at the present
+   pressure (KEst) and at the larger of the present and the target pressure
+   (KEstTarget), with the highest pressure as it stands; a gas-dominated
+   chamber is stiffer at the target, and the larger of the two, KSched, is
+   used below.
 
-   Gains, eq. (40): Kp = LIMIT(KpMin, Crossover / KEst, KpMax) and
+   Gains, eq. (40): Kp = LIMIT(KpMin, Crossover / KSched, KpMax) and
    Ki = KiRatio * Kp, so the loop's crossover is at most Crossover.
 
    Stop law, eq. (41): the piston travels for Lag at its speed and then
    decelerates at DecelMax, and must stop within the error at KEst:
-     v = -DecelMax * Lag + SQRT((DecelMax * Lag)^2 + 2 * DecelMax * |e| / KEst)
+     v = -DecelMax * Lag + SQRT((DecelMax * Lag)^2 + 2 * DecelMax * |e| / KSched)
    VelLimit = MIN(VelMax, MAX(StopVelMin, v)) is given to the controller as
    its VelMax, and Stiffness (a negligible value) disables the controller's
    own stop law. Lag is the measurement chain (filter time constant, median
@@ -82,7 +86,8 @@
        Stiffness       : LREAL            (* Stiffness for the controller's own stop law (MPa/mm)
        IntegScale      : LREAL            (* Factor for the controller's stored integral this scan
        IntegHold       : BOOL             (* Hold the controller's integrator at zero this scan
-       KEst            : LREAL            (* Stiffness bound (MPa/mm), for diagnostics
+       KEst            : LREAL            (* Stiffness bound at the present pressure (MPa/mm), for diagnostics
+       KEstTarget      : LREAL            (* Stiffness bound at the larger of the present and target pressure (MPa/mm), for diagnostics
        Lag             : LREAL            (* Lag assumed by the stop law (s), for diagnostics
        ParamError      : BOOL             (* A setting is out of range; outputs are zero
      VAR:
@@ -101,6 +106,10 @@
        rRT             : LREAL            (* Gas constant times temperature (J/mol)
        rVGas           : LREAL            (* Free gas volume (m^3)
        rC              : LREAL            (* Chamber compliance (m^3/Pa)
+       rPAbsT          : LREAL            (* Absolute pressure at the larger of Actual and Target (Pa)
+       rVGasT          : LREAL            (* Free gas volume at rPAbsT (m^3)
+       rCT             : LREAL            (* Chamber compliance at rPAbsT (m^3/Pa)
+       rKSched         : LREAL            (* Larger of KEst and KEstTarget (MPa/mm)
        rErr            : LREAL            (* Target - Actual (MPa)
        rDist           : LREAL            (* Travel that closes the error at KEst (mm)
        rStep           : LREAL            (* Velocity lost over Lag at DecelMax (mm/s)
@@ -133,6 +142,7 @@ IF (NOT Enable) OR ParamError THEN
     IntegScale := LREAL#1.0;
     IntegHold := FALSE;
     KEst := LREAL#0.0;
+    KEstTarget := LREAL#0.0;
     Lag := LREAL#0.0;
     RETURN;
 END_IF;
@@ -164,11 +174,16 @@ rRT := LREAL#8.314 * GasTemp;
 rVGas := rNGas * rRT / rPAbs;
 rC := rVGas / rPAbs + rVl / BulkModulus + HoseCompliance;
 KEst := rArea / rC / LREAL#1.0E9;
+rPAbsT := MAX(MAX(Actual, Target), LREAL#0.0) * LREAL#1.0E6 + Patm;
+rVGasT := rNGas * rRT / rPAbsT;
+rCT := rVGasT / rPAbsT + rVl / BulkModulus + HoseCompliance;
+KEstTarget := rArea / rCT / LREAL#1.0E9;
+rKSched := MAX(KEst, KEstTarget);
 
 (* --------------------------------------------------------------------------
    Gains, eq. (40), and the integral rescale on a change of Ki
    -------------------------------------------------------------------------- *)
-Kp := LIMIT(KpMin, Crossover / KEst, KpMax);
+Kp := LIMIT(KpMin, Crossover / rKSched, KpMax);
 Ki := KiRatio * Kp;
 IF (rKiPrev > LREAL#0.0) AND (Ki > LREAL#0.0) AND (Ki <> rKiPrev) THEN
     IntegScale := rKiPrev / Ki;
@@ -181,7 +196,7 @@ rKiPrev := Ki;
    Stop law with the lag, eq. (41)
    -------------------------------------------------------------------------- *)
 rErr := Target - Actual;
-rDist := ABS(rErr) / KEst;
+rDist := ABS(rErr) / rKSched;
 rStep := DecelMax * Lag;
 rVelStop := -rStep + SQRT(rStep * rStep + LREAL#2.0 * DecelMax * rDist);
 VelLimit := MIN(VelMax, MAX(StopVelMin, rVelStop));
