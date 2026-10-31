@@ -581,7 +581,7 @@ the step; Heun at second order. At the default of five Heun steps per
 scan (dt = 0.8 ms) the largest error is 0.016 kPa, and the metrics
 change by less than 0.001 MPa of overshoot and 0.001 s of settling time
 between the default and the reference. Heun at five steps costs about
-50 % more than Euler at five and is hundreds of times more accurate on
+50 % more than Euler at five and is 70 to 3000 times more accurate on
 these cases, which is why it is the default. The volume closure,
 eq. (9), holds to within 2e-9 m^3 over 6 s of compression.
 
