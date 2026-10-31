@@ -57,6 +57,7 @@
        fbCommWatchdog      : FB_CommWatchdog
        (* Step probe: scan-rate data capture, called last
        fbProbe             : FB_Probe
+       nProbeWord          : INT              (* Index of the window copy out of fbProbe.Stage
        (* Timers — each has exactly one call site (see end of body)
        tStateTimer         : TON
        tBrakeTimer         : TON
@@ -1275,8 +1276,8 @@ END_IF;
    Records this scan's values in the probe's ring and serves the master's
    window requests (see FB_Probe). Last in the file: the state, the status
    outputs and the confirmed mode code are final for this scan, and a fault
-   entered by the safety monitor above marks this scan's record. The staging
-   array is passed by reference; PRG_Output publishes it.
+   entered by the safety monitor above marks this scan's record. A completed
+   window is copied to G_sysProbeStage, which PRG_Output publishes.
    -------------------------------------------------------------------------- *)
 fbProbe(
     Enable := G_cfgProbeEnable,
@@ -1296,9 +1297,15 @@ fbProbe(
     Arm := G_mbProbeArm,
     Length := G_mbProbeLength,
     ReqLo := G_mbProbeReqLo,
-    ReqHi := G_mbProbeReqHi,
-    Stage := G_sysProbeStage
+    ReqHi := G_mbProbeReqHi
 );
+(* A completed window is copied out of the block only in the scan it is
+   published, so the copy costs nothing in the other scans *)
+IF fbProbe.Publish THEN
+    FOR nProbeWord := 0 TO 103 DO
+        G_sysProbeStage[nProbeWord] := fbProbe.Stage[nProbeWord];
+    END_FOR;
+END_IF;
 G_sysProbePublish := fbProbe.Publish;
 G_sysProbeWritten := fbProbe.Written;
 G_sysProbeMark := fbProbe.Mark;

@@ -163,8 +163,10 @@ channel inside the record, whose layout is defined only in `FB_Probe.st`
 
 The block is written so that `tools/st2m.py` and `tools/st2py.py` translate it
 and the simulator runs the source: it reads no `G_*` variable (the caller
-passes the channels and the probe's holding registers as inputs) and takes the
-staging array as a `VAR_IN_OUT`. It uses `MOD`, `SHR`, the `*_TO_WORD` /
+passes the channels and the probe's holding registers as inputs). It fills
+the window in its own output array `Stage`, which `PRG_Main` copies to
+`G_sysProbeStage` only in the scan a fill completes. `VAR_IN_OUT` is not used
+in the slave: it did not work out on this controller. It uses `MOD`, `SHR`, the `*_TO_WORD` /
 `DWORD_TO_WORD` / `DINT_TO_DWORD` conversions (which wrap modulo 2^16 and 2^32,
 as on the controller) and IF/ELSIF chains, no CASE. MotionWorks setup for it:
 the `FB_Probe` block, the `E_ProbeState` / `E_ProbeXferState` enumerations and

@@ -242,9 +242,6 @@ class PyTranslator(Translator):
         bits, signed = INT_WIDTH[typ]
         return self.wrap(f'(int({code}) << int({n}))', bits, signed)
 
-    def copy_back(self, target, source, line):
-        pass            # lists are shared with the caller, so the block wrote into it
-
     def resolve(self, name, line):
         if name not in self.vars and name.startswith(('G_', 'MO1_')):
             raise STError(f'{self.pou} line {line}: {name} is a global or I/O '

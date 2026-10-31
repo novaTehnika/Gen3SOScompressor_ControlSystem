@@ -4,7 +4,7 @@
     python3 tools/st2m.py slave-src slave-sim/generated
 
 Covers the ST subset used in slave-src: assignments, IF/ELSIF/ELSE, FOR,
-RETURN, function block calls with named inputs and VAR_IN_OUT arguments,
+RETURN, function block calls with named inputs,
 typed literals, TIME literals, one-dimensional arrays and a handful of
 standard functions (ABS, SQRT, MIN, MAX, LIMIT, SHR, SHL, the type
 conversions, MOD). An integer conversion whose source range is not inside
@@ -113,7 +113,7 @@ def parse_header_decls(text, known_types, aliases=None):
     decls, section = [], None
     for line in text[start:end].splitlines()[1:]:
         s = line.strip()
-        m = re.match(r'^(VAR_INPUT|VAR_OUTPUT|VAR_IN_OUT|VAR CONSTANT|VAR)\s*:', s)
+        m = re.match(r'^(VAR_INPUT|VAR_OUTPUT|VAR CONSTANT|VAR)\s*:', s)
         if m:
             section = m.group(1)
             continue
@@ -310,22 +310,15 @@ class Translator:
         if decl is None or not (decl['type'] in STD_FBS or decl['type'] in self.ctx['fbs']):
             raise STError(f'{self.pou} line {line}: {name} is not a function block instance')
         inst = f's.{name}'
-        inouts = {d['name'] for d in self.ctx['pou_decls'].get(decl['type'], [])
-                  if d['section'] == 'VAR_IN_OUT'}
-        back = []
         self.expect('(')
         while not self.accept(')'):
             arg = self.next()[1]
             self.expect(':=')
             value = self.expr()[0]
             self.emit(f'{inst}.{arg} = {value}{self.EOS}', line)
-            if arg in inouts:
-                back.append((arg, value))
             self.accept(',')
         self.expect(';')
         self.emit_fb_call(inst, decl['type'], line)
-        for arg, value in back:     # VAR_IN_OUT: the caller's variable takes the result
-            self.copy_back(value, f'{inst}.{arg}', line)
         self.ctx['called'].add(decl['type'])
 
     # -- expressions: (code, type) --
@@ -375,9 +368,6 @@ class Translator:
 
     def copy_value(self, code, typ):
         return code
-
-    def copy_back(self, target, source, line):
-        self.emit(f'{target} = {source}{self.EOS}', line)
 
     # -- Target language: expressions --
     def bitwise(self, op, lc, rc):

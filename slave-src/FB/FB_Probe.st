@@ -51,8 +51,9 @@
    again changes nothing. The block copies at most FillPerScan records per
    scan from the ring into Stage, so a transfer never stretches a scan.
    When the copy is complete Publish is TRUE for that scan and Start, Count
-   and StartTail hold the new window; they change only then, and PRG_Output
-   copies Stage into the mapped window and writes StartTail last, so a read
+   and StartTail hold the new window; they change only then. In that scan
+   PRG_Main copies Stage to G_sysProbeStage, and PRG_Output copies that
+   into the mapped window and writes StartTail last, so a read
    that straddles an update shows Start <> StartTail and is discarded.
      XFER_IDLE     the window is complete for the request
      XFER_FILLING  records are being copied
@@ -86,9 +87,8 @@
        Length          : UINT             (* Length register: records wanted by the next arm, 0 = open ended
        ReqLo           : UINT             (* Low word of the first record index wanted in the window
        ReqHi           : UINT             (* High word
-     VAR_IN_OUT:
-       Stage           : ARRAY104WORD     (* The window being filled: 13 records of 8 words
      VAR_OUTPUT:
+       Stage           : ARRAY104WORD     (* The window being filled: 13 records of 8 words
        Written         : UDINT := 0       (* Records written so far
        Mark            : UDINT := 0       (* Index of the record written in the scan of the last arm
        FaultMark       : UDINT := 0       (* Index of the record written in the scan of the last fault
