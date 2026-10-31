@@ -20,7 +20,6 @@
        ModeStable      : BOOL             (* Mode has been stable (no change from last scan)
        ModeChanged     : BOOL             (* Rising edge - mode just changed
      VAR:
-       nCurrentValue   : INT              (* Current mode value
        nPreviousValue  : INT              (* Previous scan mode value
        nFilteredCode   : UINT             (* Debounced mode code
        nPendingCode    : UINT             (* Code being debounced toward
@@ -29,7 +28,6 @@
        tDebounce       : TON              (* Debounce timer (single call site)
        bDebounceIN     : BOOL             (* Latched IN value for tDebounce
        fbIntToMode     : FB_IntToMode     (* Code -> enum helper
-       fbModeToInt     : FB_ModeToInt     (* Enum -> int helper (was FN_ModeToInt)
    ============================================================================ *)
 
 (* ============================================================================
@@ -69,21 +67,22 @@ IF tDebounce.Q THEN
     bDebounceIN := FALSE;
 END_IF;
 
-(* Decode mode using centralized conversion helper FBs *)
+(* Decode the debounced code. Codes above 7 (the master mirrors fault codes
+   in this register) decode to MODE_IDLE and read as value 0, as in FB_IntToMode. *)
 fbIntToMode(Value := nFilteredCode);
 DecodedMode := fbIntToMode.Mode;
 
-fbModeToInt(Mode := DecodedMode);
-nCurrentValue := fbModeToInt.Value;
-
-(* Update outputs *)
-ModeValue := nCurrentValue;
+IF nFilteredCode <= UINT#7 THEN
+    ModeValue := UINT_TO_INT(nFilteredCode);
+ELSE
+    ModeValue := 0;
+END_IF;
 
 (* Mode is stable if value matches previous scan *)
-ModeStable := (nCurrentValue = nPreviousValue);
+ModeStable := (ModeValue = nPreviousValue);
 
 (* Detect mode change (value different from previous scan) *)
-ModeChanged := (nCurrentValue <> nPreviousValue);
+ModeChanged := (ModeValue <> nPreviousValue);
 
 (* Save for next scan *)
-nPreviousValue := nCurrentValue;
+nPreviousValue := ModeValue;
