@@ -112,9 +112,14 @@ When `G_mbFaultActive` (IR5, also DO4) is 1, the slave is in fault state. `G_mbF
 **Description**: Position exceeded software limits.
 
 **Triggered When**:
-- Actual position < `G_posSoftLimitMin`
-- Actual position > `G_posSoftLimitMax`
-- Position drifted outside limits during stop
+- Actual position < `G_cfgPosSoftLimitMin` (-2.5 mm)
+- Actual position > `G_cfgPosSoftLimitMax` (367 mm)
+
+`FB_SafetyMonitor` checks this every scan, so it also catches a position that
+drifts outside the limits while the axis is held. It is suppressed in
+`ST_HOME_LIMIT` (the homing sequence drives below the minimum to find the
+switch) and in the recovery states (the axis starts outside the limits and
+is being jogged back).
 
 **Symptoms**:
 - Position near or beyond expected limits
@@ -165,13 +170,18 @@ clear. If the master itself lost the link it is latched in its own
 **Description**: Piston exit prevention guard triggered.
 
 **Triggered When**:
-- Position near `G_posSoftLimitMin` (exit boundary)
-- Torque mode anomaly: commanding torque one direction, moving opposite (indicates external pressure overcoming motor)
-- Guard detected dangerous approach to exit boundary
+All three at once, evaluated by `FB_PistonExitGuard` every scan in every state:
+- Position at or below the exit boundary, `G_cfgPosCylinderEntry` +
+  `G_cfgPosExitGuardMargin` (176 + 20 = 196 mm). This boundary is above the
+  cylinder entry, not at the soft limit (`G_cfgPosSoftLimitMin`)
+- Actual torque above `G_cfgTorqueStallThreshold` (60 %): the motor is pushing
+  the piston into the cylinder
+- Actual velocity below -`G_cfgInMotionVelThreshold` (-0.1 mm/s): the piston is
+  nevertheless moving out, so external pressure is overcoming the motor
 
 **Symptoms**:
-- Motion halted near minimum position
-- In torque mode: position drifting toward exit despite command
+- Motion halted in the band below 196 mm
+- In torque mode: position drifting toward exit despite the commanded torque
 
 **Master Recovery**:
 ```
