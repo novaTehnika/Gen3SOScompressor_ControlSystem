@@ -7,9 +7,9 @@ function charRunSim()
 %   test 4 (charStopPath) and its fit (charStopDistance); a delivery
 %   through the orifice bank in pressure mode; the pressure and position
 %   guards and a slave fault.
-%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
+%   Run from the repository root after  addpath slave-sim; buildSlaveSim
 %     addpath master-src/logic slave-sim slave-sim/generated tests
-%   Depends on: master-src/logic slave-src slave-sim tools design/pressure-loop bench/characterisation bench/common tests/fakeProbeLink.m
+%   Depends on: master-src/logic slave-src slave-sim tools models bench/characterisation bench/common tests/fakeProbeLink.m
 
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'bench', 'characterisation'), fullfile(here, '..', 'bench', 'common'));
@@ -18,7 +18,7 @@ ccfg = charConfig();
 T = 1; STEP = 2; STATUS = 3; MODE = 4; REF = 5; POS = 6; P = 9;    % log columns
 
 % --- Velocity session: ramps on the pressure, dwell, steps, then a hold ---------
-% The simulated chamber is the design model's (design/pressure-loop): the
+% The simulated chamber is the plant model's (models/): the
 % 1:1 oxygen charge over saline, about 0.5 MPa/mm at 2.5 MPa, and the
 % charge dissolves as the pressure rises, so the ramps run at 0.3 mm/s.
 opts = linkOpts(saveDir, @(sl) chamberPosition(sl, 1.7));
@@ -44,7 +44,10 @@ s5 = L(L(:, STEP) == 5, :);
 assert(any(s5(:, MODE) == 2) && any(s5(:, STATUS) == 3), 'hold did not run in position mode');
 assert(numel(r.captures) == 5, 'expected one capture per command change, got %d', numel(r.captures));
 cap = r.captures{1};
-assert(cap.step == 1 && size(cap.data, 1) == 500 && size(cap.data, 2) == 6);
+assert(cap.step == 1 && size(cap.data, 1) == 500 && size(cap.data, 2) == 8);
+csv = benchReadCsv(r.capFiles{1});
+assert(isequal(fieldnames(csv)', {'t', 'vCmd', 'velocity', 'torque', 'position', 'pressure', 'volts', 'status', 'file'}) ...
+    && abs(csv.volts(1) - cap.data(1, 7)) < 1e-4 && csv.status(1) == cap.data(1, 8), 'capture file columns');
 assert(abs(cap.data(1, 6) - s1(1, P)) < 0.3, 'capture pressure %.2f, log %.2f MPa', cap.data(1, 6), s1(1, P));
 j = find(cap.data(:, 2) ~= 0, 1);
 assert(~isempty(j) && abs(cap.data(j, 2) - 0.3) < 1e-3 && j > 5, 'first capture not around the 0.3 mm/s command');
@@ -104,7 +107,7 @@ fprintf('ok  bulk modulus fit rejects the gas charge (K %.4f GPa, gas %.1f mL of
 
 % --- One pass: levels, excursions in both directions, stops ---------------------
 % The path is planned on the simulated chamber's own stiffness (its free
-% gas and its liquid, eqs. (4) and (10) of design/pressure-loop/README.md),
+% gas and its liquid, eqs. (4) and (10) of models/README.md),
 % so that each excursion stays within its budget.
 opts = linkOpts(saveDir, @(sl) chamberPosition(sl, 1.7));
 opts.probe = 'stops';
@@ -151,16 +154,18 @@ for f = {rs.fit.comp, rs.fit.ret}
     % The plant's drive does not slew: a stop is the dead time and the lag,
     % a distance linear in the speed, so the fit's deceleration term goes
     % large and its delay is the drive's: the lag plus the dead time less
-    % the scan by which the logged command leads the drive, less the half
-    % scan the log's sum of v*Ts loses.
-    T0 = tauV + Td - 1.5 * ccfg.scanTime;                           % [s]
+    % the scan by which the logged command leads the drive, plus the scan
+    % by which the probe's velocity feedback is older than its command (the
+    % probe runs in PRG_Main, before the axis updates the feedback), less the
+    % half scan the log's sum of v*Ts loses.
+    T0 = tauV + Td - 0.5 * ccfg.scanTime;                           % [s]
     assert(abs(f{1}.T0_s - T0) < 0.003 && f{1}.D_mm_s2 > 5 * ccfg.velDecel, ...
         'fit D %.1f mm/s^2, T0 %.4f s; the drive stops in %.4f s, unslewed', f{1}.D_mm_s2, f{1}.T0_s, T0);
 end
 assert(rs.pass, 'stopping-distance checks failed');
 fprintf('ok  one-pass path: %d steps, %d stops, D %.0f / %.0f mm/s^2 (unslewed), T0 %.1f ms (drive %.1f)\n', ...
     numel(path), numel(rs.stops), rs.fit.comp.D_mm_s2, rs.fit.ret.D_mm_s2, 1000 * rs.T0_s, ...
-    1000 * (tauV + Td - 1.5 * ccfg.scanTime));
+    1000 * (tauV + Td - 0.5 * ccfg.scanTime));
 
 % --- Delivery: pressure mode, valve opens, the loop balances the outflow --------
 % A delivery follows the hold that dissolves the charge, so the saline
@@ -275,7 +280,7 @@ end
 function x = dissolvedAt(sl, P)
 % The axis position at which the chamber holds P MPa with its saline
 % saturated at P (Henry's law, eqs. (2) and (3) of
-% design/pressure-loop/README.md), after setting the dissolved gas so.
+% models/README.md), after setting the dissolved gas so.
 pl = sl.plant;
 sl.plant.n_dis = min(pl.par.kH * (P * 1e6 + pl.par.Patm) * pl.V_l, pl.n_tot);   % [mol]
 x = chamberPosition(sl, P);

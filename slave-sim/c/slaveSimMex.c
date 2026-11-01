@@ -8,6 +8,10 @@
  *   slaveSimMex('free', id)
  *   y  = slaveSimMex('step', id, u)         one scan; u, y as slaveStep.m
  *   y  = slaveSimMex('step', id, u, n)      n scans with the same u
+ *   y  = slaveSimMex('scan', id[, n])        scans on the holding registers as they stand
+ *   w  = slaveSimMex('readRegisters', id, group, start, n)   group 'holding' or 'input'
+ *   slaveSimMex('writeRegisters', id, group, start, words)   16-bit words, 1-based
+ *   R  = slaveSimMex('registers')           the register table from the AT addresses
  *   v  = slaveSimMex('get', id, path)       'ax.x', 'G.G_cfgScanTime', 'sim', ...
  *   slaveSimMex('set', id, path, value)
  *   E  = slaveSimMex('enums')               struct of the enumerations
@@ -183,17 +187,29 @@ static double field(const mxArray *u, const char *name)
     return mxGetScalar(f);
 }
 
-/* An optional field of u: def when u has none. */
-static double field_or(const mxArray *u, const char *name, double def)
-{
-    mxArray *f = mxGetField(u, 0, name);
-    return f ? mxGetScalar(f) : def;
-}
-
 static const char *Y_NAMES[] = {
 #define Y_NAME(name) #name,
     Y_FIELDS(Y_NAME)
 };
+
+static mxArray *y_struct(const sim_y_t *y)
+{
+    int n = sizeof Y_NAMES / sizeof Y_NAMES[0];
+    mxArray *s = mxCreateStructMatrix(1, 1, n, Y_NAMES);
+    const double *v = (const double *)y;
+    for (int k = 0; k < n; k++)
+        mxSetFieldByNumber(s, 0, k, mxCreateDoubleScalar(v[k]));
+    return s;
+}
+
+/* 'holding' or 'input' */
+static int group_arg(const mxArray *a)
+{
+    char g[16];
+    if (mxGetString(a, g, sizeof g) || (strcmp(g, "holding") && strcmp(g, "input")))
+        mexErrMsgIdAndTxt("slaveSimMex:group", "the register group is 'holding' or 'input'");
+    return !strcmp(g, "holding");
+}
 
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 {
@@ -224,19 +240,53 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         slave_sim_t *sl = instance(prhs[1]);
         sim_u_t u = {field(prhs[2], "heartbeat"), field(prhs[2], "modeCode"),
                      field(prhs[2], "motionEnable"), field(prhs[2], "faultReset"),
-                     field(prhs[2], "reference"),
-                     field_or(prhs[2], "positionSpeed", mxGetNaN()),
-                     field_or(prhs[2], "salineVolume", 0),
-                     field_or(prhs[2], "oxygenRatio", 0)};
+                     field(prhs[2], "reference"), field(prhs[2], "positionSpeed")};
         sim_y_t y;
         int scans = nrhs > 3 ? (int)mxGetScalar(prhs[3]) : 1;
         for (int k = 0; k < scans; k++)
             slave_sim_step(sl, &u, &y);
-        int n = sizeof Y_NAMES / sizeof Y_NAMES[0];
-        plhs[0] = mxCreateStructMatrix(1, 1, n, Y_NAMES);
-        const double *v = (const double *)&y;
-        for (int k = 0; k < n; k++)
-            mxSetFieldByNumber(plhs[0], 0, k, mxCreateDoubleScalar(v[k]));
+        plhs[0] = y_struct(&y);
+    } else if (!strcmp(cmd, "scan")) {
+        slave_sim_t *sl = instance(prhs[1]);
+        sim_y_t y;
+        int scans = nrhs > 2 ? (int)mxGetScalar(prhs[2]) : 1;
+        for (int k = 0; k < scans; k++)
+            slave_sim_scan(sl, &y);
+        plhs[0] = y_struct(&y);
+    } else if (!strcmp(cmd, "readRegisters") || !strcmp(cmd, "writeRegisters")) {
+        slave_sim_t *sl = instance(prhs[1]);
+        int holding = group_arg(prhs[2]);
+        int start = (int)mxGetScalar(prhs[3]);
+        if (!strcmp(cmd, "readRegisters")) {
+            int n = (int)mxGetScalar(prhs[4]);
+            uint16_t *words = mxCalloc(n > 0 ? n : 1, sizeof *words);
+            slave_sim_read_registers(sl, holding, start, n, words);
+            plhs[0] = mxCreateDoubleMatrix(1, n, mxREAL);
+            for (int k = 0; k < n; k++)
+                mxGetPr(plhs[0])[k] = words[k];
+        } else {
+            int n = (int)mxGetNumberOfElements(prhs[4]);
+            uint16_t *words = mxCalloc(n > 0 ? n : 1, sizeof *words);
+            for (int k = 0; k < n; k++) {
+                double v = mxGetPr(prhs[4])[k];
+                if (v < 0 || v > 65535 || v != floor(v))
+                    mexErrMsgIdAndTxt("slaveSimMex:word", "register value %g is not a 16-bit word", v);
+                words[k] = (uint16_t)v;
+            }
+            slave_sim_write_registers(sl, holding, start, n, words);
+        }
+    } else if (!strcmp(cmd, "registers")) {
+        /* The register table: name, group, first, words, one row each */
+        const char *f[] = {"name", "group", "first", "words"};
+        int nh = st_holding_regs_count, ni = st_input_regs_count;
+        plhs[0] = mxCreateStructMatrix(nh + ni, 1, 4, f);
+        for (int k = 0; k < nh + ni; k++) {
+            const st_reg_t *r = k < nh ? &st_holding_regs[k] : &st_input_regs[k - nh];
+            mxSetFieldByNumber(plhs[0], k, 0, mxCreateString(r->name + 2));   /* without "G." */
+            mxSetFieldByNumber(plhs[0], k, 1, mxCreateString(k < nh ? "holding" : "input"));
+            mxSetFieldByNumber(plhs[0], k, 2, mxCreateDoubleScalar(r->first));
+            mxSetFieldByNumber(plhs[0], k, 3, mxCreateDoubleScalar(r->words));
+        }
     } else if (!strcmp(cmd, "get") || !strcmp(cmd, "set")) {
         slave_sim_t *sl = instance(prhs[1]);
         char path[256];

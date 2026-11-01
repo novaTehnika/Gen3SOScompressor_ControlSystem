@@ -16,7 +16,7 @@ function r = charStopDistance(files, opts)
 %   start of its exchange and the row's position is read at the end of
 %   it, by which time the slave has acted, so the position at the
 %   command is taken from the row before, advanced at its velocity to
-%   the command row's time. Captures (PRG_StepProbe, 2 ms: t, vCmd,
+%   the command row's time. Captures (step probe, one row per scan: t, vCmd,
 %   velocity, torque, position, pressure) give the same stops at the
 %   scan rate where the probe was armed for them, with no such
 %   correction; the log resolves a stop to about half an exchange, the

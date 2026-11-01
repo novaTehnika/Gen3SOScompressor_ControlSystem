@@ -34,7 +34,24 @@ classdef SlaveSim < handle
         end
 
         function y = step(obj, u)
+            % One scan with the holding registers set from u (engineering
+            % units).
             y = slaveSimMex('step', obj.id, u);
+        end
+
+        function y = scan(obj)
+            % One scan on the holding registers as they stand.
+            y = slaveSimMex('scan', obj.id);
+        end
+
+        function writeHoldingRegisters(obj, start, words)
+            % The master's write (FC16): 16-bit words from register start.
+            slaveSimMex('writeRegisters', obj.id, 'holding', start, words);
+        end
+
+        function words = readInputRegisters(obj, start, n)
+            % The master's read (FC04): n 16-bit words from register start.
+            words = slaveSimMex('readRegisters', obj.id, 'input', start, n);
         end
 
         function varargout = subsref(obj, S)
@@ -44,7 +61,8 @@ classdef SlaveSim < handle
             if strcmp(S(1).subs, 'E')
                 v = obj.enums;
                 n = 1;
-            elseif any(strcmp(S(1).subs, {'id', 'step', 'delete'}))
+            elseif any(strcmp(S(1).subs, {'id', 'step', 'scan', 'delete', ...
+                    'writeHoldingRegisters', 'readInputRegisters'}))
                 [varargout{1:nargout}] = builtin('subsref', obj, S);
                 return
             else

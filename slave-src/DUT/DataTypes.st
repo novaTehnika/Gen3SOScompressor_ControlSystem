@@ -12,6 +12,7 @@
    - E_OperatingMode: Operating mode enumeration (Modbus mode code)
    - E_FaultCode: Fault code enumeration (Modbus fault code)
    - E_SystemState: System state machine enumeration
+   - E_ProbeState, E_ProbeXferState: step probe recording and transfer states
    - ST_AxisLimits: Position, velocity, torque, accel/decel limits
    - ST_HomingParams: Limit-switch homing parameters
    - ST_Cmd*/ST_Sta*: Command/status struct pairs bridging ST and LD POUs
@@ -144,6 +145,40 @@ TYPE
       DONE,                    (* Homing sequence complete *)
       ABORTING,                (* Abort requested; wait for whichever motion FB is busy *)
       ERROR                    (* Error latched; await Execute clear *)
+   );
+
+
+   (* ============================================================================
+      E_ProbeState - FB_Probe Recording State
+
+      State of the step probe's recorder. The code published in the input
+      register G_mbProbeState is the member's position below (0-3).
+      ============================================================================ *)
+
+   (* IMPORTANT: Member order defines the published code. Do not reorder. *)
+   E_ProbeState :
+   (
+      PROBE_OFF,               (* implicit 0: disabled by G_cfgProbeEnable, nothing recorded *)
+      PROBE_RECORDING,         (* implicit 1: ring running, no armed capture open *)
+      PROBE_CAPTURING,         (* implicit 2: an armed capture whose last record is not written yet (or is open-ended) *)
+      PROBE_HELD               (* implicit 3: the armed capture is fully recorded and still entirely in the ring *)
+   );
+
+
+   (* ============================================================================
+      E_ProbeXferState - FB_Probe Transfer State
+
+      State of the window the master reads. The code published in the input
+      register G_mbProbeXfer is the member's position below (0-3).
+      ============================================================================ *)
+
+   (* IMPORTANT: Member order defines the published code. Do not reorder. *)
+   E_ProbeXferState :
+   (
+      XFER_IDLE,               (* implicit 0: the window is complete for the request *)
+      XFER_FILLING,            (* implicit 1: copying the requested records into the window, a few per scan *)
+      XFER_PENDING,            (* implicit 2: the requested records are not recorded yet *)
+      XFER_OVERRUN             (* implicit 3: the requested start has been overwritten in the ring *)
    );
 
 
@@ -329,4 +364,6 @@ TYPE
    ARRAY250UINT : ARRAY[0..249] OF UINT;
    ARRAY500INT : ARRAY[0..499] OF INT;
    ARRAY500DINT : ARRAY[0..499] OF DINT;
+   ARRAY104WORD : ARRAY[0..103] OF WORD;
+   ARRAY65536WORD : ARRAY[0..65535] OF WORD;
 END_TYPE

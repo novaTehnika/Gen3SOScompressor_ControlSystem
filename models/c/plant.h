@@ -1,8 +1,8 @@
-/* C port of the design model's plant, design/pressure-loop/plant.py: the
+/* C port of the design model's plant, models/plant.py: the
  * chamber (saline and gas, Henry's-law dissolution), the outlet (hose,
  * proximal valve, orifice bank) and the actuator (velocity mode with dead
  * time, first-order lag and stall; torque mode against friction). The
- * equation numbers are those of design/pressure-loop/README.md.
+ * equation numbers are those of models/README.md.
  *
  * plant.py is the reference: a change to it needs the same change here,
  * and tests/plantParity.py runs both on the same inputs and requires their

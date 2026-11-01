@@ -18,7 +18,7 @@ function runAll(varargin)
 %
 %   or, in an open MATLAB session, cd to tests and type runAll.
 %
-%   The Python tests (stTargetParity, plantParity and design/pressure-loop)
+%   The Python tests (stTargetParity, plantParity and design/pressure-loop's)
 %   are run by tests/run_all.sh, which also runs these tests, in parallel.
 
 root = fileparts(fileparts(mfilename('fullpath')));
@@ -31,7 +31,7 @@ if ~any(strcmp(varargin, 'nogen'))
     buildSlaveSim();
 end
 
-tests = {'smokeMasterStateMachine', 'closedLoopMasterSlave', ...
+tests = {'smokeMasterStateMachine', 'modbusLinkTiming', 'closedLoopMasterSlave', ...
          'closedLoopModbusStep', 'slavePressureMode', ...
          'pressureNoiseRunSim', 'benchProbeSim', 'frictionRunSim', 'charRunSim', ...
          'charFitsSynthetic'};

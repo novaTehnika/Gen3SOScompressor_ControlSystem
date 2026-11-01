@@ -13,8 +13,9 @@ but test 4 below gives friction points under load from the same run.
 Everything is measured through the protocol the master already uses: the
 slave reports position, velocity, torque and pressure in IR11-20 every 50 ms
 (`docs/master/ModbusRegisterMap.md`). The drive lag alone needs the 4 ms
-scan, which the shared step probe (`bench/common/slave/PRG_StepProbe.st`,
-read by `bench/common/benchProbe.m`) provides. Nothing in `slave-src/` changes.
+scan, which the slave's step probe (`slave-src/FB/FB_Probe.st`, read by
+`bench/common/benchProbe.m`) provides. Nothing in `slave-src/` changes for
+the bench: the probe is part of the main program.
 
 This bench shares the friction bench's conventions: the same Modbus master
 pattern (`bench/common/`), the same log columns and capture format, the
@@ -100,7 +101,7 @@ override them for a run and cannot be set above the ceiling.
 
 ### Slave
 
-No change for tests 1 and 2. Test 3 uses `PRG_StepProbe`, set up as in
+No change for tests 1 and 2. Test 3 uses the step probe (`FB_Probe`), set up as in
 `bench/friction/README.md` section 4.5; `charRun` arms it before every
 command change in a velocity session when `opts.probe` is true, and
 applies the command once the slave has acknowledged the arm. Without it,
@@ -305,7 +306,7 @@ needed if the steps from rest show far more lag than the steps taken
 while moving, which would be the seals' stiction rather than the loop
 (the friction bench measures that). The friction bench measures this lag
 too (`bench/friction/README.md` section 4.5): `frictionRun(label, 'steps')`
-with `PRG_StepProbe` loaded and `stepResponseFit` on the captures.
+with the probe enabled and `stepResponseFit` on the captures.
 `charDriveLag` reads the same captures and fits the same model by least
 squares, so either script gives tauV at the motor; they should agree
 within a millisecond or two. Keep the step
@@ -321,14 +322,14 @@ test separates the lag from the ramp more sharply.
 for 0.3 s moves the pressure by 0.7 MPa:
 
 ```matlab
-opts.probe = true;                                   % PRG_StepProbe loaded
+opts.probe = true;                                   % step probe enabled
 path = {{'ramp', 0.1, 4.0, 60}, {'dwell', 3}, ...
         {'velstep', [0.2 0 -0.2 0 0.2 0 -0.2 0], [0.3 3 0.3 3 0.3 3 0.3 3]}};
 r = charRun('lag_wet', path, opts);
 rl = charDriveLag([r.capFiles {r.file}]);
 ```
 
-`PRG_StepProbe` records the pressure beside the velocity, so for every
+The step probe records the pressure beside the velocity, so for every
 capture whose pressure moves by more than 0.1 MPa the script also fits
 the pressure channel: the lag model for the piston velocity, integrated
 at the capture's own stiffness (its pressure change over its position
@@ -420,7 +421,7 @@ runs at 2 and 4 MPa, 1 and 2 mm/s at 6 and 8, and 1 mm/s at 10; 8 MPa
 carries 80 % of the load, which is enough for the fit.
 
 ```matlab
-opts.probe = 'stops';                                % PRG_StepProbe loaded: capture the stops
+opts.probe = 'stops';                                % step probe enabled: capture the stops
 [path, plan] = charStopPath(struct('pause_s', 3));   % prints the budget table
 r = charRun('stops', path, opts);
 rs = charStopDistance([r.capFiles {r.file}]);        % D and T0 per direction

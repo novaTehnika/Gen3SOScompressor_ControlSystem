@@ -15,11 +15,11 @@ over time and the outlet valve's state over time. Pressures are in Pa,
 flows in m^3/s and times in s.
 
 The process cases follow the machine's cycle. The oxygen charge, given
-by Params.ratio, is admitted at the supply pressure Params.P_supply, the
-piston compresses the contents to the target Params.P_target (10 MPa by
-default), the oxygen dissolves during a hold, and the ball valve is
-opened so the saline is driven through the orifices until the piston
-reaches the limit switch.
+by StudyParams.ratio, is admitted at the supply pressure
+StudyParams.P_supply, the piston compresses the contents to the target
+StudyParams.P_target (10 MPa by default), the oxygen dissolves during a
+hold, and the ball valve is opened so the saline is driven through the
+orifices until the piston reaches the limit switch.
 
   compress   Start at the supply pressure with the charge as free gas,
              the saline saturated at that pressure and the hose shut;
@@ -27,19 +27,20 @@ reaches the limit switch.
   deliver    Start at the target with the charge dissolved as far as
              the saturation limit allows, the rest free, and the hose
              shut. The proximal valve opens at 1 s (over
-             Params.Topen_prox), the distal valve 5 s after it is fully
-             open to purge the hose's virgin saline and any solution that
-             degassed entering the hose, closes when that has left, and
-             opens again after a 10 s pause; the
-             run continues to the limit switch. With Params.hose_before
-             the hose is open from the start instead, and the distal
-             valve closes over Params.Tclose.
+             StudyParams.Topen_prox), the distal valve 5 s after it is
+             fully open to purge the hose's virgin saline and any
+             solution that degassed entering the hose, closes when that
+             has left, and opens again after a 10 s pause; the run
+             continues to the limit switch. With
+             StudyParams.hose_before the hose is open from the start
+             instead, and the distal valve closes over
+             StudyParams.Tclose.
   cycle      compress, hold, then the same valve sequence, in one run.
   stiffstep  Liquid-only chamber at 10 MPa, target steps to 12 MPa at
              1 s. This is a margin probe, not a process case.
 
 Outflow. With the valve open the outflow is the orifice flow at the
-chamber pressure, Params.Q_orifice(P), scaled by the valve's area
+chamber pressure, StudyParams.Q_orifice(P), scaled by the valve's area
 fraction valve(t), which rises from 0 to 1 over Topen (a step when Topen
 is 0). A scenario may instead prescribe a fixed flow Qf, which the
 linear-model tests use. Qff(t) is the outflow a controller with flow
@@ -47,7 +48,8 @@ feedforward is told about; the machine cannot supply it, so it is kept
 only as a bound.
 
 FILE DEPENDENCY:
-None. The functions take a Params object (params.py).
+None. The functions take a StudyParams object (studyparams.py),
+whose contents() (models/params.py) gives the initial contents.
 """
 
 from dataclasses import dataclass, replace
@@ -168,31 +170,19 @@ class Scenario:
         return self.ff_scale * self.Qout(t, par, P)
 
     def initial(self, par):
-        """Return the chamber contents at the start for Params par.
-
-        Returns (P0 [Pa], free gas [mol], dissolved gas [mol]). The charge
-        is par.n_charge() when ratio is nonzero. The saline can hold
-        n_sat = kH (P0 + Patm) Vl0 by Henry's law. If the charge starts
-        dissolved, n_dis = min(charge, n_sat) and the rest is free;
-        otherwise the charge is free and the saline carries n_sat, the
-        equilibrium it reached during the fill.
-        """
-        n_sat = par.kH * (self.P0 + par.Patm) * par.Vl0
-        if self.ratio <= 0:
-            return self.P0, 0.0, n_sat
-        n_charge = par.n_charge(self.ratio)
-        if self.dissolved:
-            n_dis = min(n_charge, n_sat)
-            return self.P0, n_charge - n_dis, n_dis
-        return self.P0, n_charge, n_sat
+        """Return the chamber contents at the start for StudyParams par,
+        as (P0 [Pa], free gas [mol], dissolved gas [mol]): the scenario's
+        start pressure, charge and dissolution, through
+        par.contents() (models/params.py)."""
+        return par.contents(self.P0, self.ratio, self.dissolved)
 
 
 # %% ===== STANDARD SCENARIOS ============================================
-# Each function returns the scenario for Params par, with any field
+# Each function returns the scenario for StudyParams par, with any field
 # replaced by a keyword argument.
 
 def _hose(par):
-    """Return the hose fields for Params par: open throughout if
+    """Return the hose fields for StudyParams par: open throughout if
     hose_before is set, else opened at the scenario's t_prox."""
     if par.hose_before:
         return dict(hose_open0=True, t_prox=float('inf'))
@@ -236,7 +226,7 @@ FACTORIES = {'compress': compress, 'deliver': deliver, 'cycle': cycle,
 
 
 def make(name, par, **kw):
-    """Return the standard scenario called name for Params par, with
+    """Return the standard scenario called name for StudyParams par, with
     fields replaced by the keyword arguments."""
     if name not in FACTORIES:
         raise KeyError(f'unknown scenario {name}')

@@ -17,11 +17,13 @@ cfg.atmAmbient  = 1;        % atm, added to the slave's gauge reading
 cfg.pressureMax = 15;       % MPa gauge, the slave's G_cfgPressureTargetMax
 
 % Fill description sent to the slave for its pressure gain schedule. The
-% slave takes it as a lower bound on the saline and the actual charge.
+% saline volume and the charge must be at or below the true values (see
+% docs/slave/development/ConfigurationGuide.md, section 8).
 cfg.salineVolume = 343;     % mL, saline volume of the fill including the dead volume
 cfg.oxygenRatio  = 1.0;     % oxygen charge as STP volume per saline volume (1.0 for 1:1)
 
-% Master soft limits, inside the slave's configured travel.
+% Master soft limits: G_cfgPosSoftLimitMin <= posMin and
+% posMax <= G_cfgPosSoftLimitMax.
 cfg.posMin = 0;             % mm
 cfg.posMax = 367;           % mm
 

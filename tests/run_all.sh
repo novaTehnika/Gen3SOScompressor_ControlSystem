@@ -35,6 +35,7 @@ design/pressure-loop/test_robust.py
 tests/stTargetParity.py
 tests/plantParity.py
 design/pressure-loop/test_linear.py
+tests/modbusLinkTiming.m
 tests/smokeMasterStateMachine.m
 "
 CACHE=.test-cache
@@ -84,7 +85,7 @@ else
     done
 fi
 
-python3 tools/st_translate.py --target py slave-src design/generated
+python3 tools/st_translate.py --target py slave-src models/generated
 
 # The simulated slave: slave-src translated to C and compiled with
 # slave-sim/c into slaveSimMex (slave-sim/buildSlaveSim.m, when stale).

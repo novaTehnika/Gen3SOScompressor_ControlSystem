@@ -85,6 +85,19 @@ not treat 0 during operation as loss of mode.
 A dropped TCP connection stops the Simulink model, which sets the DAQ
 outputs to their final values (safety relay off).
 
+### Step Probe (optional side channel)
+
+Beside the protocol the slave carries a scan-rate data recorder, `FB_Probe`,
+for experiments and benches: IR401-524 and HR111-114, read and written by
+`bench/common/benchProbe.m` in the gaps between exchanges. It records the
+commanded and actual velocity, torque, position, pressure, the raw pressure
+input and a status word every scan into a ring of 8192 records, and marks the
+record of the scan the slave entered `ST_FAULT`, so the history up to a fault
+can be read back. Nothing in the protocol depends on it: the shell does not
+read or write these registers, no master state or timeout depends on them, and
+with `G_cfgProbeEnable` FALSE the slave records nothing. The registers and
+state machines are in [ModbusRegisterMap.md](ModbusRegisterMap.md), section 6.
+
 ---
 
 ## 3. Mode Encoding

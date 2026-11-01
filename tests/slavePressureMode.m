@@ -7,9 +7,9 @@ function slavePressureMode()
 %   closed on it and, with the gain schedule
 %   (G_cfgPressureScheduleEnable), compress to 10 MPa with the gains
 %   following the stiffness bound.
-%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
+%   Run from the repository root after  addpath slave-sim; buildSlaveSim
 %     addpath slave-sim slave-sim/generated tests
-%   Depends on: slave-src slave-sim tools design/pressure-loop
+%   Depends on: slave-src slave-sim tools models
 
 MODE_PRESSURE = 7;
 FAULT_PRESSURE_SENSOR = 8;
@@ -26,10 +26,10 @@ assert(h.y.faultActive == 0 && h.y.actualPressure < 0);
 h.sl.hook.pressureVolt = NaN;
 fprintf('ok  broken loop while idle does not fault\n');
 
-% The simulated chamber is the design model's (design/pressure-loop), and
-% so are the criteria: a compression ends within the status band, and the
-% overshoot is judged only against the pressure ceiling.
-P_CEILING = 12;                         % MPa, Params.P_ceiling
+% The simulated chamber is the plant model (models/), and the criteria
+% are the design studies': a compression ends within the status band, and
+% the overshoot is judged only against the pressure ceiling.
+P_CEILING = 12;                         % MPa, StudyParams.P_ceiling
 settled = @(h) h.y.performanceStatus == 1 && abs(h.sl.ax.v) < 0.05;
 
 % Enter pressure mode with a 10 MPa target: compresses within the velocity
@@ -152,12 +152,12 @@ fprintf('ok  sensor fault in pressure mode, mirror and reset\n');
 % held until the first arrival, the pressure settles in band below the
 % ceiling, and the switch and the fill are latched on entry.
 h.sl.G.G_cfgPressureScheduleEnable = true;
-h.u.salineVolume = 343;                                % mL
-h.u.oxygenRatio = 1;
+h.sl.G.G_mbSalineVolume = 343;                        % mL
+h.sl.G.G_mbOxygenRatio = 1;
 h.sl.ax.x = chamberPosition(h.sl, 0.5);
 h = enterMode(h, MODE_PRESSURE, 10);
 assert(h.sl.s.bPressureSchedActive && h.sl.s.fbPressureSched.IntegHold);
-assert(h.sl.s.rSchedSaline == h.u.salineVolume && h.sl.s.rSchedOxygenRatio == h.u.oxygenRatio);
+assert(h.sl.s.rSchedSaline == 343 && h.sl.s.rSchedOxygenRatio == 1);
 h.pMax = 0;
 t0 = h.t;
 h = runUntil(h, 30, settled);
@@ -178,8 +178,8 @@ assert(h.pMax < P_CEILING, 'peak %.3f MPa', h.pMax);
 % rewriting the registers mid-run changes nothing.
 kp = sc.Kp;
 h.sl.G.G_cfgPressureScheduleEnable = false;
-h.u.salineVolume = 343;
-h.u.oxygenRatio = 1;
+h.sl.G.G_mbSalineVolume = 100;
+h.sl.G.G_mbOxygenRatio = 2;
 h = runFor(h, 0.5);
 assert(h.sl.s.bPressureSchedActive && abs(h.sl.s.fbPressureCtrl.Kp - kp) < 0.05 * kp);
 assert(h.sl.s.rSchedSaline == 343 && h.sl.s.rSchedOxygenRatio == 1);
@@ -195,8 +195,8 @@ fprintf('ok  scheduled gains: 10 MPa in %.1f s, k_est %.2f MPa/mm, Kp %.3f, max 
 % A fill that was never written (zero saline volume) is a ParamError of the
 % schedule, and the loop runs on the configured gains.
 h.sl.G.G_cfgPressureScheduleEnable = true;
-h.u.salineVolume = 0;
-h.u.oxygenRatio = 0;
+h.sl.G.G_mbSalineVolume = 0;
+h.sl.G.G_mbOxygenRatio = 0;
 h.sl.ax.x = chamberPosition(h.sl, 0.5);
 h = enterMode(h, MODE_PRESSURE, 10);
 h = runFor(h, 1);
@@ -216,7 +216,7 @@ end
 function h = harnessInit()
 h.sl = slaveInit();
 h.u = struct('heartbeat', 0, 'modeCode', 0, 'motionEnable', 0, ...
-    'faultReset', 0, 'reference', 0, 'salineVolume', 0, 'oxygenRatio', 0);
+    'faultReset', 0, 'reference', 0, 'positionSpeed', 0);
 [h.sl, h.y] = slaveStep(h.sl, h.u);
 h.t = 0;
 h.vMax = 0;

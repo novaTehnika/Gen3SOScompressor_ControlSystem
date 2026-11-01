@@ -26,13 +26,12 @@ Usage:
 
 FILE DEPENDENCY:
 ./
-    controllers.py
+    studyparams.py, controllers.py
     metrics.py
     runner.py
     scenarios.py
     studyutil.py
-    (and the model modules they import: params.py, plant.py,
-    sensor.py, sim.py, slave.py, solver.py)
+    (and the modules they import: sim.py, and models/)
 """
 
 import math

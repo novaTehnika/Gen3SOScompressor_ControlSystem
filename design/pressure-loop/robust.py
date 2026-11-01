@@ -29,10 +29,10 @@ and returns only the metrics dicts, so thousands of runs stay cheap.
 
 FILE DEPENDENCY:
 ./
-    controllers.py
-    params.py
+    studyparams.py, controllers.py
     scenarios.py
     sim.py
+../../models/
     slave.py
 """
 
@@ -46,7 +46,8 @@ import numpy as np
 import controllers as ctl
 import scenarios
 import sim
-from params import Params
+from studyparams import StudyParams
+import modelpath  # noqa: F401  (puts models/ on sys.path)
 from slave import slave_config
 
 
@@ -55,7 +56,7 @@ from slave import slave_config
 class Uncertain:
     """One uncertain parameter and the range it is varied over."""
 
-    name: str       # Params field
+    name: str       # StudyParams field
     lo: float       # lowest value, SI units
     hi: float       # highest value, SI units
     log: bool       # True to sample uniformly in log(value)
@@ -101,14 +102,14 @@ BY_NAME = {u.name: u for u in UNCERTAIN}
 SCENARIOS = ('compress', 'deliver')
 
 _CFG = slave_config()
-_PAR = Params()
+_PAR = StudyParams()
 THRESH = {
     # [MPa] Status band of the slave (G_cfgPressureInBand)
     'inband': _CFG['G_cfgPressureInBand'],
-    # [MPa] Mechanical pressure ceiling (Params.P_ceiling)
+    # [MPa] Mechanical pressure ceiling (StudyParams.P_ceiling)
     'ceiling': _PAR.P_ceiling / 1e6,
     # [MPa] Required margin above the saturation pressure
-    # (Params.degas_margin)
+    # (StudyParams.degas_margin)
     'degas': _PAR.degas_margin / 1e6,
     # [mm] Stroke limit: the GVL soft limit minus the chamber contact
     # position of 200 mm assumed in the slave simulator
@@ -210,16 +211,16 @@ def lhs(n, seed=1, uncertain=UNCERTAIN):
 
 
 def nominal():
-    """Return each uncertain parameter at its Params default."""
-    base = Params()
+    """Return each uncertain parameter at its StudyParams default."""
+    base = StudyParams()
     return {u.name: getattr(base, u.name) for u in UNCERTAIN}
 
 
 def base_params(ratio=1.0, P_target=None, hose_before=False):
-    """Return Params for the study: the settling band set to the slave's
-    status band, the oxygen charge set to ratio, the hose procedure
-    and, if given, the target pressure [Pa]."""
-    par = Params(tol=THRESH['inband'] * 1e6,            # [MPa -> Pa]
+    """Return StudyParams for the study: the settling band set to the
+    slave's status band, the oxygen charge set to ratio, the hose
+    procedure and, if given, the target pressure [Pa]."""
+    par = StudyParams(tol=THRESH['inband'] * 1e6,            # [MPa -> Pa]
                  ratio=ratio, hose_before=hose_before)
     if P_target is not None:
         par = par.with_(P_target=P_target)
@@ -235,7 +236,7 @@ def make_params(values, ratio=1.0, P_target=None, hose_before=False):
 
 
 def make_scenario(name, par, ff_scale=1.0):
-    """Return scenario name for Params par, with the feedforward scale
+    """Return scenario name for StudyParams par, with the feedforward scale
     applied to the delivery."""
     if name == 'deliver':
         return scenarios.make(name, par, ff_scale=ff_scale)

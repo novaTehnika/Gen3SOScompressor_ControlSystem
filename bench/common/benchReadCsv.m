@@ -2,8 +2,8 @@ function d = benchReadCsv(file)
 %BENCHREADCSV Read a bench CSV with a header line into a struct of column
 %   vectors named by the header: a frictionRun log (t, step, status, mode,
 %   ref, position, velocity, torque, pressure, inMotion, inBand,
-%   exchangeMs) or a PRG_StepProbe capture (t, vCmd, velocity, torque,
-%   position). d.file keeps the name.
+%   exchangeMs) or a step probe capture (t, vCmd, velocity, torque,
+%   position, pressure, volts, status). d.file keeps the name.
 
 fid = fopen(file, 'r');
 if fid < 0

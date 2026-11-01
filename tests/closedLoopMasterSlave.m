@@ -8,9 +8,9 @@ function closedLoopMasterSlave(handshakeTimeout)
 %   The master steps every 25 ms, the Modbus exchange runs every 50 ms and
 %   the slave every scan (G_cfgScanTime, 4 ms), on a 1 ms tick. Registers are exchanged in
 %   engineering units; packing is covered by closedLoopModbusStep.
-%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
+%   Run from the repository root after  addpath slave-sim; buildSlaveSim
 %     addpath master-src/logic slave-sim slave-sim/generated tests
-%   Depends on: master-src/logic slave-src slave-sim tools design/pressure-loop
+%   Depends on: master-src/logic slave-src slave-sim tools models
 
 if nargin < 1
     handshakeTimeout = 0.5;
@@ -82,11 +82,15 @@ h.in.positionSpeed = 0;
 c = zeros(1, 2000);
 for k = 1:numel(c)
     h = runFor(h, dtS);
-    c(k) = h.sl.G.G_sysCommandedPosition;     % the LREAL, not the REAL register's 8e-6 mm steps
+    c(k) = h.y.commandedPosition;
 end
 rate = diff(c) / dtS;
 accel = diff(rate) / dtS;
-assert(max(abs(accel)) <= aMax * (1 + 1e-6) + 1e-6, 'command acceleration %.3f mm/s^2', max(abs(accel)));
+% The register is a REAL (32-bit float) as on the controller: the position
+% is quantised to eps(single(x)), which the second difference of the samples
+% turns into at most 2 eps / dt^2.
+quant = 2 * double(eps(single(max(abs(c))))) / dtS^2;
+assert(max(abs(accel)) <= aMax * (1 + 1e-6) + quant, 'command acceleration %.3f mm/s^2', max(abs(accel)));
 assert(max(abs(rate)) <= 4 + 0.02, 'command rate %.3f mm/s', max(abs(rate)));
 kStop = find(abs(rate) < 1e-9, 1);
 assert(~isempty(kStop) && all(abs(rate(kStop:end)) < 1e-9), 'command does not hold at rest');

@@ -15,6 +15,8 @@
    via G_cmd*/G_sta* structured globals. Homing (ST_HOME_LIMIT) uses Jog.
 
    Every user-defined FB is called exactly once at the end of this file.
+   The step probe (fbProbe) is called last, after the state of the scan is
+   final, so its record and its fault mark see the scan's end state.
 
    State Machine Groups:
    - Idle: ST_IDLE (first scan goes directly here)
@@ -54,6 +56,9 @@
        fbFaultToInt        : FB_FaultToInt
        fbConfModeToInt     : FB_ModeToInt
        fbCommWatchdog      : FB_CommWatchdog
+       (* Step probe: scan-rate data capture, called last
+       fbProbe             : FB_Probe
+       nProbeWord          : INT              (* Index of the window copy out of fbProbe.Stage
        (* Timers — each has exactly one call site (see end of body)
        tStateTimer         : TON
        tBrakeTimer         : TON
@@ -335,7 +340,6 @@ ELSIF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
             G_sysConfirmedMode := E_OperatingMode#MODE_POSITION;
             stCurrentLimits.PosMax := G_cfgPosSoftLimitMax;
             stCurrentLimits.PosMin := G_cfgPosSoftLimitMin;
-            stCurrentLimits.VelMax := G_cfgVelLimitMax;
             stCurrentLimits.TorqueMax := G_cfgTorqueLimitNormal;
             bPosStopping := FALSE;
         END_IF;
@@ -710,7 +714,6 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
             G_sysConfirmedMode := E_OperatingMode#MODE_POSITION;
             stCurrentLimits.PosMax := G_cfgPosSoftLimitMax;
             stCurrentLimits.PosMin := G_cfgPosSoftLimitMin;
-            stCurrentLimits.VelMax := G_cfgVelLimitMax;
             stCurrentLimits.TorqueMax := G_cfgTorqueLimitNormal;
             bPosStopping := FALSE;
         END_IF;
@@ -969,8 +972,9 @@ IF bPositionMode THEN
        inputs therefore set no limits in this mode. fbPosShaper
        (FB_PositionPathShaper) does the path shaping, and its VelMax
        (the master's position speed, HR7-8) and AccelMax are what limit a
-       position move. *)
-    G_cmdDirectControl.Velocity := stCurrentLimits.VelMax;
+       position move. The block is given the shaper's speed, so the two
+       never disagree. *)
+    G_cmdDirectControl.Velocity := rPosShaperVelMax;
     G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
     bKeepDirectControl := TRUE;
     eKeepDirectMode := Y_ControlMode#PositionMode;
@@ -1030,6 +1034,8 @@ ELSIF (G_sysCurrentState = E_SystemState#ST_HOLD_POSITION) OR
             G_cmdDirectControl.Torque := stCurrentLimits.TorqueMax;
             IF eKeepDirectMode = Y_ControlMode#VelocityTLMode THEN
                 G_cmdDirectControl.Velocity := LREAL#0.0;
+            ELSIF eKeepDirectMode = Y_ControlMode#PositionMode THEN
+                G_cmdDirectControl.Velocity := rPosShaperVelMax;
             ELSE
                 G_cmdDirectControl.Velocity := stCurrentLimits.VelMax;
             END_IF;
@@ -1337,3 +1343,50 @@ ELSE
     G_sysScanCounter := G_sysScanCounter + UINT#1;
 END_IF;
 
+
+(* --------------------------------------------------------------------------
+   Step Probe
+   Records this scan's values in the probe's ring and serves the master's
+   window requests (see FB_Probe). Last in the file: the state, the status
+   outputs and the confirmed mode code are final for this scan, and a fault
+   entered by the safety monitor above marks this scan's record. A completed
+   window is copied to G_sysProbeStage, which PRG_Output publishes.
+   -------------------------------------------------------------------------- *)
+fbProbe(
+    Enable := G_cfgProbeEnable,
+    FillPerScan := G_cfgProbeFillPerScan,
+    VelCmd := G_sysCommandedVelocity,
+    Vel := G_sysActualVelocity,
+    Torque := G_sysActualTorque,
+    Position := G_sysActualPosition,
+    Pressure := G_sysActualPressure,
+    Volts := G_aiPressure,
+    InMotion := G_doInMotion,
+    Performance := G_doPerformanceStatus,
+    FaultActive := G_doFaultActive,
+    HomingComplete := G_doHomingComplete,
+    ModeCode := G_sysConfirmedModeCode,
+    FaultState := (G_sysCurrentState = E_SystemState#ST_FAULT),
+    Arm := G_mbProbeArm,
+    Length := G_mbProbeLength,
+    ReqLo := G_mbProbeReqLo,
+    ReqHi := G_mbProbeReqHi
+);
+(* A completed window is copied out of the block only in the scan it is
+   published, so the copy costs nothing in the other scans *)
+IF fbProbe.Publish THEN
+    FOR nProbeWord := 0 TO 103 DO
+        G_sysProbeStage[nProbeWord] := fbProbe.Stage[nProbeWord];
+    END_FOR;
+END_IF;
+G_sysProbePublish := fbProbe.Publish;
+G_sysProbeWritten := fbProbe.Written;
+G_sysProbeMark := fbProbe.Mark;
+G_sysProbeFaultMark := fbProbe.FaultMark;
+G_sysProbeStart := fbProbe.Start;
+G_sysProbeCount := fbProbe.Count;
+G_sysProbeArmEcho := fbProbe.ArmEcho;
+G_sysProbeDepth := fbProbe.Depth;
+G_sysProbeWords := fbProbe.Words;
+G_sysProbeState := fbProbe.StateCode;
+G_sysProbeXfer := fbProbe.XferCode;

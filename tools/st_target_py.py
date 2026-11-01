@@ -1,6 +1,6 @@
 """Python target of tools/st_translate.py: the function blocks as modules.
 
-    python3 tools/st_translate.py --target py slave-src design/generated
+    python3 tools/st_translate.py --target py slave-src models/generated
 
 The ST subset and the parsing are those of tools/st_translate.py; this
 target subclasses its Translator and overrides only the target-language
@@ -29,7 +29,7 @@ import sys
 import copy
 from pathlib import Path
 
-from st_translate import (STError, STD_FBS, Translator, OctaveInit, init_value,
+from st_translate import (INT_WIDTH, STError, STD_FBS, Translator, OctaveInit, init_value,
                           load_project)
 
 HEADER = '# Generated from slave-src by tools/st_translate.py --target py - do not edit.'
@@ -228,6 +228,18 @@ class PyTranslator(Translator):
 
     def to_int(self, code):
         return f'st_round({code})'
+
+    def wrap(self, code, bits, signed):
+        # [two's complement wrap of an integer to the target width]
+        if signed:
+            return f'(({code} + {2 ** (bits - 1)}) % {2 ** bits} - {2 ** (bits - 1)})'
+        return f'({code} % {2 ** bits})'
+
+    def shift(self, op, code, n, typ):
+        if op == 'SHR':
+            return f'(int({code}) >> int({n}))'
+        bits, signed = INT_WIDTH[typ]
+        return self.wrap(f'(int({code}) << int({n}))', bits, signed)
 
     def resolve(self, name, line):
         if name not in self.vars and name.startswith(('G_', 'MO1_')):

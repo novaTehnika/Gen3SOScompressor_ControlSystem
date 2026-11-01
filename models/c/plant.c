@@ -1,4 +1,4 @@
-/* C port of design/pressure-loop/plant.py; see plant.h. Each function
+/* C port of models/plant.py; see plant.h. Each function
  * follows the Plant method of the same name statement for statement. */
 #include <math.h>
 #include <string.h>

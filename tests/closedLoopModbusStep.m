@@ -1,17 +1,20 @@
 function closedLoopModbusStep()
 %CLOSEDLOOPMODBUSSTEP Run masterStep (the Simulink block's entry point)
-%   against the simulated slave through the Modbus register vectors: the
-%   master steps every cfg.dt, the registers are exchanged every
-%   cfg.exchangePeriod as packed 16-bit words, and the slave scans every
-%   G_cfgScanTime (4 ms), on a 1 ms tick. Covers homing, position, pressure,
-%   fault reset
-%   and link loss on either side.
+%   against the simulated slave through the Modbus registers and the link
+%   timing model (modbusLink, modbusLinkConfig: the bench's measurements):
+%   the master steps every cfg.dt; every cfg.exchangePeriod it reads the
+%   slave's input registers, steps on what it read and writes its holding
+%   registers, as 16-bit words packed and unpacked by the slave's register
+%   map (the GVL's AT addresses); and the slave scans every G_cfgScanTime
+%   (4 ms), serving the link's requests around its scans, on a 1 ms tick. Checks that the master's
+%   register map (modbusMap) agrees with the slave's, then covers homing,
+%   position, pressure, fault reset and link loss on either side.
 %
 %   masterStep uses masterConfig as it is, so the slave's soft limit is
 %   widened to the bench value to match.
-%   Run from the repository root after  python3 tools/st_translate.py --target m slave-src slave-sim/generated
+%   Run from the repository root after  octave-cli --eval "addpath slave-sim; buildSlaveSim"
 %     addpath master-src/logic slave-sim slave-sim/generated tests
-%   Depends on: master-src/logic slave-src slave-sim tools design/pressure-loop
+%   Depends on: master-src/logic slave-src slave-sim tools models
 
 clear masterStep masterStateMachine
 cfg = masterConfig();
@@ -26,14 +29,49 @@ h.cfg = cfg;
 h.app = struct('op', 0, 'cmdSeq', 0, 'targetPosition', 100, 'targetVelocity', 0, ...
     'jogDirection', 0, 'targetPressure', 0, 'estop', 0, 'mixer', 0, ...
     'positionSpeed', cfg.positionSpeed);
-h.u = struct('heartbeat', 0, 'modeCode', 0, 'motionEnable', 0, ...
-    'faultReset', 0, 'reference', 0, 'salineVolume', 0, 'oxygenRatio', 0);
-[h.sl, h.y] = slaveStep(h.sl, h.u);
+h.y = scan(h.sl);
 h.mbRead = zeros(1, map.nRead);
+% The Modbus link with the bench's timing (modbusLinkConfig)
+h.link = modbusLink('init', modbusLinkConfig(), h.sl.G.G_cfgScanTime);
+h.readId = 0;
+h.pending = false;
+h.log = struct('read', zeros(0, 2), 'written', zeros(1, 0));
 h.tick = 0;
 h.m = [];
 h.writeLost = false;    % master's registers do not reach the slave
 h.readLost = false;     % slave's registers do not reach the master
+
+% The master's register map is the slave's: every register modbusMap
+% names is where the GVL's AT address puts the same variable, and the
+% exchange covers every register the slave has.
+R = slaveSimMex('registers');
+pairs = {'hr', 'heartbeat', 'G_mbHeartbeat'; 'hr', 'modeCode', 'G_mbModeCode';
+         'hr', 'motionEnable', 'G_mbMotionEnable'; 'hr', 'faultReset', 'G_mbFaultReset';
+         'hr', 'reference', 'G_mbReference'; 'hr', 'positionSpeed', 'G_mbPositionSpeed';
+         'hr', 'salineVolume', 'G_mbSalineVolume'; 'hr', 'oxygenRatio', 'G_mbOxygenRatio';
+         'ir', 'heartbeatEcho', 'G_mbHeartbeatEcho'; 'ir', 'slaveCounter', 'G_mbSlaveCounter';
+         'ir', 'confCode', 'G_mbConfCode'; 'ir', 'faultCode', 'G_mbFaultCode';
+         'ir', 'faultActive', 'G_mbFaultActive'; 'ir', 'inMotion', 'G_mbInMotion';
+         'ir', 'performanceStatus', 'G_mbPerformanceStatus';
+         'ir', 'homingComplete', 'G_mbHomingComplete'; 'ir', 'position', 'G_mbActualPosition';
+         'ir', 'velocity', 'G_mbActualVelocity'; 'ir', 'torque', 'G_mbActualTorque';
+         'ir', 'commandedPosition', 'G_mbCommandedPosition';
+         'ir', 'pressure', 'G_mbActualPressure'};
+% Every register of the slave inside the exchange is one modbusMap names
+% (the registers beyond it are the step probe's, read separately).
+inside = arrayfun(@(r) r.first <= map.(groupOf(sideOf(r.group), 'nWrite', 'nRead')), R);
+assert(sum(inside) == rows(pairs), 'the exchange covers %d of the slave''s registers, modbusMap names %d', ...
+    sum(inside), rows(pairs));
+for k = 1:rows(pairs)
+    r = R(strcmp({R.name}, pairs{k, 3}));
+    assert(numel(r) == 1, '%s has no register', pairs{k, 3});
+    assert(strcmp(r.group, groupOf(pairs{k, 1})) && r.first == map.(pairs{k, 1}).(pairs{k, 2}), ...
+        'modbusMap.%s.%s is %d; %s is %s register %d', pairs{k, 1}, pairs{k, 2}, ...
+        map.(pairs{k, 1}).(pairs{k, 2}), pairs{k, 3}, r.group, r.first);
+    last = r.first + r.words - 1;
+    assert(last <= map.(groupOf(pairs{k, 1}, 'nWrite', 'nRead')), '%s beyond the exchange', pairs{k, 3});
+end
+fprintf('ok  register map: modbusMap agrees with the GVL for %d registers\n', rows(pairs));
 
 % Until the slave's counter is seen the link is not up: safety relay off,
 % waiting status, no latch once it appears.
@@ -45,6 +83,20 @@ h = runUntil(h, 0.5, []);
 assert(h.m.statusCode == 0 && h.m.doSafety == 1 && h.m.linkOk == 1);
 assert(h.y.heartbeatEcho > 0, 'heartbeat not echoed');
 fprintf('ok  start-up: waits for the slave, then idle; heartbeat echoed\n');
+
+% With the link's timing the slave's reply to a write appears in the
+% following exchange: the heartbeat echo each read returns is the
+% heartbeat the master wrote in the exchange before.
+n0 = rows(h.log.read);
+h = runUntil(h, 3, []);
+echo = h.log.read(n0 + 1:end, 2)';
+written = h.log.written(n0:end - 1);
+nPair = min(numel(echo), numel(written));
+assert(isequal(echo(1:nPair), written(1:nPair)), 'echoes %s for writes %s', ...
+    mat2str(echo(1:min(nPair, 8))), mat2str(written(1:min(nPair, 8))));
+tr = sort(h.log.read(n0 + 1:end, 1));
+fprintf('ok  echo in the following exchange over %d exchanges; read call median %.1f ms, max %.1f ms\n', ...
+    nPair, 1000 * median(tr), 1000 * tr(end));
 
 % Homing from close to the negative overtravel switch.
 h.sl.ax.x = 10;
@@ -63,24 +115,27 @@ fprintf('ok  position move, displayed position %.3f mm\n', h.m.position);
 % Position speed through HR7-8: the packed value reaches the slave, a move
 % runs at it, 0 mid-move holds position and the speed above the ceiling is
 % limited.
-assert(h.u.positionSpeed == cfg.positionSpeed);
+assert(abs(h.sl.G.G_mbPositionSpeed - cfg.positionSpeed) < 1e-6);
 h.app.positionSpeed = 2;
 h.app.targetPosition = 25;
 h = command(h, 2);
-h = runUntil(h, 30, @(h) abs(h.sl.ax.v) > 1.9);
-assert(abs(h.u.positionSpeed - 2) < 1e-6 && abs(h.sl.ax.v - 2) < 0.1);
+% (The new speed reaches the slave an exchange or more after the command,
+% so the condition waits for it as well as for the motion.)
+h = runUntil(h, 30, @(h) abs(h.sl.G.G_mbPositionSpeed - 2) < 1e-6 && abs(h.sl.ax.v) > 1.9);
+h = runUntil(h, 0.3, []);
+assert(abs(h.sl.G.G_mbPositionSpeed - 2) < 1e-6 && abs(h.sl.ax.v - 2) < 0.1);
 h.app.positionSpeed = 0;
 h = runUntil(h, 3, []);
 xHold = h.sl.ax.x;
 h = runUntil(h, 1, []);
-assert(h.u.positionSpeed == 0 && abs(h.sl.ax.v) < 0.01 && abs(h.sl.ax.x - xHold) < 0.01);
+assert(h.sl.G.G_mbPositionSpeed == 0 && abs(h.sl.ax.v) < 0.01 && abs(h.sl.ax.x - xHold) < 0.01);
 assert(h.y.faultActive == 0 && h.m.statusCode == 2 && xHold < 24);
 h.app.positionSpeed = 100;
 h = runUntil(h, 30, @(h) h.m.statusCode == 3);
-assert(h.m.statusCode == 3 && h.u.positionSpeed == cfg.positionSpeedMax);
+assert(h.m.statusCode == 3 && abs(h.sl.G.G_mbPositionSpeed - cfg.positionSpeedMax) < 1e-6);
 h.app.positionSpeed = cfg.positionSpeed;
 fprintf('ok  position speed through HR7-8: 2 mm/s, 0 holds at %.2f mm, 100 limited to %g mm/s\n', ...
-    xHold, h.u.positionSpeed);
+    xHold, h.sl.G.G_mbPositionSpeed);
 
 % Go Home with a slow drive start. The link carries no BrakeDisengage, so
 % the master enters the operation tEnableMax after raising MotionEnable,
@@ -114,11 +169,11 @@ h.sl.ax.x = chamberPosition(h.sl, 1);
 h.app.targetPressure = 20 + cfg.atmAmbient;     % atm absolute
 h = command(h, 4);
 h = runUntil(h, 10, @(h) h.m.statusCode == 5);
-assert(h.m.statusCode == 5 && h.u.modeCode == 7);
-assert(abs(h.u.reference - 20 / cfg.atmPerMPa) < 1e-3);
+assert(h.m.statusCode == 5 && h.sl.G.G_mbModeCode == 7);
+assert(abs(h.sl.G.G_mbReference - 20 / cfg.atmPerMPa) < 1e-3);
 % The fill description rides in the same exchange and is latched by the
-% slave on entry to the mode, as the REAL it was sent as.
-assert(h.u.salineVolume == single(cfg.salineVolume) && h.u.oxygenRatio == single(cfg.oxygenRatio));
+% slave on entry to the mode.
+assert(h.sl.G.G_mbSalineVolume == single(cfg.salineVolume) && h.sl.G.G_mbOxygenRatio == single(cfg.oxygenRatio));
 assert(h.sl.s.rSchedSaline == single(cfg.salineVolume) && h.sl.s.rSchedOxygenRatio == single(cfg.oxygenRatio), ...
     'fill not latched by the slave');
 h = runUntil(h, 30, @(h) h.y.performanceStatus == 1);
@@ -135,7 +190,7 @@ h.sl.hook.driveFault = true;
 h = runUntil(h, 0.5, []);
 h.sl.hook.driveFault = false;
 assert(h.m.statusCode == 10 && h.m.faultCode == 2);
-assert(h.u.modeCode == 2 && h.u.motionEnable == 0);
+assert(h.sl.G.G_mbModeCode == 2 && h.sl.G.G_mbMotionEnable == 0);
 h = command(h, 5);
 h = runUntil(h, 1.5, []);
 assert(h.y.faultActive == 0 && h.m.state == 1);
@@ -187,7 +242,7 @@ assert(h.m.statusCode == 4 && h.sl.ax.v > 1);
 h.readLost = true;
 h = runUntil(h, 0.5, []);
 assert(h.m.linkOk == 0 && h.m.statusCode == 34 && h.m.doSafety == 0);
-assert(h.u.motionEnable == 0);
+assert(h.sl.G.G_mbMotionEnable == 0);
 h = runUntil(h, 3, @(h) h.sl.ax.v == 0);
 assert(h.sl.ax.v == 0, 'axis did not stop after MotionEnable dropped');
 h.readLost = false;
@@ -230,70 +285,108 @@ h.app.cmdSeq = h.app.cmdSeq + 1;
 end
 
 
-function regs = packRead(y, map)
-% The slave's registers as the Modbus Client Read block delivers them.
-regs = zeros(1, map.nRead);
-regs(map.ir.heartbeatEcho)     = y.heartbeatEcho;
-regs(map.ir.slaveCounter)      = y.slaveCounter;
-regs(map.ir.confCode)          = y.confCode;
-regs(map.ir.faultCode)         = y.faultCode;
-regs(map.ir.faultActive)       = y.faultActive;
-regs(map.ir.inMotion)          = y.inMotion;
-regs(map.ir.performanceStatus) = y.performanceStatus;
-regs(map.ir.homingComplete)    = y.homingComplete;
-regs(map.ir.position:map.ir.position + 1)   = modbusPack(y.actualPosition);
-regs(map.ir.velocity:map.ir.velocity + 1)   = modbusPack(y.actualVelocity);
-regs(map.ir.torque:map.ir.torque + 1)       = modbusPack(y.actualTorque);
-regs(map.ir.commandedPosition:map.ir.commandedPosition + 1) = ...
-    modbusPack(y.commandedPosition);
-regs(map.ir.pressure:map.ir.pressure + 1) = modbusPack(y.actualPressure);
+function side = sideOf(group)
+% The modbusMap side of a slave register group.
+if strcmp(group, 'holding')
+    side = 'hr';
+else
+    side = 'ir';
+end
 end
 
 
-function u = unpackWrite(w, map)
-% The master's registers as the slave sees them.
-u.heartbeat    = w(map.hr.heartbeat);
-u.modeCode     = w(map.hr.modeCode);
-u.motionEnable = w(map.hr.motionEnable);
-u.faultReset   = w(map.hr.faultReset);
-u.reference    = modbusUnpack(w(map.hr.reference), w(map.hr.reference + 1));
-u.positionSpeed = modbusUnpack(w(map.hr.positionSpeed), w(map.hr.positionSpeed + 1));
-u.salineVolume = modbusUnpack(w(map.hr.salineVolume), w(map.hr.salineVolume + 1));
-u.oxygenRatio  = modbusUnpack(w(map.hr.oxygenRatio), w(map.hr.oxygenRatio + 1));
+function g = groupOf(side, hr, ir)
+% The slave's register group of a modbusMap side, or the given names.
+if nargin < 2
+    hr = 'holding';
+    ir = 'input';
+end
+if strcmp(side, 'hr')
+    g = hr;
+else
+    g = ir;
+end
 end
 
 
 function h = runUntil(h, T, done)
+% On a 1 ms tick: the master steps every cfg.dt; at an exchange step it
+% reads the input registers through the link, steps when the read returns
+% and then writes its holding registers (the Read block, masterStep, the
+% Write block). The slave scans every G_cfgScanTime and serves the link's
+% requests around each scan: reads before it, writes after it.
 stepTicks = round(h.cfg.dt * 1000);
 exchangeTicks = round(h.cfg.exchangePeriod * 1000);
+scanTicks = round(1000 * h.sl.G.G_cfgScanTime);
 for n = 1:round(T * 1000)
     h.tick = h.tick + 1;
+    t = h.tick / 1000;
 
-    if mod(h.tick, stepTicks) == 0
-        a = h.app;
-        [m.mbWrite, m.doSafety, m.doMixer, m.position, m.velocity, m.pressure, ...
-            m.statusCode, m.faultCode, m.state, m.linkOk] = masterStep(h.mbRead, ...
-            a.op, a.cmdSeq, a.targetPosition, ...
-            a.targetVelocity, a.jogDirection, a.targetPressure, a.estop, a.mixer, ...
-            a.positionSpeed);
-        h.m = m;
-    end
-
-    if mod(h.tick, exchangeTicks) == 0 && ~isempty(h.m)
-        if ~h.writeLost
-            h.u = unpackWrite(h.m.mbWrite, h.map);
-        end
-        if ~h.readLost
-            h.mbRead = packRead(h.y, h.map);
+    if mod(h.tick, stepTicks) == 0 && ~h.pending
+        if mod(h.tick, exchangeTicks) ~= 0 || isempty(h.m)
+            h = stepMaster(h);
+        elseif h.readLost
+            h = stepMaster(h);
+            h = submitWrite(h, t);
+        else
+            [h.link, h.readId] = modbusLink('submit', h.link, t, 'read', 1, h.map.nRead);
+            h.pending = true;
         end
     end
 
-    if mod(h.tick, round(1000 * h.sl.G.G_cfgScanTime)) == 0
-        [h.sl, h.y] = slaveStep(h.sl, h.u);
+    [h.link, fin] = modbusLink('poll', h.link, t);
+    for d = fin
+        if strcmp(d.kind, 'read') && d.id == h.readId
+            h.mbRead = d.data;
+            h.log.read(end + 1, :) = [d.tDone - d.tCall, d.data(h.map.ir.heartbeatEcho)];
+            h = stepMaster(h);
+            h = submitWrite(h, t);
+            h.pending = false;
+        end
+    end
+
+    if mod(h.tick, scanTicks) == 0
+        k = h.tick / scanTicks;
+        [h.link, reqs] = modbusLink('due', h.link, k, 'read');
+        for q = reqs
+            h.link = modbusLink('answer', h.link, q.slot, readInputRegisters(h.sl, q.start, q.n));
+        end
+        h.y = scan(h.sl);
+        [h.link, reqs] = modbusLink('due', h.link, k, 'write');
+        for q = reqs
+            writeHoldingRegisters(h.sl, q.start, q.words);
+            h.link = modbusLink('answer', h.link, q.slot, []);
+        end
     end
 
     if ~isempty(done) && ~isempty(h.m) && done(h)
         return;
     end
+end
+end
+
+
+function h = stepMaster(h)
+a = h.app;
+[m.mbWrite, m.doSafety, m.doMixer, m.position, m.velocity, m.pressure, ...
+    m.statusCode, m.faultCode, m.state, m.linkOk] = masterStep(h.mbRead, ...
+    a.op, a.cmdSeq, a.targetPosition, ...
+    a.targetVelocity, a.jogDirection, a.targetPressure, a.estop, a.mixer, ...
+    a.positionSpeed);
+h.m = m;
+end
+
+
+function h = submitWrite(h, t)
+% The master's write of this exchange, unless the link loses it; the
+% heartbeat written is logged against the read that preceded it.
+if ~h.writeLost
+    [h.link, ~] = modbusLink('submit', h.link, t, 'write', 1, h.m.mbWrite);
+    h.log.written(end + 1) = h.m.mbWrite(h.map.hr.heartbeat);
+else
+    h.log.written(end + 1) = NaN;
+end
+if h.readLost
+    h.log.read(end + 1, :) = [NaN, NaN];
 end
 end

@@ -8,7 +8,10 @@ function block whose inputs are all scalars with one seeded random input
 sequence, once through the generated Python and once through the generated
 C (a driver program written here and compiled with the c target), and
 compares every output and internal variable after every call. Integer
-inputs stay in their type's range, as on the controller.
+inputs stay in their type's range, as on the controller. FB_Probe runs past
+its ring depth with register-style inputs that reach its pending, filling
+and overrun paths; its ring (an array of more than BIG elements) is compared
+once, after the last call.
 
 Depends on: tools slave-src slave-sim/c
 """
@@ -30,29 +33,47 @@ import st_target_c as stc  # noqa: E402
 
 STEPS = 3000                # calls for the blocks named in CORE, STEPS_OTHER for the rest
 STEPS_OTHER = 800
+STEPS_LONG = {'FB_Probe': 12000}     # past its ring depth of 8192, so the overrun paths run
+# BOOL inputs that follow a schedule of the call number instead of toggling at
+# random: the probe is on except for calls 3000-3099, so its recording runs long
+# enough to reach the ring depth.
+SCHEDULE = {('FB_Probe', 'Enable'): lambda k: not 3000 <= k < 3100}
+BIG = 1024                  # arrays longer than this are compared once, after the last call
 CORE = {'FB_PressureController', 'FB_AnalogInputFilter', 'FB_PressureInput',
         'FB_PositionPathShaper', 'FB_DigitalInputFilter',
         'FB_PressureSchedule'}
 TOL = 1e-9
 SIGNALS = {'Target', 'Actual', 'Volts', 'RawInput', 'ActualPosition', 'Position',
-           'Pressure', 'Velocity'}
+           'Pressure', 'Velocity', 'VelCmd', 'Vel', 'Torque'}
+# Values drawn for integer inputs by name (default: small codes, -1 for signed
+# types). The probe's registers get values that reach its pending, filling and
+# overrun paths and a request index with a high word.
+INT_CHOICES = {'ReqLo': [0, 1, 50, 3000, 8100, 9000, 20000, 65535],
+               'ReqHi': [0, 0, 0, 1],
+               'Arm': [0, 1, 2, 3, 4, 5, 65535],
+               'Length': [0, 1, 10, 500, 9000, 65535],
+               'FillPerScan': [1, 3, 6, 13, 0, 40, -2],
+               'ModeCode': [0, 1, 2, 7, 300]}
 PARAM_EDGES = [0.0, -1.0, 1e-9, 1e6]
 TIME_POOL = [0.0, 0.002, 0.01, 0.05, 0.5]
 SCALAR = stt.NUM_TYPES | {'BOOL', 'TIME'}
 
 
-def flat_py(x, out):
+def flat_py(x, out, big=False):
+    """Flatten a state to floats: the arrays of at most BIG elements (the
+    per-call state), or with big=True only the longer ones."""
     if isinstance(x, list):
-        out.extend(float(v) for v in x)
+        if (len(x) > BIG) == big:
+            out.extend(float(v) for v in x)
     elif hasattr(x, '__dict__'):
         for k in sorted(vars(x)):
-            flat_py(vars(x)[k], out)
-    else:
+            flat_py(vars(x)[k], out, big)
+    elif not big:
         out.append(float(x))
     return out
 
 
-def make_inputs(rng, inputs, ctx, steps):
+def make_inputs(rng, inputs, ctx, steps, block=''):
     """Rows of (dt, input values): signals redraw every call, flags toggle,
     parameters hold a value and occasionally jump to an edge case."""
     nominal = {d['name']: rng.uniform(0.1, 10.0) for d in inputs}
@@ -62,7 +83,9 @@ def make_inputs(rng, inputs, ctx, steps):
         row = [rng.choice([0.001, 0.002, 0.005])]
         for d in inputs:
             n, typ = d['name'], d['type']
-            if typ == 'BOOL':
+            if (block, n) in SCHEDULE:
+                state[n] = float(SCHEDULE[(block, n)](_))
+            elif typ == 'BOOL':
                 if rng.random() < (0.08 if n != 'Enable' else 0.03):
                     state[n] = 1.0 - state[n] if state[n] in (0.0, 1.0) else 1.0
                 if _ == 0 and n == 'Enable':
@@ -74,8 +97,9 @@ def make_inputs(rng, inputs, ctx, steps):
                 if rng.random() < 0.1:
                     state[n] = float(rng.randrange(len(ctx['enums'][typ])))
             elif typ in stt.INT_TYPES:
-                if rng.random() < 0.05:
-                    state[n] = float(rng.choice([0, 1, 2, 3, 4, 5, 7] + ([] if typ in UNSIGNED else [-1])))
+                if rng.random() < (0.3 if n in INT_CHOICES else 0.05):
+                    default = [0, 1, 2, 3, 4, 5, 7] + ([] if typ in UNSIGNED else [-1])
+                    state[n] = float(rng.choice(INT_CHOICES.get(n, default)))
             elif n in SIGNALS:
                 state[n] = rng.uniform(-12.0, 12.0) if rng.random() < 0.97 else rng.choice([0.0, 1e6])
             elif rng.random() < 0.02:
@@ -87,28 +111,30 @@ def make_inputs(rng, inputs, ctx, steps):
     return rows
 
 
-UNSIGNED = {'UINT', 'UDINT', 'USINT', 'BYTE', 'WORD'}
+UNSIGNED = {'UINT', 'UDINT', 'USINT', 'BYTE', 'WORD', 'DWORD'}
 
 
-def c_flatten(typ, ref, ctx, lines):
+def c_flatten(typ, ref, ctx, lines, big=False):
     """C statements that print every variable of ref (of ST type typ) in
     the order flat_py visits the Python namespace: fields sorted by name,
-    arrays element by element."""
+    arrays element by element; the arrays of more than BIG elements only
+    when big is set, and the other variables only when it is not."""
     for name, ftyp in sorted(stc.fields_of(typ, ctx)):
         m = stc.ARRAY_RE.match(ftyp)
         base = m.group(3) if m else ftyp
         if not m and (base in ctx['structs'] or base in ctx['fbs'] or base in stc.STD_FBS):
-            c_flatten(base, f'{ref}.{name}', ctx, lines)
+            c_flatten(base, f'{ref}.{name}', ctx, lines, big)
         elif m:
             n = int(m.group(2)) + 1
-            lines.append(f'    for (int i = 0; i < {n}; i++) put(out, (double){ref}.{name}[i]);')
-        else:
+            if (n > BIG) == big:
+                lines.append(f'    for (int i = 0; i < {n}; i++) put(out, (double){ref}.{name}[i]);')
+        elif not big:
             lines.append(f'    put(out, (double){ref}.{name});')
 
 
 def c_driver(cases, ctx):
     """One C program that runs any of the blocks in cases on an input CSV:
-    drv FB_Name in.csv out.csv."""
+    drv FB_Name in.csv out.csv big.csv."""
     lines = ['#include <stdio.h>', '#include <string.h>', '#include <math.h>',
              '#include "st_slave.h"', '',
              'static int first;',
@@ -118,13 +144,16 @@ def c_driver(cases, ctx):
         lines += [f'static void flat_{name}(FILE *out, const {name}_t *p)', '{', '    first = 1;']
         c_flatten(name, '(*p)', ctx, lines)
         lines += ['    fputc(\'\\n\', out);', '}', '',
-                  f'static void drive_{name}(FILE *in, FILE *out)', '{',
+                  f'static void big_{name}(FILE *out, const {name}_t *p)', '{', '    first = 1;']
+        c_flatten(name, '(*p)', ctx, lines, True)
+        lines += ['    fputc(\'\\n\', out);', '}', '',
+                  f'static void drive_{name}(FILE *in, FILE *out, FILE *bigOut)', '{',
                   f'    static {name}_t s;', f'    init_{name}(&s);', f'    flat_{name}(out, &s);',
                   f'    double v[{len(inputs) + 1}];',
                   '    for (;;) {']
         for k in range(len(inputs) + 1):
             sep = '' if k == 0 else ','
-            lines.append(f'        if (fscanf(in, "{sep}%lf", &v[{k}]) != 1) return;')
+            lines.append(f'        if (fscanf(in, "{sep}%lf", &v[{k}]) != 1) {{ big_{name}(bigOut, &s); return; }}')
         for k, d in enumerate(inputs, 1):
             ct = stc.c_type(d['type'], ctx)[0]
             if d['type'] == 'BOOL':
@@ -135,10 +164,10 @@ def c_driver(cases, ctx):
                 lines.append(f'        s.{d["name"]} = ({ct})(long)v[{k}];')
         lines += [f'        {name}(&s, v[0]);', f'        flat_{name}(out, &s);', '    }', '}', '']
     lines += ['int main(int argc, char **argv)', '{',
-              '    FILE *in = fopen(argv[2], "r"), *out = fopen(argv[3], "w");',
-              '    if (!in || !out) return 2;']
+              '    FILE *in = fopen(argv[2], "r"), *out = fopen(argv[3], "w"), *bigOut = fopen(argv[4], "w");',
+              '    if (!in || !out || !bigOut) return 2;']
     for name in cases:
-        lines.append(f'    if (!strcmp(argv[1], "{name}")) drive_{name}(in, out);')
+        lines.append(f'    if (!strcmp(argv[1], "{name}")) drive_{name}(in, out, bigOut);')
     lines += ['    fclose(out);', '    return 0;', '}']
     return '\n'.join(lines) + '\n'
 
@@ -169,7 +198,7 @@ def main():
                 print(f'skip {name} (non-scalar inputs)')
                 continue
             rng = random.Random(name)
-            rows = make_inputs(rng, inputs, ctx, STEPS if name in CORE else STEPS_OTHER)
+            rows = make_inputs(rng, inputs, ctx, STEPS_LONG.get(name, STEPS if name in CORE else STEPS_OTHER), name)
             with open(tmp / f'{name}_in.csv', 'w', newline='') as f:
                 csv.writer(f).writerows(([repr(v) for v in r] for r in rows))
             cases[name] = (inputs, rows)
@@ -181,7 +210,8 @@ def main():
         assert r.returncode == 0, r.stdout + r.stderr
         for name in cases:
             r = subprocess.run([str(tmp / 'drv'), name, str(tmp / f'{name}_in.csv'),
-                                str(tmp / f'{name}_out.csv')], capture_output=True, text=True)
+                                str(tmp / f'{name}_out.csv'), str(tmp / f'{name}_big.csv')],
+                               capture_output=True, text=True)
             assert r.returncode == 0, f'{name}: driver failed {r.returncode} {r.stderr}'
 
         for name, (inputs, rows) in cases.items():
@@ -199,6 +229,10 @@ def main():
                 got.append(flat_py(s, []))
             fields = []
             flat_py_names(s, '', fields)
+            big = [float(v) for v in (tmp / f'{name}_big.csv').read_text().replace(',', ' ').split()]
+            assert len(big) == len(flat_py(s, [], True)) and all(
+                close(a, b) for a, b in zip(flat_py(s, [], True), big)), \
+                f'{name}: arrays of more than {BIG} elements differ'
             assert len(got[0]) == len(ref[0]), f'{name}: state width {len(got[0])} vs {len(ref[0])}'
             worst = 0.0
             for k, (g, m) in enumerate(zip(got, ref)):
@@ -207,12 +241,14 @@ def main():
                                          f'c {b!r}')
                     if math.isfinite(a) and math.isfinite(b):
                         worst = max(worst, abs(a - b))
-            print(f'ok  {name}: {len(rows)} calls, {len(got[0])} variables, max diff {worst:.1e}')
+            print(f'ok  {name}: {len(rows)} calls, {len(got[0])} variables, max diff {worst:.1e}'
+                  + (f', {len(big)} ring words at the end' if big else ''))
 
 
 def flat_py_names(x, prefix, out):
     if isinstance(x, list):
-        out.extend(f'{prefix}[{i}]' for i in range(len(x)))
+        if len(x) <= BIG:
+            out.extend(f'{prefix}[{i}]' for i in range(len(x)))
     elif hasattr(x, '__dict__'):
         for k in sorted(vars(x)):
             flat_py_names(vars(x)[k], f'{prefix}.{k}' if prefix else k, out)

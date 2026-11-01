@@ -38,11 +38,13 @@ controller used in that scan.
 
 FILE DEPENDENCY:
 ./
+    modelpath.py
     metrics.py
+    studyparams.py, scenarios.py, controllers.py (supply the arguments)
+../../models/
     plant.py
     sensor.py
     solver.py (through plant.py)
-    params.py, scenarios.py, controllers.py (supply the arguments)
 """
 
 from dataclasses import dataclass
@@ -50,6 +52,7 @@ from dataclasses import dataclass
 import numpy as np
 
 import metrics
+import modelpath  # noqa: F401  (puts models/ on sys.path)
 from plant import Plant
 from sensor import LegacySensor, SlaveSensor
 
@@ -114,7 +117,7 @@ def make_sensor(par, controller, P0, legacy_sensor):
 
 # %% ===== SIMULATION ====================================================
 def run(par, scenario, controller, legacy_sensor=False, seed=1):
-    """Simulate scenario under controller with Params par.
+    """Simulate scenario under controller with StudyParams par.
 
     legacy_sensor selects the legacy measurement chain instead of the
     slave's. The sensor noise draws come from numpy's default generator

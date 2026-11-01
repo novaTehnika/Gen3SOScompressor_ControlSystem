@@ -17,7 +17,7 @@ of them:
                  if it is a piston force [N].
   c.accel        [m/s^2] Slew limits the velocity actuator applies to
   c.decel        the command in velocity mode. None selects the plant
-                 defaults, Params.amax and Params.dmax.
+                 defaults, StudyParams.amax and StudyParams.dmax.
   c.cfg          G_cfg* settings this controller requires of the slave
                  configuration, including the sensor chain.
   c.reset(par, scenario)
@@ -59,14 +59,18 @@ It exists to explore structures that the slave does not have.
 
 FILE DEPENDENCY:
 ./
+    modelpath.py
+../../models/
     slave.py
-../generated/ (translated by tools/st_translate.py from slave-src/FB/)
+../../models/generated/ (translated by tools/st_translate.py from
+slave-src/FB/)
     FB_PressureController.py
     FB_PressureSchedule.py
 """
 
 import math
 
+import modelpath  # noqa: F401  (puts models/ on sys.path)
 import slave  # noqa: F401  (puts the generated blocks on sys.path)
 from FB_PressureController import (FB_PressureController,
                                    new_FB_PressureController)
@@ -186,7 +190,7 @@ class LegacyController:
                 error, eq. (24), using the stiffness estimated over the
                 last ten scans, eq. (23).
       amax      [m/s^2] Slew limit for both accel and decel. None selects
-                Params.amax.
+                StudyParams.amax.
       vff       'V' mode only. If True, add the expected outflow divided
                 by the piston area as velocity feedforward.
       tauF      [s] Sensor filter time constant. It is applied as the

@@ -549,7 +549,7 @@ end
 
 
 function printParams(say, r, cfg)
-say('\ndesign/pressure-loop/params.py values (SI):\n');
+say('\nmodels/params.py values (SI):\n');
 fu = r.unloaded;
 fl = r.loaded;
 if fu.ok
