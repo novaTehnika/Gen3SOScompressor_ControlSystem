@@ -113,10 +113,13 @@ class Params:
     # pressure. It cannot be purged, so it is present in every run, and
     # it dissolves only very slowly through the narrow passage, so the
     # model holds it as a fixed amount of isothermal gas that never
-    # dissolves, eq. (46). The default is the largest gas-like term the
-    # bulk-modulus fits found in the closed chamber (0.65 mL), an upper
-    # bound: the passage alone (1 to 2 mm bore) holds 0.02 to 0.06 mL,
-    # and the fits at two fill levels are to settle the rest.
+    # dissolves, eq. (46). The passage alone (1 to 2 mm bore) holds 0.02
+    # to 0.06 mL, plus whatever the cavity holds. The default, 0.65 mL,
+    # is a placeholder of the size of the gas-like term the bulk-modulus
+    # fits found in the closed chamber. That term is a volume at the
+    # fit's mean pressure P0, so the same air at atmosphere would be
+    # larger by (P0 + Patm) / Patm, tens of times at 5 MPa; the fits at
+    # two fill levels are to settle V_air.
     V_air: float = 0.65e-6
 
     # ----- Oxygen charge -------------------------------------------------
