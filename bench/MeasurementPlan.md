@@ -108,12 +108,15 @@ no second fill is needed.
    measurement of session 2. Some air stays whatever the purge: the
    passage to the pressure transducer, about 2 cm, and the transducer's
    cavity hold a pocket that cannot be purged and dissolves only slowly
-   through the passage. The fit carries it as its gas term (up to
-   0.65 mL in the October closed-chamber runs, an upper bound; the
-   geometry suggests less). Expect it, and use it as a check: the gas
-   term should be the same in every liquid-only run at either fill
-   level, and the liquid K comes from the fit's liquid term
-   (`K_liq_GPa`). Air beyond the pocket is what the purge removes.
+   through the passage. It is small, about 0.1 mL by the geometry
+   (`V_air` in `params.py`), and the fit carries it as the floor of its
+   gas term. It is not what the October runs showed: their gas term,
+   0.65 mL at the ramps' mean pressure, is about 40 mL of air at
+   atmosphere, free gas in those fills, which the scale sees as a
+   40 g shortfall against the geometry. So weigh, purge until the fill
+   agrees with the geometry to a few mL, and then use the gas term as a
+   check: the same small value in every liquid-only run at either fill
+   level, with the liquid K from the fit's liquid term (`K_liq_GPa`).
 2. **Bulk modulus**, three runs, probe on (section 3):
 
    ```matlab

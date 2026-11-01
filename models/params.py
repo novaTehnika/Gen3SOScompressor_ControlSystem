@@ -94,9 +94,11 @@ class Params:
     # alone is 2.2 GPa; the seals, hoses and residual gas lower it.
     # Measured 0.72 GPa (0.67 to 0.78 over the segments, 0.81 with the
     # gas-like curvature removed) on 2026-10-26, bench/characterisation.
-    # With the air pocket V_air below explicit, K is the liquid value,
-    # to be re-read from the fits' liquid-only term; the 0.72 GPa is
-    # an effective value that includes the pocket's compliance.
+    # It is the effective value of those runs, which held free gas
+    # (the fits' gas term, about 40 mL at atmosphere); the liquid value
+    # is the fits' liquid-only term, 0.81 GPa, and replaces this once the
+    # runs are repeated on a weighed, purged fill with the pocket V_air
+    # below explicit.
     K: float = 0.72e9
     # [m^3] Saline volume at the start of a run, including the dead
     # volume: the fill at the 280 mm start position of the bench runs
@@ -113,14 +115,13 @@ class Params:
     # pressure. It cannot be purged, so it is present in every run, and
     # it dissolves only very slowly through the narrow passage, so the
     # model holds it as a fixed amount of isothermal gas that never
-    # dissolves, eq. (46). The passage alone (1 to 2 mm bore) holds 0.02
-    # to 0.06 mL, plus whatever the cavity holds. The default, 0.65 mL,
-    # is a placeholder of the size of the gas-like term the bulk-modulus
-    # fits found in the closed chamber. That term is a volume at the
-    # fit's mean pressure P0, so the same air at atmosphere would be
-    # larger by (P0 + Patm) / Patm, tens of times at 5 MPa; the fits at
-    # two fill levels are to settle V_air.
-    V_air: float = 0.65e-6
+    # dissolves, eq. (46). The default is an estimate from the geometry:
+    # the passage (1 to 2 mm bore) holds 0.02 to 0.06 mL and the cavity
+    # about as much. It is not the gas-like term of the bulk-modulus
+    # fits (0.65 mL at the ramps' mean pressure, about 40 mL at
+    # atmosphere), which was free gas in those fills; the fits at two
+    # fill levels, on a weighed and purged fill, settle V_air.
+    V_air: float = 0.1e-6
 
     # ----- Oxygen charge -------------------------------------------------
     # [-] Oxygen charge as the ratio of its volume at STP (0 degC, 1 atm)

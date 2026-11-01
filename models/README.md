@@ -64,18 +64,16 @@ gas, `V_air` at atmosphere, eq. (46): it adds its own gas term to the
 capacitance, eq. (4), and its volume to the volume closure, eq. (9), and
 to the hose-opening equalisation, eq. (43), and it never dissolves or
 leaves with the outflow. Its compliance falls with the square of the
-pressure: with the 0.65 mL default and the full 343 mL fill it is 3.4
-times the liquid's at 0.1 MPa, 11 % of it at 1 MPa and 0.14 % at 10 MPa,
-and in a liquid-only compression it is the whole gas term. The passage's
-geometry alone suggests 0.02 to 0.06 mL, plus the transducer's cavity.
-The default, 0.65 mL, is a placeholder of the size of the gas-like term
-of the closed-chamber bulk-modulus fits; that term is a volume at the
-fit's mean pressure P0, so the same air at atmosphere would be larger by
-(P0 + Patm) / Patm, and 0.65 mL at atmosphere is about 0.011 mL at
-5.7 MPa, a small part of what the fits found. The fits at two fill levels
-settle `V_air`. K is the bulk modulus of the liquid alone, which is what
-the fits give once their gas term is read as this pocket and any free
-gas.
+pressure: with the 0.1 mL default and the full 343 mL fill it is half
+the liquid's at 0.1 MPa, 1.7 % of it at 1 MPa and 0.02 % at 10 MPa, and
+in a purged liquid-only compression it is the whole gas term. The
+default is an estimate from the geometry (the passage, 1 to 2 mm bore,
+holds 0.02 to 0.06 mL, the cavity about as much). The gas-like term of
+the closed-chamber bulk-modulus fits is not this pocket: the fit reports
+the gas volume at the ramp's mean pressure P0, and 0.65 mL at 6.5 MPa is
+about 40 mL at atmosphere, free gas the fill held. The fits at two fill
+levels, on a weighed and purged fill, settle `V_air`. K is the bulk
+modulus of the liquid alone, which is what the fits' liquid term gives.
 
 The outflow Q removes saline. The saline volume falls with the outflow,
 the compliance uses the present saline volume, and the gas dissolved in
@@ -443,7 +441,7 @@ assumed before:
 | Parameter | Measured | Assumed before | Where |
 |---|---|---|---|
 | Bulk modulus K | 0.72 GPa effective (0.67–0.78; 0.81 gas-corrected, the liquid value once the pocket is explicit) | 1 GPa | `charBulkModulus`, 3 runs at a 343 mL fill |
-| Trapped air V_air at the transducer | placeholder 0.65 mL at atmosphere, the size of the gas term of the closed-chamber K runs (a volume at the fit's mean pressure); the 2 cm passage of 1–2 mm bore holds 0.02–0.06 mL; to be settled by the fits at two fill levels | not modelled | `charBulkModulus`, `Vg_mL` of the closed-chamber runs |
+| Trapped air V_air at the transducer | about 0.1 mL at atmosphere, estimated from the geometry (the 2 cm passage of 1–2 mm bore holds 0.02–0.06 mL, the cavity about as much); the closed-chamber K runs' gas term, 0.65 mL at the ramps' mean pressure, is about 40 mL at atmosphere and was free gas in the fill; to be settled by the fits at two fill levels | not modelled | geometry; `charBulkModulus`, `Vair_fit_mL` |
 | Saline volume Vl0 | 343 mL at the 280 mm start, including the dead volume | 300 mL | geometry |
 | Dead volume | 57 mL of passages (hose shut, with the present fittings); 86 mL with the 29 mL hose and the tube (delivery) | 20–30 mL (then 10 mL in the master) | 57 g of water fills it |
 | Hose compliance | 0.24 mL/MPa | not modelled | difference between bulk-modulus runs with the hose shut and open |

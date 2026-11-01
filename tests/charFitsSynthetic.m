@@ -1,7 +1,7 @@
 function charFitsSynthetic()
 %CHARFITSSYNTHETIC The three characterisation fits on synthetic logs with
 %   known parameters: charBulkModulus recovers K, the air pocket at the
-%   pressure transducer (a fixed isothermal gas of cfg.airVolume_mL at
+%   pressure transducer (a fixed isothermal gas of Vair / 1000 at
 %   atmosphere in every chamber), a residual gas bubble beyond it and
 %   the split between liquid and series compliance from two fills;
 %   charOrificeFlow recovers Cd and the square-root exponent from
@@ -33,14 +33,15 @@ V0 = A * (cfg.posEOT - x0) + Vdead;
 % Every chamber holds the air pocket at the transducer, a fixed isothermal
 % gas of the configured volume at atmosphere (params.py V_air); a bubble
 % of free gas comes on top of it where a case sets one.
-Vair = cfg.airVolume_mL * 1000; % mm^3 of air at atmosphere in the transducer passage
+Vair = 650;                     % mm^3 of air at atmosphere in the transducer passage: larger than
+                                % the configured pocket so the fit resolves it, passed to every fit
 VgBubble = 1000;                % mm^3 of free gas at atmosphere beyond the pocket
 % Up and down ramps at 0.1 mm/s; x(P) from the compliances, then t from x.
 % The pocket alone: the fit recovers the liquid K, and its gas term is the
 % pocket, within the tolerance of the acceptance.
 f1 = fullfile(dir, 'k_run_1.csv');
 writeRamps(f1, K, V0, x0, Vair, 0, A, Patm);
-r = charBulkModulus(f1, struct('quiet', true, 'deadVolume_mL', Vdead / 1000));
+r = charBulkModulus(f1, struct('quiet', true, 'deadVolume_mL', Vdead / 1000, 'airVolume_mL', Vair / 1000));
 assert(abs(r.K_liq_GPa - K / 1000) / (K / 1000) < 0.02, 'liquid K %.3f GPa, set %.3f', r.K_liq_GPa, K / 1000);
 assert(abs(r.K_lin_GPa - K / 1000) / (K / 1000) < 0.04, 'effective K %.3f GPa, set %.3f', r.K_lin_GPa, K / 1000);
 assert(abs(r.K_Pa - r.K_liq_GPa * 1e9) < 1, 'r.K_Pa is not the liquid K');
@@ -49,19 +50,19 @@ VgAtP0 = Vair * Patm / (P0 + Patm) / 1000;
 assert(abs(r.segments(1).airAtP0_mL - VgAtP0) < 1e-12, 'the pocket at P0 is %.5f mL, expected %.5f', ...
     r.segments(1).airAtP0_mL, VgAtP0);
 assert(abs(r.Vg_mL - VgAtP0) < 0.5 * VgAtP0, 'gas %.4f mL fitted, pocket %.4f mL at %.1f MPa', r.Vg_mL, VgAtP0, P0);
-assert(mean([r.segments.Vair_fit_mL]) > 0.5 * cfg.airVolume_mL && mean([r.segments.Vair_fit_mL]) < 1.5 * cfg.airVolume_mL, ...
-    'pocket at atmosphere %.3f mL fitted, %.3f mL set', mean([r.segments.Vair_fit_mL]), cfg.airVolume_mL);
+assert(mean([r.segments.Vair_fit_mL]) > 0.5 * Vair / 1000 && mean([r.segments.Vair_fit_mL]) < 1.5 * Vair / 1000, ...
+    'pocket at atmosphere %.3f mL fitted, %.3f mL set', mean([r.segments.Vair_fit_mL]), Vair / 1000);
 assert(r.gasExcess_mL < 0.3 && r.pass, 'the pocket alone failed the checks (excess %.3f mL)', r.gasExcess_mL);
 assert(numel(r.segments) == 2 && r.hysteresis < 0.02);
 fprintf('ok  bulk modulus: liquid K %.3f GPa (set %.3f), pocket %.3f mL at atmosphere fitted (set %.3f), gas %.4f mL at %.1f MPa (set %.4f)\n', ...
-    r.K_liq_GPa, K / 1000, mean([r.segments.Vair_fit_mL]), cfg.airVolume_mL, r.Vg_mL, P0, VgAtP0);
+    r.K_liq_GPa, K / 1000, mean([r.segments.Vair_fit_mL]), Vair / 1000, r.Vg_mL, P0, VgAtP0);
 
 % A bubble of free gas beyond the pocket: the fit finds the sum, the
 % liquid K is still recovered, and the gas excess over the pocket is the
 % bubble.
 f1b = fullfile(dir, 'k_run_1b.csv');
 writeRamps(f1b, K, V0, x0, Vair + VgBubble, 0, A, Patm);
-r = charBulkModulus(f1b, struct('quiet', true, 'deadVolume_mL', Vdead / 1000));
+r = charBulkModulus(f1b, struct('quiet', true, 'deadVolume_mL', Vdead / 1000, 'airVolume_mL', Vair / 1000));
 bubbleAtP0 = VgBubble * Patm / (P0 + Patm) / 1000;
 assert(abs(r.K_liq_GPa - K / 1000) / (K / 1000) < 0.03, 'liquid K %.3f GPa with a bubble, set %.3f', r.K_liq_GPa, K / 1000);
 assert(abs(mean([r.segments.VgExcess_mL]) - bubbleAtP0) < 0.5 * bubbleAtP0, ...
@@ -73,10 +74,10 @@ fprintf('ok  bulk modulus: a bubble of %.4f mL at %.1f MPa beyond the pocket is 
 % the 0.3 mL tolerance is an option.
 f1c = fullfile(dir, 'k_run_1c.csv');
 writeRamps(f1c, K, V0, x0, Vair + 30e3, 0, A, Patm);
-r = charBulkModulus(f1c, struct('quiet', true, 'deadVolume_mL', Vdead / 1000));
+r = charBulkModulus(f1c, struct('quiet', true, 'deadVolume_mL', Vdead / 1000, 'airVolume_mL', Vair / 1000));
 failedNames = cellfun(@(c) c.name, r.checks(cellfun(@(c) ~c.pass, r.checks)), 'UniformOutput', false);
 assert(any(strcmp(failedNames, 'gasExcess_mL')), 'failed checks: %s', strjoin(failedNames, ', '));
-r2 = charBulkModulus(f1c, struct('quiet', true, 'deadVolume_mL', Vdead / 1000, 'airTolerance_mL', 5));
+r2 = charBulkModulus(f1c, struct('quiet', true, 'deadVolume_mL', Vdead / 1000, 'airVolume_mL', Vair / 1000, 'airTolerance_mL', 5));
 assert(all(cellfun(@(c) c.pass, r2.checks(strcmp(cellfun(@(c) c.name, r2.checks, 'UniformOutput', false), 'gasExcess_mL')))), ...
     'a gas excess inside airTolerance_mL = 5 failed (%.3f mL)', r2.gasExcess_mL);
 fprintf('ok  bulk modulus: %.2f mL of gas beyond the pocket at %.1f MPa fails the gas check (%.2f mL excess), passes with a 5 mL tolerance\n', ...
@@ -85,7 +86,7 @@ fprintf('ok  bulk modulus: %.2f mL of gas beyond the pocket at %.1f MPa fails th
 % The pocket alone and the clean-run checks pass.
 f2 = fullfile(dir, 'k_run_2.csv');
 writeRamps(f2, K, V0, x0, Vair, 0, A, Patm);
-r = charBulkModulus(f2, struct('quiet', true, 'deadVolume_mL', Vdead / 1000));
+r = charBulkModulus(f2, struct('quiet', true, 'deadVolume_mL', Vdead / 1000, 'airVolume_mL', Vair / 1000));
 assert(r.pass, 'clean liquid run failed the checks');
 assert(abs(r.K_Pa - K * 1e6) / (K * 1e6) < 0.02);
 fprintf('ok  bulk modulus: clean run passes, K %.3g Pa\n', r.K_Pa);
@@ -102,8 +103,8 @@ Plogged = gv0.G_cfgPressureRangeMin + (mAlogged - gv0.G_cfgPressureZeroMa) / mAp
 f2s = fullfile(dir, 'k_run_2_shunt434.csv');
 writeRun(f2s, [d2.t d2.step d2.status d2.mode d2.ref d2.position d2.velocity d2.torque Plogged ...
     d2.inMotion d2.inBand d2.exchangeMs]);
-rs = charBulkModulus(f2s, struct('quiet', true, 'deadVolume_mL', Vdead / 1000, 'logShuntOhms', 434));
-ru = charBulkModulus(f2s, struct('quiet', true, 'deadVolume_mL', Vdead / 1000));
+rs = charBulkModulus(f2s, struct('quiet', true, 'deadVolume_mL', Vdead / 1000, 'airVolume_mL', Vair / 1000, 'logShuntOhms', 434));
+ru = charBulkModulus(f2s, struct('quiet', true, 'deadVolume_mL', Vdead / 1000, 'airVolume_mL', Vair / 1000));
 assert(abs(rs.K_Pa - K * 1e6) / (K * 1e6) < 0.02, 'rescaled K %.3g Pa, set %.3g', rs.K_Pa, K * 1e6);
 assert(abs(ru.K_Pa - K * 1e6) / (K * 1e6) > 0.5 * abs(1 - gv0.G_cfgPressureShuntOhms / 434), ...
     'K without the rescale %.3g Pa is not off by the shunt ratio', ru.K_Pa);
@@ -117,7 +118,7 @@ f4 = fullfile(dir, 'k_fill150.csv');
 writeRamps(f3, K, V0, x0, Vair, ks, A, Patm);
 x1 = cfg.posEOT - (150e3 - Vdead) / A;
 writeRamps(f4, K, 150e3, x1, Vair, ks, A, Patm);
-r = charBulkModulus({f3, f4}, struct('quiet', true, 'deadVolume_mL', Vdead / 1000));
+r = charBulkModulus({f3, f4}, struct('quiet', true, 'deadVolume_mL', Vdead / 1000, 'airVolume_mL', Vair / 1000));
 Keff = 1 / (1 / K + A^2 / (ks * V0));
 assert(abs(r.segments(1).K_lin_GPa - Keff / 1000) / (Keff / 1000) < 0.03, ...
     'effective K at 300 mL %.3f GPa, expected %.3f with the series compliance', r.segments(1).K_lin_GPa, Keff / 1000);
@@ -141,7 +142,7 @@ fprintf('ok  bulk modulus: the pocket leaves the two-fill liquid K at %.3f GPa; 
     r.split.K_GPa, r.split.ks_N_per_um, r0.split.ks_N_per_um, ks / 1000);
 
 % File patterns: the fits take a pattern like a list of names
-rp = charBulkModulus(fullfile(dir, 'k_fill*.csv'), struct('quiet', true, 'deadVolume_mL', Vdead / 1000));
+rp = charBulkModulus(fullfile(dir, 'k_fill*.csv'), struct('quiet', true, 'deadVolume_mL', Vdead / 1000, 'airVolume_mL', Vair / 1000));
 assert(numel(rp.segments) == numel(r.segments) && abs(rp.split.K_GPa - r.split.K_GPa) < 1e-9, 'pattern differs from the list');
 failed = false;
 try

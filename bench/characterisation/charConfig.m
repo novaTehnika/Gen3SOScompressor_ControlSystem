@@ -22,8 +22,9 @@ cfg.Patm_MPa        = 0.101325;
 % mL at atmosphere: air in the passage (about 2 cm) to the pressure
 % transducer and in its cavity, which cannot be purged and dissolves only
 % very slowly, so it is a fixed isothermal gas pocket in every run. It is
-% params.py V_air (0.65e-6 m^3), the same number, and charRunSim checks it.
-cfg.airVolume_mL    = 0.65;
+% params.py V_air (0.1e-6 m^3, an estimate from the geometry until the
+% fits at two fill levels settle it), the same number; charRunSim checks it.
+cfg.airVolume_mL    = 0.1;
 
 % --- Outlet: ball valve, tube, orifice plate -----------------------------------
 cfg.nOrifice        = 32;

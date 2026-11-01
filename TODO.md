@@ -187,11 +187,13 @@ reference for every declaration.
       the calibrated pressure input (`G_cfgPressureShuntOhms` 421.4) at
       the 4 ms scan. `bench/MeasurementPlan.md` sequences every model
       measurement, these included, into three sessions on two fills:
-  - [ ] Fill, weigh the fill against the geometry, and purge; the gas
-        term the fit reports has a floor, the air in the transducer
-        passage and cavity (`V_air`, up to 0.65 mL from the October
-        fits, less by the geometry), and should come out the same in
-        every liquid-only run. Note the passage's bore and length.
+  - [ ] Fill, weigh the fill against the geometry, and purge until they
+        agree to a few mL: the October fits' gas term (0.65 mL at the
+        ramps' mean pressure) is about 40 mL of air at atmosphere, which
+        the scale shows. The air in the transducer passage and cavity
+        (`V_air`, about 0.1 mL by the geometry) stays and is the floor of
+        the gas term, the same in every liquid-only run. Note the
+        passage's bore and length.
   - [ ] Bulk modulus with the proximal valve shut: `K300` three times,
         then a second fill level so `charBulkModulus` separates the liquid
         from the series compliance.
