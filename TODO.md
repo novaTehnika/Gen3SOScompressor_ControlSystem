@@ -121,18 +121,13 @@ reference for every declaration.
       groups, but this has not been measured.
 - [ ] Run a bench with the probe and check the timing of a command that
       waits for the probe's arm acknowledgement.
-- [ ] When reading delays from probe captures, allow one scan: the probe
-      logs the velocity feedback one scan older than the command.
 - [ ] Run `bench/modbus/modbusCountSweep.m` with a Wireshark capture and
       analyse it with `modbusCaptureTiming.py` (README "Register count").
       Fill the table there and set `perRegister` in
       `slave-sim/modbusLinkConfig.m`. Writes need a block of holding
       registers inside the group that the program does not use, passed as
       `writeStart`. If the same-tick share falls with the register count,
-      make `pNextTick` depend on the count too. Before running it, widen
-      the sweep's protected range: `modbusCountSweep.m` refuses HR1-8 and
-      HR111-114, but the protocol now uses HR1-12, so a `writeStart` of
-      9 to 12 would overwrite the saline and oxygen registers.
+      make `pNextTick` depend on the count too.
 - [ ] Repeat the characterisation (`bench/characterisation/README.md`) on
       the calibrated pressure input (`G_cfgPressureShuntOhms` 421.4) at
       the 4 ms scan:
@@ -170,9 +165,7 @@ reference for every declaration.
   - [ ] End of travel, `posEOT` (367 mm, `master-src/logic/masterConfig.m`),
         which sets the displayed position and volume.
   - [ ] Cylinder entry, `G_cfgPosCylinderEntry` (176 mm). The simulator's
-        `chamberContactPos` is still 200 mm and
-        `bench/friction/frictionBenchConfig.m` `exitGuardPos` still
-        assumes 200 + 20 = 220 mm.
+        `chamberContactPos` is still 200 mm.
   - [ ] Margins between the limits. `posMax` and `G_cfgPosSoftLimitMax`
         are both 367 mm and the switch sits just past them, so a jog the
         master stops at `posMax` can overshoot into `FAULT_POSITION` or
@@ -194,10 +187,6 @@ reference for every declaration.
       GVL setting) and `G_cfgPressureDecel` 50 mm/s², conservative by
       three to four times at 5 mm/s; the slave's unscheduled stop law has
       no delay term, and `FB_PressureSchedule` computes its own `Lag`.
-- [ ] From the one-pass logs already taken (`bench/captures/stops_char_*`):
-      the friction at speed under load (`frictionFit` on the legs) and the
-      stiffness against pressure (`charBulkModulus` with `chargeRatio`).
-      Neither fit has been run on them.
 - [ ] Confirm that `Y_DirectControl`'s `Acceleration` input limits the
       drive in VelocityTLMode: velocity steps at 1 and at 100 mm/s². The
       bench saw every step complete in 60 ms whatever its size
@@ -298,10 +287,6 @@ reference for every declaration.
       still says to open the proximal valve before the compression; the
       settled procedure (its "Settled" list and the hose item above) keeps
       it shut until after mixing.
-- [ ] Capture directory: `charRun` saves to `bench/common/captures` by
-      default and `bench/characterisation/README.md` reads from
-      `../common/captures`, but the committed logs are in
-      `bench/captures`. Point both at one place.
 
 ## Open decisions
 
@@ -313,9 +298,9 @@ reference for every declaration.
 - [ ] Merge `G_cfgGoHomeAccel` and `G_cfgHomeLimAccel` (both 5 mm/s², the
       same kind of move) into one `G_cfgMoveAccel`.
 - [ ] `G_cfgGearRatio` and `G_cfgLeadScrewPitch` duplicate the Hardware
-      Configuration scaling and nothing reads them: `benchGvl.m` lists
-      them only as parse fallbacks and `frictionBenchConfig.m` hardcodes
-      70 and 5.08. Label them as bench copies, move them to the bench
+      Configuration scaling and nothing on the controller reads them: the
+      friction bench takes its gear ratio and lead from them through
+      `benchGvl.m`. Label them as bench copies, move them to the bench
       config, or delete them.
 - [ ] Share one debounce setting each between the two overtravel inputs
       (both 10 ms) and between MotionEnable and FaultReset (both 20 ms).
