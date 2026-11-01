@@ -123,49 +123,38 @@ types = cellfun(@(s) s{1}, path, 'UniformOutput', false);
 assert(nStops >= 6 && sum(strcmp(types, 'move')) == nStops && sum(strcmp(types, 'settle')) == nStops / 2, ...
     'plan: %d stops, %d steps', nStops, numel(path));
 r = charRun('simstop', path, opts);
-assert(isempty(r.abort), r.abort);
-L = r.runLog;
-% Every excursion stays within its budget (plus the stop beyond the leg)
-% and each pair of legs returns the piston to where the first began
-level = 0;
-for s = 1:numel(path)
-    rows = L(L(:, STEP) == s, :);
-    switch path{s}{1}
-        case 'ramp'
-            level = level + (path{s}{2} > 0);
-        case 'move'
-            if path{s}{2} > 0
-                xPair = rows(1, POS);
-                Plevel = plan(min(level, numel(plan))).P_MPa;
-                assert(max(rows(:, P)) < Plevel + 1.0 + 0.6, ...
-                    'step %d reached %.2f MPa at a %.0f MPa level', s, max(rows(:, P)), Plevel);
-            else
-                after = L(L(:, STEP) == s + 1, :);
-                assert(abs(after(end, POS) - xPair) < 0.15, ...
-                    'pair ending at step %d returned to %.3f mm from %.3f', s, after(end, POS), xPair);
-            end
-    end
-end
-rs = charStopDistance([r.capFiles {r.file}], struct('quiet', true, 'D_cfg', ccfg.velDecel, 'lag_s', 0.06));
-assert(numel(rs.stops) >= nStops, 'only %d stops found', numel(rs.stops));
-assert(sum(strcmp({rs.stops.source}, 'capture')) >= nStops - 1, 'only %d stops in the captures', ...
-    sum(strcmp({rs.stops.source}, 'capture')));
-for f = {rs.fit.comp, rs.fit.ret}
-    % The plant's drive does not slew: a stop is the dead time and the lag,
-    % a distance linear in the speed, so the fit's deceleration term goes
-    % large and its delay is the drive's: the lag plus the dead time less
-    % the scan by which the logged command leads the drive, plus the scan
-    % by which the probe's velocity feedback is older than its command (the
-    % probe runs in PRG_Main, before the axis updates the feedback), less the
-    % half scan the log's sum of v*Ts loses.
-    T0 = tauV + Td - 0.5 * ccfg.scanTime;                           % [s]
-    assert(abs(f{1}.T0_s - T0) < 0.003 && f{1}.D_mm_s2 > 5 * ccfg.velDecel, ...
-        'fit D %.1f mm/s^2, T0 %.4f s; the drive stops in %.4f s, unslewed', f{1}.D_mm_s2, f{1}.T0_s, T0);
-end
-assert(rs.pass, 'stopping-distance checks failed');
+rs = checkOnePass(r, path, plan, nStops, tauV + Td, ccfg, 0.6, 0.003);
 fprintf('ok  one-pass path: %d steps, %d stops, D %.0f / %.0f mm/s^2 (unslewed), T0 %.1f ms (drive %.1f)\n', ...
     numel(path), numel(rs.stops), rs.fit.comp.D_mm_s2, rs.fit.ret.D_mm_s2, 1000 * rs.T0_s, ...
     1000 * (tauV + Td - 0.5 * ccfg.scanTime));
+
+% --- The same at 8 and 10 MPa and 0.25 and 0.5 mm/s (README section 6) ----------
+% The chamber starts liquid-only (its charge dissolved at 7.5 MPa) with the
+% hose open: 4.8 MPa/mm at the fill, the stiff chamber the bench meets at
+% these pressures. The options are the README's command; only the
+% stiffness (the plant's own) and the pause (the simulated readout needs
+% 3 s) differ from it.
+opts = linkOpts(saveDir, @(sl) dissolvedAt(sl, 7.5));
+opts.probe = 'stops';
+S = fakeProbeLink('state');
+pl = S.sl.plant;
+kPlant = @(Pq) pl.par.A ./ ((pl.n_tot - pl.n_dis) * pl.par.RT ./ (Pq * 1e6 + pl.par.Patm).^2 ...
+    + (pl.V_l / pl.par.K + pl.par.C_hose)) * 1e-9;                  % [Pa/m -> MPa/mm]
+[path, plan] = charStopPath(struct('levels_MPa', [8 10], 'speeds', [0.25 0.5], 'budget_MPa', [2 0.7], ...
+    'rampOvershoot_MPa', 0.2, 'minRun_mm', 0.03, 'minSteady_s', 0, 'P_start_MPa', 7.5, 'pause_s', 3, ...
+    'stiffness', kPlant, 'D_mm_s2', ccfg.velDecel, 'quiet', true));
+nStops = plan(1).nStops;
+% Both speeds at 8 MPa; at 10 MPa the 0.5 mm/s leg leaves no budget under the guard
+assert(nStops == 6 && isequal(plan(1).speeds, [0.25 0.5]) && isequal(plan(2).speeds, 0.25), ...
+    'plan: %d stops, speeds %s / %s', nStops, mat2str(plan(1).speeds), mat2str(plan(2).speeds));
+r = charRun('simstophp', path, opts);
+% The legs are 0.03 to 0.35 mm, so the drive has not reached speed when a
+% stop begins and the fitted delay falls a little short of the plant's
+rs = checkOnePass(r, path, plan, nStops, tauV + Td, ccfg, 0.3, 0.006);
+assert(max(r.runLog(:, P)) < ccfg.pressureStop, 'the run reached the guard');
+assert(abs(rs.scan_s - ccfg.scanTime) < 0.1 * ccfg.scanTime, 'scan period %.2f ms', 1000 * rs.scan_s);
+fprintf('ok  stops at 8 and 10 MPa, 0.25 and 0.5 mm/s: %d stops in the captures, T0 %.1f ms, r.D_mm_s2 %.3g\n', ...
+    sum(strcmp({rs.stops.source}, 'capture')), 1000 * rs.T0_s, rs.D_mm_s2);
 
 % --- Delivery: pressure mode, valve opens, the loop balances the outflow --------
 % A delivery follows the hold that dissolves the charge, so the saline
@@ -286,3 +275,50 @@ sl.plant.n_dis = min(pl.par.kH * (P * 1e6 + pl.par.Patm) * pl.V_l, pl.n_tot);   
 x = chamberPosition(sl, P);
 end
 
+
+function rs = checkOnePass(r, path, plan, nStops, driveLag, ccfg, slack, tol)
+% The checks of a one-pass run: no abort, every excursion within its
+% budget plus slack [MPa], each pair of legs back where it began, every
+% stop in a capture, and the fit recovering the plant's delay to within
+% tol [s] with a deceleration too large to resolve (the drive does not
+% slew).
+T = 1; STEP = 2; POS = 6; P = 9;                                    % log columns
+assert(isempty(r.abort), r.abort);
+L = r.runLog;
+level = 0;
+for s = 1:numel(path)
+    rows = L(L(:, STEP) == s, :);
+    switch path{s}{1}
+        case 'ramp'
+            level = level + (path{s}{2} > 0);
+        case 'move'
+            if path{s}{2} > 0
+                xPair = rows(1, POS);
+                q = plan(min(max(level, 1), numel(plan)));
+                assert(max(rows(:, P)) < q.P_MPa + q.budget_MPa + slack, ...
+                    'step %d reached %.2f MPa at a %.0f MPa level', s, max(rows(:, P)), q.P_MPa);
+            else
+                after = L(L(:, STEP) == s + 1, :);
+                assert(abs(after(end, POS) - xPair) < 0.15, ...
+                    'pair ending at step %d returned to %.3f mm from %.3f', s, after(end, POS), xPair);
+            end
+    end
+end
+rs = charStopDistance([r.capFiles {r.file}], struct('quiet', true, 'D_cfg', ccfg.velDecel, 'lag_s', 0.06));
+assert(numel(rs.stops) >= nStops, 'only %d stops found', numel(rs.stops));
+assert(sum(strcmp({rs.stops.source}, 'capture')) >= nStops - 1, 'only %d stops in the captures', ...
+    sum(strcmp({rs.stops.source}, 'capture')));
+for f = {rs.fit.comp, rs.fit.ret}
+    % The plant's drive does not slew: a stop is the dead time and the lag,
+    % a distance linear in the speed, so the fit's deceleration term goes
+    % large and its delay is the drive's: the lag plus the dead time less
+    % the scan by which the logged command leads the drive, plus the scan
+    % by which the probe's velocity feedback is older than its command (the
+    % probe runs in PRG_Main, before the axis updates the feedback), less the
+    % half scan the log's sum of v*Ts loses.
+    T0 = driveLag - 0.5 * ccfg.scanTime;                            % [s]
+    assert(abs(f{1}.T0_s - T0) < tol && f{1}.D_mm_s2 > 5 * ccfg.velDecel, ...
+        'fit D %.1f mm/s^2, T0 %.4f s; the drive stops in %.4f s, unslewed', f{1}.D_mm_s2, f{1}.T0_s, T0);
+end
+assert(rs.pass, 'stopping-distance checks failed');
+end

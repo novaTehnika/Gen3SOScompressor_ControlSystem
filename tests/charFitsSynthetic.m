@@ -50,6 +50,26 @@ assert(r.pass, 'clean liquid run failed the checks');
 assert(abs(r.K_Pa - K * 1e6) / (K * 1e6) < 0.02);
 fprintf('ok  bulk modulus: clean run passes, K %.3g Pa\n', r.K_Pa);
 
+% A log recorded with another shunt setting (434 ohm; the present GVL has
+% 421.4) reads its pressure scaled by the ratio of the two: opts.logShuntOhms
+% rescales it back, and without it K is off by that ratio.
+gv0 = benchGvl();
+mAperMPa = gv0.G_cfgPressureSpanMa / (gv0.G_cfgPressureRangeMax - gv0.G_cfgPressureRangeMin);
+d2 = benchReadCsv(f2);
+mAtrue = gv0.G_cfgPressureZeroMa + (d2.pressure - gv0.G_cfgPressureRangeMin) * mAperMPa;      % [mA]
+mAlogged = mAtrue * gv0.G_cfgPressureShuntOhms / 434;                                          % [mA]
+Plogged = gv0.G_cfgPressureRangeMin + (mAlogged - gv0.G_cfgPressureZeroMa) / mAperMPa;        % [MPa]
+f2s = fullfile(dir, 'k_run_2_shunt434.csv');
+writeRun(f2s, [d2.t d2.step d2.status d2.mode d2.ref d2.position d2.velocity d2.torque Plogged ...
+    d2.inMotion d2.inBand d2.exchangeMs]);
+rs = charBulkModulus(f2s, struct('quiet', true, 'deadVolume_mL', Vdead / 1000, 'logShuntOhms', 434));
+ru = charBulkModulus(f2s, struct('quiet', true, 'deadVolume_mL', Vdead / 1000));
+assert(abs(rs.K_Pa - K * 1e6) / (K * 1e6) < 0.02, 'rescaled K %.3g Pa, set %.3g', rs.K_Pa, K * 1e6);
+assert(abs(ru.K_Pa - K * 1e6) / (K * 1e6) > 0.5 * abs(1 - gv0.G_cfgPressureShuntOhms / 434), ...
+    'K without the rescale %.3g Pa is not off by the shunt ratio', ru.K_Pa);
+fprintf('ok  bulk modulus: a log from the 434 ohm shunt, K %.3g Pa rescaled (set %.3g), %.3g without\n', ...
+    rs.K_Pa, K * 1e6, ru.K_Pa);
+
 % Two fills with a series compliance of 200 N/um split liquid and structure.
 ks = 200e3;                     % N/mm
 f3 = fullfile(dir, 'k_fill300.csv');
@@ -67,6 +87,18 @@ assert(abs(r.split.ks_N_per_um - ks / 1000) / (ks / 1000) < 0.1, 'series stiffne
     r.split.ks_N_per_um, ks / 1000);
 fprintf('ok  bulk modulus: two fills give liquid %.2f GPa and series %.0f N/um (effective %.2f GPa at 300 mL)\n', ...
     r.split.K_GPa, r.split.ks_N_per_um, r.segments(1).K_lin_GPa);
+
+% File patterns: the fits take a pattern like a list of names
+rp = charBulkModulus(fullfile(dir, 'k_fill*.csv'), struct('quiet', true, 'deadVolume_mL', Vdead / 1000));
+assert(numel(rp.segments) == numel(r.segments) && abs(rp.split.K_GPa - r.split.K_GPa) < 1e-9, 'pattern differs from the list');
+failed = false;
+try
+    benchFiles(fullfile(dir, 'no_such_*.csv'));
+catch
+    failed = true;
+end
+assert(failed, 'a pattern that matches nothing was accepted');
+fprintf('ok  file patterns: k_fill*.csv gives the two fills, a pattern with no match is an error\n');
 
 % --- Schedule check ---------------------------------------------------------------
 % The slave's stiffness bound against a liquid-only run of known stiffness
