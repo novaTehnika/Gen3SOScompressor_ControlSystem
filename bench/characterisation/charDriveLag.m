@@ -64,9 +64,8 @@ function r = charDriveLag(files, opts)
 %                dead time.
 %   r.pass, r.checks
 
-if ischar(files)
-    files = {files};
-end
+addpath(fullfile(fileparts(mfilename('fullpath')), '..', 'common'));
+files = benchFiles(files);
 if nargin < 2
     opts = struct();
 end

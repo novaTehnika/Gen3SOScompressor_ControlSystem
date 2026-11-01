@@ -30,6 +30,9 @@ function r = charBulkModulus(files, opts)
 %   opts.pressureRange     [min max] MPa gauge fitted (default [2.5 10.5])
 %   opts.skip              s dropped at the start of each segment (default 1)
 %   opts.minSpeed          mm/s, rows slower are dropped (default 0.03)
+%   opts.minRows           rows a segment needs to be fitted (default 20;
+%                          the legs of the one-pass path of test 4 are
+%                          10 to 40 rows at a 25 ms cycle)
 %   opts.chargeRatio       oxygen charge (STP volume / saline volume) of a
 %                          charged run, to compare the gas bound with the
 %                          model's free gas (default none)
@@ -40,14 +43,14 @@ function r = charBulkModulus(files, opts)
 %
 %   r.segments  one row per segment: file, step, direction, Pmin, Pmax,
 %               xMean, V_mL, dPdx (MPa/mm), K_lin_GPa, K_liq_GPa, Vg_mL,
-%               residual_MPa, n
+%               residual_MPa, n, and fileIdx (index into files) and rowTop
+%               (the row of the segment's highest pressure in that file)
 %   r.K_Pa      effective bulk modulus for params.py (mean of the segments)
 %   r.pass      every acceptance check passed
 %   r.checks    the checks, with their values and limits
 
-if ischar(files)
-    files = {files};
-end
+addpath(fullfile(fileparts(mfilename('fullpath')), '..', 'common'));
+files = benchFiles(files);
 if nargin < 2
     opts = struct();
 end
@@ -55,6 +58,7 @@ cfg = charConfig();
 opts = withDefault(opts, 'pressureRange', [2.5 10.5]);
 opts = withDefault(opts, 'skip', 1);
 opts = withDefault(opts, 'minSpeed', 0.03);
+opts = withDefault(opts, 'minRows', 20);
 opts = withDefault(opts, 'chargeRatio', []);
 opts = withDefault(opts, 'logShuntOhms', []);
 opts = withDefault(opts, 'quiet', false);
@@ -70,7 +74,7 @@ expectedTable(say, A, cfg);
 
 seg = struct('file', {}, 'step', {}, 'dir', {}, 'Pmin', {}, 'Pmax', {}, 'xMean', {}, ...
     'V_mL', {}, 'dPdx', {}, 'K_lin_GPa', {}, 'K_liq_GPa', {}, 'Vg_mL', {}, ...
-    'residual_MPa', {}, 'residual_x_mm', {}, 'n', {}, 'rate_MPa_s', {});
+    'residual_MPa', {}, 'residual_x_mm', {}, 'n', {}, 'rate_MPa_s', {}, 'fileIdx', {}, 'rowTop', {});
 for f = 1:numel(files)
     d = benchReadCsv(files{f});
     d.pressure = benchPressureRescale(d.pressure, opts.logShuntOhms);
@@ -86,7 +90,7 @@ for f = 1:numel(files)
         t0 = d.t(rows(1));
         rows = rows(d.t(rows) >= t0 + opts.skip & abs(d.velocity(rows)) >= opts.minSpeed & ...
             d.pressure(rows) >= opts.pressureRange(1) & d.pressure(rows) <= opts.pressureRange(2));
-        if numel(rows) < 20
+        if numel(rows) < opts.minRows
             continue;
         end
         x = d.position(rows);
@@ -107,6 +111,9 @@ for f = 1:numel(files)
         s.Pmin = min(P);
         s.Pmax = max(P);
         s.n = numel(rows);
+        s.fileIdx = f;
+        [~, iTop] = max(P);
+        s.rowTop = rows(iTop);                          % row of the segment's highest pressure
         s.rate_MPa_s = abs((P(end) - P(1)) / (d.t(rows(end)) - d.t(rows(1))));
         if isnan(fill)
             V = A * (cfg.posEOT - s.xMean) + opts.deadVolume_mL * 1000;
