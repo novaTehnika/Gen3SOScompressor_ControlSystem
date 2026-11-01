@@ -189,16 +189,19 @@ TRUE for up to `V/A` after the drop (0.6 s at `V` = 6 mm/s, `A` = 10 mm/s²) plu
 ### Mode 110 (Home to Limit)
 
 Durations follow from the `FB_HomeLimit` phases and the GVL defaults
-(fast 5 mm/s, slow 1 mm/s, backoff/retract 5 mm/s, accel 5 mm/s², decel 50 mm/s²).
+(fast 6 mm/s, slow 1 mm/s, backoff/retract 5 mm/s, accel 5 mm/s², decel
+50 mm/s²). The velocities are limited to `G_cfgVelLimitMax` (6 mm/s). The
+switch's hysteresis is not measured; the backoff and slow approach are
+timed for a couple of millimetres of it.
 
 | Phase | Duration | Description |
 |-------|----------|-------------|
-| Fast Approach | distance / 5 mm/s, up to ≈ 63 s from the positive soft limit (≈ 310 mm) | Jog reverse at `G_cfgHomeLimFastApproachVel` until the negative overtravel switch trips, then wait for the Jog to stop |
-| Inter-Backoff | switch hysteresis / 5 mm/s | Jog forward at `G_cfgHomeLimBackoffVel` until the switch clears |
-| Slow Approach | switch hysteresis / 1 mm/s | Jog reverse at `G_cfgHomeLimSlowApproachVel`; the switch position is captured on trip |
-| Retract | ≈ 1.6 s | `MC_MoveAbsolute` by `G_cfgHomeLimRetractDist` (5 mm) |
+| Fast Approach | distance / 6 mm/s, up to 62 s (63 s with the ramps) from the positive soft limit: 372 mm, from `G_cfgPosSoftLimitMax` (367 mm) to the switch at -`G_cfgHomeLimRetractDist` (-5 mm) | Jog reverse at `G_cfgHomeLimFastApproachVel` until the negative overtravel switch trips, then wait for the Jog to stop (0.12 s, 0.36 mm past the trip) |
+| Inter-Backoff | 1-2 s | Jog forward at `G_cfgHomeLimBackoffVel` until the switch clears: switch hysteresis / 5 mm/s plus the acceleration |
+| Slow Approach | 2-3 s | Jog reverse at `G_cfgHomeLimSlowApproachVel`: switch hysteresis / 1 mm/s plus the acceleration; the switch position is captured on trip |
+| Retract | ≈ 1.6 s | `MC_MoveAbsolute` to the captured switch position plus `G_cfgHomeLimRetractDist` (5 mm), at `G_cfgHomeLimBackoffVel` |
 | Set Reference | a few scans | `MC_SetPosition` via `G_cmdSetPosition` until `G_staSetPosition.Done` |
-| **Total** | **≤ 90 s** | Bounded by `G_cfgHomingTimeout`; expiry raises `FAULT_LIMIT_SWITCH` |
+| **Total** | **≈ 70 s worst case, ≤ 90 s** | Bounded by `G_cfgHomingTimeout`; expiry raises `FAULT_LIMIT_SWITCH` |
 
 Mode 110 is the only homing sequence. Mode code 111 (7) is `MODE_PRESSURE`, an
 operational mode handled by `FB_PressureController`, not a homing mode.
@@ -241,7 +244,7 @@ Modbus service tick  |..|..|..|..|..|..|..|..|..|..|..|..|  (4 ms)
 MP2600iec scan       ||||||||||||||||||||||||||||||||||||||  (4 ms)
 ```
 
-The master writes holding registers HR1-HR8 and reads input registers IR1-IR20
+The master writes holding registers HR1-HR12 and reads input registers IR1-IR20
 once per exchange. The slave's Modbus server services the connection on its own
 tick, independent of the PLC task; `PRG_Main` sees new holding register values
 at its next scan. See `docs/master/ModbusRegisterMap.md`.
@@ -338,7 +341,9 @@ FaultReset   _______________|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 | G_cfgDebounceTimeOvertravelNeg | 10 ms | 1-20 ms | Negative overtravel / home reference debounce |
 | G_cfgDebounceTimeOvertravelPos | 10 ms | 1-20 ms | Positive overtravel debounce |
 | G_cfgAnalogFilterTimeConst | 20 ms | 1-200 ms | Pressure input low-pass time constant |
-| G_cfgHomingTimeout | 90000 ms | 30000-180000 ms | Homing sequence timeout |
+| G_cfgHomingTimeout | 90000 ms | 70000-140000 ms | Homing sequence timeout; derivation below |
+
+**`G_cfgHomingTimeout` range.** The lower bound is the longest legitimate homing: the fast approach over the longest travel, 372 mm (soft limit at 367 mm to the switch at -5 mm) at `G_cfgHomeLimFastApproachVel` (6 mm/s), 63 s with the ramps (§7), plus up to 7 s for the backoff, slow approach, retract and set reference (§7): 70 s. A shorter timeout would fault a homing that started at the far end. Scale it with the speed: `372 mm / G_cfgHomeLimFastApproachVel + 7 s`. The upper bound, twice the lower, is a judgement: a switch that never trips runs the axis at the fast approach speed until the timeout, and a longer timeout lets it run further before the fault. The default, 90 s, is about 30 % above the longest homing.
 
 ---
 
