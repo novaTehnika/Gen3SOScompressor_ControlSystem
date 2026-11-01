@@ -481,13 +481,13 @@
         DIAGNOSTICS
         ======================================================================== *)
 
-     G_sysLastFaultCode        : E_FaultCode := FAULT_NONE    (* Last fault that occurred *)
-     G_sysLastFaultState       : E_SystemState := ST_INIT     (* State when last fault occurred *)
+     G_sysLastFaultCode        : E_FaultCode      (* Last fault that occurred *)
+     G_sysLastFaultState       : E_SystemState    (* State when last fault occurred *)
      G_sysFaultCount           : UDINT := 0       (* Total number of faults since power-up *)
 
 
      (* ========================================================================
-        STEP PROBE (FB_Probe outputs, published by PRG_Output)
+        PROBE (FB_Probe outputs, published by PRG_Output)
         ======================================================================== *)
 
      G_sysProbeStage           : ARRAY104WORD     (* Window being filled; copied to G_mbProbeWindow when a fill completes *)
