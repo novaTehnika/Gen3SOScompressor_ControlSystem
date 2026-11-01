@@ -202,8 +202,7 @@ reference for every declaration.
       drive in VelocityTLMode: velocity steps at 1 and at 100 mm/s². The
       bench saw every step complete in 60 ms whatever its size
       (`bench/characterisation/README.md` section 8), which says it does
-      not. `bench/friction/README.md` still gives `G_cfgDirectCtrlAccel`
-      as 5 mm/s²; the GVL has 10.
+      not.
 - [ ] Hose procedure: the proximal valve stays shut during the
       compression and opens after mixing; a switched bypass orifice is
       deferred. Opening the proximal valve at 10 MPa drops the chamber to
@@ -266,38 +265,10 @@ reference for every declaration.
       `Ki`, `Accel`, `VelMax`, `Decel`, `StopStiffness`, `StopVelMin`,
       `TorqueLimit`, `TargetMax`, `InBand`). Take defaults and
       descriptions from the GVL.
-- [ ] `docs/slave/reference/HomingSequenceGuide.md`: the Mode 110
-      parameter table gives `G_cfgHomeLimFastApproachVel` as 5.0; the GVL
-      has 6.0.
-- [ ] `docs/slave/reference/TimingSpecification.md` §7: the Mode 110 table
-      works from a 5 mm/s fast approach over about 310 mm. With the GVL's
-      6 mm/s and `G_cfgPosSoftLimitMax` of 367 mm the worst-case approach
-      is about 372 mm (still about 63 s). Update the stated speed and
-      distance.
 - [ ] `docs/slave/reference/TimingSpecification.md` §12: the Range column
-      for `G_cfgBrakeEngageDelay`, `G_cfgBrakeDisengageDelay` (100-1000 ms)
-      and `G_cfgHomingTimeout` (30-180 s) was widened only so the defaults
-      fall inside it. Set ranges from the brake's datasheet and the
-      longest homing travel.
-- [ ] `docs/master/FaultCodeReference.md` (`FAULT_POSITION` and
-      `FAULT_PISTON_EXIT` sections) names `G_posSoftLimitMin` and
-      `G_posSoftLimitMax`; the globals are `G_cfgPosSoftLimitMin` and
-      `G_cfgPosSoftLimitMax`. The piston exit boundary is
-      `G_cfgPosCylinderEntry + G_cfgPosExitGuardMargin`, not the soft
-      limit.
-- [ ] `docs/slave/FB_Review_Summary.md` carries review dates in its
-      heading and in the `FB_PistonExitGuard` and `FB_SafetyMonitor`
-      status lines. Restate it as a description of the current blocks, or
-      retire it.
-- [ ] Register numbers left from before the fill moved to HR9-12:
-      `docs/master/ModbusRegisterMap.md` ("keeps the groups at IR20 and
-      HR6": HR12), `design/pressure-loop/README.md` "Porting the schedule"
-      (HR7-10, HR7-8, HR9-10: HR9-12, HR9-10, HR11-12) and `AGENTS.md`
-      ("8-register write vector": 12).
-- [ ] `design/pressure-loop/README.md` "What this means for the machine"
-      still says to open the proximal valve before the compression; the
-      settled procedure (its "Settled" list and the hose item above) keeps
-      it shut until after mixing.
+      for `G_cfgBrakeEngageDelay` and `G_cfgBrakeDisengageDelay`
+      (100-1000 ms) was widened only so the defaults fall inside it. Set
+      the ranges from the brake's datasheet.
 - [ ] Capture directory: `charRun` saves to `bench/common/captures` by
       default and `bench/characterisation/README.md` reads from
       `../common/captures`, but the committed logs are in
