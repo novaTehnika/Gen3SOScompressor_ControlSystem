@@ -262,12 +262,6 @@ reference for every declaration.
 
 ## Simulator and tests
 
-- [ ] The link timing model (`slave-sim/modbusLink.m`) leaves out what the
-      Simulink side adds: the master's step overrunning while a Modbus call
-      blocks, the exchange that arrives a period late (about one a minute
-      at 50 ms on the bench), and a lost link stopping the Simulink model
-      (bench case D). `closedLoopModbusStep` assumes every exchange
-      completes.
 - [ ] Simplifications of the simulated slave to keep in mind or remove:
   - [ ] Position moves, jog and stop prescribe the piston's velocity; the
         drive's dead time and lag apply only in `Y_DirectControl`'s

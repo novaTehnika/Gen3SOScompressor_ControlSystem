@@ -6,9 +6,15 @@ function closedLoopModbusStep()
 %   slave's input registers, steps on what it read and writes its holding
 %   registers, as 16-bit words packed and unpacked by the slave's register
 %   map (the GVL's AT addresses); and the slave scans every G_cfgScanTime
-%   (4 ms), serving the link's requests around its scans, on a 1 ms tick. Checks that the master's
+%   (4 ms), serving the link's requests around its scans, on a 1 ms tick.
+%   The master runs as the Simulink model does (the model commands of
+%   modbusLink): the Read and Write calls block its step, so a slow
+%   exchange delays the steps behind it, an exchange now and then arrives a
+%   period late, and a call that fails on a lost link stops the model, with
+%   the DAQ outputs at their final values. Checks that the master's
 %   register map (modbusMap) agrees with the slave's, then covers homing,
-%   position, pressure, fault reset and link loss on either side.
+%   position, pressure, fault reset, link loss on either side, a late
+%   exchange and the model stopping on a lost link.
 %
 %   masterStep uses masterConfig as it is, so the slave's soft limit is
 %   widened to the bench value to match.
@@ -33,8 +39,10 @@ h.y = scan(h.sl);
 h.mbRead = zeros(1, map.nRead);
 % The Modbus link with the bench's timing (modbusLinkConfig)
 h.link = modbusLink('init', modbusLinkConfig(), h.sl.G.G_cfgScanTime);
-h.readId = 0;
-h.pending = false;
+h.link = modbusLink('modelInit', h.link, cfg.dt, cfg.exchangePeriod, map.nRead);
+h.stopped = false;      % the Simulink model has stopped on a lost link
+h.tStop = NaN;
+h.nStep = 0;            % masterStep calls
 h.log = struct('read', zeros(0, 2), 'written', zeros(1, 0));
 h.tick = 0;
 h.m = [];
@@ -257,6 +265,70 @@ h = runUntil(h, 30, @(h) h.m.statusCode == 3);
 assert(h.m.statusCode == 3, 'position move after link loss did not reach target');
 fprintf('ok  master link loss -> latched until Stop\n');
 
+% A late exchange: the exchange due at one step arrives a period later
+% (the bench sees one a minute at 50 ms). The read results have one gap of
+% two periods, the master rides it out in a jog, and the slave's 300 ms
+% heartbeat timeout is not reached.
+h.app.targetVelocity = 2;
+h.app.jogDirection = 1;
+h = command(h, 3);
+h = runUntil(h, 10, @(h) h.m.statusCode == 4);
+h = runUntil(h, 2, @(h) h.sl.ax.v > 1);
+assert(h.m.statusCode == 4 && h.sl.ax.v > 1);
+st0 = modbusLink('modelStats', h.link);
+h.link = modbusLink('late', h.link);
+h = runUntil(h, 1, []);
+st = modbusLink('modelStats', h.link);
+gap = diff(st.tExchange(numel(st0.tExchange):end));
+assert(st.late == st0.late + 1, 'late exchanges: %d', st.late - st0.late);
+assert(sum(gap > 1.7 * cfg.exchangePeriod) == 1 && max(gap) < 2.5 * cfg.exchangePeriod, ...
+    'gaps between read results (ms): %s', mat2str(round(1000 * gap)));
+assert(numel(gap) >= 18 && numel(gap) <= 19, ...
+    '%d exchanges in 1 s, 19 or 20 expected less the merged one', numel(gap));
+assert(h.y.faultActive == 0 && h.m.linkOk == 1 && h.m.statusCode == 4 && h.sl.ax.v > 1);
+fprintf('ok  late exchange: gap of %.0f ms between read results, nominal %.0f ms; jog and link unaffected\n', ...
+    1000 * max(gap), 1000 * cfg.exchangePeriod);
+h.app.op = 0;
+h = runUntil(h, 0.5, []);
+h = runUntil(h, 3, @(h) h.sl.ax.v == 0);
+
+% The model stops on a lost link: the connection drops during a jog, the
+% next Modbus call (the next exchange step's Read) fails, the model ends (no more masterStep calls) and
+% the DAQ outputs fall to their final values, safety relay off. The slave
+% sees the heartbeat stop, raises FAULT_COMM and stops the axis. A restarted
+% model finds the fault and the operator resets it.
+h.app.targetVelocity = 2;
+h.app.jogDirection = 1;
+h = command(h, 3);
+h = runUntil(h, 10, @(h) h.m.statusCode == 4);
+h = runUntil(h, 2, @(h) h.sl.ax.v > 1);
+assert(h.m.statusCode == 4 && h.sl.ax.v > 1 && ~h.stopped);
+h = runUntil(h, 1, @(h) strcmp(h.link.model.x, 'none'));     % between two calls
+tCut = h.tick / 1000;
+h.link = modbusLink('cut', h.link, tCut);
+h = runUntil(h, 1, @(h) h.stopped);
+assert(h.stopped, 'the model did not stop on the lost link');
+assert(h.tStop > tCut && h.tStop - tCut <= cfg.exchangePeriod + 1e-9, 'the model stopped %.0f ms after the cut', ...
+    1000 * (h.tStop - tCut));
+nStep = h.nStep;
+h = runUntil(h, 0.3, []);
+assert(h.nStep == nStep, 'masterStep ran after the model stopped');
+assert(h.m.doSafety == 0 && h.m.doMixer == 0, 'DAQ outputs not at their final values');
+assert(h.y.faultActive == 1 && h.y.faultCode == 4, 'slave did not raise FAULT_COMM');
+h = runUntil(h, 3, @(h) h.sl.ax.v == 0);
+assert(h.sl.ax.v == 0, 'axis did not stop after the model stopped');
+fprintf('ok  lost link: model stopped %.0f ms after the cut, outputs off, slave FAULT_COMM and stopped\n', ...
+    1000 * (h.tStop - tCut));
+h.link = modbusLink('restore', h.link);
+h.app.op = 0;
+h = restartModel(h);
+h = runUntil(h, 0.5, []);
+assert(~h.stopped && h.m.linkOk == 1 && h.y.faultActive == 1);
+h = command(h, 5);
+h = runUntil(h, 1.5, []);
+assert(h.y.faultActive == 0 && h.m.state == 1 && h.m.linkOk == 1 && h.m.doSafety == 1);
+fprintf('ok  restarted model resets the fault\n');
+
 % E-stop drops the safety output and the mixer.
 h.app.mixer = 1;
 h = runUntil(h, 0.1, []);
@@ -310,38 +382,47 @@ end
 
 
 function h = runUntil(h, T, done)
-% On a 1 ms tick: the master steps every cfg.dt; at an exchange step it
-% reads the input registers through the link, steps when the read returns
-% and then writes its holding registers (the Read block, masterStep, the
-% Write block). The slave scans every G_cfgScanTime and serves the link's
-% requests around each scan: reads before it, writes after it.
-stepTicks = round(h.cfg.dt * 1000);
-exchangeTicks = round(h.cfg.exchangePeriod * 1000);
+% On a 1 ms tick: the Simulink model steps as modbusLink's model commands
+% say (the master steps every cfg.dt; at an exchange step the Read block
+% returns the input registers through the link, masterStep runs and the
+% Write block sends the holding registers, each call blocking the model).
+% The slave scans every G_cfgScanTime and serves the link's requests
+% around each scan: reads before it, writes after it. A stopped model
+% steps no more and its DAQ outputs hold their final values.
 scanTicks = round(1000 * h.sl.G.G_cfgScanTime);
 for n = 1:round(T * 1000)
     h.tick = h.tick + 1;
     t = h.tick / 1000;
 
-    if mod(h.tick, stepTicks) == 0 && ~h.pending
-        if mod(h.tick, exchangeTicks) ~= 0 || isempty(h.m)
-            h = stepMaster(h);
-        elseif h.readLost
-            h = stepMaster(h);
-            h = submitWrite(h, t);
-        else
-            [h.link, h.readId] = modbusLink('submit', h.link, t, 'read', 1, h.map.nRead);
-            h.pending = true;
-        end
-    end
-
-    [h.link, fin] = modbusLink('poll', h.link, t);
-    for d = fin
-        if strcmp(d.kind, 'read') && d.id == h.readId
-            h.mbRead = d.data;
-            h.log.read(end + 1, :) = [d.tDone - d.tCall, d.data(h.map.ir.heartbeatEcho)];
-            h = stepMaster(h);
-            h = submitWrite(h, t);
-            h.pending = false;
+    ev.kind = '';
+    while ~strcmp(ev.kind, 'none')
+        [h.link, ev] = modbusLink('modelPoll', h.link, t);
+        switch ev.kind
+            case 'step'
+                h = stepMaster(h);
+            case 'exchange'
+                if h.readLost || ev.failed
+                    h.log.read(end + 1, :) = [NaN, NaN];
+                else
+                    h.mbRead = ev.data;
+                    h.log.read(end + 1, :) = [ev.dur, ev.data(h.map.ir.heartbeatEcho)];
+                end
+                h = stepMaster(h);
+                words = [];
+                if ~h.writeLost
+                    words = h.m.mbWrite;
+                    h.log.written(end + 1) = words(h.map.hr.heartbeat);
+                else
+                    h.log.written(end + 1) = NaN;
+                end
+                h.link = modbusLink('modelWrite', h.link, t, words);
+            case 'stopped'
+                h.stopped = true;
+                h.tStop = ev.t;
+                if ~isempty(h.m)
+                    h.m.doSafety = 0;       % the DAQ outputs' final values
+                    h.m.doMixer = 0;
+                end
         end
     end
 
@@ -366,6 +447,18 @@ end
 end
 
 
+function h = restartModel(h)
+% A new run of the model: the master's state is cleared, the link's model
+% starts from now.
+clear masterStep masterStateMachine
+h.link = modbusLink('modelInit', h.link, h.cfg.dt, h.cfg.exchangePeriod, h.map.nRead, h.tick / 1000);
+h.stopped = false;
+h.tStop = NaN;
+h.m = [];
+h.mbRead = zeros(1, h.map.nRead);
+end
+
+
 function h = stepMaster(h)
 a = h.app;
 [m.mbWrite, m.doSafety, m.doMixer, m.position, m.velocity, m.pressure, ...
@@ -374,19 +467,5 @@ a = h.app;
     a.targetVelocity, a.jogDirection, a.targetPressure, a.estop, a.mixer, ...
     a.positionSpeed);
 h.m = m;
-end
-
-
-function h = submitWrite(h, t)
-% The master's write of this exchange, unless the link loses it; the
-% heartbeat written is logged against the read that preceded it.
-if ~h.writeLost
-    [h.link, ~] = modbusLink('submit', h.link, t, 'write', 1, h.m.mbWrite);
-    h.log.written(end + 1) = h.m.mbWrite(h.map.hr.heartbeat);
-else
-    h.log.written(end + 1) = NaN;
-end
-if h.readLost
-    h.log.read(end + 1, :) = [NaN, NaN];
-end
+h.nStep = h.nStep + 1;
 end
