@@ -328,6 +328,12 @@ f = frictionFit('../common/captures/u1_unloaded_*.csv', ...
 
 The first argument is the unloaded log or logs, the second the loaded
 ones (gas sets and deliveries); either may be a pattern or a cell array.
+A third argument takes options: `settle` and `trim` (the steady part's
+margins, 1.0 and 0.2 s), `accel` (the slew allowed to reach speed; the
+drive follows a step in about 60 ms, so a large value with a short
+`settle`) and `logShuntOhms`. The legs of the characterisation bench's
+one-pass path (0.4 to 3 s, `bench/characterisation/README.md` section 6)
+fit with `struct('settle', 0.15, 'trim', 0.05, 'accel', 1e4)`.
 The fit prints, in order:
 
 1. **One line per jog step**: the commanded and measured speed (from the
