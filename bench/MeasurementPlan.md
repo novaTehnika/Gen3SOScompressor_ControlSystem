@@ -57,7 +57,11 @@ Piston in the bore, chamber open, no liquid.
    larger reading means the chain has moved since the calibration.
 2. **Noise at rest**: `pressureNoiseProbe('idle')`. The scripts now read
    the step probe, and this is their first run on the hardware; the
-   window rms should repeat the 0.8 mV with the capacitor.
+   window rms should repeat the 0.8 mV with the capacitor. While the
+   chamber is open, note the bore and length of the passage to the
+   transducer and the transducer's cavity: their volume is the floor of
+   the gas term the K fits will show, and `params.py` carries it as
+   `V_air`.
 3. **Drive response at the motor** (`bench/friction/README.md` 4.5):
 
    ```matlab
@@ -101,8 +105,15 @@ no second fill is needed.
    to a few mL, and the difference is air. Purge at 10 MPa until a
    `{'hold', 60}` step holds the pressure within 0.05 MPa; log the last
    hold, which is the leak and liquid-only baseline for the dissolution
-   measurement of session 2. The 26 October runs had a gas term of up to
-   0.65 mL, which is why the liquid-only K was not pinned.
+   measurement of session 2. Some air stays whatever the purge: the
+   passage to the pressure transducer, about 2 cm, and the transducer's
+   cavity hold a pocket that cannot be purged and dissolves only slowly
+   through the passage. The fit carries it as its gas term (up to
+   0.65 mL in the October closed-chamber runs, an upper bound; the
+   geometry suggests less). Expect it, and use it as a check: the gas
+   term should be the same in every liquid-only run at either fill
+   level, and the liquid K comes from the fit's liquid term
+   (`K_liq_GPa`). Air beyond the pocket is what the purge removes.
 2. **Bulk modulus**, three runs, probe on (section 3):
 
    ```matlab
@@ -158,7 +169,9 @@ no second fill is needed.
    and after the purge: the purged value is the wall, the difference is
    the air, which is what the robustness study spans 0.12 to 0.36 mL/MPa
    for. Fit as section 3 shows (`Ch1`, `wall1`), with the fill reduced
-   by the purge volume.
+   by the purge volume. The gas term of these runs less the closed
+   chamber's pocket is the hose's air, a second reading of the same
+   split.
 6. **Orifice Cd**, three deliveries at held pressure with the discharge
    weighed (section 4), hose open as in service:
 
