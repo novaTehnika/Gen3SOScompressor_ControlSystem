@@ -67,6 +67,21 @@ reference for every declaration.
   - [ ] Rename `G_cfgPosGateAccelMax` to `G_cfgPosShaperAccelMax` and
         `G_cfgPosGateMaxDeviation` to `G_cfgPosShaperMaxDeviation`.
   - [ ] Set `G_cfgVelLimitMax` to 6.0.
+  - [ ] Replace `G_cfgGoHomeAccel` and `G_cfgHomeLimAccel` by one
+        `G_cfgMoveAccel : LREAL := 5.0`.
+  - [ ] Replace `G_cfgDebounceTimeMotion` and `G_cfgDebounceTimeFault` by
+        `G_cfgDebounceTimeCommand : TIME := T#20MS`, and
+        `G_cfgDebounceTimeOvertravelNeg` and
+        `G_cfgDebounceTimeOvertravelPos` by
+        `G_cfgDebounceTimeOvertravel : TIME := T#10MS`.
+  - [ ] Delete `G_doPerformanceStatus`, `G_doFaultActive`,
+        `G_doHomingComplete` and `G_doInMotion` (`%QX0.3`-`%QX0.6`) and
+        add `G_sysPerformanceStatus`, `G_sysFaultActive`,
+        `G_sysHomingComplete` and `G_sysInMotion` as `BOOL := FALSE` with no
+        address; the output points `MO1_DO_03`-`MO1_DO_06` are no longer
+        written. Check the LD POU does not use the old four.
+  - [ ] `G_cfgGearRatio` and `G_cfgLeadScrewPitch` stay; their comments now
+        call them reference copies of the Hardware Configuration scaling.
   - [ ] Add `G_cfgStopDecel`, `G_cfgProbeEnable`, `G_cfgProbeFillPerScan`,
         `G_mbPositionSpeed`, `G_sysPositionSpeed`, the `G_mbProbe*`
         globals and the `G_sysProbe*` globals.
@@ -305,20 +320,6 @@ reference for every declaration.
 
 ## Open decisions
 
-- [ ] Slave outputs DO3-DO6 (`G_doPerformanceStatus`, `G_doFaultActive`,
-      `G_doHomingComplete`, `G_doInMotion`) are still driven in
-      `PRG_Output`, but nothing on the master side is wired to them; the
-      master reads the same values from IR5-IR8. Keep them as status lines
-      or stop driving them. DI0-DI5 and DO0-DO2 are unused.
-- [ ] Merge `G_cfgGoHomeAccel` and `G_cfgHomeLimAccel` (both 5 mm/s², the
-      same kind of move) into one `G_cfgMoveAccel`.
-- [ ] `G_cfgGearRatio` and `G_cfgLeadScrewPitch` duplicate the Hardware
-      Configuration scaling and nothing reads them: `benchGvl.m` lists
-      them only as parse fallbacks and `frictionBenchConfig.m` hardcodes
-      70 and 5.08. Label them as bench copies, move them to the bench
-      config, or delete them.
-- [ ] Share one debounce setting each between the two overtravel inputs
-      (both 10 ms) and between MotionEnable and FaultReset (both 20 ms).
 - [ ] 34 function block outputs are read by nothing outside their block
       (diagnostics; counted once per block, 46 per instance): all four
       edge and status outputs of `FB_DigitalInputFilter`, the six

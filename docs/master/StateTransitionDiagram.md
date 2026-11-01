@@ -164,7 +164,7 @@ through the same hold-position and fault paths as the other operational modes.
         v
 +---------------+
 | ST_HOME       |  PRG_Main sets G_flagHomingComplete and
-| _COMPLETE     |  G_doHomingComplete; wait for mode change
+| _COMPLETE     |  G_sysHomingComplete; wait for mode change
 +---------------+
 ```
 
@@ -202,7 +202,7 @@ through the same hold-position and fault paths as the other operational modes.
     +---------------+
     | ST_FAULT      |
     |               |
-    | - G_doFaultActive = HIGH
+    | - G_sysFaultActive = HIGH
     | - Fault code in IR4 (G_mbFaultCode)
     | - MC_Stop (motion stopped)
     +-------+-------+
@@ -219,7 +219,7 @@ through the same hold-position and fault paths as the other operational modes.
     | ST_BRAKE_HOLD |           |               |
     | (drive stays  |           | - Brake engaged
     |  enabled)     |           | - Drive disabled
-    +---------------+           | - G_doFaultActive = HIGH
+    +---------------+           | - G_sysFaultActive = HIGH
                                 +-------+-------+
                                         |
                                 (FaultReset HIGH

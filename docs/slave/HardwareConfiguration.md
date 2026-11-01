@@ -100,14 +100,10 @@ The mode code, MotionEnable and FaultReset arrive in Modbus holding registers HR
 ### 4.2 Digital Output Addresses
 | Pin | Address | Signal | External Connection |
 |-----|---------|--------|---------------------|
-| DO0-DO2 | %QX0.0-%QX0.2 | unused | (Not connected) |
-| DO3 | %QX0.3 | G_doPerformanceStatus | Not wired to the master (IR7) |
-| DO4 | %QX0.4 | G_doFaultActive | Not wired to the master (IR5) |
-| DO5 | %QX0.5 | G_doHomingComplete | Not wired to the master (IR8) |
-| DO6 | %QX0.6 | G_doInMotion | Not wired to the master (IR6) |
+| DO0-DO6 | %QX0.0-%QX0.6 | unused | Not driven (not connected) |
 | DO7 | %QX0.7 | G_doBrakeDisengage | Brake Relay |
 
-The mode confirmation and fault code are published in input registers IR3 and IR4 (`G_mbConfCode`, `G_mbFaultCode`); DO3-DO6 are mirrored in IR5-IR8.
+The mode confirmation and fault code are published in input registers IR3 and IR4 (`G_mbConfCode`, `G_mbFaultCode`); the status bits (`G_sysFaultActive`, `G_sysInMotion`, `G_sysPerformanceStatus`, `G_sysHomingComplete`) are published only in IR5-IR8. DO3-DO6 are no longer driven.
 
 ### 4.3 Overtravel Switch Wiring (PNP, Normally Closed)
 
@@ -229,7 +225,7 @@ The SGM7J-04A6A6C has a 24-bit absolute encoder:
 ### 8.5 Homing Verification
 1. [ ] Execute Mode 110 (Home to Negative Overtravel Switch)
 2. [ ] Verify ram drives negative, stops at negative overtravel, backs off, and `MC_SetPosition` sets position to `G_cfgHomeLimSetPosition`
-3. [ ] Verify `G_doHomingComplete` goes TRUE
+3. [ ] Verify `G_sysHomingComplete` goes TRUE
 4. [ ] Power-cycle the controller and drive — verify the reported position is unchanged and Position mode is accepted without homing
 
 ---

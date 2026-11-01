@@ -7,7 +7,7 @@
 
 ## 1. Overview
 
-When `G_mbFaultActive` (IR5, also DO4) is 1, the slave is in fault state. `G_mbFaultCode` (IR4) holds the full fault code; `G_mbConfCode` (IR3) reads 0 outside the handshake, so also during the fault. The master must handle fault conditions by:
+When `G_mbFaultActive` (IR5) is 1, the slave is in fault state. `G_mbFaultCode` (IR4) holds the full fault code; `G_mbConfCode` (IR3) reads 0 outside the handshake, so also during the fault. The master must handle fault conditions by:
 
 1. Reading the fault code from IR4
 2. Mirroring the full code in `G_mbModeCode` (HR2)

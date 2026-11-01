@@ -96,10 +96,10 @@ Hold Secure ______________________|‾‾‾‾‾‾‾‾‾‾‾‾
 | Signal | Debounce Time | Config Parameter |
 |--------|---------------|------------------|
 | G_mbModeCode (HR2) | 50 ms | `G_cfgDebounceTimeMode` (code value held this long) |
-| G_mbMotionEnable (HR3) | 20 ms | `G_cfgDebounceTimeMotion` |
-| G_mbFaultReset (HR4) | 20 ms | `G_cfgDebounceTimeFault` |
-| G_diOvertravelNeg | 10 ms | `G_cfgDebounceTimeOvertravelNeg` (negative overtravel / home reference) |
-| G_diOvertravelPos | 10 ms | `G_cfgDebounceTimeOvertravelPos` |
+| G_mbMotionEnable (HR3) | 20 ms | `G_cfgDebounceTimeCommand` |
+| G_mbFaultReset (HR4) | 20 ms | `G_cfgDebounceTimeCommand` |
+| G_diOvertravelNeg | 10 ms | `G_cfgDebounceTimeOvertravel` (negative overtravel / home reference) |
+| G_diOvertravelPos | 10 ms | `G_cfgDebounceTimeOvertravel` |
 
 ### Edge Detection
 
@@ -163,7 +163,7 @@ to be raised once bench testing confirms the torque headroom (see
 ### Position Mode Exit
 
 When MotionEnable (HR3) drops in position mode, the command is ramped to rest under
-`G_cfgPosShaperAccelMax` before the axis is handed to `MC_Stop`, so `G_doInMotion` stays
+`G_cfgPosShaperAccelMax` before the axis is handed to `MC_Stop`, so `G_sysInMotion` stays
 TRUE for up to `V/A` after the drop (0.6 s at `V` = 6 mm/s, `A` = 10 mm/s²) plus the
 `MC_Stop` settling time.
 
@@ -224,7 +224,7 @@ operational mode handled by `FB_PressureController`, not a homing mode.
 | Fault Latch Time | 1 scan | Fault latched in FB_SafetyMonitor |
 | Motion Stop Initiate | 1 scan | MC_Stop issued |
 | Fault Code Output | 1 scan | `G_mbFaultCode` (IR4) updated |
-| G_doFaultActive Assert | 1 scan | DO4 and `G_mbFaultActive` (IR5) go HIGH |
+| G_sysFaultActive Assert | 1 scan | `G_mbFaultActive` (IR5) goes HIGH |
 
 ---
 
@@ -333,10 +333,8 @@ FaultReset   _______________|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 | G_cfgBrakeDisengageDelay | 500 ms | 100-1000 ms | Brake release wait |
 | G_cfgDriveReadyTimeout | 5000 ms | 1000-10000 ms | Drive enable timeout |
 | G_cfgDebounceTimeMode | 50 ms | 10-200 ms | Mode code debounce |
-| G_cfgDebounceTimeMotion | 20 ms | 5-100 ms | MotionEnable debounce |
-| G_cfgDebounceTimeFault | 20 ms | 5-100 ms | FaultReset debounce |
-| G_cfgDebounceTimeOvertravelNeg | 10 ms | 1-20 ms | Negative overtravel / home reference debounce |
-| G_cfgDebounceTimeOvertravelPos | 10 ms | 1-20 ms | Positive overtravel debounce |
+| G_cfgDebounceTimeCommand | 20 ms | 5-100 ms | MotionEnable and FaultReset debounce |
+| G_cfgDebounceTimeOvertravel | 10 ms | 1-20 ms | Debounce of both overtravel inputs (the negative one is the home reference) |
 | G_cfgAnalogFilterTimeConst | 20 ms | 1-200 ms | Pressure input low-pass time constant |
 | G_cfgHomingTimeout | 90000 ms | 30000-180000 ms | Homing sequence timeout |
 

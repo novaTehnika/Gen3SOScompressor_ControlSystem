@@ -45,7 +45,7 @@ These define the safe operating envelope of the machine.
 | `G_cfgPosExitGuardMargin`| 20.0 | mm | Safety margin for the piston exit guard. The guard's torque/velocity danger-zone monitoring is active below `G_cfgPosCylinderEntry + G_cfgPosExitGuardMargin`. |
 | `G_cfgVelLimitMax` | 6.0 | mm/s | The one axis speed ceiling: `stCurrentLimits.VelMax` in velocity, torque and velocity recovery, and the upper bound of the position speed. The mode speeds (`G_cfgGoHomeVelocity`, the three `G_cfgHomeLim*Vel`, `G_cfgPressureVelMax`) reach their blocks through `MIN(.., G_cfgVelLimitMax)`, so none can exceed it, and `masterConfig.jogVelMax` must not either (checked in `tests/closedLoopMasterSlave.m`). `Y_DirectControl` does no path shaping in PositionMode (the position command reaches the drive as given), so its `Velocity` and `Acceleration` inputs set no limits there; `FB_PositionPathShaper` does the path shaping, and its `VelMax` and `AccelMax` (`G_cfgPosShaperAccelMax`) limit a position move. `VelMax` is the master's position speed (HR7-8, `G_mbPositionSpeed`) limited to `0..G_cfgVelLimitMax`, evaluated every scan; a speed of 0 brakes the command to rest and holds. `Y_DirectControl`'s `Velocity` input is given the same value in position mode, so the two never disagree. `masterConfig.positionSpeedMax` must not exceed the ceiling either (checked in `tests/closedLoopMasterSlave.m`). |
 | `G_cfgStopDecel` | 10.0 | mm/s² | The one `MC_Stop` deceleration: hold, fault, recovery and the Go Home abort. |
-| `G_cfgInMotionVelThreshold`| 0.1 | mm/s | The velocity above which the `G_doInMotion` output is considered active. **Tuning:** Increase if motor vibration at rest causes the flag to flicker. |
+| `G_cfgInMotionVelThreshold`| 0.1 | mm/s | The velocity above which the `G_sysInMotion` flag is set. **Tuning:** Increase if motor vibration at rest causes the flag to flicker. |
 
 ### Position Path Shaper
 
@@ -79,10 +79,8 @@ These parameters control the software filters applied to raw I/O signals to reje
 | Parameter | Default Value | Units | Description & Tuning Considerations |
 |---|---|---|---|
 | `G_cfgDebounceTimeMode`| T#50MS | ms | Debounce time for the mode code register (`G_mbModeCode`, HR2): the code must hold one value this long before it is decoded. **Tuning:** Increase if mode commands are unstable. Decrease for faster mode changes. |
-| `G_cfgDebounceTimeMotion`| T#20MS | ms | Debounce time for the Motion Enable register (`G_mbMotionEnable`, HR3). Should be relatively short for responsiveness. |
-| `G_cfgDebounceTimeFault`| T#20MS | ms | Debounce time for the Fault Reset register (`G_mbFaultReset`, HR4). |
-| `G_cfgDebounceTimeOvertravelNeg`| T#10MS | ms | Debounce time for the negative overtravel switch (`G_diOvertravelNeg`), which is also the Mode 110 home reference. |
-| `G_cfgDebounceTimeOvertravelPos`| T#10MS | ms | Debounce time for the positive overtravel switch (`G_diOvertravelPos`). |
+| `G_cfgDebounceTimeCommand`| T#20MS | ms | Debounce time for the Motion Enable register (`G_mbMotionEnable`, HR3) and the Fault Reset register (`G_mbFaultReset`, HR4). Should be relatively short for responsiveness. |
+| `G_cfgDebounceTimeOvertravel`| T#10MS | ms | Debounce time for both overtravel switches (`G_diOvertravelNeg`, `G_diOvertravelPos`). The negative switch is also the Mode 110 home reference, so keep it short for homing precision. |
 | `G_cfgAnalogFilterTimeConst`| T#20MS | ms | Time constant for the IIR low-pass filter on the pressure transducer input (`G_aiPressure`), after the median filter. The filter runs once per scan with alpha = `G_cfgScanTime` / (time constant + `G_cfgScanTime`), so the time constant is this value only when `G_cfgScanTime` is the real scan. **Tuning:** Its lag adds to the pressure loop's overshoot on a target step; the median filter and the capacitor across the loop shunt leave little noise for it to remove. Increase only if the filtered reading is visibly noisy. |
 | `G_cfgAnalogMedianSize`| 5 | count | The number of samples for the median filter on the pressure transducer input (valid: 3 or 5). The median filter is excellent at rejecting large, single-sample spikes. |
 
@@ -92,6 +90,11 @@ These parameters control the software filters applied to raw I/O signals to reje
 
 These parameters define the behavior of the homing (110) and Go Home (101) modes. Mode code 111 (7) is Pressure Control, not a homing mode.
 
+### Homing and Go Home moves
+| Parameter | Default Value | Units | Description & Tuning Considerations |
+|---|---|---|---|
+| `G_cfgMoveAccel` | 5.0 | mm/s² | Acceleration of every move the homing modes make: Mode 110's approaches, backoff and retract, and Mode 101's Go Home move. |
+
 ### Mode 110: Home to Limit Switch
 | Parameter | Default Value | Units | Description & Tuning Considerations |
 |---|---|---|---|
@@ -100,7 +103,6 @@ These parameters define the behavior of the homing (110) and Go Home (101) modes
 | `G_cfgHomeLimBackoffVel` | 5.0 | mm/s | Velocity for the backoff between approaches and for the final retract. |
 | `G_cfgHomeLimRetractDist` | 5.0 | mm | Distance retracted from the precise switch position to the retract endpoint. The switch lands at `-G_cfgHomeLimRetractDist` in the homed frame. |
 | `G_cfgHomeLimSetPosition`| 0.0 | mm | The position value assigned at the retract endpoint. This defines the origin of the coordinate system. |
-| `G_cfgHomeLimAccel` | 5.0 | mm/s² | Acceleration for all homing moves. |
 | `G_cfgHomeLimDecel` | 50.0 | mm/s² | Deceleration for all homing moves. |
 
 ### Mode 101: Go Home
@@ -108,7 +110,6 @@ These parameters define the behavior of the homing (110) and Go Home (101) modes
 |---|---|---|---|
 | `G_cfgGoHomePosition` | 0.0 | mm | The target position for the Go Home command. This should match `G_cfgHomeLimSetPosition`. |
 | `G_cfgGoHomeVelocity` | 6.0 | mm/s | The velocity used for the move-to-home motion. |
-| `G_cfgGoHomeAccel` | 5.0 | mm/s² | Acceleration for the Go Home move. |
 | `G_cfgGoHomeDecel` | 10.0 | mm/s² | Deceleration for the Go Home move. |
 
 ---

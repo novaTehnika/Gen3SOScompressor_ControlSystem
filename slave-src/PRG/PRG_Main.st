@@ -143,9 +143,9 @@ IF bFirstScan THEN
     G_sysPreviousState := E_SystemState#ST_IDLE;
 
     G_doBrakeDisengage := FALSE;
-    G_doPerformanceStatus := FALSE;
-    G_doHomingComplete := FALSE;
-    G_doInMotion := FALSE;
+    G_sysPerformanceStatus := FALSE;
+    G_sysHomingComplete := FALSE;
+    G_sysInMotion := FALSE;
 
     bRecoveryPending := FALSE;
 
@@ -207,7 +207,7 @@ bPosShaperActive := FALSE;
 (* Likewise for the pressure loop. The in-band status output is only
    meaningful in pressure mode and is recomputed there. *)
 bPressureCtrlActive := FALSE;
-G_doPerformanceStatus := FALSE;
+G_sysPerformanceStatus := FALSE;
 
 bEnterState := (G_sysCurrentState <> G_sysPreviousState);
 IF bEnterState THEN
@@ -315,7 +315,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_BRAKE_HOLD THEN
             G_sysConfirmedMode := E_OperatingMode#MODE_BRAKE_HOLD;
         END_IF;
 
-        G_doInMotion := FALSE;
+        G_sysInMotion := FALSE;
 
         IF fbHandshake.HandshakeComplete THEN
             eTargetMode := G_sysRequestedMode;
@@ -365,7 +365,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
         rPosShaperVelMax := LIMIT(LREAL#0.0, G_sysPositionSpeed, G_cfgVelLimitMax);
         bPosShaperActive := TRUE;
 
-        G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
+        G_sysInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
         IF bPosStopping AND (ABS(fbPosShaper.CommandedRate) < LREAL#0.001) THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
@@ -384,7 +384,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_VELOCITY_CTRL THEN
                                         G_sysReference,
                                         stCurrentLimits.VelMax);
 
-        G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
+        G_sysInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
         IF NOT bFilteredMotionEnable THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
@@ -403,7 +403,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_TORQUE_CTRL THEN
                                       G_sysReference,
                                       stCurrentLimits.TorqueMax);
 
-        G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
+        G_sysInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
         IF NOT bFilteredMotionEnable THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
@@ -446,8 +446,8 @@ ELSIF G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL THEN
             G_sysCommandedVelocity := LREAL#0.0;
         END_IF;
 
-        G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
-        G_doPerformanceStatus := ABS(G_sysActualPressure - rPressureTarget) <= G_cfgPressureInBand;
+        G_sysInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
+        G_sysPerformanceStatus := ABS(G_sysActualPressure - rPressureTarget) <= G_cfgPressureInBand;
 
         IF NOT bFilteredMotionEnable THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
@@ -460,7 +460,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_GO_HOME THEN
             G_sysConfirmedMode := E_OperatingMode#MODE_GO_HOME;
         END_IF;
 
-        G_doInMotion := fbGoHome.InMotion;
+        G_sysInMotion := fbGoHome.InMotion;
 
         IF fbGoHome.Error THEN
             G_sysActiveFault := E_FaultCode#FAULT_DRIVE;
@@ -470,7 +470,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_GO_HOME THEN
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
 
         ELSIF fbGoHome.Done THEN
-            G_doInMotion := FALSE;
+            G_sysInMotion := FALSE;
         END_IF;
 
 
@@ -481,7 +481,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_HOME_LIMIT THEN
             G_flagHomingInProgress := TRUE;
         END_IF;
 
-        G_doInMotion := fbHomeLimit.InMotion;
+        G_sysInMotion := fbHomeLimit.InMotion;
 
         IF fbHomeLimit.Done THEN
             G_flagHomingComplete := TRUE;
@@ -500,13 +500,13 @@ ELSIF G_sysCurrentState = E_SystemState#ST_HOME_COMPLETE THEN
 
         IF bEnterState THEN
             G_flagHomingInProgress := FALSE;
-            G_doHomingComplete := TRUE;
+            G_sysHomingComplete := TRUE;
         END_IF;
 
-        G_doInMotion := FALSE;
+        G_sysInMotion := FALSE;
 
         IF NOT bFilteredMotionEnable THEN
-            G_doHomingComplete := FALSE;
+            G_sysHomingComplete := FALSE;
             G_sysCurrentState := E_SystemState#ST_HOLD_POSITION;
         END_IF;
 
@@ -527,7 +527,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_HOLD_POSITION THEN
             END_IF;
         END_IF;
 
-        G_doInMotion := NOT G_sysHalted;
+        G_sysInMotion := NOT G_sysHalted;
 
         (* Transitions wait for MC_Stop to have aborted Y_DirectControl
            (bKeepDirectControl cleared in Command Arbitration); otherwise the
@@ -602,7 +602,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_FAULT THEN
            - Slow recovery: Timeout -> ST_FAULT_IDLE (drive off, brake on)
            ---------------------------------------------------------------- *)
         IF bEnterState THEN
-            G_doInMotion := FALSE;
+            G_sysInMotion := FALSE;
 
             G_sysLastFaultCode := G_sysActiveFault;
             G_sysFaultCount := G_sysFaultCount + UDINT#1;
@@ -641,7 +641,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_FAULT_IDLE THEN
            ---------------------------------------------------------------- *)
         IF bEnterState THEN
             G_doBrakeDisengage := FALSE;
-            G_doInMotion := FALSE;
+            G_sysInMotion := FALSE;
         END_IF;
 
         IF tBrakeTimer.Q THEN
@@ -685,7 +685,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY THEN
             G_sysConfirmedMode := E_OperatingMode#MODE_BRAKE_HOLD;
         END_IF;
 
-        G_doInMotion := FALSE;
+        G_sysInMotion := FALSE;
 
         IF fbHandshake.HandshakeComplete THEN
             eTargetMode := G_sysRequestedMode;
@@ -745,7 +745,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
         rPosShaperVelMax := LIMIT(LREAL#0.0, G_sysPositionSpeed, G_cfgVelLimitMax);
         bPosShaperActive := TRUE;
 
-        G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
+        G_sysInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
         IF bPosStopping AND (ABS(fbPosShaper.CommandedRate) < LREAL#0.001) THEN
             IF bLimitConditionActive THEN
@@ -779,7 +779,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_VELOCITY THEN
             G_sysCommandedVelocity := LREAL#0.0;
         END_IF;
 
-        G_doInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
+        G_sysInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
         IF NOT bFilteredMotionEnable THEN
             IF bLimitConditionActive THEN
@@ -924,13 +924,13 @@ G_cmdReset.Execute := FALSE;
 G_cmdMoveAbsolute.Execute := FALSE;
 G_cmdMoveAbsolute.Position := LREAL#0.0;
 G_cmdMoveAbsolute.Velocity := LREAL#0.0;
-G_cmdMoveAbsolute.Acceleration := G_cfgGoHomeAccel;   (* Go Home's move, the one a hold or fault can interrupt before MC_Stop takes the axis *)
+G_cmdMoveAbsolute.Acceleration := G_cfgMoveAccel;   (* Go Home's move, the one a hold or fault can interrupt before MC_Stop takes the axis *)
 G_cmdMoveAbsolute.Deceleration := G_cfgGoHomeDecel;
 G_cmdMoveAbsolute.Direction := MC_Direction#Current_Direction;
 G_cmdJog.Forward := FALSE;
 G_cmdJog.Reverse := FALSE;
 G_cmdJog.Velocity := LREAL#0.0;
-G_cmdJog.Acceleration := G_cfgHomeLimAccel;   (* homing is the only user of Jog; an abort into ST_HOLD_POSITION drops Forward/Reverse and *)
+G_cmdJog.Acceleration := G_cfgMoveAccel;   (* homing is the only user of Jog; an abort into ST_HOLD_POSITION drops Forward/Reverse and *)
 G_cmdJog.Deceleration := G_cfgHomeLimDecel;   (* the block then stops on this Deceleration, as it did under FB_HomeLimit *)
 G_cmdDirectControl.Enable := FALSE;
 G_cmdDirectControl.ControlMode := Y_ControlMode#VelocityTLMode;
@@ -1060,10 +1060,10 @@ END_IF;
    -------------------------------------------------------------------------- *)
 
 (* Input filters *)
-fbFilterMotionEnable(RawInput := G_mbMotionEnable <> UINT#0, DebounceTime := G_cfgDebounceTimeMotion);
-fbFilterOvertravelNeg(RawInput := G_diOvertravelNeg, DebounceTime := G_cfgDebounceTimeOvertravelNeg);
-fbFilterOvertravelPos(RawInput := G_diOvertravelPos, DebounceTime := G_cfgDebounceTimeOvertravelPos);
-fbFilterFaultReset(RawInput := G_mbFaultReset <> UINT#0, DebounceTime := G_cfgDebounceTimeFault);
+fbFilterMotionEnable(RawInput := G_mbMotionEnable <> UINT#0, DebounceTime := G_cfgDebounceTimeCommand);
+fbFilterOvertravelNeg(RawInput := G_diOvertravelNeg, DebounceTime := G_cfgDebounceTimeOvertravel);
+fbFilterOvertravelPos(RawInput := G_diOvertravelPos, DebounceTime := G_cfgDebounceTimeOvertravel);
+fbFilterFaultReset(RawInput := G_mbFaultReset <> UINT#0, DebounceTime := G_cfgDebounceTimeCommand);
 
 fbFilterPressure(
     Enable := TRUE,
@@ -1133,7 +1133,7 @@ fbGoHome(
     Execute := bInGoHome,
     HomePosition := G_cfgGoHomePosition,
     HomeVelocity := MIN(G_cfgGoHomeVelocity, G_cfgVelLimitMax),
-    Acceleration := G_cfgGoHomeAccel,
+    Acceleration := G_cfgMoveAccel,
     Deceleration := G_cfgGoHomeDecel,
     StopDeceleration := G_cfgStopDecel,
     Abort := NOT bFilteredMotionEnable,
@@ -1149,7 +1149,7 @@ fbHomeLimit(
     SlowApproachVelocity := MIN(G_cfgHomeLimSlowApproachVel, G_cfgVelLimitMax),
     BackoffVelocity := MIN(G_cfgHomeLimBackoffVel, G_cfgVelLimitMax),
     RetractDist := G_cfgHomeLimRetractDist,
-    Acceleration := G_cfgHomeLimAccel,
+    Acceleration := G_cfgMoveAccel,
     Deceleration := G_cfgHomeLimDecel,
     SetPosition := G_cfgHomeLimSetPosition,
     Timeout := G_cfgHomingTimeout,
@@ -1329,7 +1329,7 @@ END_IF;
    -------------------------------------------------------------------------- *)
 
 (* Reads the state again: the safety block above may have just entered ST_FAULT *)
-G_doFaultActive := (G_sysCurrentState = E_SystemState#ST_FAULT) OR
+G_sysFaultActive := (G_sysCurrentState = E_SystemState#ST_FAULT) OR
                    (G_sysCurrentState = E_SystemState#ST_FAULT_IDLE);
 
 (* Values published in the Modbus input registers by PRG_Output *)
@@ -1361,10 +1361,10 @@ fbProbe(
     Position := G_sysActualPosition,
     Pressure := G_sysActualPressure,
     Volts := G_aiPressure,
-    InMotion := G_doInMotion,
-    Performance := G_doPerformanceStatus,
-    FaultActive := G_doFaultActive,
-    HomingComplete := G_doHomingComplete,
+    InMotion := G_sysInMotion,
+    Performance := G_sysPerformanceStatus,
+    FaultActive := G_sysFaultActive,
+    HomingComplete := G_sysHomingComplete,
     ModeCode := G_sysConfirmedModeCode,
     FaultState := (G_sysCurrentState = E_SystemState#ST_FAULT),
     Arm := G_mbProbeArm,

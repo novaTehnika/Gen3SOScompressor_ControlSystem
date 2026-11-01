@@ -46,9 +46,8 @@ This document provides step-by-step guidance for implementing the Simulink Deskt
 | HR9-10 | `G_mbSalineVolume` | REAL saline volume of the fill, mL (pressure gain schedule) |
 | HR11-12 | `G_mbOxygenRatio` | REAL oxygen charge as STP volume per saline volume (pressure gain schedule) |
 
-The slave debounces HR2 (`G_cfgDebounceTimeMode`, 50 ms), HR3
-(`G_cfgDebounceTimeMotion`, 20 ms) and HR4 (`G_cfgDebounceTimeFault`, 20 ms)
-before acting on them. The master DAQ drives P0.0 (safety control relay
+The slave debounces HR2 (`G_cfgDebounceTimeMode`, 50 ms) and HR3 and HR4
+(`G_cfgDebounceTimeCommand`, 20 ms for both) before acting on them. The master DAQ drives P0.0 (safety control relay
 enable - brake disengage / safe-torque-off) and P0.4 (stir bar motor); these
 are not part of the slave protocol. See [IOReference.md](IOReference.md) for
 the wiring.

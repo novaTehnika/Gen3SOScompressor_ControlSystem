@@ -92,7 +92,7 @@ Step 9: RETRACT AWAIT              Step 10: COMPLETE
 | State: RETRACT_AWAIT             |  | State: ST_HOME_COMPLETE         |
 | Action: CmdMoveAbsolute.Execute  |  |   (PRG_Main, not FB)            |
 |   := FALSE (one-scan latch)      |  | G_sysActualPosition ≈ 0.0       |
-| Exit: StaMoveAbsolute.Done       |  | G_doHomingComplete = TRUE       |
+| Exit: StaMoveAbsolute.Done       |  | G_sysHomingComplete = TRUE       |
 | FB sets Done = TRUE              |  | G_flagHomingComplete = TRUE     |
 | PRG_Main sets                    |  | Exit: New mode commanded        |
 |   G_flagHomingComplete           |  +---------------------------------+
@@ -178,7 +178,7 @@ MASTER:
 | `G_cfgHomeLimBackoffVel` | 5.0 | mm/s | Inter-approach backoff AND retract velocity |
 | `G_cfgHomeLimRetractDist` | 5.0 | mm | Distance retracted from precise switch to position 0 |
 | `G_cfgHomeLimSetPosition` | 0.0 | mm | Position value at the retract endpoint (becomes coord-frame zero) |
-| `G_cfgHomeLimAccel` | 5.0 | mm/s² | Acceleration for all homing moves |
+| `G_cfgMoveAccel` | 5.0 | mm/s² | Acceleration for all homing moves (shared with Go Home) |
 | `G_cfgHomeLimDecel` | 50.0 | mm/s² | Deceleration for all homing moves |
 | `G_cfgHomingTimeout` | T#90S | — | Overall FB timeout for the entire homing sequence |
 
@@ -188,6 +188,7 @@ MASTER:
 |-----------|---------|-------|-------------|
 | `G_cfgGoHomePosition` | 0.0 | mm | Target home position |
 | `G_cfgGoHomeVelocity` | 6.0 | mm/s | Movement velocity |
+| `G_cfgMoveAccel` | 5.0 | mm/s² | Acceleration of the move (shared with Mode 110) |
 
 ---
 
@@ -217,7 +218,7 @@ MASTER: Command Mode 110 (Home to Limit)
 Limit homing executes; MC_SetPosition stores the new offset
     |
     v
-G_doHomingComplete = TRUE (until MotionEnable, HR3, drops)
+G_sysHomingComplete = TRUE (until MotionEnable, HR3, drops)
 ```
 
 ---
