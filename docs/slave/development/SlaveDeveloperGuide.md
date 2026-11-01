@@ -143,6 +143,20 @@ The core logic resides in a state machine within `PRG_Main.st`. Understanding th
 
 ---
 
+### Input, Handshake and Safety Blocks
+
+These blocks sit between the Modbus registers and the state machine. Each is called once per scan at the end of `PRG_Main`, and the states read their outputs on the next scan.
+
+- **`FB_AnalogInputFilter`** filters the transducer voltage in two stages: a median of 3 or 5 samples (`G_cfgAnalogMedianSize`), then a first-order low pass whose coefficient the caller computes (`alpha = dt / (tau + dt)` from `G_cfgAnalogFilterTimeConst`). The first enabled scan fills the median buffer and the filter state with the input. While disabled it passes the raw input through and keeps its state, so a re-enable resumes from the stored samples rather than from a fresh start.
+- **`FB_DigitalInputFilter`** debounces a BOOL: the first scan accepts the input as it is, and afterwards the output follows the input only once it has held the new value for `DebounceTime`. `PRG_Main` filters MotionEnable, FaultReset and the two overtravel inputs with it; the edge outputs are not read.
+- **`FB_ModeDecoder`** debounces the mode register (`G_cfgDebounceTimeMode`) the same way and decodes it with `FB_IntToMode`. A code above 7, such as the fault code the master mirrors during a reset, decodes to `MODE_IDLE` with value 0. `ModeStable` is FALSE while a new code is being debounced.
+- **`FB_HandshakeManager`** runs the mode handshake only (request, confirmation, MotionEnable, verification, timeout). Its `ConfirmedMode` is an `E_OperatingMode`; `PRG_Main` converts it to `G_sysConfirmedModeCode`, which `PRG_Output` publishes as `G_mbConfCode`.
+- **`FB_FaultResetHandler`** is a combinational check with no state or timer. A reset is valid when FaultReset is high, MotionEnable is low, the system is in a fault state, the decoded mode code is stable and the fault code the master mirrored in `G_mbModeCode` equals the active fault. `PRG_Main` decodes the mirrored code with `FB_IntToFaultCode` and passes it in as `MasterFaultCode`, so it is compared as an `E_FaultCode` and not as a mode.
+- **`FB_PistonExitGuard`** only detects; it never modifies a command. Positive is into the cylinder, so the pressure pushes the piston out and the motor holds it with positive torque. Within `G_cfgPosExitGuardMargin` of `G_cfgPosCylinderEntry` (the boundary is their sum), positive torque above `G_cfgTorqueStallThreshold` together with a velocity below minus `G_cfgInMotionVelThreshold` means the pressure is winning, and `FaultTriggered` goes to `FB_SafetyMonitor`. It does not depend on the mode.
+- **`FB_SafetyMonitor`** holds every fault condition in one block and latches the highest-priority one (the order is in its header). It has no encoder input and no warning outputs: the Sigma-7 detects encoder alarms itself and they arrive as `DriveFault`, so they raise `FAULT_DRIVE`; there is no encoder-manager block.
+
+---
+
 ### Step Probe and the Per-Scan Bound
 
 MotionWorks IEC 3 Express has a single task, so every POU runs every scan and
