@@ -71,8 +71,8 @@ values below are the ones at the time of writing.
 
 | Setting | Value | Effect on the bench |
 |---------|-------|---------------------|
-| `G_cfgVelLimitMax`, `masterConfig.jogVelMax` | 5 mm/s | The highest speed point. 7 mm/s needs both raised, which this bench does not do |
-| `G_cfgDirectCtrlAccel` / `Decel` | 5 mm/s² | Velocity-mode slew: the 5 mm/s step spends 1 s and 2.5 mm reaching speed |
+| `G_cfgVelLimitMax`, `masterConfig.jogVelMax` | 6 mm/s | The highest speed point (5 mm/s) is below it. 7 mm/s needs both raised, which this bench does not do |
+| `G_cfgDirectCtrlAccel` | 10 mm/s² | `Y_DirectControl`'s `Acceleration` (the block has no deceleration input). The drive does not slew the command at this value (steps complete in about 60 ms whatever their size, `bench/characterisation/README.md` section 8); the run's step durations still allow `v / 10 mm/s²` for the ramp, 0.5 s at 5 mm/s |
 | `G_cfgTorqueLimitNormal`, `G_cfgPressureTorqueLimit` | 100 % | The axis stalls there, which is 29 MPa on a sealed chamber; the run stops the axis at 90 % (`torqueAbort`) |
 | `G_cfgPosSoftLimitMax` / `Min` | 367 / -2.5 mm | `FAULT_POSITION` beyond them. Keep every step, with its slew, inside |
 | `G_cfgPosCylinderEntry` + `G_cfgPosExitGuardMargin` | 196 mm | Below this, positive torque above 60 % while moving out is `FAULT_PISTON_EXIT`. Loaded steps stay above it |
@@ -145,10 +145,10 @@ measured twice in each direction at different times:
 | 0.1 | 60 | 6 | 1.2 |
 | 0.3 | 40 | 12 | 2.4 |
 | 1 | 20 | 20 | 4 |
-| 3 | 10 | 32 | 6 |
-| 5 | 10 | 55 | 11 |
+| 3 | 10 | 31 | 6 |
+| 5 | 10 | 52.5 | 10 |
 
-Each step adds the slew to speed (`v / 5 mm/s²`) and is followed by a
+Each step adds the ramp allowance (`v / G_cfgDirectCtrlAccel`, 10 mm/s²) to its time at speed and is followed by a
 stop of a few seconds before the reverse step, so a pair returns to its
 start. Both passes take about 11 minutes. Every step starts from rest, so
 the breakaway is recorded 20 times.
@@ -285,8 +285,8 @@ seconds (3 s), with a capture armed and acknowledged before every change. The st
 taken while moving and give the lag; the steps from 0 give the breakaway
 and the stick time. With `opts.probe` on a jog set, every step's command
 from rest is captured, plus one capture a second after it reaches speed
-for the ripple. 2v must stay within the 5 mm/s limit, so v is at most
-2.5 mm/s.
+for the ripple. 2v must stay within the 6 mm/s limit, so v is at most
+3 mm/s (the set uses 0.3, 1 and 2.5 mm/s).
 
 Captures are saved as `bench/common/captures/<label>_cap_<set>_<n>_<step>_<tag>_<timestamp>.csv`
 with `t` (s from the first scan), `vCmd` and `velocity` (mm/s), `torque`
@@ -299,7 +299,7 @@ f = stepResponseFit('../common/captures/s1_cap_*.csv');
 ```
 
 For each capture taken while moving it fits the response as the command
-slewed at `G_cfgDirectCtrlAccel` (the profile Y_DirectControl generates),
+slewed at `opts.accel` and `opts.decel` (default `G_cfgDirectCtrlAccel`),
 through a first-order lag `tauV` and a delay, by a grid search on the rms
 velocity error, and also reports the model-free tracking lag at mid-step
 and the overshoot. For each capture from rest it reports the breakaway
@@ -312,9 +312,12 @@ milliseconds up and down and at both speeds; the rms error should be a
 few hundredths of a millimetre per second; a delay above about 10 ms
 or an overshoot above a few percent means the drive's velocity loop is
 not the first-order lag the model assumes, and the captures should go
-to the design model as they are. The breakaway should agree with the
-50 ms log's lower bound and the stick time with the ramp: at 5 mm/s² the
-command reaches 0.1 mm/s in 20 ms, so a stick of several tenths of a
+to the design model as they are. The drive does not slew the command at
+`G_cfgDirectCtrlAccel`, so fit with `opts.accel` and `opts.decel` large
+(1e4, as in section 8); with the GVL value the model cannot follow the
+response and reports a lag near zero. The breakaway should agree with the
+50 ms log's lower bound and the stick time with the ramp: the drive
+follows a step in about 60 ms, so a stick of several tenths of a
 second is the friction, not the profile. If the measured lag changes
 with the step size, the loop is saturating; repeat at the smaller step.
 
@@ -417,13 +420,14 @@ deliveries should lie on one line in `F - P A` against `P A`.
 
 ## 7. Not covered
 
-- 7 mm/s: `G_cfgVelLimitMax` and `masterConfig.jogVelMax` are 5 mm/s. The
+- 7 mm/s: `G_cfgVelLimitMax` and `masterConfig.jogVelMax` are 6 mm/s. The
   pressure loop's own clamp is 5 mm/s, so the model's operating range is
   covered.
-- A velocity step without the 5 mm/s² slew. The lag is identified from
-  the slewed response, which is what the model also sees; a sharper step
-  needs `G_cfgDirectCtrlAccel` raised on the machine for the run, or the
-  SERVOPACK's own trace in SigmaWin+.
+- The rate at which the drive follows a step. It follows at the rate the
+  step needs (18 mm/s² for a 1 mm/s step, 45 for 2.5 mm/s,
+  `bench/characterisation/README.md` section 8), not at
+  `G_cfgDirectCtrlAccel`, so the fit lumps it into the lag; the
+  SERVOPACK's own trace in SigmaWin+ would show how it is made up.
 - The pressure force in the captures: `stepResponseFit` reports the
   breakaway from the torque alone, so from a capture under load it
   includes `P A`. The capture carries the pressure; use the 50 ms log's
