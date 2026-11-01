@@ -103,6 +103,14 @@ tick, so a long transfer costs a tick per request. What it cannot know
 is whether a request with more registers takes the controller longer to
 answer; its `perRegister` term is 0 until this measures it.
 
+The model also carries what section 7 measured for the Modbus Client
+blocks: the blocking Read and Write calls stall the master's step (the
+share of steps started late is the "Steps lagging" column), one exchange a
+minute arrives a period late (`lateExchangeRate`), and a lost link ends the
+run at the first failing call (case D; `stopOnLostLink`). Its lognormal
+client delay has a lighter tail than the capture's (61 ms at most), so at
+a 25 ms step it gives fewer late steps than the 0.21 % measured.
+
 ```matlab
 r = modbusCountSweep;                                  % reads of 1, 2, 20, 60 and 125 registers
 r = modbusCountSweep(500, struct('writeStart', 201));  % and writes of 1, 6, 60 and 123 registers

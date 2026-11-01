@@ -222,12 +222,6 @@ reference for every declaration.
 
 ## Simulator and tests
 
-- [ ] The link timing model (`slave-sim/modbusLink.m`) leaves out what the
-      Simulink side adds: the master's step overrunning while a Modbus call
-      blocks, the exchange that arrives a period late (about one a minute
-      at 50 ms on the bench), and a lost link stopping the Simulink model
-      (bench case D). `closedLoopModbusStep` assumes every exchange
-      completes.
 - [ ] Speed up `tests/fakeProbeLink.m`: `logScan` reads the whole
       `S.sl.G` every scan, which on the compiled slave builds a snapshot
       each time. `frictionRunSim` and `charRunSim` went from about 55 s and
