@@ -250,9 +250,6 @@ reference for every declaration.
 
 ## Documentation
 
-- [ ] Write the pin tables of the other LD blocks in
-      `docs/slave/ld/README.md`. Their screenshots are already in that
-      directory.
 - [ ] Redraw `docs/slave/diagrams/MainStateMachine.svg` from `PRG_Main`.
       It shows `ST_ENCODER_CHECK`, `ST_REQUIRE_ABS_HOME` and
       `ST_FAULT_RECOVERY`, which `E_SystemState` does not have, and lacks
