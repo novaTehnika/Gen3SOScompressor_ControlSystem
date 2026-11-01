@@ -2,10 +2,13 @@
 
 The LD POU (`PRG_LD`) that owns the axis and the built-in motion function
 blocks lives only in the MotionWorks IEC project; it cannot be exported as
-text. `PRG_LD.md` is its specification: every block, its instance name and
-what is wired to each pin. This directory also records the wiring as it is
-in the project: a screenshot of each block, and a table of what is wired
-to each pin.
+text. `slave-src/PRG/PRG_LD.st` is its specification, in the form of the
+ST headers: the instances to declare and, network by network, what is
+wired to each pin. This directory records the wiring as it is in the
+project: a screenshot of each block, and a table of what is wired to each
+pin. The screenshots are named after the project's instances
+(`MC_Power_1` and so on); the specification names them in the project's
+style (`fbPower`), and the axis `G_sysAxis` (`AXIS1` in the project).
 The Structured Text writes the `G_cmd*` structs and reads the `G_sta*`
 structs (`slave-src/DUT/DataTypes.st`), so this record is the contract
 between the two halves. When a field is added to one of those structs,
@@ -40,10 +43,11 @@ keep the table to what the picture shows.
 
 The other blocks (`MC_Power`, `MC_Stop`, `MC_Reset`, `MC_MoveAbsolute`,
 `MC_SetPosition`, `MC_ReadActual*`, Jog) have their screenshots in this
-directory and their pin tables in `PRG_LD.md`. The screenshot of
-`MC_Power_1` shows `Enable_Positive` and `Enable_Negative` open; the
+directory and their pin lists in `slave-src/PRG/PRG_LD.st`. The screenshot
+of `MC_Power_1` shows `Enable_Positive` and `Enable_Negative` open; the
 specification wires them to `G_cmdPower.EnablePositive` and
-`G_cmdPower.EnableNegative`, which the ST drives.
+`G_cmdPower.EnableNegative`, which the ST drives. `MC_ReadStatus`
+(`fbReadStatus`, the source of `G_sysDriveFault`) has no screenshot yet.
 
 ## To change: remove `MC_MoveVelocity`
 

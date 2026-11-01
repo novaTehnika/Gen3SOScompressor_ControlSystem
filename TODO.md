@@ -82,10 +82,14 @@ reference for every declaration.
       `G_cmdDirectControl.FilterTimeConstant` (it is hard-wired to
       `LREAL#0.05`) and `Error` to `G_staDirectControl.Error` (it is wired
       to `.Active`), as `docs/slave/ld/README.md` records.
-- [ ] LD POU, against `docs/slave/ld/PRG_LD.md`: wire `MC_Power_1`'s
-      `Enable_Positive` and `Enable_Negative` (open in the screenshot) and
-      add `MC_ReadStatus_1` with `ErrorStop` to `G_sysDriveFault`, which
-      nothing writes today. Replace the screenshots of the blocks touched.
+- [ ] LD POU, against `slave-src/PRG/PRG_LD.st`: wire `MC_Power`'s
+      `Enable_Positive` and `Enable_Negative` (open in the screenshot), add
+      an `MC_ReadStatus` with `ErrorStop` to `G_sysDriveFault`, which
+      nothing writes today, and rename the instances to the `fb*` names of
+      the specification (`MC_Power_1` to `fbPower`, and so on) and the
+      axis `AXIS1` to `G_sysAxis` if Hardware Configuration allows it.
+      Retake the screenshots of the blocks touched, named after the new
+      instances.
 - [ ] Export the GVL from MotionWorks and diff it against
       `slave-src/GVL/GlobalVariables_Reference.st`. The soft limit, the
       cylinder entry, the velocities and the scan were found to differ
