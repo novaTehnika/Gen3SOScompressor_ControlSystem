@@ -154,6 +154,27 @@ reference for every declaration.
       a loop calibrator, and measure the 4.7 uF capacitor's leakage out of
       circuit (the input's load in parallel with the shunt fitted as about
       15 kohm).
+- [ ] Verify every assumed position against the machine, in the homed
+      frame, and correct each copy:
+  - [ ] Positive overtravel switch trip point (just past 367 mm, not
+        measured; trip it with a limit fault). The simulator assumes
+        370 mm (`slave-sim/slaveSimConfig.m` `switchPosPos`) with a 3 mm
+        hard stop beyond it (`hardStopMargin`).
+  - [ ] Negative overtravel switch, assumed at -5 mm
+        (`G_cfgHomeLimRetractDist`, `switchNegPos`), and
+        `G_cfgPosSoftLimitMin` (-2.5 mm) between it and zero.
+  - [ ] End of travel, `posEOT` (367 mm, `master-src/logic/masterConfig.m`),
+        which sets the displayed position and volume.
+  - [ ] Cylinder entry, `G_cfgPosCylinderEntry` (176 mm). The simulator's
+        `chamberContactPos` is still 200 mm and
+        `bench/friction/frictionBenchConfig.m` `exitGuardPos` still
+        assumes 200 + 20 = 220 mm.
+  - [ ] Margins between the limits. `posMax` and `G_cfgPosSoftLimitMax`
+        are both 367 mm and the switch sits just past them, so a jog the
+        master stops at `posMax` can overshoot into `FAULT_POSITION` or
+        the switch. Leave room for the arrival tolerance (0.5 mm) and one
+        exchange of travel at full speed (0.3 mm at 6 mm/s), then set
+        `posMax` < `G_cfgPosSoftLimitMax` < the switch.
 - [ ] Measure what the models still assume (`design/pressure-loop/README.md`,
       "Open questions"): the dissolution time constant `tauDiss`, the lag
       at the piston, and how much of the hose's compliance is wall and how
