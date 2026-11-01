@@ -6,12 +6,13 @@ function charFitsSynthetic()
 %   deliveries at three pressures; charDriveLag recovers tauV and the dead
 %   time from step probe captures, and roughly from 50 ms run logs,
 %   including the piston-side lag from the pressure column through the
-%   sensor chain; charStopDistance recovers the delay and the
+%   sensor chain; charScheduleCheck compares the schedule's stiffness bound
+%   with a known stiffness; charStopDistance recovers the delay and the
 %   deceleration of the stopping-distance law from captures and a run
 %   log of stops in both directions. The logs are in frictionRun's
 %   formats.
 %   Run from the repository root:  addpath master-src/logic tests
-%   Depends on: master-src/logic bench/characterisation bench/common
+%   Depends on: master-src/logic slave-src bench/characterisation bench/common bench/captures
 
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'bench', 'characterisation'), fullfile(here, '..', 'bench', 'common'));
@@ -49,6 +50,26 @@ assert(r.pass, 'clean liquid run failed the checks');
 assert(abs(r.K_Pa - K * 1e6) / (K * 1e6) < 0.02);
 fprintf('ok  bulk modulus: clean run passes, K %.3g Pa\n', r.K_Pa);
 
+% A log recorded with another shunt setting (434 ohm; the present GVL has
+% 421.4) reads its pressure scaled by the ratio of the two: opts.logShuntOhms
+% rescales it back, and without it K is off by that ratio.
+gv0 = benchGvl();
+mAperMPa = gv0.G_cfgPressureSpanMa / (gv0.G_cfgPressureRangeMax - gv0.G_cfgPressureRangeMin);
+d2 = benchReadCsv(f2);
+mAtrue = gv0.G_cfgPressureZeroMa + (d2.pressure - gv0.G_cfgPressureRangeMin) * mAperMPa;      % [mA]
+mAlogged = mAtrue * gv0.G_cfgPressureShuntOhms / 434;                                          % [mA]
+Plogged = gv0.G_cfgPressureRangeMin + (mAlogged - gv0.G_cfgPressureZeroMa) / mAperMPa;        % [MPa]
+f2s = fullfile(dir, 'k_run_2_shunt434.csv');
+writeRun(f2s, [d2.t d2.step d2.status d2.mode d2.ref d2.position d2.velocity d2.torque Plogged ...
+    d2.inMotion d2.inBand d2.exchangeMs]);
+rs = charBulkModulus(f2s, struct('quiet', true, 'deadVolume_mL', Vdead / 1000, 'logShuntOhms', 434));
+ru = charBulkModulus(f2s, struct('quiet', true, 'deadVolume_mL', Vdead / 1000));
+assert(abs(rs.K_Pa - K * 1e6) / (K * 1e6) < 0.02, 'rescaled K %.3g Pa, set %.3g', rs.K_Pa, K * 1e6);
+assert(abs(ru.K_Pa - K * 1e6) / (K * 1e6) > 0.5 * abs(1 - gv0.G_cfgPressureShuntOhms / 434), ...
+    'K without the rescale %.3g Pa is not off by the shunt ratio', ru.K_Pa);
+fprintf('ok  bulk modulus: a log from the 434 ohm shunt, K %.3g Pa rescaled (set %.3g), %.3g without\n', ...
+    rs.K_Pa, K * 1e6, ru.K_Pa);
+
 % Two fills with a series compliance of 200 N/um split liquid and structure.
 ks = 200e3;                     % N/mm
 f3 = fullfile(dir, 'k_fill300.csv');
@@ -66,6 +87,54 @@ assert(abs(r.split.ks_N_per_um - ks / 1000) / (ks / 1000) < 0.1, 'series stiffne
     r.split.ks_N_per_um, ks / 1000);
 fprintf('ok  bulk modulus: two fills give liquid %.2f GPa and series %.0f N/um (effective %.2f GPa at 300 mL)\n', ...
     r.split.K_GPa, r.split.ks_N_per_um, r.segments(1).K_lin_GPa);
+
+% File patterns: the fits take a pattern like a list of names
+rp = charBulkModulus(fullfile(dir, 'k_fill*.csv'), struct('quiet', true, 'deadVolume_mL', Vdead / 1000));
+assert(numel(rp.segments) == numel(r.segments) && abs(rp.split.K_GPa - r.split.K_GPa) < 1e-9, 'pattern differs from the list');
+failed = false;
+try
+    benchFiles(fullfile(dir, 'no_such_*.csv'));
+catch
+    failed = true;
+end
+assert(failed, 'a pattern that matches nothing was accepted');
+fprintf('ok  file patterns: k_fill*.csv gives the two fills, a pattern with no match is an error\n');
+
+% --- Schedule check ---------------------------------------------------------------
+% The slave's stiffness bound against a liquid-only run of known stiffness
+% (the clean run above, K 1.3 GPa, the fill as the saline volume): with a
+% largest plausible bulk modulus of 2 GPa the bound is 2/1.3 of the
+% measured stiffness and the check passes; with the GVL's 1 GPa, below the
+% run's own, the bound is below the measured stiffness and the check fails.
+fillSaline = V0 / 1000;                                             % [mm^3 -> mL]
+bulk = struct('deadVolume_mL', Vdead / 1000);
+sc = charScheduleCheck(f2, struct('quiet', true, 'salineVolume_mL', fillSaline, 'bulk', bulk, ...
+    'settings', struct('G_cfgPressureSchedBulkModulus', 2e9)));
+assert(sc.pass && numel(sc.rows) == 2, 'bound below the stiffness with K_cfg above the true K');
+assert(all(abs([sc.rows.ratio] - 2000 / K) < 0.04 * 2000 / K), 'bound / measured %s, expected %.3f', ...
+    mat2str([sc.rows.ratio], 4), 2000 / K);
+gv = benchGvl();
+wcExpected = gv.G_cfgPressureSchedCrossover * 1300 / 2000;         % [rad/s] Kp k_true = wc k_true / k_bound
+assert(all(abs([sc.rows.wc] - wcExpected) < 0.04 * wcExpected), 'crossover %s rad/s, expected %.2f', ...
+    mat2str([sc.rows.wc], 4), wcExpected);
+sc = charScheduleCheck(f2, struct('quiet', true, 'salineVolume_mL', fillSaline, 'bulk', bulk, ...
+    'settings', struct('G_cfgPressureSchedBulkModulus', 1e9)));
+assert(~sc.pass && all([sc.rows.ratio] < 1) && abs(sc.minRatio - 1000 / K) < 0.04 * 1000 / K, ...
+    'a bound below the stiffness was accepted (ratio %.3f)', sc.minRatio);
+fprintf('ok  schedule check: bound / measured %.2f with 2 GPa (set 1.3 GPa), %.2f with 1 GPa fails\n', ...
+    2000 / K, sc.minRatio);
+
+% The committed K300 logs (proximal valve shut, 343 mL, logged at 434 ohm):
+% the GVL's bound, with its 1 GPa bulk modulus above the measured 0.72 GPa,
+% stands above the measured stiffness of every ramp.
+cap = fullfile(here, '..', 'bench', 'captures');
+k300 = {fullfile(cap, 'K300_char_20261026_192617.csv'), fullfile(cap, 'K300_char_20261026_192751.csv'), ...
+        fullfile(cap, 'K300_char_20261026_193002.csv')};
+sc = charScheduleCheck(k300, struct('quiet', true, 'bulk', struct('logShuntOhms', 434, 'deadVolume_mL', 50)));
+assert(sc.pass && numel(sc.rows) == 24 && sc.minRatio > 1.15 && max([sc.rows.ratio]) < 1.6, ...
+    'K300 logs: bound / measured %.2f to %.2f over %d ramps', sc.minRatio, max([sc.rows.ratio]), numel(sc.rows));
+fprintf('ok  schedule check on the K300 logs: bound %.1f MPa/mm over measured %.1f to %.1f, ratio %.2f to %.2f\n', ...
+    sc.rows(1).kBound, min([sc.rows.dPdx]), max([sc.rows.dPdx]), sc.minRatio, max([sc.rows.ratio]));
 
 % --- Orifice flow -------------------------------------------------------------------
 Cd = 0.68;

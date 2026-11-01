@@ -47,9 +47,8 @@ function r = charOrificeFlow(files, opts)
 %   r.exponent  fitted exponent n of Q = c P^n (NaN with one pressure)
 %   r.pass, r.checks
 
-if ischar(files)
-    files = {files};
-end
+addpath(fullfile(fileparts(mfilename('fullpath')), '..', 'common'));
+files = benchFiles(files);
 if nargin < 2
     opts = struct();
 end
