@@ -1,8 +1,10 @@
 # TODO
 
 Open items after the step probe, position speed, configuration and cleanup
-work (PR #21) and the simulator, models and link timing work (PR #22).
-Grouped by where they have to be done.
+work (PR #21), the simulator, models and link timing work (PR #22), and
+the pressure-loop design, bench and scheduled-controller work (PR #17 and
+the `sched-pressure-controller` branch). Grouped by where they have to be
+done.
 
 ## MotionWorks project
 
@@ -44,7 +46,25 @@ reference for every declaration.
         `G_mbPositionSpeed`, `G_sysPositionSpeed`, the `G_mbProbe*`
         globals and the `G_sysProbe*` globals.
 - [ ] Modbus groups in Hardware Configuration: holding registers to HR114,
-      input registers to IR524.
+      input registers to IR524. Keep the groups to what is used: a
+      3410-register input group (the old step probe's) made the protocol
+      exchange 50 ms (p99 70) instead of 20 (p99 30), programs loaded or
+      not, and tripped the slave's 300 ms watchdog during motion.
+- [ ] Enable the cyclic task's watchdog, at the 4 ms interval. The 2 ms
+      task overran for weeks (about 2.5 ms of work a scan) and ran on
+      every second motion cycle with nothing reported.
+- [ ] LD POU, `Y_DirectControl_1`: wire `FilterTimeConstant` from
+      `G_cmdDirectControl.FilterTimeConstant` (it is hard-wired to
+      `LREAL#0.05`) and `Error` to `G_staDirectControl.Error` (it is wired
+      to `.Active`), as `docs/slave/ld/README.md` records.
+- [ ] Scheduled pressure controller (`sched-pressure-controller`): declare
+      `FB_PressureSchedule`'s variables, `FB_PressureController.IntegScale`
+      (initial 1.0), the new `PRG_Main` locals and the `G_cfgPressureSched*`
+      globals when that branch is loaded.
+- [ ] Export the GVL from MotionWorks and diff it against
+      `slave-src/GVL/GlobalVariables_Reference.st`. The soft limit, the
+      cylinder entry, the velocities and the scan were found to differ
+      from the machine one at a time; one diff settles the rest.
 
 ## Lab PC
 
@@ -55,6 +75,9 @@ reference for every declaration.
       compiled simulated slave. It has only been run under Octave. The
       Python parity tests (`stTargetParity.py`, `plantParity.py`) also need
       a C compiler as `CC` (for example `set CC=gcc` with MinGW-w64).
+      `charFitsSynthetic` and `frictionRunSim` seed with the legacy
+      `randn('seed', n)`, which MATLAB accepts with a warning; `rng` is
+      the replacement if it objects.
 
 ## Checks on the machine
 
@@ -89,6 +112,36 @@ reference for every declaration.
       "Open questions"): the dissolution time constant `tauDiss`, the lag
       at the piston, and how much of the hose's compliance is wall and how
       much trapped air.
+- [ ] Stopping distance under load at 8 to 10 MPa with scan-rate captures
+      (`bench/characterisation/README.md` test 4, `charStopPath` with
+      `levels_MPa [8 10]`, speeds 0.25 and 0.5 mm/s, probe armed for the
+      stops). The 50 ms log gave 0.031 s times the speed from 2 to 10 MPa
+      with no load dependence; the captures confirm it at the scan rate
+      and settle the delay term. Then set the slave's allowance from the
+      fit (`charStopDistance`: `r.T0_s`, `r.D_mm_s2`; today 0.05 s and
+      50 mm/s², conservative by three to four times at 5 mm/s). The
+      bench's capture reader expects the old step probe's record; adapt
+      `charRun`'s 'stops' probe mode and `charStopDistance` to `FB_Probe`.
+- [ ] From the one-pass logs already taken (`bench/captures/stops_char_*`):
+      the friction at speed under load (`frictionFit` on the legs) and the
+      stiffness against pressure (`charBulkModulus` with `chargeRatio`).
+      Neither fit has been run on them.
+- [ ] Confirm that `Y_DirectControl`'s `Acceleration` input limits the
+      drive in VelocityTLMode: velocity steps at 1 and at 100 mm/s². The
+      bench saw the command followed within 30 ms whatever the step, which
+      says it does not.
+- [ ] Before the next oxygen run, choose the hose procedure. Opening the
+      proximal valve at 10 MPa drops the chamber to 6.4 MPa in one scan
+      and degasses any charge above about 1.8:1. Either open it before
+      the compression, or fit a bypass metering orifice of 0.3 mm or less
+      (Cv about 0.003) that is opened ahead of the ball valve; the model
+      sizes both (`study_hose_opening.py`). The purge must then carry the
+      slug that degassed entering the hose, 2 to 3 mL behind the 29 mL of
+      virgin saline.
+- [ ] The hose model's inputs that only the procedure can give: whether
+      the whole 29 mL is purged, the pause between purge and delivery,
+      whether the tube drains in it (`tube_refills`), and how fast the
+      distal valve is shut (`Params.Tclose`).
 
 ## Simulator and tests
 
@@ -138,12 +191,35 @@ reference for every declaration.
 - [ ] Retire `PRG_PressureProbe`: the main probe records the raw pressure
       voltage every scan, so the noise statistics could be computed on the
       master.
-- [ ] On the plant model the slave's pressure loop overshoots a 10 MPa
-      target by about 0.6 MPa and settles in about 13 s
-      (`tests/slavePressureMode.m`), as `design/pressure-loop/README.md`
-      reports for the GVL loop. In the studies `ScheduledSlaveController`
-      arrives in 2.4 s without overshooting the reading. Decide whether to
-      port it to the slave.
+- [ ] The scheduled pressure controller is ported on
+      `sched-pressure-controller` (`FB_PressureSchedule` behind
+      `G_cfgPressureScheduleEnable`, off by default; the stiffness bound
+      taken at the present and the target pressure; lockstep with the
+      Python reference to 1e-9; 24 commits not on main). Review and merge
+      it, then commission it in this order: the stiffness estimate against
+      the measured slope on the characterisation bench; a water-only
+      delivery with the full valve sequence, comparing the opening dip and
+      the purge-closing peak with the model's 0.8 and 1.0 MPa; oxygen at
+      1:1, then 2:1. The GVL gains let the purge closing reach 12.2 MPa in
+      every plausible case; until the schedule is on, stop the piston
+      before shutting the distal valve.
+- [ ] How the slave learns the recipe for the schedule: a GVL setting the
+      operator edits per batch (enough to commission), or a holding
+      register from the master (a protocol change: register map, protocol
+      guide, master logic and operator app together).
+- [ ] An on-line stiffness estimate (dP against dx while the piston moves)
+      as a monitor beside the configured bound, logging its value and
+      flagging disagreement, which is the schedule's one failure mode (a
+      wrong configuration). Letting it raise the gain is a later,
+      reversible step; model predictive control was considered and set
+      aside (scan rate, uncertain gas model, no sensor for the valve
+      events).
+- [ ] A transducer in the tube downstream of the distal valve would give
+      the outflow and the valve state (the flow feedforward the studies
+      carry as a bound, limited by the loop's 50 ms); a transducer at the
+      distal end of the hose gives no usable lead (the pressure wave
+      crosses the hose in 2.8 ms). Decide whether the extra input is worth
+      it.
 - [ ] The probe's record index wraps after 2^32 scans (about 200 days at
       4 ms of uninterrupted running), and the master does not handle the
       wrap.
