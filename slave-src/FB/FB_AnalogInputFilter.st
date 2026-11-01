@@ -33,7 +33,7 @@
      VAR_OUTPUT:
        FilteredOutput      : LREAL            (* Filtered output value (volts)
      VAR:
-       aMedianBuffer       : ARRAY[0..4] OF LREAL  (* Median filter buffer
+       aMedianBuffer       : ARRAY5LREAL      (* Median filter buffer
        nMedianIndex        : INT := 0
        rFilteredValue      : LREAL := 0.0     (* Low-pass filter state
        rAlpha              : LREAL

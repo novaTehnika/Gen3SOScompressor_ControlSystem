@@ -50,11 +50,13 @@
    differs from the fill target restarts the fill; the same request written
    again changes nothing. The block copies at most FillPerScan records per
    scan from the ring into Stage, so a transfer never stretches a scan.
-   When the copy is complete Publish is TRUE for that scan and Start, Count
-   and StartTail hold the new window; they change only then. In that scan
-   PRG_Main copies Stage to G_sysProbeStage, and PRG_Output copies that
-   into the mapped window and writes StartTail last, so a read
-   that straddles an update shows Start <> StartTail and is discarded.
+   FillPerScan below 1 is taken as 1; above 13 it changes nothing, since a
+   window never needs more. When the copy is complete Publish is TRUE for
+   that scan and Start and Count hold the new window; they change only
+   then. In that scan PRG_Main copies Stage to G_sysProbeStage, and
+   PRG_Output copies that into the mapped window and writes the register
+   StartTail (a copy of Start) last, so a read that straddles an update
+   shows Start <> StartTail and is discarded.
      XFER_IDLE     the window is complete for the request
      XFER_FILLING  records are being copied
      XFER_PENDING  the requested start is not recorded yet
@@ -65,12 +67,13 @@
 
    Cost per scan: the 8-word record, the arm and fault logic and at most
    FillPerScan * 8 word copies (48 at the default of 6), plus, in the scan a
-   fill completes, the 104-word copy in PRG_Output.
+   fill completes, two 104-word copies: Stage to G_sysProbeStage in
+   PRG_Main and that to the mapped window in PRG_Output.
 
    Variables (define in MWiec GUI):
      VAR_INPUT:
        Enable          : BOOL             (* FALSE: no recording, PROBE_OFF
-       FillPerScan     : INT              (* Records copied into the window per scan, limited to 1-13
+       FillPerScan     : INT              (* Records copied into the window per scan, at least 1
        VelCmd          : LREAL            (* Commanded velocity (mm/s)
        Vel             : LREAL            (* Actual velocity (mm/s)
        Torque          : LREAL            (* Actual torque (% of rated)
@@ -93,7 +96,6 @@
        Mark            : UDINT := 0       (* Index of the record written in the scan of the last arm
        FaultMark       : UDINT := 0       (* Index of the record written in the scan of the last fault
        Start           : UDINT := 0       (* Index of the first record in the published window
-       StartTail       : UDINT := 0       (* Copy of Start, written after the window
        Count           : UINT := 0        (* Records in the published window (0-13)
        ArmEcho         : UINT := 0        (* Arm value last acted on
        Depth           : UINT := 0        (* Ring depth in records
@@ -123,7 +125,6 @@
        nFilled         : UDINT := 0       (* Records of the target copied into Stage
        nPlanned        : UDINT := 0       (* Records the window is to hold
        nAvail          : UDINT := 0       (* Records written from the target on, up to cWindow
-       nPerScan        : UDINT := 6       (* FillPerScan limited to 1..cWindow
        nStep           : UDINT := 0       (* Records to copy this scan
        nSrc            : UDINT := 0       (* First ring word of the records being copied
        nDst            : UDINT := 0       (* First Stage word they go to
@@ -240,14 +241,6 @@ END_IF;
 (* --------------------------------------------------------------------------
    Transfer: plan the window for the request
    -------------------------------------------------------------------------- *)
-IF FillPerScan < 1 THEN
-    nPerScan := UDINT#1;
-ELSIF FillPerScan > 13 THEN
-    nPerScan := cWindow;
-ELSE
-    nPerScan := INT_TO_UDINT(FillPerScan);
-END_IF;
-
 nReq := UINT_TO_UDINT(ReqHi) * UDINT#65536 + UINT_TO_UDINT(ReqLo);
 IF nReq <> nTarget THEN
     nTarget := nReq;
@@ -262,10 +255,7 @@ IF NOT bOverrun THEN
     ELSIF (nFilled < nPlanned) AND (nTarget + nFilled < nOldest) THEN
         bOverrun := TRUE;
     ELSIF nTarget < Written THEN
-        nAvail := Written - nTarget;
-        IF nAvail > cWindow THEN
-            nAvail := cWindow;
-        END_IF;
+        nAvail := MIN(Written - nTarget, cWindow);
         IF (nAvail > nPlanned) AND (nTarget + nFilled >= nOldest) THEN
             nPlanned := nAvail;
         END_IF;
@@ -273,13 +263,12 @@ IF NOT bOverrun THEN
 END_IF;
 
 (* --------------------------------------------------------------------------
-   Transfer: copy at most nPerScan records, publish when the window is complete
+   Transfer: copy at most FillPerScan records, publish when the window is
+   complete. The rest of a window is at most cWindow records, so only the
+   lower bound of FillPerScan needs enforcing.
    -------------------------------------------------------------------------- *)
 IF (NOT bOverrun) AND (nFilled < nPlanned) THEN
-    nStep := nPlanned - nFilled;
-    IF nStep > nPerScan THEN
-        nStep := nPerScan;
-    END_IF;
+    nStep := MIN(nPlanned - nFilled, INT_TO_UDINT(MAX(FillPerScan, INT#1)));
     nSrc := ((nTarget + nFilled) MOD cDepth) * cWords;
     nDst := nFilled * cWords;
     nWords := UDINT_TO_DINT(nStep * cWords);
@@ -292,7 +281,6 @@ IF (NOT bOverrun) AND (nFilled < nPlanned) THEN
     IF nFilled = nPlanned THEN
         Start := nTarget;
         Count := UDINT_TO_UINT(nFilled);
-        StartTail := nTarget;
         Publish := TRUE;
     END_IF;
 END_IF;
