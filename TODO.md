@@ -16,6 +16,13 @@ reference for every declaration.
 
 - [ ] LD POU: delete the `MC_MoveVelocity` instance, then delete
       `docs/slave/ld/MC_MoveVelocity_1.PNG`.
+- [ ] LD POU, from the pin tables in `docs/slave/ld/README.md` ("To
+      change" sections): wire `MC_Power_1`'s `Enable_Positive` and
+      `Enable_Negative` to `G_cmdPower.EnablePositive` and
+      `.EnableNegative`, which `PRG_Main` writes and nothing reads; and
+      find or add the block that drives `G_sysDriveFault` (the
+      `MC_ReadActual*` blocks leave `Error` unwired and no screenshot
+      shows an axis-error block), then replace the screenshots.
 - [ ] Data types:
   - [ ] Remove the `ST_HOME_LIM_*` members from `E_SystemState`.
   - [ ] Remove `ST_CmdMoveVelocity`, `ST_StaMoveVelocity` and the
@@ -111,9 +118,10 @@ reference for every declaration.
   - [ ] Add `G_cfgStopDecel`, `G_cfgProbeEnable`, `G_cfgProbeFillPerScan`,
         `G_mbPositionSpeed`, `G_sysPositionSpeed`, the `G_mbProbe*`
         globals and the `G_sysProbe*` globals.
-- [ ] Modbus groups in Hardware Configuration: holding registers to HR114 (the protocol uses HR1-12),
-      input registers to IR524. Keep the groups to what is used: a
-      3410-register input group (the old step probe's) made the protocol
+- [ ] Modbus groups in Hardware Configuration: holding registers to
+      HR114 (the protocol uses HR1-12), input registers to IR524. Keep the
+      groups to what is used: a 3410-register input group (the old step
+      probe's) made the protocol
       exchange 50 ms (p99 70) instead of 20 (p99 30), programs loaded or
       not, and tripped the slave's 300 ms watchdog during motion.
 - [ ] Enable the cyclic task's watchdog, at the 4 ms interval. The 2 ms
@@ -141,6 +149,12 @@ reference for every declaration.
       `modbusLinkTiming` seed with the legacy `randn('seed', n)` (and
       `rand('seed', n)`), which MATLAB accepts with a warning; `rng` is
       the replacement if it objects.
+- [ ] Pull the cable with the shell running and note when the model stops.
+      `master-src/README.md` says it retries and stops about 20 s later
+      when Windows TCP gives up; bench case D (`bench/modbus/README.md`)
+      says the Read block errors on the first exchange after the drop. The
+      link model (`slave-sim/modbusLinkConfig.m` `lostLinkErrorDelay`)
+      uses the bench figure, 0; correct whichever is wrong.
 
 ## Checks on the machine
 
@@ -188,7 +202,10 @@ reference for every declaration.
       `tauV`) and rerun the studies (`study_robust`, `study_compare`,
       `study_delivery`). Until then `K` 0.72 GPa and `Cd` 0.85 are the
       26 October fits as logged; refitted on the calibrated scale
-      (`opts.logShuntOhms = 434`) they are 0.74 GPa and 0.83.
+      (`opts.logShuntOhms = 434`) they are 0.74 GPa and 0.83. Run the
+      scenarios with the settled hose procedure (`hose_before` False): the
+      design README's results passage ("Every result below is for the
+      first remedy") still reports the hose-before remedy; relabel it.
 - [ ] Pressure input calibration (`bench/pressure/README.md` section 6):
       it rests on a hand-held meter's mA range, about 1 %. Repeat it with
       a loop calibrator, and measure the 4.7 uF capacitor's leakage out of

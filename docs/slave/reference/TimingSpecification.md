@@ -34,7 +34,7 @@ conf_code (IR3)        0|_____|‾‾‾‾‾‾‾‾‾ (matches mode)
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| Mode Stable Time | 20 ms | Mode code must be stable before handshake |
+| Mode Stable Time | 50 ms | Mode code must be stable before handshake (`G_cfgDebounceTimeMode`) |
 | Handshake Timeout | 500 ms | Max time for slave to confirm mode |
 | Confirm Stable Time | 10 ms | Confirmation must be stable before accepted |
 
