@@ -39,7 +39,8 @@ function out = fakeProbeLink(cmd, varargin)
 %   one per slave tick around the scans (reads before a scan, writes after
 %   it) and returns after the client delay, with the slave running all the
 %   while. S.calls logs every call as [t called, t returned, requests,
-%   registers, is a read].
+%   registers, is a read]. The bench scripts call from MATLAB, so the link
+%   is used alone, without modbusLink's Simulink model commands.
 %   S    = fakeProbeLink('state')       S.collectLog is [t, mm^3 collected at
 %                                       the orifices, mol of free gas in the
 %                                       chamber] while the valve is open;
