@@ -295,7 +295,9 @@ P0, so the fit finds its volume at P0 and not at atmosphere (`Vair_fit_mL`
 brings it back). The acceptance compares the fitted gas volume at P0 with
 the pocket there and passes when it is no more than 0.3 mL above it
 (`opts.airTolerance_mL`); a gas term beyond that is free gas the purge
-left. The pocket is the same volume at every fill, so it does not change
+left, or a compliance that falls with pressure, which the fit cannot tell
+from gas (the hold of section 2 can: gas dissolves, a compliance does
+not). The pocket is the same volume at every fill, so it does not change
 the slope of the compliance against V in the two-fill split; its
 compliance is removed from the intercept before the series stiffness is
 taken.
@@ -734,7 +736,7 @@ values as fitted until the tests are repeated with the calibrated input.
 
 | Parameter | Result | Runs | Notes |
 |---|---|---|---|
-| K, chamber closed off from the hose (proximal valve shut) | 0.72 GPa, segments 0.67 to 0.78; stiffness 7.2 MPa/mm at 343 mL | `K300_char` x3 at 280 mm, 19:26 to 19:30 | Below the 1 GPa assumed. Up and down agree to 0.2 %, but the curvature gives a gas-like term of up to 0.65 mL, 23 % of the compliance, so the liquid-only K is not pinned: gas-corrected, 0.81 GPa. The gas term is a volume at the ramps' mean pressure, about 40 mL at atmosphere: free gas the fill held, far more than the transducer passage's pocket (section 2, about 0.1 mL). Weigh the fill against the geometry and purge; the K at two fill levels then pins the liquid value. |
+| K, chamber closed off from the hose (proximal valve shut) | 0.72 GPa, segments 0.67 to 0.78; stiffness 7.2 MPa/mm at 343 mL | `K300_char` x3 at 280 mm, 19:26 to 19:30 | Below the 1 GPa assumed. Up and down agree to 0.2 %, but the curvature gives a gas-like term of up to 0.65 mL, 23 % of the compliance, so the liquid-only K is not pinned: gas-corrected, 0.81 GPa. The gas term is a volume at the ramps' mean pressure; as gas it would be about 40 mL at atmosphere, more than the machine holds, and far more than the transducer passage's pocket (section 2, about 0.1 mL), so the curvature it fits may not be gas at all: a compliance that falls with pressure looks the same. The weighed fill and the hold at 10 MPa say whether there is gas; the K at two fill levels gives the series term and pins the liquid value. |
 | Discharge hose open (3 ft of 1/4 in R7 hose, 29 mL, to the orifice tube) | stiffness 5.2 MPa/mm with 305 mL of liquid; as an effective K, 0.46 GPa | `K300_char` at 299 mm, 19:36 | The hose adds about 0.24 mL/MPa of compliance beyond its own liquid (2.4 mL per 10 MPa): its wall stretching and any air it holds, the latter being what the curvature's gas term of up to 1.1 mL in this run points at. This is the chamber the delivery sees. |
 | Cd | 0.85 (0.84 to 0.87 over 1.6 to 8.3 MPa), exponent 0.48; Q = 4.8 mL/s at 10 MPa, piston 1.42 mm/s | `d2`, `d5`, `d10` deliveries and `Q10_char` x2 | With the transducer zero of -0.11 MPa corrected (`pressureOffset`). Above the 0.7 assumed: deliveries run 20 % faster than the model. The loop held 8.1 MPa for a 10 MPa target, the steady error the design study predicted. |
 | tauV at the motor | 18.2 +/- 0.03 ms lag after 22.8 +/- 0.02 ms dead time (sum 41 ms), the same for 0.3, 1 and 2.5 mm/s steps, up and down; `stepResponseFit`'s grid gives 16 ms after 28 ms | `s1`, `s2` step captures, 74 | **The command is not slewed at `G_cfgDirectCtrlAccel`**: a 2.5 mm/s step is complete in 60 ms, as is a 0.3 mm/s step, so the drive follows the command at whatever rate it needs (18 mm/s^2 for a 1 mm/s step, 45 for 2.5) with a 2 to 5 % overshoot. Fit with `opts.accel` large (1e4) and the 4 ms row spacing, from several starting dead times; with the GVL slew the model cannot follow and reports a lag near zero. |

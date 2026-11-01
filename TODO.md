@@ -188,12 +188,15 @@ reference for every declaration.
       the 4 ms scan. `bench/MeasurementPlan.md` sequences every model
       measurement, these included, into three sessions on two fills:
   - [ ] Fill, weigh the fill against the geometry, and purge until they
-        agree to a few mL: the October fits' gas term (0.65 mL at the
-        ramps' mean pressure) is about 40 mL of air at atmosphere, which
-        the scale shows. The air in the transducer passage and cavity
-        (`V_air`, about 0.1 mL by the geometry) stays and is the floor of
-        the gas term, the same in every liquid-only run. Note the
-        passage's bore and length.
+        agree to a few mL. The October fits' gas-law term (0.65 mL at
+        the ramps' mean pressure, about 40 mL at atmosphere as gas) is
+        more air than the machine holds, so its origin is open: the
+        weighed fill, the hold at 10 MPa (gas dissolves, a compliance
+        does not) and the second fill level decide. If it persists with
+        no gas, give `charBulkModulus` a pressure-dependent series term
+        in place of the gas law. The transducer passage's air (`V_air`,
+        about 0.1 mL by the geometry) is the floor of the gas term; note
+        the passage's bore and length.
   - [ ] Bulk modulus with the proximal valve shut: `K300` three times,
         then a second fill level so `charBulkModulus` separates the liquid
         from the series compliance.
