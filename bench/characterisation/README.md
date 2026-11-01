@@ -255,10 +255,14 @@ few scans.
 
 The fit (`charBulkModulus`) regresses the position on the pressure in each
 ramp with a liquid term and an isothermal gas term. It reports per ramp the
-slope dP/dx, the effective K (liquid plus whatever gas is left, which is
-what the loop sees), the liquid-only K, the gas volume the curvature
-implies, and the residual. Then up against down (hysteresis: friction,
-backlash or a leak), the spread, and the `params.py` line.
+slope dP/dx, the effective K (liquid plus the gas, which is what the loop
+sees), the liquid-only K, the gas volume the curvature implies (at the
+ramp's mean pressure), the pocket's share of it and the residual. Then up
+against down (hysteresis: friction, backlash or a leak), the spread, and
+the `params.py` line. The liquid-only K (`K_liq_GPa`, from the linear
+term; `r.K_Pa` is its mean) is the value for `params.py`'s `K`: the gas
+term is the air pocket and any free gas, which the model carries
+separately.
 
 **Expected values** (300 mL, 0.1 mm/s; the script prints this table):
 
@@ -272,11 +276,26 @@ backlash or a leak), the spread, and the `params.py` line.
 
 Water alone is 2.2 GPa. A good run shows a nearly straight P(x) with a
 slope in this table, the same within 10 % up and down and in both pressure
-bands, and a gas volume below 0.05 mL. A pressure that rises more slowly at
-3 MPa than at 10 MPa (upward curvature) is residual gas: a bubble of 0.1 mL
-at 5 MPa adds 7 % to the compliance of 300 mL at 1 GPa, which is why the
-fit bounds it and the acceptance limits its share to 5 %. A K below 0.5 GPa
+bands, and a gas volume no larger than the pocket described below. A
+pressure that rises more slowly at 3 MPa than at 10 MPa (upward
+curvature) is gas: a bubble of 0.1 mL at 5 MPa adds 7 % to the compliance
+of 300 mL at 1 GPa, which is why the fit reports it. A K below 0.5 GPa
 with no gas term is the actuator, a hose or a seal flexing; see below.
+
+**Air pocket.** The chamber always holds the air in the passage to the
+pressure transducer (about 2 cm) and in the transducer's cavity, which no
+purge reaches (`cfg.airVolume_mL` in `charConfig.m`, the `V_air` of
+`models/params.py`). It dissolves only very slowly, so for the fit it is a
+fixed isothermal gas, and the gas term has it as a floor: a pocket of
+V_air at atmosphere is Patm V_air / (P0 + Patm) at a ramp's mean pressure
+P0, so the fit finds its volume at P0 and not at atmosphere (`Vair_fit_mL`
+brings it back). The acceptance compares the fitted gas volume at P0 with
+the pocket there and passes when it is no more than 0.3 mL above it
+(`opts.airTolerance_mL`); a gas term beyond that is free gas the purge
+left. The pocket is the same volume at every fill, so it does not change
+the slope of the compliance against V in the two-fill split; its
+compliance is removed from the intercept before the series stiffness is
+taken.
 
 **Residual gas.** Dissolved gas does not change the compressibility; only
 free gas does. The curvature fit bounds the free gas; the hold in section 2

@@ -19,6 +19,11 @@ cfg.posEOT          = m.posEOT;                          % mm, piston at the end
 cfg.deadVolume_mL   = m.deadVolume;                      % mL left at the end of travel (measured, masterConfig)
 cfg.rho             = 1000;                              % kg/m^3 saline
 cfg.Patm_MPa        = 0.101325;
+% mL at atmosphere: air in the passage (about 2 cm) to the pressure
+% transducer and in its cavity, which cannot be purged and dissolves only
+% very slowly, so it is a fixed isothermal gas pocket in every run. It is
+% params.py V_air (0.65e-6 m^3), the same number, and charRunSim checks it.
+cfg.airVolume_mL    = 0.65;
 
 % --- Outlet: ball valve, tube, orifice plate -----------------------------------
 cfg.nOrifice        = 32;

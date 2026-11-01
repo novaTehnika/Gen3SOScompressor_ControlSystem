@@ -86,7 +86,7 @@ symbols in the equations match the variable names in the code.
 
 The plant and the sensor chain the studies run on are the machine's
 models, in `models/`; `models/README.md` describes them, gives their
-equations (1) to (18), (34) to (38) and (42) to (45) and the measured
+equations (1) to (18), (34) to (38) and (42) to (46) and the measured
 values of their parameters. This section and the next cover what the
 studies add: the controllers, the scenarios and the linear model.
 
@@ -313,8 +313,14 @@ The ranges are the bench measurements of 2026-10-26 with their spread
 (`bench/characterisation/README.md` section 8, `bench/friction`,
 `bench/pressure`). `mr`, `b`, `Fc` and `mu` act only in torque mode and
 the stall, so they are not varied; the dead time is fixed at its
-measured 22.8 ms. Each
-sample runs compress and deliver and checks these requirements:
+measured 22.8 ms. The air pocket at the pressure transducer, `V_air`,
+is explicit in the model (eq. (46) of `models/README.md`) and is held at
+its default, 0.65 mL; it is not sampled. The K range above is therefore
+to be re-read as the range of the liquid K, which the bulk-modulus fits
+give once their gas term is read as the pocket (0.81 GPa gas-corrected in
+the fits of 2026-10-26), and the ranges stand until those fits are
+repeated.
+Each sample runs compress and deliver and checks these requirements:
 
 - The pressure never exceeds the ceiling, 12 MPa (`StudyParams.P_ceiling`).
   The machine's mechanical limit is to be confirmed; 15 MPa may break
