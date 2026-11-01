@@ -185,7 +185,8 @@ reference for every declaration.
       make `pNextTick` depend on the count too.
 - [ ] Repeat the characterisation (`bench/characterisation/README.md`) on
       the calibrated pressure input (`G_cfgPressureShuntOhms` 421.4) at
-      the 4 ms scan:
+      the 4 ms scan. `bench/MeasurementPlan.md` sequences every model
+      measurement, these included, into three sessions on two fills:
   - [ ] Fill and purge longer than the 26 October runs and weigh the
         fill; one of those fills held enough gas to read 0.42 GPa.
   - [ ] Bulk modulus with the proximal valve shut: `K300` three times,
