@@ -130,6 +130,8 @@
        nDst            : UDINT := 0       (* First Stage word they go to
        nWords          : DINT := 0        (* Words to copy this scan
        nI              : DINT := 0
+       nRingIx         : INT := 0         (* aRing index (the compiler takes only a variable as an index)
+       nStageIx        : INT := 0         (* Stage index
        bOverrun        : BOOL := FALSE    (* The target (or the rest of a fill) was overwritten
    ============================================================================ *)
 
@@ -189,14 +191,22 @@ nStatus := BOOL_TO_UINT(InMotion) + BOOL_TO_UINT(Performance) * UINT#2
            + BOOL_TO_UINT(FaultActive) * UINT#4 + BOOL_TO_UINT(HomingComplete) * UINT#8
            + MIN(ModeCode, UINT#255) * UINT#256;
 
-aRing[nBase]              := INT_TO_WORD(LREAL_TO_INT(LIMIT(LREAL#-32767.0, VelCmd * LREAL#1000.0, LREAL#32767.0)));
-aRing[nBase + UDINT#1]    := INT_TO_WORD(LREAL_TO_INT(LIMIT(LREAL#-32767.0, Vel * LREAL#1000.0, LREAL#32767.0)));
-aRing[nBase + UDINT#2]    := INT_TO_WORD(LREAL_TO_INT(LIMIT(LREAL#-32767.0, Torque * LREAL#100.0, LREAL#32767.0)));
-aRing[nBase + UDINT#3]    := DWORD_TO_WORD(dwPos);
-aRing[nBase + UDINT#4]    := DWORD_TO_WORD(SHR(dwPos, UINT#16));
-aRing[nBase + UDINT#5]    := INT_TO_WORD(LREAL_TO_INT(LIMIT(LREAL#-32767.0, Pressure * LREAL#1000.0, LREAL#32767.0)));
-aRing[nBase + UDINT#6]    := UINT_TO_WORD(LREAL_TO_UINT(LIMIT(LREAL#0.0, Volts * LREAL#5000.0, LREAL#65535.0)));
-aRing[nBase + UDINT#7]    := UINT_TO_WORD(nStatus);
+nRingIx := UDINT_TO_INT(nBase);
+aRing[nRingIx] := INT_TO_WORD(LREAL_TO_INT(LIMIT(LREAL#-32767.0, VelCmd * LREAL#1000.0, LREAL#32767.0)));
+nRingIx := nRingIx + 1;
+aRing[nRingIx] := INT_TO_WORD(LREAL_TO_INT(LIMIT(LREAL#-32767.0, Vel * LREAL#1000.0, LREAL#32767.0)));
+nRingIx := nRingIx + 1;
+aRing[nRingIx] := INT_TO_WORD(LREAL_TO_INT(LIMIT(LREAL#-32767.0, Torque * LREAL#100.0, LREAL#32767.0)));
+nRingIx := nRingIx + 1;
+aRing[nRingIx] := DWORD_TO_WORD(dwPos);
+nRingIx := nRingIx + 1;
+aRing[nRingIx] := DWORD_TO_WORD(SHR(dwPos, UINT#16));
+nRingIx := nRingIx + 1;
+aRing[nRingIx] := INT_TO_WORD(LREAL_TO_INT(LIMIT(LREAL#-32767.0, Pressure * LREAL#1000.0, LREAL#32767.0)));
+nRingIx := nRingIx + 1;
+aRing[nRingIx] := UINT_TO_WORD(LREAL_TO_UINT(LIMIT(LREAL#0.0, Volts * LREAL#5000.0, LREAL#65535.0)));
+nRingIx := nRingIx + 1;
+aRing[nRingIx] := UINT_TO_WORD(nStatus);
 Written := Written + UDINT#1;
 
 IF Written > cDepth THEN
@@ -263,7 +273,9 @@ IF (NOT bOverrun) AND (nFilled < nPlanned) THEN
     nDst := nFilled * cWords;
     nWords := UDINT_TO_DINT(nStep * cWords);
     FOR nI := 0 TO nWords - 1 DO
-        Stage[nDst + DINT_TO_UDINT(nI)] := aRing[(nSrc + DINT_TO_UDINT(nI)) MOD (cDepth * cWords)];
+        nStageIx := UDINT_TO_INT(nDst + DINT_TO_UDINT(nI));
+        nRingIx := UDINT_TO_INT((nSrc + DINT_TO_UDINT(nI)) MOD (cDepth * cWords));
+        Stage[nStageIx] := aRing[nRingIx];
     END_FOR;
     nFilled := nFilled + nStep;
     IF nFilled = nPlanned THEN
