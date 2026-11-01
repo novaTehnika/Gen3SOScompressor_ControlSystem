@@ -245,5 +245,5 @@ Protocol:
   from the ring for as long as it holds (about 16 s).
 - **Cost.** Per scan: the 8-word record, the arm and fault logic and at most
   `G_cfgProbeFillPerScan` x 8 word copies; in the scan a fill completes,
-  `PRG_Output` adds a 104-word copy of the staging array into the mapped
-  window.
+  two 104-word copies: `PRG_Main` copies the block's window to the staging
+  array and `PRG_Output` copies that into the mapped window.
