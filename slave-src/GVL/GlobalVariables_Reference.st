@@ -133,7 +133,7 @@
      G_mbProbeStart        AT %QD74600 : UDINT  (* IR405-406: index of the first record in the window *)
      G_mbProbeArmEcho      AT %QW74604 : UINT   (* IR407: arm value last acted on *)
      G_mbProbeCount        AT %QW74606 : UINT   (* IR408: records in the window (0..13) *)
-     G_mbProbeDepth        AT %QW74608 : UINT   (* IR409: ring depth in records (8192) *)
+     G_mbProbeDepth        AT %QW74608 : UINT   (* IR409: ring depth in records (4096) *)
      G_mbProbeWords        AT %QW74610 : UINT   (* IR410: words per record (8) *)
      G_mbProbeWindow       AT %QW74612 : ARRAY104WORD  (* IR411-514: 13 records of 8 words; IR515-518 are not used *)
      G_mbProbeStartTail    AT %QD74828 : UDINT  (* IR519-520: copy of Start, assigned after the window *)

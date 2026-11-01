@@ -189,7 +189,7 @@ Input registers:
 | 405–406 | `%QD74600` | UDINT | `G_mbProbeStart` | Index of the first record in the window |
 | 407 | `%QW74604` | UINT | `G_mbProbeArmEcho` | Arm value last acted on |
 | 408 | `%QW74606` | UINT | `G_mbProbeCount` | Records in the window (0 to 13) |
-| 409 | `%QW74608` | UINT | `G_mbProbeDepth` | Ring depth in records (8192) |
+| 409 | `%QW74608` | UINT | `G_mbProbeDepth` | Ring depth in records (4096) |
 | 410 | `%QW74610` | UINT | `G_mbProbeWords` | Words per record (8) |
 | 411–514 | `%QW74612` | WORD ×104 | `G_mbProbeWindow` | 13 records of 8 words (the record layout below). IR515-518 are not used |
 | 519–520 | `%QD74828` | UDINT | `G_mbProbeStartTail` | Copy of Start written after the window; a read with Start ≠ StartTail is torn |
@@ -212,7 +212,7 @@ from IR410):
 
 Protocol:
 
-- **Ring.** One record per scan is appended to a ring of 8192 records (33 s at
+- **Ring.** One record per scan is appended to a ring of 4096 records (16 s at
   the 4 ms scan) in plain memory; the master reads records through the
   window, so the capture length is limited by the ring, not by the register
   groups. Index values wrap after 2^32 scans.
@@ -242,7 +242,7 @@ Protocol:
   StartTail and equals the index it requested.
 - **Fault mark.** On the scan `PRG_Main` enters `ST_FAULT`, FaultMark takes
   the index of that scan's record, so the history up to the fault can be read
-  from the ring for as long as it holds (about 33 s).
+  from the ring for as long as it holds (about 16 s).
 - **Cost.** Per scan: the 8-word record, the arm and fault logic and at most
   `G_cfgProbeFillPerScan` x 8 word copies; in the scan a fill completes,
   `PRG_Output` adds a 104-word copy of the staging array into the mapped
