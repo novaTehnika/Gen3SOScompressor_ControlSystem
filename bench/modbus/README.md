@@ -111,7 +111,7 @@ r = modbusCountSweep(500, struct('writeStart', 201));  % and writes of 1, 6, 60 
 Reads take input registers from IR1. Writes need a block of holding
 registers inside the holding group that the program does not use: check
 the group's range and the variables in the Global Variables worksheet and
-pass its first register as `writeStart`. HR1-8 and HR111-114 are refused.
+pass its first register as `writeStart`. HR1-12 and HR111-114 are refused.
 The block is read once and the same values are written back. Capture the
 run in Wireshark and run `modbusCaptureTiming.py` on it: besides the
 figures above it reports, per function code and register count, the

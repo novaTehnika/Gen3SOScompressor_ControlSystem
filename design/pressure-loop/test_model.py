@@ -40,7 +40,7 @@ FILE DEPENDENCY:
 ../../models/
     plant.py, sensor.py, slave.py
 ../../models/generated/
-    FB_PressureController.py
+    FB_PressureController.py, FB_PressureSchedule.py
 tests/run_all.sh reruns this script when a file under these paths
 changes (paths from the repository root):
 Depends on: design/pressure-loop models slave-src tools
@@ -537,6 +537,103 @@ def check_scheduled():
        "FB_PressureController's")
 
 
+def check_scheduled_st():
+    par = StudyParams()
+    cfg = slave_config()
+    # The reference takes the plant's values where the slave has settings;
+    # they must agree for the two to be compared.
+    assert abs(par.A - cfg['G_cfgPressureSchedPistonArea'] * 1e-6) < 1e-15
+    assert par.t_dead == cfg['G_cfgPressureSchedDriveDeadTime']
+    assert par.tauV == cfg['G_cfgPressureSchedDriveLag']
+    assert (par.kH, par.T, par.Patm) == (cfg['G_cfgPressureSchedHenry'],
+        cfg['G_cfgPressureSchedGasTemp'], cfg['G_cfgPressureSchedPatm'])
+
+    def reference():
+        return ctl.ScheduledSlaveController(
+            'ref', wc=cfg['G_cfgPressureSchedCrossover'],
+            K_cfg=cfg['G_cfgPressureSchedBulkModulus'],
+            V_l_cfg=par.Vl0,
+            V_dead_cfg=(cfg['G_cfgPressureSchedPassagesVolume']
+                         + cfg['G_cfgPressureSchedHoseVolume']) * 1e-6,
+            C_hose_cfg=cfg['G_cfgPressureSchedHoseCompliance'],
+            ratio_cfg=None,
+            ki_ratio=cfg['G_cfgPressureSchedKiRatio'],
+            kp_min=cfg['G_cfgPressureSchedKpMin'],
+            kp_max=cfg['G_cfgPressureSchedKpMax'],
+            e_int=cfg['G_cfgPressureSchedArriveBand'])
+
+    class Lockstep:
+        """Runs the reference and the port on the same inputs and
+        returns the reference's command."""
+        mode = 'V'
+
+        def __init__(self, ref, port):
+            self.ref, self.port = ref, port
+            self.name = port.name
+            self.cfg = port.cfg
+
+        def reset(self, p, sc):
+            u = self.ref.reset(p, sc)
+            assert self.port.reset(p, sc) == u
+            self.accel, self.decel = self.ref.accel, self.ref.decel
+            self.worst, self.kp, self.gain = 0.0, [], 0.0
+            return u
+
+        def step(self, P, tg, t, sc, x=0.0):
+            a = self.ref.step(P, tg, t, sc, x)
+            b = self.port.step(P, tg, t, sc, x)
+            self.worst = max(self.worst, abs(a - b))
+            self.kp.append(self.port.fb.Kp)
+            for r, q in ((self.ref.fb, self.port.fb),):
+                self.gain = max(self.gain, abs(r.Kp - q.Kp),
+                                abs(r.Ki - q.Ki),
+                                abs(r.VelMax - q.VelMax))
+            return a
+
+    q = par.with_(hose_before=True)     # the hose is open throughout
+    for name in ('compress', 'deliver'):
+        L = Lockstep(reference(), ctl.ScheduledSlaveControllerST(
+            SchedHoseOpen=True))
+        r = sim.run(q, scenarios.make(name, q), L)
+        assert L.worst < 1e-9, (name, L.worst)            # [m/s]
+        assert L.gain < 1e-9, (name, L.gain)  # [mm/s per MPa]
+        assert L.port.sched.Enable and not L.port.sched.ParamError
+        assert not L.port.sched.IntegHold                  # arrived
+        assert max(L.kp) > 1.5 * min(L.kp)                 # scheduled
+        ok(f'FB_PressureSchedule (ST) matches ScheduledSlaveController '
+           f'scan for scan through {name} (largest command difference '
+           f'{L.worst:.1e} m/s, Kp {min(L.kp):.3f} to {max(L.kp):.3f})')
+
+    # With the switch off the port is the GVL loop.
+    sc = scenarios.stiffstep(par)
+    a, b = ctl.SlaveController(), ctl.ScheduledSlaveControllerST(
+        ScheduleEnable=False)
+    a.reset(par, sc), b.reset(par, sc)
+    rng = random.Random(2)
+    for k in range(2000):
+        P = 10e6 + 2e6 * math.sin(k / 100.0) + rng.uniform(-1e5, 1e5)
+        assert a.step(P, 10.5e6, k * par.Ts, sc) == \
+            b.step(P, 10.5e6, k * par.Ts, sc)
+    ok('ScheduledSlaveControllerST with the switch off is the GVL loop')
+
+    # Gas spring: the stiffness grows as the pressure squared, so the
+    # bound at the target pressure keeps the stop law from braking late.
+    g = StudyParams(Vl0=1e-6, ratio=200.0, P_supply=1e3, noise=0.0,
+               P_offset=0.0, V_passages=1e-6, V_hose=1e-9, C_hose=0.0,
+               tauDiss=1e9)
+    L = Lockstep(ctl.ScheduledSlaveController(
+        'ref', wc=6.0, K_cfg=1.0e9, V_dead_cfg=1e-6, C_hose_cfg=0.0),
+        ctl.ScheduledSlaveControllerST(
+            SchedBulkModulus=1.0e9, SchedPassagesVolume=1.0,
+            SchedHoseOpen=False, SchedCrossover=6.0,
+            saline_ml=1.0, oxygen_ratio=200.0))
+    r = sim.run(g, scenarios.compress(g), L)
+    assert L.worst < 1e-9 and L.gain < 1e-9, (L.worst, L.gain)
+    assert r['overshoot'] < 0.3, r['overshoot']             # [MPa]
+    ok(f'gas-spring compression at wc 6: overshoot '
+       f'{r["overshoot"]:.2f} MPa, the port matches the reference')
+
+
 def check_legacy_reference():
     # Reference values for this case without noise or transducer offset,
     # computed with Heun at nsub = 5, a 2 ms scan and a drive lag of
@@ -634,6 +731,7 @@ if __name__ == '__main__':
     check_sensor()
     check_wiring()
     check_scheduled()
+    check_scheduled_st()
     check_legacy_reference()
     check_closed_loop()
     check_runner()

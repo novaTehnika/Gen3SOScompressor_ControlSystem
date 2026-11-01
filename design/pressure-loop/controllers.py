@@ -47,6 +47,11 @@ upper bound on the stiffness, so the scheduled gain is a lower bound on
 the gain that gives the chosen crossover. This is the candidate for the
 slave; it is prototyped here before being ported to Structured Text.
 
+ScheduledSlaveControllerST runs the slave's FB_PressureSchedule and
+FB_PressureController, both translated from Structured Text, wired as
+PRG_Main wires them, with the schedule's settings read from the GVL. It
+is the port of ScheduledSlaveController and matches it scan for scan.
+
 LegacyController is a PID controller written for the earlier studies
 (eqs. (21) to (25)). It can estimate the chamber stiffness online for its
 stop law, add a flow feedforward, and command either velocity or force.
@@ -60,6 +65,7 @@ FILE DEPENDENCY:
 ../../models/generated/ (translated by tools/st_translate.py from
 slave-src/FB/)
     FB_PressureController.py
+    FB_PressureSchedule.py
 """
 
 import math
@@ -68,6 +74,8 @@ import modelpath  # noqa: F401  (puts models/ on sys.path)
 import slave  # noqa: F401  (puts the generated blocks on sys.path)
 from FB_PressureController import (FB_PressureController,
                                    new_FB_PressureController)
+from FB_PressureSchedule import (FB_PressureSchedule,
+                                 new_FB_PressureSchedule)
 
 
 # %% ===== SLAVE CONTROLLER ==============================================
@@ -320,6 +328,16 @@ def legacy_set():
 
 
 # %% ===== SCHEDULED SLAVE CONTROLLER ====================================
+def limit_position(par, scenario):
+    """[m] Position, in the run's coordinates, at which the chamber is
+    down to the cylinder head's passages (the limit switch)."""
+    RT = par.R * par.T                                          # [J/mol]
+    P0, ng0, nd0 = scenario.initial(par)
+    Vch0 = (par.Vl0 * (1 - P0 / par.K)
+            + ng0 * RT / (P0 + par.Patm))                       # [m^3]
+    return (Vch0 - par.V_passages) / par.A                      # [m]
+
+
 class ScheduledSlaveController(SlaveController):
     """FB_PressureController with Kp, Ki and the stop law scheduled on
     the estimated chamber stiffness.
@@ -431,10 +449,7 @@ class ScheduledSlaveController(SlaveController):
         # Limit-switch position: where the cylinder is down to its
         # passages. The slave knows it from its own position, and the
         # configured dead volume is the lower bound of the range.
-        P0, ng0, nd0 = scenario.initial(par)
-        Vch0 = (par.Vl0 * (1 - P0 / par.K)
-                + ng0 * self.RT / (P0 + par.Patm))              # [m^3]
-        self.x_limit = (Vch0 - par.V_passages) / par.A          # [m]
+        self.x_limit = limit_position(par, scenario)            # [m]
         if self.V_dead_cfg is None:
             self.V_dead_run = par.V_dead                        # [m^3]
         else:
@@ -459,14 +474,23 @@ class ScheduledSlaveController(SlaveController):
         self.P_ref = 0.0                    # [Pa] highest pressure seen
         self.arrived = False
         self.k_est = math.nan
+        self.k_target = math.nan
         self.v_lim = math.nan
         return u0
 
     def estimate_stiffness(self, P_meas, x):
         """[Pa/m] Upper bound on the chamber stiffness from the measured
-        pressure P_meas [Pa] and piston position x [m], eq. (39)."""
+        pressure P_meas [Pa] and piston position x [m], eq. (39). The
+        highest pressure seen is updated here, once per scan."""
         P_abs = max(P_meas, 0.0) + self.Patm                    # [Pa]
         self.P_ref = max(self.P_ref, P_abs)                     # [Pa]
+        return self.stiffness_at(P_meas, x)
+
+    def stiffness_at(self, P, x):
+        """[Pa/m] The bound of eq. (39) at the gauge pressure P [Pa] and
+        piston position x [m], with the highest pressure seen as it
+        stands. It does not update that pressure."""
+        P_abs = max(P, 0.0) + self.Patm                         # [Pa]
         V_ch = (max(self.A * (self.x_limit - x), 0.0)
                 + self.V_dead_run)                              # [m^3]
         V_l = min(self.V_l_cfg_run, V_ch)                       # [m^3]
@@ -488,8 +512,14 @@ class ScheduledSlaveController(SlaveController):
 
     def step(self, P_meas, target, t, scenario, x=0.0):
         fb = self.fb
-        k = self.estimate_stiffness(P_meas, x)                  # [Pa/m]
-        self.k_est = k
+        k_now = self.estimate_stiffness(P_meas, x)              # [Pa/m]
+        self.k_est = k_now
+        # The bound at the target pressure, where a gas-dominated
+        # chamber is stiffest on the way there, eq. (39a).
+        tgt = min(max(target * 1e-6, 0.0), self.target_max)     # [MPa]
+        self.k_target = self.stiffness_at(
+            max(P_meas, tgt * 1e6), x)                          # [Pa/m]
+        k = max(k_now, self.k_target)                           # [Pa/m]
         k_mm = k / 1e9                          # [Pa/m -> MPa/mm]
         # Scheduled gain, eq. (40): [rad/s / (MPa/mm) -> (mm/s)/MPa]
         Kp = min(max(self.wc / k_mm, self.kp_min), self.kp_max)
@@ -511,3 +541,109 @@ class ScheduledSlaveController(SlaveController):
         if hold:
             fb.rInteg = 0.0
         return u
+
+
+# %% ===== SCHEDULED SLAVE CONTROLLER, STRUCTURED TEXT ===================
+class ScheduledSlaveControllerST(SlaveController):
+    """FB_PressureSchedule and FB_PressureController wired as PRG_Main
+    wires them, eqs. (39) to (41).
+
+    The schedule's settings are the G_cfgPressureSched* values of the
+    GVL, with overrides by full or short name as for SlaveController
+    (for example SchedCrossover=6.0). The schedule is used when
+    G_cfgPressureScheduleEnable is TRUE, which the constructor sets
+    unless ScheduleEnable=False is given; otherwise the block runs on
+    the configured gains, as PRG_Main does.
+
+    The saline volume [mL] and the oxygen ratio [-] are what the master
+    writes to holding registers HR7 to HR10. They are the constructor
+    arguments saline_ml and oxygen_ratio, which default to the run's
+    saline volume and charge ratio.
+
+    The slave measures the piston position in its own frame, where the
+    chamber is down to the passages at G_cfgPressureSchedEndOfTravel. The
+    run's position x is mapped so that the distance to that limit is
+    the distance to the run's limit-switch position.
+    """
+
+    def __init__(self, name='scheduled-st', flow_ff=False,
+                 saline_ml=None, oxygen_ratio=None, **overrides):
+        overrides.setdefault('ScheduleEnable', True)
+        super().__init__(name, flow_ff, **overrides)
+        self.saline_ml = saline_ml                              # [mL]
+        self.oxygen_ratio = oxygen_ratio                        # [-]
+
+    def reset(self, par, scenario):
+        u0 = super().reset(par, scenario)
+        c = self.c
+        self.active = c['G_cfgPressureScheduleEnable']
+        self.x_limit = limit_position(par, scenario)            # [m]
+        self.pos_limit = c['G_cfgPressureSchedEndOfTravel']     # [mm]
+        s = new_FB_PressureSchedule()
+        # Settings, as PRG_Main passes them
+        s.EndOfTravel = self.pos_limit                          # [mm]
+        s.VelMax = self.vel_max                                 # [mm/s]
+        s.DecelMax = c['G_cfgPressureDecel']                    # [mm/s^2]
+        s.StopVelMin = c['G_cfgPressureStopVelMin']             # [mm/s]
+        s.CycleTime = c['G_cfgScanTime']                        # [s]
+        s.FilterTime = c['G_cfgAnalogFilterTimeConst']          # [s]
+        s.MedianSize = c['G_cfgAnalogMedianSize']               # [-]
+        s.DriveDeadTime = c['G_cfgPressureSchedDriveDeadTime']  # [s]
+        s.DriveLag = c['G_cfgPressureSchedDriveLag']            # [s]
+        s.Crossover = c['G_cfgPressureSchedCrossover']
+        s.KiRatio = c['G_cfgPressureSchedKiRatio']
+        s.KpMin = c['G_cfgPressureSchedKpMin']
+        s.KpMax = c['G_cfgPressureSchedKpMax']
+        s.PistonArea = c['G_cfgPressureSchedPistonArea']
+        if self.saline_ml is None:
+            s.SalineVolume = par.Vl0 * 1e6      # [m^3 -> mL]
+        else:
+            s.SalineVolume = self.saline_ml                     # [mL]
+        s.PassagesVolume = c['G_cfgPressureSchedPassagesVolume']
+        s.HoseVolume = c['G_cfgPressureSchedHoseVolume']
+        s.HoseCompliance = c['G_cfgPressureSchedHoseCompliance']
+        s.HoseOpen = c['G_cfgPressureSchedHoseOpen']
+        s.BulkModulus = c['G_cfgPressureSchedBulkModulus']
+        if self.oxygen_ratio is None:
+            s.OxygenRatio = scenario.ratio                      # [-]
+        else:
+            s.OxygenRatio = self.oxygen_ratio                   # [-]
+        s.Henry = c['G_cfgPressureSchedHenry']
+        s.GasTemp = c['G_cfgPressureSchedGasTemp']
+        s.Patm = c['G_cfgPressureSchedPatm']
+        s.ArriveBand = c['G_cfgPressureSchedArriveBand']
+        self.sched = s
+        self.k_est = math.nan                                   # [Pa/m]
+        return u0
+
+    def step(self, P_meas, target, t, scenario, x=0.0):
+        fb, s, c = self.fb, self.sched, self.c
+        entry = self.first_scan
+        self.first_scan = False
+        # PRG_Main limits the target to [0, TargetMax]. [Pa -> MPa]
+        tgt = min(max(target * 1e-6, 0.0), self.target_max)
+        act = P_meas * 1e-6                                     # [MPa]
+        # Slave position: the same distance to the limit. [m -> mm]
+        pos = self.pos_limit - (self.x_limit - x) * 1e3
+        s.Enable, s.Reset = self.active, entry
+        s.Target, s.Actual, s.Position = tgt, act, pos
+        FB_PressureSchedule(s, self.dt)
+        used = self.active and not s.ParamError
+        self.k_est = s.KEst * 1e9               # [MPa/mm -> Pa/m]
+        fb.Enable = True
+        fb.Reset = entry or (used and s.IntegHold)
+        if used:
+            fb.Kp, fb.Ki = s.Kp, s.Ki
+            fb.VelMax, fb.Stiffness = s.VelLimit, s.Stiffness
+            fb.IntegScale = s.IntegScale
+        else:
+            fb.Kp = c['G_cfgPressureKp']
+            fb.Ki = c['G_cfgPressureKi']
+            fb.VelMax = self.vel_max
+            fb.Stiffness = c['G_cfgPressureStopStiffness']
+            fb.IntegScale = 1.0
+        fb.Target, fb.Actual = tgt, act
+        FB_PressureController(fb, self.dt)
+        # PRG_Main clamps the block output to VelMax. [mm/s]
+        v = min(max(fb.Velocity, -self.vel_max), self.vel_max)
+        return v * 1e-3                                 # [mm/s -> m/s]

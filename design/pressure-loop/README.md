@@ -52,7 +52,7 @@ The plant, the sensor chain and their parameters are in `models/`
 | `study_convergence.py` | Measures the integration error against the time step for both methods. |
 | `studyparams.py` | Defines `StudyParams`: the models' `Params` (`models/params.py`) and the studies' own settings, the valve timings and procedure, the legacy controller's filter, the target and the requirement limits. A study overrides a model default by redeclaring the field. |
 | `modelpath.py` | Puts `models/` on the import path for the studies. |
-| `controllers.py` | Defines `SlaveController` (the slave's block, with a flow feedforward option kept only as a bound), `ScheduledSlaveController` (the same block with its gains and stop law scheduled on an estimate of the chamber stiffness, equations (39) to (41)) and `LegacyController` (PID with a stiffness-estimating stop law and a torque mode). All share the `reset` and `step` interface. |
+| `controllers.py` | Defines `SlaveController` (the slave's block, with a flow feedforward option kept only as a bound), `ScheduledSlaveController` (the same block with its gains and stop law scheduled on an estimate of the chamber stiffness, equations (39) to (41)), `ScheduledSlaveControllerST` (the ported Structured Text blocks, wired as PRG_Main wires them) and `LegacyController` (PID with a stiffness-estimating stop law and a torque mode). All share the `reset` and `step` interface. |
 | `scenarios.py` | Defines the operating cases `compress`, `deliver`, `cycle` and the `stiffstep` probe, with the hose procedure and the valve timings (proximal opening, purge, pause, delivery). |
 | `sim.py` | Runs one closed-loop simulation: `run(params, scenario, controller)` returns a `Result` with traces, the valve event times and metrics. It sequences the valves: the hose opening, the purge, its closing and the reopening. |
 | `metrics.py` | Computes the loop metrics (overshoot, settling time, ripple, stroke) and the process metrics (pressure ceiling, saturation margin, the deepest dip at a valve event, volume delivered before a violation, solution delivered). |
@@ -117,7 +117,11 @@ modulus, eq. (39). The free gas is taken as the least there can be
 seen), the saline volume as the configured value or the chamber volume
 when that is smaller, and the bulk modulus as the largest plausible, so
 the bound never falls below the true stiffness while the configured
-saline volume is at or below the true one. The gain is Kp = wc/k_est for
+saline volume is at or below the true one. The bound is taken at the
+present pressure and again at the larger of the present and the target
+pressure, with the highest pressure as it stands; a gas-dominated
+chamber is stiffest at the target, so the larger of the two, k_sched,
+is used for the gain and the stop law. The gain is Kp = wc/k_sched for
 a chosen crossover wc, eq. (40), with Ki in a fixed ratio to Kp, so the
 loop's crossover is at most wc whatever the chamber is doing: soft on
 the approach, stiffening as the gas dissolves, and stiffening again as
@@ -202,16 +206,19 @@ P_ref the highest absolute pressure seen in the run:
                  + C_hose_cfg
          k_est = A / C_est
 
+The same expression evaluated with P_abs taken at max(P, P_target) (and
+P_ref unchanged) gives k_target, and k_sched = max(k_est, k_target).
+
 Scheduled gains for a target crossover wc, bounded, with Ki in a fixed
 ratio to Kp:
 
-    (40) Kp = clamp(wc / k_est, Kp_min, Kp_max),   Ki = r_i Kp
+    (40) Kp = clamp(wc / k_sched, Kp_min, Kp_max),   Ki = r_i Kp
 
 Stop law with the measurement lag: the piston travels for the lag at its
 speed and then decelerates at D, and must stop within the error at the
-estimated stiffness, v lag + v^2 / (2 D) <= |e| / k_est, so
+estimated stiffness, v lag + v^2 / (2 D) <= |e| / k_sched, so
 
-    (41) v_stop = -D lag + sqrt((D lag)^2 + 2 D |e| / k_est)
+    (41) v_stop = -D lag + sqrt((D lag)^2 + 2 D |e| / k_sched)
          v_lim = min(VelMax, max(StopVelMin, v_stop))
 
 The block's own stop law, eq. (19), is this with lag = Ts and a fixed
@@ -662,3 +669,55 @@ Kp = wc/k holds 37° at wc = 11 everywhere.
 - Whether a bypass orifice of 0.3 mm or less (Cv 0.003), opened ahead
   of the ball valve at pressure, is worth fitting later
   (`study_hose_opening.py`).
+
+## Porting the schedule
+
+`FB_PressureSchedule` (`slave-src/FB/`) is the port of
+`ScheduledSlaveController`. It is off by default and is selected on
+entry to pressure mode by `G_cfgPressureScheduleEnable`; its settings
+are the `G_cfgPressureSched*` values of the GVL, except the saline volume and
+the oxygen charge of the fill, which the master writes in holding registers
+HR7-10 and the slave latches on entry to pressure mode. `FB_PressureController`
+gains an `IntegScale` input, because PRG_Main cannot write the block's
+stored integral.
+
+The reference's arguments map to the settings as follows: `wc` to
+`Crossover`, `K_cfg` to `BulkModulus`, `V_l_cfg` to `SalineVolume` (HR7-8),
+`V_dead_cfg` to `PassagesVolume` plus `HoseVolume` and `C_hose_cfg` to
+`HoseCompliance`, both hose terms counted only when `HoseOpen` is set,
+`ratio_cfg` to `OxygenRatio` (HR9-10), `ki_ratio` to `KiRatio`, `kp_min` and
+`kp_max` to `KpMin` and `KpMax`, and `e_int` to `ArriveBand`. The lag of
+eq. (41) is built from the pressure input filter's time constant, the
+median window, the scan time and the drive's dead time and lag
+(`DriveDeadTime`, `DriveLag`).
+
+The reference's limit-switch position `x_limit` is
+`G_cfgPressureSchedEndOfTravel` on the slave, where the chamber is down
+to the passages, so the chamber volume is the swept volume to that
+position plus the passages (and the hose when it is open). All of these
+are measured values; the hose is switched in and out by
+`G_cfgPressureSchedHoseOpen`, not by editing them. The estimate stays an
+upper bound on the stiffness while each is at or below its true value.
+
+When Ki changes, the schedule outputs `IntegScale` = previous Ki / new
+Ki so that Ki times the stored integral is continuous. The integrator is
+held at zero until the first arrival by driving the controller's Reset on
+the held scans and on the arrival scan, which reproduces the reference
+zeroing the integral after each held call.
+
+`check_scheduled_st` in `test_model.py` runs the reference and
+`ScheduledSlaveControllerST` in lockstep through the compression and the
+delivery and requires the commands to agree to 1e-9 m/s on every scan;
+`tests/stTargetParity.py` checks the Python translation against the Octave
+one.
+
+The stiffness bound is evaluated at the present pressure (`KEst`) and
+at the larger of the present and the target pressure (`KEstTarget`);
+the larger is used for Kp and the stop law, and the pressure history
+that sets the dissolved oxygen is updated from the measurement only.
+`check_scheduled_st` compares Kp, Ki and the stop-law limit as well as
+the command, and includes a gas-spring compression.
+
+Left for commissioning: `G_cfgPressureSchedHoseOpen` against the
+procedure (FALSE while the proximal valve opens after mixing), and the
+charge against the recipe.

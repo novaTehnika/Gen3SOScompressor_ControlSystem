@@ -13,8 +13,8 @@ This document provides step-by-step guidance for implementing the Simulink Deskt
 
 ```
 +-------------------+      Modbus TCP, port 502        +-------------------+
-|                   |  == HR1-8: heartbeat, mode,  ==> |                   |
-|  Simulink DTRT    | enable, reset, reference, speed  |  MP2600iec Slave  |
+|                   |  == HR1-12: heartbeat, mode, ==> |                   |
+|  Simulink DTRT    | enable, reset, ref, speed, fill  |  MP2600iec Slave  |
 |  Master           |  <= IR1-20: echo, counter, ===== |  (Modbus server)  |
 |                   |  confirm, fault, status, feedback|                   |
 +-------------------+                                  +-------------------+
@@ -43,6 +43,8 @@ This document provides step-by-step guidance for implementing the Simulink Deskt
 | HR4 | `G_mbFaultReset` | 1 = FaultReset (level) |
 | HR5-6 | `G_mbReference` | REAL reference: mm, mm/s or % by mode |
 | HR7-8 | `G_mbPositionSpeed` | REAL speed of a position move, mm/s (0 holds position) |
+| HR9-10 | `G_mbSalineVolume` | REAL saline volume of the fill, mL (pressure gain schedule) |
+| HR11-12 | `G_mbOxygenRatio` | REAL oxygen charge as STP volume per saline volume (pressure gain schedule) |
 
 The slave debounces HR2 (`G_cfgDebounceTimeMode`, 50 ms), HR3
 (`G_cfgDebounceTimeMotion`, 20 ms) and HR4 (`G_cfgDebounceTimeFault`, 20 ms)
@@ -334,7 +336,7 @@ FAULT_PERSISTENT:
 ### Position Speed (Master to Slave): HR7-8
 
 **Signal**: `G_mbPositionSpeed`, a REAL in mm/s, copied to `G_sysPositionSpeed` by
-`PRG_Input`. The master writes it every exchange, with HR1-6 in the same FC16 write.
+`PRG_Input`. The master writes it every exchange, with HR1-12 in the same FC16 write.
 In `ST_POSITION_CTRL` and `ST_RECOVERY_POSITION` the slave evaluates
 `LIMIT(0, G_sysPositionSpeed, G_cfgVelLimitMax)` every scan as the speed limit of
 `FB_PositionPathShaper`, so a change takes effect mid-move: a lower speed slows
@@ -343,6 +345,23 @@ decelerates the command to rest at `G_cfgPosShaperAccelMax` and holds position;
 restoring the speed resumes the move. Other modes ignore it. The master limits it
 to `0` to `cfg.positionSpeedMax` (not above `G_cfgVelLimitMax`); the operator app
 sets it in its move-speed field.
+
+### Fill description (Master to Slave): HR9-12
+
+**Signals**: `G_mbSalineVolume` (mL) and `G_mbOxygenRatio` (oxygen charge as
+STP volume per saline volume), REALs copied to `G_sysSalineVolume` and
+`G_sysOxygenRatio` by `PRG_Input`. The master writes `cfg.salineVolume` and
+`cfg.oxygenRatio` in every exchange (the shell's `SalineVolume` and
+`OxygenRatio` Constant blocks, which `masterStep` takes as its last two
+inputs). They are used only by the pressure gain schedule
+(`G_cfgPressureScheduleEnable`): `PRG_Main` latches them on entry to pressure
+mode, so rewriting them during a run changes nothing. A saline volume of 0
+(registers never written) or a negative or non-numeric value makes
+`FB_PressureSchedule` report `ParamError`, and the loop runs on the configured
+gains. The saline volume and the charge must each be at or below the true
+values: a smaller value makes the stiffness bound larger, so the gain lower
+and the loop slower (safe), and a larger one the reverse. The charge must
+equal the recipe of the fill (1.0 for 1:1).
 
 The reference is read by the slave at most every 50 ms plus one 4 ms
 service tick. The master sends the next value with the same write that

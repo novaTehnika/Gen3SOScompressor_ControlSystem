@@ -106,6 +106,8 @@
      G_mbFaultReset        AT %MW3.483334 : UINT  (* HR4: 1 = FaultReset *)
      G_mbReference         AT %MD3.483336 : REAL  (* HR5-6: reference, mm / mm/s / % by mode *)
      G_mbPositionSpeed     AT %MD3.483340 : REAL  (* HR7-8: position-move speed, mm/s (0 holds position) *)
+     G_mbSalineVolume      AT %MD3.483344 : REAL  (* HR9-10: saline volume of the fill, mL (gain schedule) *)
+     G_mbOxygenRatio       AT %MD3.483348 : REAL  (* HR11-12: oxygen charge as STP volume per saline volume (gain schedule) *)
    END_VAR
 
 
@@ -284,6 +286,29 @@
      G_cfgPressureTargetMax      : LREAL := 15.0       (* Highest target accepted from the master (MPa gauge) *)
      G_cfgPressureInBand         : LREAL := 0.1        (* |actual - target| for the in-band status output (MPa) *)
 
+     (* Gain schedule (FB_PressureSchedule). When enabled, latched on entry to
+        pressure mode, Kp, Ki and the stop law follow an upper bound on the
+        chamber stiffness instead of G_cfgPressureKp/Ki/StopStiffness above,
+        which remain the fallback. *)
+     G_cfgPressureScheduleEnable     : BOOL := FALSE       (* Schedule the pressure-loop gains on the stiffness bound *)
+     G_cfgPressureSchedCrossover     : LREAL := 11.0       (* Target loop crossover wc (rad/s) *)
+     G_cfgPressureSchedKiRatio       : LREAL := 0.4        (* Ki / Kp (1/s) *)
+     G_cfgPressureSchedKpMin         : LREAL := 0.001      (* Lower bound on the scheduled Kp (mm/s per MPa) *)
+     G_cfgPressureSchedKpMax         : LREAL := 5.0        (* Upper bound on the scheduled Kp (mm/s per MPa) *)
+     G_cfgPressureSchedPistonArea    : LREAL := 3431.0     (* Piston area (mm^2), 2.602 in bore *)
+     G_cfgPressureSchedEndOfTravel   : LREAL := 367.0      (* Position at the end of travel, where the chamber is down to the passages (mm) *)
+     G_cfgPressureSchedPassagesVolume: LREAL := 57.0       (* Cylinder passages, chamber volume at the end of travel without the hose (mL), measured with the present fittings *)
+     G_cfgPressureSchedHoseVolume    : LREAL := 29.0       (* Hose between the cylinder head and the outlet (mL), measured; used when the hose is open *)
+     G_cfgPressureSchedHoseCompliance: LREAL := 1.2E-13    (* Hose compliance beyond its liquid (m^3/Pa), a lower bound on the measured value; used when the hose is open *)
+     G_cfgPressureSchedHoseOpen      : BOOL := FALSE       (* The proximal valve is open during the compression, so the hose is part of the chamber; FALSE when it opens after mixing *)
+     G_cfgPressureSchedBulkModulus   : LREAL := 1.0E9      (* Saline bulk modulus (Pa), an upper bound *)
+     G_cfgPressureSchedHenry         : LREAL := 1.22E-5    (* Henry constant of oxygen in 0.9 % saline (mol/(m^3 Pa)) *)
+     G_cfgPressureSchedGasTemp       : LREAL := 293.0      (* Gas temperature (K) *)
+     G_cfgPressureSchedPatm          : LREAL := 101325.0   (* Atmospheric pressure (Pa) *)
+     G_cfgPressureSchedArriveBand    : LREAL := 0.5        (* |error| that first releases the integrator (MPa) *)
+     G_cfgPressureSchedDriveDeadTime : LREAL := 0.0228     (* Drive dead time, command to response (s), measured *)
+     G_cfgPressureSchedDriveLag      : LREAL := 0.0182     (* Drive velocity-loop time constant (s), measured *)
+
 
      (* ========================================================================
         TIMING PARAMETERS
@@ -409,6 +434,8 @@
      G_sysRequestedMode        : E_OperatingMode := MODE_IDLE (* Mode from master *)
      G_sysReference            : LREAL := 0.0     (* Reference from master: mm, mm/s or % by mode *)
      G_sysPositionSpeed        : LREAL := 0.0     (* Position-move speed from master (mm/s), the shaper's speed limit once clamped to [0, G_cfgVelLimitMax] *)
+     G_sysSalineVolume         : LREAL := 0.0     (* Saline volume from master (mL); 0 until written *)
+     G_sysOxygenRatio          : LREAL := 0.0     (* Oxygen charge per saline volume from master (STP volume ratio) *)
      G_sysScanCounter          : UINT := UINT#0   (* Incremented every scan, published in G_mbSlaveCounter *)
      G_sysActiveFaultCode      : UINT := UINT#0   (* G_sysActiveFault as an integer, published in G_mbFaultCode *)
      G_sysConfirmedModeCode    : UINT := UINT#0   (* Handshake confirmed mode as an integer, published in G_mbConfCode *)

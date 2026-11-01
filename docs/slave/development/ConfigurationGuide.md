@@ -121,3 +121,30 @@ The scan-rate recorder `FB_Probe` (ModbusRegisterMap.md, section 6). Nothing in 
 |---|---|---|---|
 | `G_cfgProbeEnable` | TRUE | | FALSE stops the probe: nothing is recorded, arms are not acted on and `G_mbProbeState` reads `PROBE_OFF`. The Modbus groups still span IR524 and HR114. |
 | `G_cfgProbeFillPerScan` | 6 | records | Records `FB_Probe` copies into the window per scan (limited to 1-13), 8 words each: the bound on the cost a transfer adds to one scan. A window of 13 records takes 3 scans at 6 and 13 at 1. **Tuning:** Lower it if scan time is tight; raise it if a stream reader needs the window refilled faster than every 6 ms. |
+
+---
+
+## 8. Pressure Loop Gain Schedule
+
+When `G_cfgPressureScheduleEnable` is TRUE on entry to pressure mode, `FB_PressureSchedule` sets the pressure loop's Kp, Ki and stop-law velocity limit every scan from an upper bound on the chamber stiffness, so the loop's crossover stays at or below `G_cfgPressureSchedCrossover`. The saline volume and the oxygen charge of the fill are not settings: the master writes them in holding registers HR7-10 (`G_mbSalineVolume`, `G_mbOxygenRatio`, see `docs/master/ModbusRegisterMap.md`), the slave latches them on entry to pressure mode, and an unwritten (zero) saline volume makes the schedule fall back to the configured gains. Both must be at or below the true values, and the charge must equal the recipe of the fill. The stiffness bound is evaluated at the present pressure and at the larger of the present and the target pressure, and the larger value is used. The choice is latched on entry. If a setting is out of range (`ParamError`), the loop runs on the fixed `G_cfgPressureKp`, `G_cfgPressureKi` and `G_cfgPressureStopStiffness`, which are unchanged and remain the fallback when the schedule is off.
+
+| Parameter | Default Value | Units | Description & Tuning Considerations |
+|---|---|---|---|
+| `G_cfgPressureScheduleEnable` | FALSE | BOOL | Selects the gain schedule. Latched on entry to pressure mode, so changing it during a run changes nothing until the next entry. |
+| `G_cfgPressureSchedCrossover` | 11.0 | rad/s | Target crossover of the pressure loop, wc. The scheduled Kp is `wc / KEst`, bounded by the two Kp limits. |
+| `G_cfgPressureSchedKiRatio` | 0.4 | 1/s | Ki / Kp. |
+| `G_cfgPressureSchedKpMin` | 0.001 | mm/s per MPa | Lower bound on the scheduled Kp. |
+| `G_cfgPressureSchedKpMax` | 5.0 | mm/s per MPa | Upper bound on the scheduled Kp. |
+| `G_cfgPressureSchedPistonArea` | 3431.0 | mm² | Piston area (2.602 in bore). |
+| `G_cfgPressureSchedEndOfTravel` | 367.0 | mm | Position at the end of travel, where the chamber is down to the passages (the same frame as `G_cfgPosSoftLimitMax`). The chamber volume is the swept volume from the piston to this position plus the passages and, when open, the hose. |
+| `G_cfgPressureSchedPassagesVolume` | 57.0 | mL | Cylinder passages: chamber volume at the end of travel without the hose, measured with the present fittings. Must be at or below the true value; re-measure when the fittings change. |
+| `G_cfgPressureSchedHoseVolume` | 29.0 | mL | Hose between the cylinder head and the outlet, measured. Counted only while `G_cfgPressureSchedHoseOpen` is TRUE. Must be at or below the true value. |
+| `G_cfgPressureSchedHoseCompliance` | 1.2E-13 | m³/Pa | Hose compliance beyond its liquid (wall and any trapped air), a lower bound on the measured 0.24 mL/MPa. Counted only while `G_cfgPressureSchedHoseOpen` is TRUE. |
+| `G_cfgPressureSchedHoseOpen` | FALSE | BOOL | The proximal valve is open during the compression, so the hose volume and compliance are part of the chamber. Leave FALSE while the valve opens after mixing; set TRUE for a procedure that opens it before the compression. The measured hose values above do not change with it. |
+| `G_cfgPressureSchedBulkModulus` | 1.0E9 | Pa | Saline bulk modulus. Must be at or above the true value. |
+| `G_cfgPressureSchedHenry` | 1.22E-5 | mol/(m³·Pa) | Henry constant of oxygen in 0.9 % saline. |
+| `G_cfgPressureSchedGasTemp` | 293.0 | K | Gas temperature. |
+| `G_cfgPressureSchedPatm` | 101325.0 | Pa | Atmospheric pressure. |
+| `G_cfgPressureSchedArriveBand` | 0.5 | MPa | |error| at which the integrator is first released; it is held at zero until then. |
+| `G_cfgPressureSchedDriveDeadTime` | 0.0228 | s | Drive dead time from command to response, measured on the bench (`bench/characterisation`) with `Y_DirectControl`'s FilterTimeConstant as wired. Re-measure if that pin changes. |
+| `G_cfgPressureSchedDriveLag` | 0.0182 | s | Drive velocity-loop time constant, measured as above. |

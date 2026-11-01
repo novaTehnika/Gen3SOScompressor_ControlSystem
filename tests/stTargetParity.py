@@ -40,7 +40,8 @@ STEPS_LONG = {'FB_Probe': 12000}     # past its ring depth of 8192, so the overr
 SCHEDULE = {('FB_Probe', 'Enable'): lambda k: not 3000 <= k < 3100}
 BIG = 1024                  # arrays longer than this are compared once, after the last call
 CORE = {'FB_PressureController', 'FB_AnalogInputFilter', 'FB_PressureInput',
-        'FB_PositionPathShaper', 'FB_DigitalInputFilter'}
+        'FB_PositionPathShaper', 'FB_DigitalInputFilter',
+        'FB_PressureSchedule'}
 TOL = 1e-9
 SIGNALS = {'Target', 'Actual', 'Volts', 'RawInput', 'ActualPosition', 'Position',
            'Pressure', 'Velocity', 'VelCmd', 'Vel', 'Torque'}

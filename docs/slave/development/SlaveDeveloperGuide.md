@@ -117,6 +117,10 @@ Functions can only have one output. For multiple outputs, use a function block i
 
 MotionWorks IEC Express fails native code generation with `E2001: circular assembly references` when a `FUNCTION` POU has a user-defined enum in its signature — as a `VAR_INPUT` type or as the return type. Always implement such conversions as `FUNCTION_BLOCK`s. Precedent: the six enum-helper FBs (`FB_IsOperationalMode`, `FB_IsHomingMode`, `FB_ModeToInt`, `FB_FaultToInt`, `FB_IntToMode`, `FB_IntToFaultCode`) exist as FBs specifically to work around this defect.
 
+### Changing a block's gains between scans
+
+A POU never writes another block's internal `VAR` (IEC 61131-3 forbids it), so a state that must change when its inputs change is rescaled by the block itself: `FB_PressureController` takes `IntegScale` (old Ki / new Ki on the scan Ki changes, otherwise 1) and `FB_PressureSchedule` computes it. Every input of a block is passed on its one call in `PRG_Main`, because an omitted input keeps its previous value.
+
 ---
 
 ## 4. State Machine Deep Dive

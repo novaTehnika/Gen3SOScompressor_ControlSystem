@@ -3,7 +3,7 @@
 Open items after the step probe, position speed, configuration and cleanup
 work (PR #21), the simulator, models and link timing work (PR #22), and
 the pressure-loop design, bench and scheduled-controller work (PR #17 and
-the `sched-pressure-controller` branch). Grouped by where they have to be
+the scheduled pressure controller). Grouped by where they have to be
 done.
 
 ## MotionWorks project
@@ -40,6 +40,17 @@ reference for every declaration.
   - [ ] Rename `fbPosGate` to `fbPosShaper` and `bPosGateActive` to
         `bPosShaperActive`.
 - [ ] `PRG_PressureProbe`: add the local `nWindow : INT`.
+- [ ] Pressure gain schedule:
+  - [ ] Add `FB_PressureSchedule`, and `IntegScale` (initial value 1.0) to
+        `FB_PressureController`.
+  - [ ] `PRG_Main` locals: `fbPressureSched`, `rAnalogFilterTime`,
+        `rSchedSaline`, `rSchedOxygenRatio`, `bPressureSchedActive`,
+        `bPressureSchedUsed`, `rPressureKp`, `rPressureKi`,
+        `rPressureVelMax`, `rPressureStiffness` and `rPressureIntegScale`
+        (initial value 1.0).
+  - [ ] Globals: `G_mbSalineVolume`, `G_mbOxygenRatio`,
+        `G_sysSalineVolume`, `G_sysOxygenRatio` and the
+        `G_cfgPressureSched*` settings with `G_cfgPressureScheduleEnable`.
 - [ ] Globals:
   - [ ] PR #14, if not already done: add `G_sysConfirmedModeCode : UINT`.
         First confirm the LD POU reads none of `G_diModeBit0`-`2`,
@@ -57,7 +68,7 @@ reference for every declaration.
   - [ ] Add `G_cfgStopDecel`, `G_cfgProbeEnable`, `G_cfgProbeFillPerScan`,
         `G_mbPositionSpeed`, `G_sysPositionSpeed`, the `G_mbProbe*`
         globals and the `G_sysProbe*` globals.
-- [ ] Modbus groups in Hardware Configuration: holding registers to HR114,
+- [ ] Modbus groups in Hardware Configuration: holding registers to HR114 (the protocol uses HR1-12),
       input registers to IR524. Keep the groups to what is used: a
       3410-register input group (the old step probe's) made the protocol
       exchange 50 ms (p99 70) instead of 20 (p99 30), programs loaded or
@@ -69,10 +80,6 @@ reference for every declaration.
       `G_cmdDirectControl.FilterTimeConstant` (it is hard-wired to
       `LREAL#0.05`) and `Error` to `G_staDirectControl.Error` (it is wired
       to `.Active`), as `docs/slave/ld/README.md` records.
-- [ ] Scheduled pressure controller (`sched-pressure-controller`): declare
-      `FB_PressureSchedule`'s variables, `FB_PressureController.IntegScale`
-      (initial 1.0), the new `PRG_Main` locals and the `G_cfgPressureSched*`
-      globals when that branch is loaded.
 - [ ] Export the GVL from MotionWorks and diff it against
       `slave-src/GVL/GlobalVariables_Reference.st`. The soft limit, the
       cylinder entry, the velocities and the scan were found to differ
@@ -246,22 +253,17 @@ reference for every declaration.
 - [ ] Retire `PRG_PressureProbe`: the main probe records the raw pressure
       voltage every scan, so the noise statistics could be computed on the
       master.
-- [ ] The scheduled pressure controller is ported on
-      `sched-pressure-controller` (`FB_PressureSchedule` behind
-      `G_cfgPressureScheduleEnable`, off by default; the stiffness bound
-      taken at the present and the target pressure; lockstep with the
-      Python reference to 1e-9; 24 commits not on main). Review and merge
-      it, then commission it in this order: the stiffness estimate against
+- [ ] The scheduled pressure controller is ported (`FB_PressureSchedule`
+      behind `G_cfgPressureScheduleEnable`, off by default; the stiffness
+      bound taken at the present and the target pressure; lockstep with
+      the Python reference to 1e-9; the saline volume and charge arrive in
+      HR9-12). Commission it in this order: the stiffness estimate against
       the measured slope on the characterisation bench; a water-only
       delivery with the full valve sequence, comparing the opening dip and
       the purge-closing peak with the model's 0.8 and 1.0 MPa; oxygen at
       1:1, then 2:1. The GVL gains let the purge closing reach 12.2 MPa in
       every plausible case; until the schedule is on, stop the piston
       before shutting the distal valve.
-- [ ] How the slave learns the recipe for the schedule: a GVL setting the
-      operator edits per batch (enough to commission), or a holding
-      register from the master (a protocol change: register map, protocol
-      guide, master logic and operator app together).
 - [ ] An on-line stiffness estimate (dP against dx while the piston moves)
       as a monitor beside the configured bound, logging its value and
       flagging disagreement, which is the schedule's one failure mode (a
@@ -275,6 +277,10 @@ reference for every declaration.
       distal end of the hose gives no usable lead (the pressure wave
       crosses the hose in 2.8 ms). Decide whether the extra input is worth
       it.
+- [ ] Decide the schedule's default switch and crossover once it has run
+      on the machine: `G_cfgPressureSchedCrossover` 11 rad/s overshoots a
+      gas-dominated chamber by 1 MPa with the measured drive lag, 6 rad/s
+      by 0.06 MPa (`design/pressure-loop/test_model.py`).
 - [ ] The probe's record index wraps after 2^32 scans (about 200 days at
       4 ms of uninterrupted running), and the master does not handle the
       wrap.

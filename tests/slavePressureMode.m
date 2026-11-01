@@ -3,8 +3,10 @@ function slavePressureMode()
 %   slave-src) in pressure mode through its holding registers, standing in
 %   for the master: handshake into mode 7, hold and step the target, ride
 %   through an outflow disturbance, clamp an excessive target, leave the
-%   mode, and fault on a broken transducer loop only while the loop is
-%   closed on it.
+%   mode, fault on a broken transducer loop only while the loop is
+%   closed on it and, with the gain schedule
+%   (G_cfgPressureScheduleEnable), compress to 10 MPa with the gains
+%   following the stiffness bound.
 %   Run from the repository root after  addpath slave-sim; buildSlaveSim
 %     addpath slave-sim slave-sim/generated tests
 %   Depends on: slave-src slave-sim tools models
@@ -143,6 +145,69 @@ h = runFor(h, 1);
 assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_BRAKE_HOLD && h.sl.ax.v == 0);
 assert(h.y.faultActive == 0 && h.y.brakeDisengage == 0);
 fprintf('ok  sensor fault in pressure mode, mirror and reset\n');
+
+% Gain schedule on the simulated chamber (the design model's plant, 343 mL
+% of saline with a 1:1 oxygen charge): the master describes that fill in
+% holding registers HR9-12, the gains follow wc / k_est, the integrator is
+% held until the first arrival, the pressure settles in band below the
+% ceiling, and the switch and the fill are latched on entry.
+h.sl.G.G_cfgPressureScheduleEnable = true;
+h.sl.G.G_mbSalineVolume = 343;                        % mL
+h.sl.G.G_mbOxygenRatio = 1;
+h.sl.ax.x = chamberPosition(h.sl, 0.5);
+h = enterMode(h, MODE_PRESSURE, 10);
+assert(h.sl.s.bPressureSchedActive && h.sl.s.fbPressureSched.IntegHold);
+assert(h.sl.s.rSchedSaline == 343 && h.sl.s.rSchedOxygenRatio == 1);
+h.pMax = 0;
+t0 = h.t;
+h = runUntil(h, 30, settled);
+assert(settled(h), 'scheduled loop did not settle in the target band');
+t1 = h.t - t0;
+h = runFor(h, 3);
+sc = h.sl.s.fbPressureSched;
+assert(isfinite(sc.KEst) && sc.KEst > 0 && sc.KEstTarget >= sc.KEst);
+wc = h.sl.G.G_cfgPressureSchedCrossover;
+kSched = max(sc.KEst, sc.KEstTarget);
+assert(abs(sc.Kp - min(max(wc / kSched, h.sl.G.G_cfgPressureSchedKpMin), ...
+    h.sl.G.G_cfgPressureSchedKpMax)) < 1e-12);
+assert(h.sl.s.fbPressureCtrl.Kp == sc.Kp && h.sl.s.fbPressureCtrl.Stiffness == sc.Stiffness);
+assert(~sc.IntegHold && ~sc.ParamError);
+assert(abs(h.sl.ax.P - 10) <= G.G_cfgPressureInBand && h.y.performanceStatus == 1);
+assert(h.pMax < P_CEILING, 'peak %.3f MPa', h.pMax);
+% The switch and the fill are latched on entry: turning the switch off or
+% rewriting the registers mid-run changes nothing.
+kp = sc.Kp;
+h.sl.G.G_cfgPressureScheduleEnable = false;
+h.sl.G.G_mbSalineVolume = 100;
+h.sl.G.G_mbOxygenRatio = 2;
+h = runFor(h, 0.5);
+assert(h.sl.s.bPressureSchedActive && abs(h.sl.s.fbPressureCtrl.Kp - kp) < 0.05 * kp);
+assert(h.sl.s.rSchedSaline == 343 && h.sl.s.rSchedOxygenRatio == 1);
+h.u.motionEnable = 0;
+h = runFor(h, 1);
+h.u.modeCode = 0;
+h.u.reference = 0;
+h = runUntil(h, 5, @(h) h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE);
+assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE && h.y.faultActive == 0);
+fprintf('ok  scheduled gains: 10 MPa in %.1f s, k_est %.2f MPa/mm, Kp %.3f, max %.3f MPa\n', ...
+    t1, sc.KEst, sc.Kp, h.pMax);
+
+% A fill that was never written (zero saline volume) is a ParamError of the
+% schedule, and the loop runs on the configured gains.
+h.sl.G.G_cfgPressureScheduleEnable = true;
+h.sl.G.G_mbSalineVolume = 0;
+h.sl.G.G_mbOxygenRatio = 0;
+h.sl.ax.x = chamberPosition(h.sl, 0.5);
+h = enterMode(h, MODE_PRESSURE, 10);
+h = runFor(h, 1);
+assert(h.sl.s.bPressureSchedActive && h.sl.s.fbPressureSched.ParamError && ~h.sl.s.bPressureSchedUsed);
+assert(h.sl.s.fbPressureCtrl.Kp == h.sl.G.G_cfgPressureKp && h.sl.s.fbPressureCtrl.Ki == h.sl.G.G_cfgPressureKi);
+h.u.motionEnable = 0;
+h = runFor(h, 1);
+h.u.modeCode = 0;
+h.u.reference = 0;
+h = runUntil(h, 5, @(h) h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE);
+fprintf('ok  unwritten fill -> schedule ParamError, configured gains\n');
 
 fprintf('all passed\n');
 end

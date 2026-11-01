@@ -164,7 +164,7 @@ def parse_globals(text, known_types, aliases=None):
 
 TOKEN_RE = re.compile(r'''
     (?P<time>T\#[0-9A-Za-z_.]+)
-  | (?P<typed>[A-Za-z_]\w*\#[-+]?[A-Za-z0-9_.]+)
+  | (?P<typed>[A-Za-z_]\w*\#[-+]?(?:\d+\.\d*[eE][-+]?\d+|[A-Za-z0-9_.]+))
   | (?P<num>\d+\.\d*(?:[eE][-+]?\d+)?|\d+)
   | (?P<id>[A-Za-z_]\w*)
   | (?P<op>:=|=>|<>|<=|>=|[-+*/=<>()\[\],;.:])
