@@ -18,7 +18,7 @@ measured by the bench test in `bench/modbus`.
 
 Each exchange is one **Write Multiple Registers (FC16)** of holding registers
 1–12 followed at once by one **Read Input Registers (FC04)** of input registers
-1–18, so both land in the same controller service tick. The exchange period is
+1–20, so both land in the same controller service tick. The exchange period is
 up to 50 ms, a multiple of the master step; see
 [EthernetCommsReference.md](EthernetCommsReference.md).
 
@@ -58,7 +58,8 @@ bidirectional Holding Registers** checked, **Set all outputs off when PLC
 stops**, and the four Modbus groups assigned to the cyclic task that runs
 `PRG_Main` (MotionWorks IEC 3 Express has only that one task), so the
 registers update once per scan. Every register in the groups is copied
-every scan, so the groups are sized to the registers in use (the step probe of section 6 extends them to IR524 and HR114). The controller services the
+every scan, so the groups are sized to the registers in use (the step
+probe of section 6 extends them to IR524 and HR114). The controller services the
 connection on a 4 ms tick, so a transaction takes 1 to 8 ms regardless of the
 task interval.
 
@@ -168,9 +169,10 @@ the master and slave behave identically. It is read in its own FC04 read
 between the protocol's exchanges, never in them. The input group must extend
 to IR524 and the holding group to HR114. A group is copied every scan over its
 whole span, so these spans (gaps included) are the probe's standing cost; a
-project that does not use the probe keeps the groups at IR20 and HR6 and
-`G_cfgProbeEnable` FALSE. Every 32-bit value is on a 4-byte boundary except the request at HR112,
-which is two UINT registers, low word first.
+project that does not use the probe keeps the groups at IR20 and HR12 (the
+protocol's registers) and `G_cfgProbeEnable` FALSE. Every 32-bit value is on
+a 4-byte boundary except the request at HR112, which is two UINT registers,
+low word first.
 
 Holding registers:
 
