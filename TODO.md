@@ -249,12 +249,6 @@ reference for every declaration.
 
 ## Documentation
 
-- [ ] Redraw `docs/slave/diagrams/MainStateMachine.svg` from `PRG_Main`.
-      It shows `ST_ENCODER_CHECK`, `ST_REQUIRE_ABS_HOME` and
-      `ST_FAULT_RECOVERY`, which `E_SystemState` does not have, and lacks
-      `ST_DRIVE_RESET`, `ST_PRESSURE_CTRL`, `ST_RECOVERY`,
-      `ST_RECOVERY_POSITION` and `ST_RECOVERY_VELOCITY`.
-      `docs/master/StateTransitionDiagram.md` is the current text version.
 - [ ] `docs/slave/development/ConfigurationGuide.md` says it covers every
       `G_cfg*` global but has no rows for `G_cfgCommTimeout`,
       `G_cfgHoldPositionTimeout`, `G_cfgTorqueStallThreshold`,
