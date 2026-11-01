@@ -155,12 +155,14 @@ bounds its own cost:
   `G_sysProbeStage` per scan, and a request is served over several scans
   (`XFER_FILLING`) instead of in one;
 - the mapped window is written only in the scan a fill completes
-  (`G_sysProbePublish`), by one 104-word copy in `PRG_Output`, with StartTail
-  made different from Start before the copy and set equal to it last;
+  (`G_sysProbePublish`), by two 104-word copies: `PRG_Main` copies the
+  block's `Stage` to `G_sysProbeStage`, and `PRG_Output` copies that into
+  the mapped window with StartTail made different from Start before the
+  copy and set equal to it last;
 - everything else is a few comparisons and assignments.
 
 The worst scan therefore adds 8 + 8 x `G_cfgProbeFillPerScan` word moves from the
-block plus, in the completing scan, the 104-word copy. Do not replace the
+block plus, in the completing scan, the two 104-word copies. Do not replace the
 fill loop by a copy of the whole window in one scan, and keep any new probe
 channel inside the record, whose layout is defined only in `FB_Probe.st`
 (the master decoder is `benchProbe.m`).
