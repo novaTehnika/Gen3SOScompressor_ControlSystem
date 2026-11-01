@@ -26,7 +26,7 @@ The MotionWorks IEC project is organized into several key folders, following sta
 
 ### ST ↔ LD POU Interface
 
-Because `G_sysAxis` and the built-in motion FBs live in the LD POU, `PRG_Main` never calls `MC_Power`, `MC_Stop`, `Y_DirectControl`, etc. directly. The LD POU is not in this repository; its wiring is recorded block by block, with screenshots, in `docs/slave/ld/`, and a change to a `G_cmd*` or `G_sta*` field is complete only when that record and the LD agree. Instead it writes command fields into the `G_cmd*` structured globals and reads state from the matching `G_sta*` globals each scan:
+Because `G_sysAxis` and the built-in motion FBs live in the LD POU, `PRG_Main` never calls `MC_Power`, `MC_Stop`, `Y_DirectControl`, etc. directly. The LD POU (`PRG_LD`) is not in this repository; `docs/slave/ld/PRG_LD.md` specifies it (every block, its instance name and the pin wiring) and the screenshots beside it record the project's wiring, and a change to a `G_cmd*` or `G_sta*` field is complete only when the specification, the screenshots and the LD agree. Instead it writes command fields into the `G_cmd*` structured globals and reads state from the matching `G_sta*` globals each scan:
 
 | ST writes (command) | LD owns (FB instance) | LD writes back (status) |
 |---------------------|------------------------|--------------------------|

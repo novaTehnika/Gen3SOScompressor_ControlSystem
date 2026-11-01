@@ -1,9 +1,11 @@
 # Ladder Diagram POU wiring record
 
-The LD POU that owns `G_sysAxis` and the built-in motion function blocks
-lives only in the MotionWorks IEC project; it cannot be exported as text.
-This directory records its wiring block by block: a screenshot of each
-block as it is in the project, and a table of what is wired to each pin.
+The LD POU (`PRG_LD`) that owns the axis and the built-in motion function
+blocks lives only in the MotionWorks IEC project; it cannot be exported as
+text. `PRG_LD.md` is its specification: every block, its instance name and
+what is wired to each pin. This directory also records the wiring as it is
+in the project: a screenshot of each block, and a table of what is wired
+to each pin.
 The Structured Text writes the `G_cmd*` structs and reads the `G_sta*`
 structs (`slave-src/DUT/DataTypes.st`), so this record is the contract
 between the two halves. When a field is added to one of those structs,
@@ -38,7 +40,10 @@ keep the table to what the picture shows.
 
 The other blocks (`MC_Power`, `MC_Stop`, `MC_Reset`, `MC_MoveAbsolute`,
 `MC_SetPosition`, `MC_ReadActual*`, Jog) have their screenshots in this
-directory; their pin tables are not yet written.
+directory and their pin tables in `PRG_LD.md`. The screenshot of
+`MC_Power_1` shows `Enable_Positive` and `Enable_Negative` open; the
+specification wires them to `G_cmdPower.EnablePositive` and
+`G_cmdPower.EnableNegative`, which the ST drives.
 
 ## To change: remove `MC_MoveVelocity`
 
