@@ -207,11 +207,6 @@ reference for every declaration.
       scenarios with the settled hose procedure (`hose_before` False): the
       design README's results passage ("Every result below is for the
       first remedy") still reports the hose-before remedy; relabel it.
-- [ ] Pressure input calibration (`bench/pressure/README.md` section 6):
-      it rests on a hand-held meter's mA range, about 1 %. Repeat it with
-      a loop calibrator, and measure the 4.7 uF capacitor's leakage out of
-      circuit (the input's load in parallel with the shunt fitted as about
-      15 kohm).
 - [ ] Verify every assumed position against the machine, in the homed
       frame, and correct each copy:
   - [ ] Positive overtravel switch trip point (just past 367 mm, not

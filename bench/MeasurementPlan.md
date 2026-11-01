@@ -11,7 +11,7 @@ sequences them and says what each run is for.
 
 | Parameter (`params.py`) | Session | Run |
 |---|---|---|
-| Transducer chain: `G_cfgPressureShuntOhms`, `ZeroMa`, `P_offset` | 0 | calibration against a loop calibrator |
+| Transducer chain: `G_cfgPressureShuntOhms`, `ZeroMa`, `P_offset` | done | the current-source calibration of `bench/pressure/README.md` section 6 stands |
 | Sensor noise `noise` | 0 | `pressureNoiseProbe('idle')`, and any capture later |
 | Drive dead time `t_dead` and lag `tauV` at the motor | 0 | `frictionRun('s1', 'steps')` |
 | Whether the drive slews (`slew_limited`) | 0 | the same steps with `G_cfgDirectCtrlAccel` at 1 mm/s² |
@@ -37,29 +37,24 @@ sequences them and says what each run is for.
   capture below needs the probe.
 - `tests\run_all.bat` passes under MATLAB on the lab PC, so the fits run
   there.
-- Equipment: a loop calibrator (or the bench supply as a current source
-  with the meter in series, as in `bench/pressure/README.md` section 6);
-  a scale reading 0.1 g; tared beakers; a stopwatch; the oxygen supply
-  with its gauge. Wireshark if the link items are run.
+- The pressure chain is calibrated (`bench/pressure/README.md` section
+  6: the effective shunt 421.4 ohm, the zero +0.002 MPa vented) and is
+  not repeated. Every new log is on that scale, so `opts.logShuntOhms`
+  is only for the October logs.
+- Equipment: a scale reading 0.1 g; tared beakers; a stopwatch; the
+  oxygen supply with its gauge. Wireshark if the link items are run.
 - Every run logs to `bench/common/captures`. Keep the labels of the
   recipes, with the valve state in the label where it matters
   (`K300`, `K300_hose`, `lag_wet`, `lag_wet_open`), and weigh every fill,
   purge and discharge: the volumes are inputs to the fits.
 
-## Session 0: dry, about two hours
+## Session 0: dry, about an hour and a half
 
 Piston in the bore, chamber open, no liquid.
 
-1. **Calibrate the pressure chain** (`bench/pressure/README.md` section 6,
-   "Calibrating the chain"). Drive the loop at 4, 8, 12, 16 and 20 mA
-   with the calibrator in place of the transducer, read the slave's
-   volts in MotionWorks debug mode, fit volts against current: the slope
-   is `G_cfgPressureShuntOhms`, the intercept over the slope corrects
-   `G_cfgPressureZeroMa`. Measure the 4.7 uF capacitor's leakage out of
-   circuit. Set the GVL and the controller, then confirm the vented
-   transducer reads 0.00 +/- 0.02 MPa. Everything after this is on the
-   calibrated scale, so `opts.logShuntOhms` is not needed for the new
-   logs.
+1. **Check the zero**: with the transducer vented and the controller
+   on the calibrated settings, the slave reads 0.00 +/- 0.02 MPa. A
+   larger reading means the chain has moved since the calibration.
 2. **Noise at rest**: `pressureNoiseProbe('idle')`. The scripts now read
    the step probe, and this is their first run on the hardware; the
    window rms should repeat the 0.8 mV with the capacitor.

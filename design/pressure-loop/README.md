@@ -660,8 +660,6 @@ Kp = wc/k holds 37° at wc = 11 everywhere.
   fitted.
 
 **Open questions:**
-- The calibration's reference: a hand-held meter's mA range. A loop
-  calibrator would tighten it.
 - The lag at the piston (not resolved) and the dissolution time constant
   are the two unmeasured plant parameters; the robustness study covers
   the first, and the second sets only the hold time.
