@@ -169,7 +169,7 @@ longest gap between cycles 108 ms.
 ## 6. Analog input calibration check
 
 The slave reads the transducer as the voltage across the shunt
-(`FB_PressureInput`: `LoopMa = Volts / ShuntOhms`), so its reading carries
+(`FB_PressureInput`: loop current = `Volts / ShuntOhms`), so its reading carries
 three errors in series: the transducer's current, the voltage the loop
 develops at the input terminals (the shunt in parallel with the input's own
 impedance, specified above 10 kohm), and the input's conversion of that

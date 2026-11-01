@@ -16,10 +16,9 @@
        DebounceTime    : TIME := T#50MS   (* Time a new code must be held
      VAR_OUTPUT:
        DecodedMode     : E_OperatingMode  (* Decoded operating mode
-       ModeValue       : INT              (* Numeric mode value 0-7
        ModeStable      : BOOL             (* Mode has been stable (no change from last scan)
-       ModeChanged     : BOOL             (* Rising edge - mode just changed
      VAR:
+       nModeValue      : INT              (* Numeric mode value 0-7
        nPreviousValue  : INT              (* Previous scan mode value
        nFilteredCode   : UINT             (* Debounced mode code
        nPendingCode    : UINT             (* Code being debounced toward
@@ -37,9 +36,8 @@
 IF NOT Enable THEN
     (* Reset outputs when disabled *)
     DecodedMode := E_OperatingMode#MODE_IDLE;
-    ModeValue := 0;
+    nModeValue := 0;
     ModeStable := FALSE;
-    ModeChanged := FALSE;
     nPreviousValue := 0;
     RETURN;
 END_IF;
@@ -73,16 +71,13 @@ fbIntToMode(Value := nFilteredCode);
 DecodedMode := fbIntToMode.Mode;
 
 IF nFilteredCode <= UINT#7 THEN
-    ModeValue := UINT_TO_INT(nFilteredCode);
+    nModeValue := UINT_TO_INT(nFilteredCode);
 ELSE
-    ModeValue := 0;
+    nModeValue := 0;
 END_IF;
 
 (* Mode is stable if value matches previous scan *)
-ModeStable := (ModeValue = nPreviousValue);
-
-(* Detect mode change (value different from previous scan) *)
-ModeChanged := (ModeValue <> nPreviousValue);
+ModeStable := (nModeValue = nPreviousValue);
 
 (* Save for next scan *)
-nPreviousValue := ModeValue;
+nPreviousValue := nModeValue;

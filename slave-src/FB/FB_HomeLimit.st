@@ -79,7 +79,6 @@
        StaMoveAbsolute      : ST_StaMoveAbsolute     (* Status from MC_MoveAbsolute
        StaSetPosition       : ST_StaSetPosition      (* Status from MC_SetPosition
      VAR_OUTPUT:
-       Active               : BOOL                   (* Sequence is running
        Done                 : BOOL                   (* Homing complete
        InMotion             : BOOL                   (* Currently moving
        Error                : BOOL                   (* Error occurred
@@ -99,7 +98,6 @@
    ============================================================================ *)
 
 IF NOT Enable THEN
-    Active := FALSE;
     Done := FALSE;
     InMotion := FALSE;
     Error := FALSE;
@@ -156,7 +154,6 @@ ELSE
 IF eState = E_HomeLimitState#IDLE THEN
 
     (* IDLE - Waiting for execute command *)
-        Active := FALSE;
         Done := FALSE;
         InMotion := FALSE;
         Error := FALSE;
@@ -167,7 +164,6 @@ IF eState = E_HomeLimitState#IDLE THEN
         CmdSetPosition.Execute := FALSE;
 
         IF rTrigExecute.Q OR Execute THEN
-            Active := TRUE;
             eState := E_HomeLimitState#FAST_APPROACH;
         END_IF;
 
@@ -350,7 +346,6 @@ ELSIF eState = E_HomeLimitState#DONE THEN
 
     (* DONE - Homing sequence complete *)
         Done := TRUE;
-        Active := TRUE;
         InMotion := FALSE;
 
         IF NOT Execute THEN
@@ -369,7 +364,6 @@ ELSIF eState = E_HomeLimitState#ABORTING THEN
         InMotion := StaJog.Busy OR StaMoveAbsolute.Busy;
 
         IF (StaJog.Done OR NOT StaJog.Busy) AND (NOT StaMoveAbsolute.Busy) THEN
-            Active := FALSE;
             InMotion := FALSE;
             eState := E_HomeLimitState#IDLE;
 
@@ -381,7 +375,6 @@ ELSIF eState = E_HomeLimitState#ABORTING THEN
 ELSIF eState = E_HomeLimitState#ERROR THEN
 
     (* ERROR *)
-        Active := FALSE;
         InMotion := FALSE;
         Done := FALSE;
 

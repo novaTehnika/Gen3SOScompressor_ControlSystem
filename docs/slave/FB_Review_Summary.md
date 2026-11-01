@@ -48,7 +48,7 @@ This document summarizes the agent reviews of the function blocks in `slave-src/
 ### Changes:
 - **Fault reset logic extracted** to `FB_FaultResetHandler` (separate single-responsibility FB)
 - Confirmed mode is an `E_OperatingMode` output; `PRG_Main` converts it to `G_sysConfirmedModeCode` for IR3 (`G_mbConfCode`)
-- Stripped down to mode handshake only: `ConfirmedMode`, `HandshakeActive`, `HandshakeComplete`, `HandshakeTimeout_Q`
+- Stripped down to mode handshake only: `ConfirmedMode` and `HandshakeComplete`
 
 ### Previous Findings (resolved):
 1. **CRITICAL** *(FIXED)*: Timer not called in HS_WAIT_MOTION_EN state
@@ -81,7 +81,7 @@ Validates: FaultReset HIGH, MotionEnable LOW, InFaultState, CodeStable, and Mast
 
 ### Findings:
 1. **CRITICAL** *(FIXED)*: Edge detection logic error
-   - Previous: `ModeChanged := NOT ModeStable AND bPrevStable;` (detected stability transitions, not value changes)
+   - Previous: `ModeStable` followed stability transitions, not value changes
    - **Fix applied**: Removed `bPrevStable`, simplified to direct comparison of mode values
 
 2. **LOW**: `nPreviousValue` initialized to 0 implicitly (correct, matches MODE_IDLE)
@@ -95,7 +95,7 @@ Validates: FaultReset HIGH, MotionEnable LOW, InFaultState, CodeStable, and Mast
 
 ### CRITICAL:
 1. ~~**FB_HandshakeManager**: Add timer call in HS_WAIT_MOTION_EN state~~ *(FIXED)*
-2. ~~**FB_ModeDecoder**: Fix ModeChanged edge detection logic~~ *(FIXED)*
+2. ~~**FB_ModeDecoder**: Fix mode-change detection logic~~ *(FIXED)*
 
 ### MEDIUM:
 3. **FB_DigitalInputFilter**: Consider initialization handling

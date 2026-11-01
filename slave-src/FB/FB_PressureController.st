@@ -21,7 +21,7 @@
    soft regime overshoots the target by many MPa once the chamber is stiff.
    The output is therefore also clamped to the velocity from which the
    axis, decelerating at DecelMax, comes to rest within the pressure error
-   at the assumed stiffness: v = sqrt(2 * DecelMax * |Error| / Stiffness).
+   at the assumed stiffness: v = sqrt(2 * DecelMax * |Target - Actual| / Stiffness).
    Stiffness is a configured value, not a measurement: the filtered pressure
    lags the chamber, and in a gas-rich chamber the stiffness grows faster
    than any estimate from the lagging reading can follow, so a value above
@@ -58,12 +58,12 @@
        CycleTime       : LREAL            (* Task period (s)
        IntegScale      : LREAL := 1.0     (* Factor applied to the stored integral at the start of the scan
      VAR_OUTPUT:
-       Velocity        : LREAL            (* Commanded velocity (mm/s), within +/-VelLimit
-       Error           : LREAL            (* Target - Actual (MPa), for diagnostics
-       VelLimit        : LREAL            (* Clamp applied this scan: min of VelMax and the stop law (mm/s)
-       Saturated       : BOOL             (* Output is at the clamp this scan
-       ParamError      : BOOL             (* VelMax, DecelMax, Stiffness or CycleTime not positive, or StopVelMin negative
+       Velocity        : LREAL            (* Commanded velocity (mm/s), within +/-rVelLimit
      VAR:
+       rError          : LREAL            (* Target - Actual (MPa)
+       rVelLimit       : LREAL            (* Clamp applied this scan: min of VelMax and the stop law (mm/s)
+       bSaturated      : BOOL             (* Output is at the clamp this scan
+       bParamError     : BOOL             (* VelMax, DecelMax, Stiffness or CycleTime not positive, or StopVelMin negative
        rInteg          : LREAL := 0.0     (* Integral of the error (MPa * s)
        rRaw            : LREAL            (* Unclamped output this scan
        rDist           : LREAL            (* Travel that closes the error at the assumed stiffness (mm)
@@ -71,45 +71,42 @@
        rVelStop        : LREAL            (* Stop-law velocity (mm/s)
    ============================================================================ *)
 
-ParamError := (VelMax <= LREAL#0.0) OR (DecelMax <= LREAL#0.0) OR
+bParamError := (VelMax <= LREAL#0.0) OR (DecelMax <= LREAL#0.0) OR
               (Stiffness <= LREAL#0.0) OR (CycleTime <= LREAL#0.0) OR
               (StopVelMin < LREAL#0.0);
 
 rInteg := rInteg * IntegScale;
 
-IF (NOT Enable) OR Reset OR ParamError THEN
+IF (NOT Enable) OR Reset OR bParamError THEN
     rInteg := LREAL#0.0;
 END_IF;
 
-IF (NOT Enable) OR ParamError THEN
+IF (NOT Enable) OR bParamError THEN
     Velocity := LREAL#0.0;
-    Error := LREAL#0.0;
-    VelLimit := LREAL#0.0;
-    Saturated := FALSE;
     RETURN;
 END_IF;
 
-Error := Target - Actual;
+rError := Target - Actual;
 
 (* --------------------------------------------------------------------------
    Stop law: the velocity from which DecelMax brings the axis to rest within
    the travel that closes the error at the assumed stiffness, accounting for
    the scan in which the command takes effect; never below StopVelMin.
    -------------------------------------------------------------------------- *)
-rDist := ABS(Error) / Stiffness;
+rDist := ABS(rError) / Stiffness;
 rStep := DecelMax * CycleTime;
 rVelStop := -rStep + SQRT(rStep * rStep + LREAL#2.0 * DecelMax * rDist);
-VelLimit := MIN(VelMax, MAX(StopVelMin, rVelStop));
+rVelLimit := MIN(VelMax, MAX(StopVelMin, rVelStop));
 
 (* --------------------------------------------------------------------------
    PI with conditional anti-windup
    -------------------------------------------------------------------------- *)
-rRaw := Kp * Error + Ki * rInteg;
-Velocity := LIMIT(-VelLimit, rRaw, VelLimit);
-Saturated := (rRaw <> Velocity);
+rRaw := Kp * rError + Ki * rInteg;
+Velocity := LIMIT(-rVelLimit, rRaw, rVelLimit);
+bSaturated := (rRaw <> Velocity);
 
-IF (NOT Saturated) OR
-   ((rRaw > Velocity) AND (Error < LREAL#0.0)) OR
-   ((rRaw < Velocity) AND (Error > LREAL#0.0)) THEN
-    rInteg := rInteg + Error * CycleTime;
+IF (NOT bSaturated) OR
+   ((rRaw > Velocity) AND (rError < LREAL#0.0)) OR
+   ((rRaw < Velocity) AND (rError > LREAL#0.0)) THEN
+    rInteg := rInteg + rError * CycleTime;
 END_IF;

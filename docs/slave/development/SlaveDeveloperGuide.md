@@ -229,15 +229,15 @@ Let's say you want to add `FAULT_NEW_CONDITION` with a value of `5` (currently `
 
 3.  **Update Master Docs:** Add the new fault to the tables in `docs/master/FaultCodeReference.md` and other relevant guides.
 
-4.  **Add Detection Logic:** In `slave-src/FB/FB_SafetyMonitor.st`, add the logic that detects the new fault condition.
+4.  **Add Detection Logic:** In `slave-src/FB/FB_SafetyMonitor.st`, declare a local flag (`bFaultNewCondition : BOOL`, in the `VAR` section of the header comment) and add the logic that detects the new fault condition.
     ```structuredtext
     (* --------------------------------------------------------------------------
        NEW FAULT MONITORING
        -------------------------------------------------------------------------- *)
     IF (some_new_dangerous_condition) THEN
-        FaultNewCondition := TRUE;
+        bFaultNewCondition := TRUE;
     ELSE
-        FaultNewCondition := FALSE;
+        bFaultNewCondition := FALSE;
     END_IF;
     ```
 
@@ -245,15 +245,15 @@ Let's say you want to add `FAULT_NEW_CONDITION` with a value of `5` (currently `
     ```structuredtext
     // Example: Giving it a higher priority than FAULT_POSITION
     ...
-    ELSIF FaultLimitSwitch THEN
+    ELSIF bFaultLimitSwitch THEN
         FaultDetected := TRUE;
         FaultCode := FAULT_LIMIT_SWITCH;
 
-    ELSIF FaultNewCondition THEN
+    ELSIF bFaultNewCondition THEN
         FaultDetected := TRUE;
         FaultCode := FAULT_NEW_CONDITION;
 
-    ELSIF FaultPosition THEN
+    ELSIF bFaultPosition THEN
         FaultDetected := TRUE;
         FaultCode := FAULT_POSITION;
     ...

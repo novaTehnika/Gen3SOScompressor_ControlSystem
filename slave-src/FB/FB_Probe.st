@@ -28,7 +28,7 @@
                                            confirmed mode code
    Index values are UDINT and wrap after 2^32 scans.
 
-   Recording state (State): PROBE_OFF while Enable is FALSE. Otherwise
+   Recording state (eState): PROBE_OFF while Enable is FALSE. Otherwise
    PROBE_RECORDING. A change of the arm register acts at once, whatever
    else is going on: it publishes Mark, the index of the record written in
    that scan, echoes the arm value in ArmEcho, latches the register Length
@@ -44,17 +44,18 @@
    history up to every fault can be read back while it is in the ring.
    FaultMark is 0 until the first fault.
 
-   Transfer state (Xfer): the master's request is the index of the first
+   Transfer state (XferCode): the master's request is the index of the first
    record it wants (ReqLo, ReqHi: two UINT registers, low word first,
    because the pair starts 2 bytes past a 4-byte boundary). A request that
    differs from the fill target restarts the fill; the same request written
    again changes nothing. The block copies at most FillPerScan records per
    scan from the ring into Stage, so a transfer never stretches a scan.
-   When the copy is complete Publish is TRUE for that scan and Start, Count
-   and StartTail hold the new window; they change only then. In that scan
-   PRG_Main copies Stage to G_sysProbeStage, and PRG_Output copies that
-   into the mapped window and writes StartTail last, so a read
-   that straddles an update shows Start <> StartTail and is discarded.
+   When the copy is complete Publish is TRUE for that scan and Start and
+   Count hold the new window; they change only then. In that scan PRG_Main
+   copies Stage to G_sysProbeStage, and PRG_Output copies that into the
+   mapped window and writes the register StartTail (G_mbProbeStartTail) last,
+   so a read that straddles an update shows Start <> StartTail and is
+   discarded.
      XFER_IDLE     the window is complete for the request
      XFER_FILLING  records are being copied
      XFER_PENDING  the requested start is not recorded yet
@@ -93,15 +94,12 @@
        Mark            : UDINT := 0       (* Index of the record written in the scan of the last arm
        FaultMark       : UDINT := 0       (* Index of the record written in the scan of the last fault
        Start           : UDINT := 0       (* Index of the first record in the published window
-       StartTail       : UDINT := 0       (* Copy of Start, written after the window
        Count           : UINT := 0        (* Records in the published window (0-13)
        ArmEcho         : UINT := 0        (* Arm value last acted on
        Depth           : UINT := 0        (* Ring depth in records
        Words           : UINT := 0        (* Words per record
-       State           : E_ProbeState := E_ProbeState#PROBE_RECORDING
-       StateCode       : UINT := 0        (* State as the published integer
-       Xfer            : E_ProbeXferState := E_ProbeXferState#XFER_IDLE
-       XferCode        : UINT := 0        (* Xfer as the published integer
+       StateCode       : UINT := 0        (* Recording state as the published integer (E_ProbeState)
+       XferCode        : UINT := 0        (* Transfer state as the published integer (E_ProbeXferState)
        Publish         : BOOL := FALSE    (* TRUE in the scan a fill completes: Stage, Start, Count are new
      VAR CONSTANT:
        cDepth          : UDINT := 8192    (* Ring depth in records; the ring array holds cDepth * cWords words
@@ -109,6 +107,7 @@
        cWindow         : UDINT := 13      (* Records in the window; Stage holds cWindow * cWords words
      VAR:
        aRing           : ARRAY65536WORD   (* Ring: records of cWords words, record n in words (n MOD cDepth) * cWords
+       eState          : E_ProbeState := E_ProbeState#PROBE_RECORDING  (* Recording state
        bFirstScan      : BOOL := TRUE
        bPrevFault      : BOOL := FALSE    (* FaultState on the previous scan
        nLastArm        : UINT := 0        (* Arm value already acted on
@@ -146,17 +145,16 @@ IF bFirstScan THEN
 END_IF;
 
 IF NOT Enable THEN
-    State := E_ProbeState#PROBE_OFF;
+    eState := E_ProbeState#PROBE_OFF;
     StateCode := UINT#0;
-    Xfer := E_ProbeXferState#XFER_IDLE;
     XferCode := UINT#0;
     nLastArm := Arm;
     bPrevFault := FaultState;
     RETURN;
 END_IF;
 
-IF State = E_ProbeState#PROBE_OFF THEN
-    State := E_ProbeState#PROBE_RECORDING;
+IF eState = E_ProbeState#PROBE_OFF THEN
+    eState := E_ProbeState#PROBE_RECORDING;
 END_IF;
 
 (* --------------------------------------------------------------------------
@@ -167,7 +165,7 @@ IF Arm <> nLastArm THEN
     ArmEcho := Arm;
     Mark := Written;
     nCapLen := UINT_TO_UDINT(Length);
-    State := E_ProbeState#PROBE_CAPTURING;
+    eState := E_ProbeState#PROBE_CAPTURING;
 END_IF;
 
 (* --------------------------------------------------------------------------
@@ -208,20 +206,20 @@ END_IF;
    Recording state: CAPTURING -> HELD when the last record is written,
    HELD -> RECORDING when the record at Mark is overwritten
    -------------------------------------------------------------------------- *)
-IF State = E_ProbeState#PROBE_CAPTURING THEN
+IF eState = E_ProbeState#PROBE_CAPTURING THEN
     IF (nCapLen > UDINT#0) AND (Written >= Mark + nCapLen) THEN
-        State := E_ProbeState#PROBE_HELD;
+        eState := E_ProbeState#PROBE_HELD;
     END_IF;
 END_IF;
-IF State = E_ProbeState#PROBE_HELD THEN
+IF eState = E_ProbeState#PROBE_HELD THEN
     IF Mark < nOldest THEN
-        State := E_ProbeState#PROBE_RECORDING;
+        eState := E_ProbeState#PROBE_RECORDING;
     END_IF;
 END_IF;
 
-IF State = E_ProbeState#PROBE_CAPTURING THEN
+IF eState = E_ProbeState#PROBE_CAPTURING THEN
     StateCode := UINT#2;
-ELSIF State = E_ProbeState#PROBE_HELD THEN
+ELSIF eState = E_ProbeState#PROBE_HELD THEN
     StateCode := UINT#3;
 ELSE
     StateCode := UINT#1;
@@ -280,21 +278,16 @@ IF (NOT bOverrun) AND (nFilled < nPlanned) THEN
     IF nFilled = nPlanned THEN
         Start := nTarget;
         Count := UDINT_TO_UINT(nFilled);
-        StartTail := nTarget;
         Publish := TRUE;
     END_IF;
 END_IF;
 
 IF bOverrun THEN
-    Xfer := E_ProbeXferState#XFER_OVERRUN;
     XferCode := UINT#3;
 ELSIF nFilled < nPlanned THEN
-    Xfer := E_ProbeXferState#XFER_FILLING;
     XferCode := UINT#1;
 ELSIF nPlanned = UDINT#0 THEN
-    Xfer := E_ProbeXferState#XFER_PENDING;
     XferCode := UINT#2;
 ELSE
-    Xfer := E_ProbeXferState#XFER_IDLE;
     XferCode := UINT#0;
 END_IF;
