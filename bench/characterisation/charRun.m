@@ -2,7 +2,7 @@ function r = charRun(label, path, opts)
 %CHARRUN Drive the axis along a path of steps and log the protocol feedback
 %   for the pressure loop characterisation (bench/characterisation/README.md).
 %   The script is the master for the run: one Modbus TCP connection carries
-%   the protocol exchange (HR1-8 out, IR1-20 back, every 50 ms, sequenced by
+%   the protocol exchange (HR1-12 out, IR1-20 back, every 50 ms, sequenced by
 %   masterStep as in the shell) and, between exchanges, the shared step
 %   probe (slave-src/FB/FB_Probe.st, read by benchProbe), which
 %   records the velocity command and feedback at the scan rate. The

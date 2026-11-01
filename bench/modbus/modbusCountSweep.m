@@ -12,7 +12,7 @@ function result = modbusCountSweep(nCycles, opts)
 %   opts.writeStart    first holding register written, FC16. Default []:
 %                      no writes. It must lie inside the holding register
 %                      group and outside every register the program uses
-%                      (check the Global Variables worksheet); HR1-8 (the
+%                      (check the Global Variables worksheet); HR1-12 (the
 %                      protocol) and HR111-114 (the step probe) are refused.
 %                      The block is read once (FC03) and the same values
 %                      are written back, so its content does not change.

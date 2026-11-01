@@ -303,7 +303,7 @@ while env.now() < t0 + 4.4
     if conf == 1
         enable = 1;
     end
-    fakeProbeLink('write', 1, [hb 1 enable 0 0 0 0 0]);    % HR1-8, position speed 0
+    fakeProbeLink('write', 1, [hb 1 enable zeros(1, modbusMap().nWrite - 3)]);    % every other register 0
     [p, c] = benchProbe('slot', p, link, t);
     caps = [caps c];                                %#ok<AGROW>
 end

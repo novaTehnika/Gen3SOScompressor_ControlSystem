@@ -336,7 +336,7 @@ FAULT_PERSISTENT:
 ### Position Speed (Master to Slave): HR7-8
 
 **Signal**: `G_mbPositionSpeed`, a REAL in mm/s, copied to `G_sysPositionSpeed` by
-`PRG_Input`. The master writes it every exchange, with HR1-6 in the same FC16 write.
+`PRG_Input`. The master writes it every exchange, with HR1-12 in the same FC16 write.
 In `ST_POSITION_CTRL` and `ST_RECOVERY_POSITION` the slave evaluates
 `LIMIT(0, G_sysPositionSpeed, G_cfgVelLimitMax)` every scan as the speed limit of
 `FB_PositionPathShaper`, so a change takes effect mid-move: a lower speed slows

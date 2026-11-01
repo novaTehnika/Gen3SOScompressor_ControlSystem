@@ -538,7 +538,7 @@ def check_scheduled():
 
 
 def check_scheduled_st():
-    par = Params()
+    par = StudyParams()
     cfg = slave_config()
     # The reference takes the plant's values where the slave has settings;
     # they must agree for the two to be compared.
@@ -618,7 +618,7 @@ def check_scheduled_st():
 
     # Gas spring: the stiffness grows as the pressure squared, so the
     # bound at the target pressure keeps the stop law from braking late.
-    g = Params(Vl0=1e-6, ratio=200.0, P_supply=1e3, noise=0.0,
+    g = StudyParams(Vl0=1e-6, ratio=200.0, P_supply=1e3, noise=0.0,
                P_offset=0.0, V_passages=1e-6, V_hose=1e-9, C_hose=0.0,
                tauDiss=1e9)
     L = Lockstep(ctl.ScheduledSlaveController(

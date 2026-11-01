@@ -1,7 +1,7 @@
 function out = fakeProbeLink(cmd, varargin)
 %FAKEPROBELINK Stand-in for the bench runs' Modbus link and clock: the
 %   simulated slave's own registers behind the protocol registers (IR1-20,
-%   HR1-8), an emulation of PRG_PressureProbe behind the noise registers
+%   HR1-12), an emulation of PRG_PressureProbe behind the noise registers
 %   (HR101, IR101-113, IR121-370) and, behind the step probe registers
 %   (HR111-114, IR401-524), the slave's own FB_Probe. The slave's
 %   registers are packed and unpacked by its register map (the GVL's AT
@@ -134,7 +134,7 @@ switch cmd
         first = varargin{1};
         inProbe = first >= 111 && first <= 114;
         assert((inProbe && first + numel(w) - 1 <= 114) || (first == 1 && numel(w) == S.map.nWrite), ...
-            'write is not HR1-8 or HR111-114');
+            'write is not HR1-nWrite or HR111-114');
         if first == 1
             % The master's last write, decoded, for the tests' checks
             S.u.heartbeat    = w(S.map.hr.heartbeat);

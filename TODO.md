@@ -30,6 +30,17 @@ reference for every declaration.
   - [ ] Rename `fbPosGate` to `fbPosShaper` and `bPosGateActive` to
         `bPosShaperActive`.
 - [ ] `PRG_PressureProbe`: add the local `nWindow : INT`.
+- [ ] Pressure gain schedule:
+  - [ ] Add `FB_PressureSchedule`, and `IntegScale` (initial value 1.0) to
+        `FB_PressureController`.
+  - [ ] `PRG_Main` locals: `fbPressureSched`, `rAnalogFilterTime`,
+        `rSchedSaline`, `rSchedOxygenRatio`, `bPressureSchedActive`,
+        `bPressureSchedUsed`, `rPressureKp`, `rPressureKi`,
+        `rPressureVelMax`, `rPressureStiffness` and `rPressureIntegScale`
+        (initial value 1.0).
+  - [ ] Globals: `G_mbSalineVolume`, `G_mbOxygenRatio`,
+        `G_sysSalineVolume`, `G_sysOxygenRatio` and the
+        `G_cfgPressureSched*` settings with `G_cfgPressureScheduleEnable`.
 - [ ] Globals:
   - [ ] Remove `G_cmdMoveVelocity`, `G_staMoveVelocity`,
         `G_sysCycleCount`, `G_posModeEntryPosition`,
@@ -43,7 +54,8 @@ reference for every declaration.
   - [ ] Add `G_cfgStopDecel`, `G_cfgProbeEnable`, `G_cfgProbeFillPerScan`,
         `G_mbPositionSpeed`, `G_sysPositionSpeed`, the `G_mbProbe*`
         globals and the `G_sysProbe*` globals.
-- [ ] Modbus groups in Hardware Configuration: holding registers to HR114,
+- [ ] Modbus groups in Hardware Configuration: holding registers to HR114
+      (the protocol uses HR1-12),
       input registers to IR524.
 
 ## Lab PC
@@ -138,12 +150,12 @@ reference for every declaration.
 - [ ] Retire `PRG_PressureProbe`: the main probe records the raw pressure
       voltage every scan, so the noise statistics could be computed on the
       master.
-- [ ] On the plant model the slave's pressure loop overshoots a 10 MPa
-      target by about 0.6 MPa and settles in about 13 s
-      (`tests/slavePressureMode.m`), as `design/pressure-loop/README.md`
-      reports for the GVL loop. In the studies `ScheduledSlaveController`
-      arrives in 2.4 s without overshooting the reading. Decide whether to
-      port it to the slave.
+- [ ] The pressure gain schedule is ported (`FB_PressureSchedule`, off
+      by default). Decide whether to enable `G_cfgPressureScheduleEnable`
+      by default once it has run on the machine, and the crossover
+      `G_cfgPressureSchedCrossover` (11 rad/s overshoots a gas-dominated
+      chamber by 1 MPa with the measured drive lag; 6 rad/s by 0.06 MPa,
+      `design/pressure-loop/test_model.py`).
 - [ ] The probe's record index wraps after 2^32 scans (about 200 days at
       4 ms of uninterrupted running), and the master does not handle the
       wrap.

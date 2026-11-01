@@ -1,7 +1,7 @@
 function r = frictionRun(label, set, opts)
 %FRICTIONRUN Drive the axis through the friction bench's speed points and
 %   log the slave's feedback. The script is the master for the run: one
-%   Modbus TCP connection carries the protocol exchange (HR1-8 out, IR1-20
+%   Modbus TCP connection carries the protocol exchange (HR1-12 out, IR1-20
 %   back, every 50 ms, sequenced by masterStep as in the shell) and every
 %   exchange is logged with the torque feedback, which the shell and the
 %   operator app do not show. With opts.probe the script also takes
