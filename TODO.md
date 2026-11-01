@@ -123,6 +123,40 @@ reference for every declaration.
 - [ ] Write the pin tables of the other LD blocks in
       `docs/slave/ld/README.md`. Their screenshots are already in that
       directory.
+- [ ] Redraw `docs/slave/diagrams/MainStateMachine.svg` from `PRG_Main`.
+      It shows `ST_ENCODER_CHECK`, `ST_REQUIRE_ABS_HOME` and
+      `ST_FAULT_RECOVERY`, which `E_SystemState` does not have, and lacks
+      `ST_PRESSURE_CTRL`, `ST_RECOVERY`, `ST_RECOVERY_POSITION` and
+      `ST_RECOVERY_VELOCITY`. `docs/master/StateTransitionDiagram.md` is
+      the current text version.
+- [ ] `docs/slave/development/ConfigurationGuide.md` says it covers every
+      `G_cfg*` global but has no rows for `G_cfgCommTimeout`,
+      `G_cfgHoldPositionTimeout`, `G_cfgTorqueStallThreshold`,
+      `G_cfgGearRatio`, `G_cfgLeadScrewPitch` and the pressure
+      transducer and loop settings (`G_cfgPressureShuntOhms`, `ZeroMa`,
+      `SpanMa`, `RangeMin`, `RangeMax`, `SensorMinMa`, `SensorMaxMa`,
+      `SensorFaultTime`, `Kp`, `Ki`, `Decel`, `StopStiffness`,
+      `StopVelMin`, `TorqueLimit`, `TargetMax`, `InBand`). Take defaults
+      and descriptions from the GVL.
+- [ ] `docs/slave/reference/HomingSequenceGuide.md`: the Mode 110
+      parameter table gives `G_cfgHomeLimFastApproachVel` as 5.0; the GVL
+      has 6.0.
+- [ ] `docs/slave/reference/TimingSpecification.md` §7: the Mode 110 table
+      works from a 5 mm/s fast approach over about 310 mm. With the GVL's
+      6 mm/s and `G_cfgPosSoftLimitMax` of 367 mm the worst-case approach
+      is about 372 mm (still about 63 s). Update the stated speed and
+      distance.
+- [ ] `docs/slave/reference/TimingSpecification.md` §12: the Range column
+      for `G_cfgBrakeEngageDelay`, `G_cfgBrakeDisengageDelay` (100-1000 ms)
+      and `G_cfgHomingTimeout` (30-180 s) was widened only so the defaults
+      fall inside it. Set ranges from the brake's datasheet and the
+      longest homing travel.
+- [ ] `docs/master/FaultCodeReference.md` (`FAULT_POSITION` and
+      `FAULT_PISTON_EXIT` sections) names `G_posSoftLimitMin` and
+      `G_posSoftLimitMax`; the globals are `G_cfgPosSoftLimitMin` and
+      `G_cfgPosSoftLimitMax`. The piston exit boundary is
+      `G_cfgPosCylinderEntry + G_cfgPosExitGuardMargin`, not the soft
+      limit.
 
 ## Open decisions
 
