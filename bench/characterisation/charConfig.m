@@ -26,6 +26,13 @@ cfg.Patm_MPa        = 0.101325;
 % fits at two fill levels settle it), the same number; charRunSim checks it.
 cfg.airVolume_mL    = 0.1;
 
+% --- Drive ------------------------------------------------------------------------
+% Reflected inertia of the motor and gearbox as the torque it takes, in
+% percent of rated torque per mm/s^2 of piston acceleration: the October
+% steps (README section 10), which charDrivePath uses to take the inertial
+% torque out of a reversal when the same call has no step captures.
+cfg.driveInertia_pct_per_mm_s2 = 0.42;
+
 % --- Outlet: ball valve, tube, orifice plate -----------------------------------
 cfg.nOrifice        = 32;
 cfg.dOrifice_um     = 40;
