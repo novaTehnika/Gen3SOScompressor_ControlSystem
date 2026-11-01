@@ -266,8 +266,17 @@ class Params:
     # addition to the Coulomb and viscous terms, so the efficiency
     # pushing against the load is 1 / (1 + mu). Measured 0.45.
     mu: float = 0.45
-    # [kg] Motor and gearbox inertia reflected to the piston
-    mr: float = 5e4
+    # [kg] Motor and gearbox inertia reflected to the piston. Measured
+    # 4.6e5 (0.42 % rated torque per mm/s^2 of piston acceleration, the
+    # torque excess of 74 open-chamber velocity steps against the
+    # motor's acceleration) through the lossless torque constant Fcap:
+    # the drivetrain's efficiency is not applied, and a torque that is
+    # partly lost in the gearbox would lower it by that factor. The
+    # model carries no compliance between the motor and the piston: the
+    # drive path's stiffness is above 4.7 kN/um (an up/down offset of the
+    # motor position at the same pressure within 5 um of a 25 kN
+    # friction reversal), 200 times the chamber's.
+    mr: float = 4.6e5
     # [N s/m] Viscous friction coefficient. Measured 2.3e6 (11 kN at
     # 5 mm/s).
     b: float = 2.3e6

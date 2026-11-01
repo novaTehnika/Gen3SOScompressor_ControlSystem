@@ -179,6 +179,18 @@ efficiency of 0.69 pushing), and a breakaway of about 24 kN. In velocity
 mode the drive's own loop absorbs these and they enter the model only
 through the stall; in torque mode they act on the reflected mass.
 
+**Drive path.** The motor's position, velocity and torque are what the
+slave measures; between them and the chamber lie the gearbox, the ball
+screw and nut, the rod and the piston seals. The model carries no
+compliance and no backlash in that path: the piston moves as the motor
+does. The up/down offset of the motor position at the same pressure,
+through the friction reversal of the K ramps, bounds the path's stiffness
+above 4.7 kN/um (`bench/characterisation/README.md` section 10), over 200
+times the chamber's 24 N/um: under a force of 25 kN the path deflects by
+less than 5 um where the chamber compresses by 1 mm. Backlash has not
+been measured. The inertia of the motor and gearbox is the reflected
+mass `mr` of the torque actuator.
+
 **Torque actuator** (TorqueVLMode). The commanded force drives the
 reflected mass of the motor and gearbox against the chamber pressure, the
 load-dependent friction and the viscous and Coulomb friction, and the
@@ -452,6 +464,8 @@ assumed before:
 | Orifice Cd | 0.85 (0.84–0.87), exponent 0.48; 4.8 mL/s at 10 MPa | 0.7; 4.0 mL/s | `charOrificeFlow`, deliveries at 2, 5 and 10 MPa |
 | Drive response | 22.8 ms dead time, 18.2 ms lag at the motor, no slew | 20 ms lag, slewed at the configured accel | `charDriveLag`, 74 step captures at the 4 ms scan |
 | Lag at the piston | not resolved | — | repeat with the pressure probe |
+| Reflected mass mr | 4.6e5 kg: 0.42 % of rated torque per mm/s^2 of piston acceleration (0.38, 0.41, 0.44 at steps of 0.3, 1, 2.5 mm/s), through the lossless torque constant, so an efficiency below 1 lowers it | 5e4 kg | `charDrivePath`, 74 open-chamber velocity-step captures |
+| Drive path stiffness | above 4.7 kN/um: the motor position at the same pressure differs by 1 to 3 um between an up and a down ramp through a 22 to 25 % (24 to 28 kN) friction reversal; no compliance in the model | not modelled | `charDrivePath`, the K300 ramps; a bound, not a value |
 | Coulomb friction Fc | 6.1 kN | 0.5 kN | `frictionFit` |
 | Viscous friction b | 2.3 MN s/m | 5 kN s/m | `frictionFit` |
 | Load-dependent friction mu | 0.45 (efficiency 0.69 pushing) | 0.85 efficiency | `frictionFit` |

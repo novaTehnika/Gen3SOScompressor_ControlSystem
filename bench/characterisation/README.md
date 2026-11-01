@@ -9,6 +9,10 @@ drive's velocity loop as seen at the piston (`tauV`) and the distance the
 piston needs to stop under load (the stop law's deceleration
 `G_cfgPressureDecel` and its delay). The friction test is a separate bench,
 but test 4 below gives friction points under load from the same run.
+Test 5 (section 10) takes the drive path between the motor and the
+piston: the reflected inertia, the friction reversal under load, the
+path's stiffness (or a bound on it), its backlash and the motor-side
+friction.
 
 Everything is measured through the protocol the master already uses: the
 slave reports position, velocity, torque and pressure in IR11-20 every 50 ms
@@ -33,12 +37,15 @@ position guards.
 | `charDriveLag.m` | Test 3: tauV and dead time from the step probe captures at the motor and, through their pressure channel, at the piston; the 50 ms log as a coarse check |
 | `charStopPath.m` | Test 4: builds the one-pass path, a staircase of pressure levels with an excursion set at each, sized to a pressure budget from the fill and the gas charge |
 | `charStopDistance.m` | Test 4: the stopping distance of every stop in the run, from the captures and the log, fitted to the stop law's two terms per direction and compared with the slave's allowance |
+| `charDrivePath.m` | Test 5: the drive path from the motor's position, velocity and torque against the pressure: the inertia of velocity steps, the friction reversal and the stiffness bound of the K ramps, and the backlash, windup and motor-side friction of the reversal and dither captures |
+| `charDriveRecipe.m` | Test 5: the `velstep` paths of the two reversal runs (direct reversals in the open chamber, a dither about a pressure in the closed one) |
 | `charScheduleCheck.m`, `charScheduleBound.m` | Section 9: the stiffness bound of the slave's gain schedule (`FB_PressureSchedule`) computed from the GVL at the pressures and positions of a log and compared with the stiffness the log measured |
 
 `tests/charRunSim.m` runs `charRun` and the fits against the simulated slave
 (through the friction bench's `fakeProbeLink`), the one-pass path included,
 `tests/charFitsSynthetic.m` the fits on synthetic logs with known
-parameters (the schedule check included, on the committed K300 logs too),
+parameters (the schedule check included, on the committed K300 logs too, and
+`charDrivePath` on a synthetic two-mass drive and on the October logs),
 and `tests/slavePressureMode.m` holds `charScheduleBound` equal to the
 compiled block; `tests/run_all.sh` runs them.
 
@@ -705,6 +712,7 @@ rows show and do not remove it.
 | `Vl0` | the fill of the runs (`r` prints it) | m^3 |
 | `Cd` | `charOrificeFlow` (`r.Cd`) | - |
 | `tauV` | `charDriveLag` (`r.tauV_s` at the motor; `r.tauP_s` at the piston, the value the model stands for, when it exceeds it) or `stepResponseFit` | s |
+| `mr` | `charDrivePath` (`r.inertia.mass_kg`, lossless) | kg |
 | `G_cfgPressureDecel` (GVL, the stop law) and the model's stop allowance | `charStopDistance` (`r.D_mm_s2`, `r.T0_s`) | mm/s², s |
 
 `V_dead` is not a `Params` field; the delivery scenario stops at `V_empty`.
@@ -744,6 +752,10 @@ values as fitted until the tests are repeated with the calibrated input.
 | Stopping distance under load (test 4) | 0.031 s × v in both directions, 2 to 10 MPa, 1 to 6 mm/s, residual 4 µm; no deceleration term resolvable (the drive stops within a scan or two once it acts) and no travel after rest | `stops_char_20261030_232726` (16 stops, 25 ms cycles) | The slave's allowance v·0.05 s + v²/(2·50 mm/s²) is above every stop, by 3 to 4 times at 5 mm/s. The 31 ms is 10 ms less than the drive's 22.8 ms dead time and 18.2 ms lag of the velocity steps, so the stop is not explained by the step response plus the command pipeline and Modbus tick; the stop reaches rest earlier than a first-order lag after a dead time would, and the difference is not resolved. Two later runs with 90 ms cycles (the probe's register group mapped) do not resolve the stops. |
 | Friction at speed under load (`frictionFit` on the legs of the one-pass runs) | Fc 4.4 +/- 0.5 kN, b 2.7e6 +/- 0.2e6 N s/m, mu 0.41 +/- 0.02 (efficiency 0.71 pushing, 0.59 pushed), F0 -1.0 kN, 60 legs | `stops_char_20261030_232726` (13 legs, 25 ms cycles; 6.2 +/- 1.6 kN, 2.4e6, mu 0.36 +/- 0.07), `stops_char_20261031_001105` (21; 4.3 kN, 2.8e6, 0.43), `stops_char_20261031_001956` (26; 4.1 kN, 2.5e6, 0.40) | Each leg of the path (1 to 5 mm/s on the 25 ms run, 0.25 to 2 mm/s on the others, 0.3 to 10 MPa, both directions) is one steady point; `frictionFit({}, logs, struct('logShuntOhms', 434, 'settle', 0.15, 'trim', 0.05, 'accel', 1e4))`. The fit is the loaded law F - P A = F0 + sign(v) (Fc + mu P A) + b v. The pooled values agree with the friction bench's own fit of the same day's runs (Coulomb 6.1 kN, viscous 2.3e6 N s/m, mu 0.45) on b and mu. The pressure rises 1 to 2 MPa through a leg, so the force drifts by 3 to 20 kN across it and `frictionFit` flags the legs `drift` and `0.1 lead` (a leg is a fraction of a screw lead); the residual of the fit is 1 to 1.5 kN and Fc scatters from 4.1 to 6.2 kN between the runs. The two `stops_hp_char` runs (20261031_004938, _012956; 10 legs each, 8 to 10 MPa, 90 ms cycles, the legs 0.2 to 0.5 s) give Fc 0.9 and 1.9 kN, b 5.7e6 and 4.3e6, mu 0.50 and 0.48 and are not used: at 90 ms the legs hold two to five samples and the velocity does not reach the command. Breakaway 15 to 22 kN from rest. |
 | Stiffness against pressure (`charBulkModulus` with `chargeRatio` 2 on the legs and ramps of the one-pass runs) | dP/dx 0.9 MPa/mm at 3.3 MPa, 2.0 at 4.7, 2.9 at 6.3, 3.6 at 7.2, 5.2 at 9.5 | `stops_char_20261030_232726` (9 ramps), `stops_char_20261031_001105`, `_001956`, `stops_hp_char_20261031_004938`, `_012956` | `charBulkModulus(file, struct('logShuntOhms', 434, 'chargeRatio', 2, 'fillVolume_mL', 193, 'pressureRange', [0.5 11], 'minRows', 8, 'skip', 0.2))`; the five runs give the same curve to 15 % (up and down, 2.2 to 11 MPa). The piston stood at 325 to 328 mm from 3 to 10 MPa, which puts the liquid at about 193 mL, not the 343 mL the path assumes (`fillVolume_mL`); the model's stiffness for 193 mL and a 2:1 charge is 1.2, 2.3, 3.7, 4.5 and 6.0 MPa/mm at those pressures with the hose open (0.24 mL/MPa) and 1.3, 2.8, 5.1, 6.5 and 10.4 with it shut, so the chamber is 0.75 to 0.87 of the hose-open model (the valve state is not logged). The curvature fit gives 8 to 13 mL of free gas at 3.3 MPa against the model's 7.8, and 4 to 5 mL at 6.3 MPa and 1.9 mL at 9.6 MPa against the model's 0.8 and 0: the gas dissolves more slowly than the saturation model assumes. The liquid-bulk-modulus checks fail by design for a gas-charged chamber (K lin 0.05 to 0.5 GPa). |
+| Reflected inertia (test 5) | 0.418 % of rated torque per mm/s^2 overall, 0.38, 0.41 and 0.44 at the steps of 0.3, 1 and 2.5 mm/s: 4.6e5 kg at the piston with the lossless constant | `s1`, `s2` step captures, 74 | `charDrivePath` (section 10.1): the torque excess over the steady torque after a step against the motor acceleration. The 0.3 mm/s steps scatter (acceleration 7 mm/s^2 against a torque noise of 1 %: interquartile range 0.12 to 0.51), the 1 and 2.5 mm/s ones do not (0.34 to 0.45, 0.42 to 0.46). An efficiency below 1 lowers the mass at the piston by that factor. `mr` in `params.py`. |
+| Friction reversal under load (test 5) | 17 to 18 % of rated torque at 4 MPa rising to 29 to 32 % at 9 MPa (19 to 20 kN, then 32 to 35 kN lossless); dT = 6.9 + 2.54 P % gives Fc 3.8 kN, mu 0.41 | `K300_char_20261026_192617`, `_192751`, `_193002` | The torque of an up ramp minus that of the next down ramp at the same pressure (0.1 mm/s, 7 pairs a log); medians of the logs 25.1, 21.6 and 22.5 %. Agrees with `frictionFit` on mu (0.41 to 0.45); its Fc includes the viscous term at 0.1 mm/s. |
+| Drive path stiffness (test 5) | k_s > 4.7 kN/um (4.3 % of rated torque per um): the motor position at the same pressure differs by 1.1, 2.3 and 2.6 um (median) between an up and a down ramp, through a 22 to 25 % force reversal; over 200 times the chamber's 24 N/um | the three K300 runs | A bound and not a value: the offsets are within the 5 um the logs resolve, and the pressure sensor's lag adds to them. The hose-open run `K300_char_20261026_193603` has offsets of -25 to -48 um (the hose, not the drive: the contrast). The model carries no compliance between the motor and the piston. |
+| Backlash, motor-side friction, windup (test 5) | not measured | - | The October logs have no direct reversal. Sections 10.2 (open chamber) and 10.3 (dither) are the runs. |
 
 **Two dead volumes.** The proximal valve at the cylinder head is shut
 during compression and mixing and open during the delivery, so the
@@ -835,3 +847,250 @@ crossover 7.6 to 8.8 rad/s against 11; with the hose open at 299 mm a
 bound of 7.9 MPa/mm against 4.8 to 5.9 (ratio 1.32 to 1.62). The schedule
 is conservative on both by 25 to 60 %, the measured bulk modulus being
 0.72 GPa against the 1 GPa configured.
+
+## 10. Test 5: drive path
+
+The slave's position, velocity and torque are the motor's: the encoder
+and the drive current, scaled through the 70:1 gearbox and the 5.08 mm
+lead to piston units (`G_cfgGearRatio`, `G_cfgLeadScrewPitch`). The
+whole drive path lies between that measurement and the chamber: the
+gearbox, the ball screw and nut, the rod and the piston seals. The only
+measurement on the piston's side is the chamber pressure. With the
+chamber closed and liquid-filled the pressure is a force sensor on the
+piston (P A, A = 3431 mm^2), so the motor's position and torque against
+the pressure identify the path:
+
+| Quantity | What it is | Where it shows |
+|---|---|---|
+| Reflected inertia `mr` | motor and gearbox inertia at the piston, as the torque the motor needs per mm/s^2 | the torque excess over its steady value during a velocity step |
+| Friction reversal | the torque difference between motion up and motion down at the same pressure, 2 (Fc + mu P A) | the K ramps, torque at the same pressure on an up and the next down ramp |
+| Stiffness `k_s` | the motor-to-piston deflection per force | the motor position at the same pressure on the up and the down ramp (through the friction reversal), and the motor travel while the torque changes at a reversal in the dither |
+| Backlash `b` | the free motor travel when the force through the path changes sign | a travel at near-constant torque at a reversal, hidden while the pressure force exceeds the friction |
+| Motor-side friction `f_m` | the part of the friction that never reaches the path | the torque on the flat segment of the backlash traverse, where the path carries no force |
+
+Every force is the torque (percent of rated) times the lossless constant
+of `frictionBenchConfig` (1100 N per percent: the force at the piston
+through a drivetrain with no loss), which the fit prints; so that an
+efficiency can be applied later, the inertia is also given in percent per
+mm/s^2, the friction reversal in percent and the stiffness in percent per
+um. A force at the piston is the efficiency times the lossless one for the
+motor pushing the piston and the lossless one divided by it for the motor
+being pushed.
+
+`charDrivePath` takes any mix of the files below (names, patterns or
+cells, as the other fits do) and fits what each gives:
+
+| Files | Gives |
+|---|---|
+| open-chamber step captures (`frictionRun('s1', 'steps')`, the first captures of the reversal run) | the inertia, per step size and overall |
+| 50 ms logs of the K ramps (section 3), liquid-filled, proximal valve shut | the friction reversal against pressure and a bound on the stiffness |
+| reversal captures, open chamber (below) | backlash, motor-side friction, and the stiffness if the windup is resolved |
+| dither captures, closed liquid-filled chamber (below) | backlash, windup and stiffness (or a bound) against the pressure at the reversal |
+
+### 10.1 What the October logs already give
+
+```matlab
+cd bench/characterisation
+addpath ../common
+logs = '../captures';
+steps = {[logs '/s1_cap_steps_*.csv'], [logs '/s2_cap_steps_*.csv']};
+rp = charDrivePath(steps);                                   % inertia
+rk = charDrivePath({[logs '/K300_char_20261026_192617.csv'], ...
+    [logs '/K300_char_20261026_192751.csv'], [logs '/K300_char_20261026_193002.csv']});   % friction reversal, stiffness bound
+rh = charDrivePath([logs '/K300_char_20261026_193603.csv']); % the hose-open run, as the contrast
+```
+
+1. **Inertia.** For each step of at least 0.25 mm/s the torque excess over
+   the steady torque 100 to 240 ms after the command is regressed through
+   the origin on the motor acceleration (the gradient of the velocity
+   feedback, one row per 4 ms scan whatever the `t` column says) over the
+   160 ms after the command, on the rows with an acceleration above
+   5 mm/s^2. The 74 step captures give 0.418 % of rated torque per mm/s^2
+   overall: 0.38 at the steps of 0.3 mm/s (the acceleration is 7 mm/s^2
+   and the torque noise 1 %, the interquartile range 0.12 to 0.51), 0.41
+   at 1 mm/s and 0.44 at 2.5 mm/s (interquartile range 0.42 to 0.46).
+   That is a reflected mass of 4.6e5 kg at the piston with the lossless
+   constant (`models/params.py` `mr`).
+2. **Friction reversal under load.** The segments of constant velocity
+   sign of a K log (more than 20 rows, 50 ms each) are paired with the
+   next of opposite direction; the torque of the up ramp minus that of the
+   down ramp is interpolated at the same pressure on 4 to 9 MPa in steps
+   of 0.5 MPa, and the median taken over the pairs. In all three K300 runs
+   it rises from 17 to 18 % of rated torque at 4 MPa (19 to 20 kN
+   lossless) to 29 to 32 % at 9 MPa (32 to 35 kN), the median of each log
+   being 25.1, 21.6 and 22.5 % (27.6, 23.7 and 24.7 kN). The pooled fit
+   dT = 6.9 + 2.54 P % (P in MPa) is 2 Fc + 2 mu P A with Fc 3.8 kN and mu
+   0.41 on the lossless constant, against `frictionFit`'s 4.4 to 6.1 kN
+   and 0.41 to 0.45 (the ramp speed is 0.1 mm/s, so the viscous term adds
+   little here).
+3. **Stiffness bound.** The same pairs give the motor position of the up
+   ramp minus that of the down ramp at the same pressure: 0 to 10 um,
+   median 1.1, 2.3 and 2.6 um (the +10 um at 6.5 MPa is the boundary of
+   the ramp bands of the K path). The force reversal passes the path, so
+   it deflects less than the offset, k_s > dT / max(|dx|, 5 um): 5.5, 4.7
+   and 4.9 kN/um (5.0, 4.3 and 4.5 % of rated torque per um), over 200
+   times the chamber's 24 N/um. The 5 um floor (`opts.floor_um`) is what
+   the logs resolve: the pair-to-pair scatter, and the pressure sensor's
+   lag (36 ms: median 5, low-pass 20 ms, two scans of pipeline), which at
+   0.1 mm/s moves the up and down ramps 7 um apart in the same direction a
+   stiff path would, so it raises the offset and the bound stays valid.
+   The bound takes the whole torque reversal as passing the path, which
+   holds if the friction is at the piston's side of it; the motor's own
+   friction `f_m` (10.2) is subtracted twice from the reversal in
+   `r.stiffness.boundPath_N_per_um` once the reversal run has measured it.
+   The hose-open run (`K300_char_20261026_193603`) has offsets of -25 to
+   -48 um, in the opposite sense (apart from -9 um at the band boundary,
+   6.5 MPa): the hose and the air in it, not the drive. The fit reports them as above the floor and fails its
+   `offset below floor` check; it is the contrast and not a result for the
+   path.
+
+The October data has no direct reversal at a speed, so it has no backlash
+or motor-side friction: the steps from rest show the torque rising before
+the motor moves (the stiction), and the 8 to 9 um of motor travel the K
+logs show between a reversal and the first 0.05 MPa of pressure change is
+what the pressure sensor's lag (36 ms) and the 50 ms rows give at 0.1 mm/s.
+
+### 10.2 Reversal, open chamber (session 0)
+
+Direct reversals from +v to -v with no stop, at 0.3, 1 and 2.5 mm/s, each
+command held 2 s, the probe armed at every command change. The piston is
+in the bore with the chamber open (fill port open or drained), 5 mm clear
+of the position guard in the direction of the first command, after the
+drive steps of section 5 (their captures give the inertia in the same
+call).
+
+```matlab
+cd bench/characterisation
+addpath ../common
+opts.probe = true;                               % armed at every command change
+[path, info] = charDriveRecipe('reversal');      % 27 captures, 54 s, 5 mm of travel
+r = charRun('rev', path, opts);
+rd = charDrivePath([r1.capFiles r2.capFiles r.capFiles]);    % r1, r2: the steps of section 5
+rd.reversal.backlash_um, rd.reversal.motorFriction_kN        % NaN and a bound when none is resolved
+% the K ramps' stiffness bound with the motor's own friction out of the reversal:
+rk = charDrivePath({r1.file, r2.file, r3.file}, struct('motorFriction_pct', rd.reversal.motorFriction_pct));
+rk.stiffness.boundPath_N_per_um
+```
+
+`charDriveRecipe('reversal')` is one `velstep` per speed, joined: for each
+speed `[+v -v +v -v +v -v +v -v 0]` held 2 s each (seven reversals, then
+the stop), so the explicit path is
+
+```matlab
+v = [0.3 1 2.5];  cmd = [];
+for k = 1:3, cmd = [cmd v(k) * [1 -1 1 -1 1 -1 1 -1] 0]; end
+path = {{'velstep', cmd, 2 * ones(size(cmd))}};
+```
+
+The commands alternate, so the piston ends where it began. The first
+capture of each speed is a step from rest and the last a stop: both go
+into the inertia.
+
+**The fit's method.** The first command change of each capture is the
+reversal (the capture starts at the arm, about 100 ms before the
+command, and lasts 2 s). With J from the steps (or `opts.inertia_pct`;
+`charConfig` has the October value), the torque is corrected for the
+inertia, T - J a, with a the slope over five rows, and oriented along the
+old direction. Its level before the command, L1, is the median of the
+rows before it, and the level after, L2, the median from 0.3 s on. phi =
+(L1 - T) / (L1 - L2) goes from 0 at the old level to 1 at the new. The
+motor's turn is the extremum of its position, and the travel xi since it
+(the abscissa, so that the speed profile of the lag drops out; at 0.3 mm/s
+a row is 1 um) is where phi is analysed. A path with backlash b and a
+stiff spring carries, in order: the friction of the motor flips at the
+turn (phi jumps to f_m / (f_m + f_p)), the path unwinds (a ramp of f_p /
+k_s of travel), the motor crosses the gap on its own friction alone (a
+flat segment of length b, at the level where the path carries nothing:
+phi = (2 f_m + f_p) / (2 f_m + 2 f_p), between 0.5 and 1), and the path
+winds up on the other side (a ramp to 1). The fit takes the rows to
+where phi last sits below 0.85 (or three times the noise below 1,
+`opts.beta`), within 80 um, and fits that transition by least squares: a
+ramp, a flat segment, a ramp and 1 after, with the three breakpoints
+searched on a grid and refined, against the same without a flat segment
+(one ramp). A flat segment counts as backlash when it is at least 4 um
+long, holds three rows and the model without it fits twice as badly. The
+level of the flat segment is the torque of the motor alone, f_m = -s T
+there. The windup is the rest of the transition's travel, and the
+stiffness the torque change over it, (1 - phi(0)) (L1 - L2), per
+travel; below 3 um (`opts.res_um`) of windup the stiffness is a bound at
+3 um. The backlash is reported when more than half the reversals show it,
+else the travel of the whole transition bounds it
+(`r.reversal.backlashBound_um`).
+
+What limits it: the torque ripple, 1 % at the motor turn and its
+harmonics (the lead is 72.6 um per motor turn), the noise of the inertia
+correction (J known to 10 % leaves a tenth of the peak inertial torque,
+0.5 % at 0.3 mm/s and 5 % at 2.5 mm/s) and the row spacing at the speed. The
+0.3 mm/s reversals are the clean ones; the table prints the groups by
+speed, with the share that showed a plateau, and the flat segment is
+trusted where the speeds agree.
+
+### 10.3 Dither, closed liquid chamber (session 1)
+
+Triangles of about +-0.15 mm at 0.2 mm/s (legs of 1.5 s), ten cycles,
+about mean pressures of 1, 5 and 9 MPa: a `ramp` to the pressure, then the
+`velstep` train, the probe armed at every command change. At each
+reversal the torque changes by the friction reversal while the pressure
+stands still (the piston sticks); the motor travel during it over the
+torque change is 1/k_s, at about 1 um resolution. At 1 MPa the pressure
+force (3.4 kN) is below the friction, so the force through the path
+passes zero and backlash appears; at 5 and 9 MPa it does not.
+
+```matlab
+opts.probe = true;
+[path, info] = charDriveRecipe('dither');        % levels 1, 5 and 9 MPa, 75 captures, 105 s
+% the pressure swings by +-0.15 mm x 7.2 MPa/mm = 1.1 MPa about each level; the call errors if
+% the top comes within 0.5 MPa of the 11 MPa guard (opts.stiffness_MPa_mm, opts.levels_MPa)
+r = charRun('dither', path, opts);               % the liquid-full, purged chamber of the K runs, proximal valve shut
+rd = charDrivePath(r.capFiles);
+rd.dither.groups                                 % per pressure and direction: backlash, windup, stiffness
+```
+
+`charDriveRecipe('dither')` is, for each level P, `{'ramp', 0.1, P, 240}`,
+`{'dwell', 2}` and `{'velstep', [-0.2 repmat([0.2 -0.2], 1, 10) 0.2 0],
+[0.75 1.5 * ones(1, 20) 0.75 2]}` (half a leg down, ten up-and-down
+cycles, half a leg back, the stop). The ramp goes up or down to reach each
+level from the one before (`opts.P_start_MPa`, 0 by default).
+
+**The fit** is the same transition analysis, with the chamber closed. A
+capture lasts 2 s and the legs 1.5 s, so each holds the next reversal too;
+only the first is analysed. The late torque is regressed on the pressure
+and evaluated at the reversal's pressure (the extremum of the pressure
+about the reversal), because the load-dependent friction changes with it
+along the leg. The reversals are grouped by their pressure (bins of 1 MPa)
+and direction, so the top and the bottom turn of each triangle are
+separate rows: the table has the torque reversal, the travel of the whole
+transition, the backlash (the flat segment, only where the majority of
+the group shows it), the windup, the stiffness or its bound and the
+pressure change over the transition one sensor lag later, which says the
+chamber stood still. The windup over the torque change gives
+k_s = (1 - phi(0)) (L1 - L2) newtonPerPct / windup, the part of the
+reversal outside the motor's own friction flip; a windup within 3 um is
+reported as the bound at 3 um, which is below the stiffness when the true
+windup is within it too.
+
+### 10.4 What the fit returns
+
+| Field | Contents |
+|---|---|
+| `r.inertia` | `.sizes` (per step size: n, J in % per mm/s^2 with its quartiles, mass in kg), `.J_pct_per_mm_s2`, `.mass_kg`, `.steps` |
+| `r.friction` | `.logs` (per K log: pairs, torque reversal and up/down offset on the grid, medians, bound), `.P_MPa`, `.dT_pct`, `.dF_kN`, `.dX_um` (median over the logs), `.a_pct` and `.b_pct_per_MPa` (dT = a + b P), `.Fc_N`, `.mu` |
+| `r.stiffness` | `.bound_N_per_um`, `.bound_pct_per_um` (the weakest log), `.boundPath_N_per_um` (the motor-side friction out), `.resolved` (an offset above the floor) |
+| `r.reversal` | `.rec` (per capture), `.groups` (per speed), `.backlash_um` (NaN when none), `.backlashBound_um`, `.motorFriction_pct`, `.motorFriction_kN` |
+| `r.dither` | `.rec`, `.groups` (per pressure and direction), `.backlash_um`, `.backlashBound_um` |
+| `r.checks`, `r.pass` | the named checks: the inertia's spread (interquartile range over the median at 1 mm/s and more, below 0.35) and sign, the repeat of the torque reversal across the K logs (spread over mean below 0.3), its rise with the pressure, the up/down offset within the floor (the hose-open log fails this one), and the share of captures whose reversal the noise lets through (0.7) |
+
+`opts` has the thresholds (`floor_um`, `res_um`, `minBacklash_um`,
+`hingeRatio`, `inertia_pct`, `motorFriction_pct`, `logShuntOhms`, ...;
+`help charDrivePath`). The logs of the 26 October runs were recorded at
+434 ohm, which the pressure grid of the K logs hardly notices (3 %); pass
+`opts.logShuntOhms = 434` to rescale them.
+
+**Carrying it over.** `r.inertia.mass_kg` is `mr` in `models/params.py`
+(lossless; with an efficiency e the mass at the piston is e times it for
+the motor pushing the piston); the stiffness bound justifies the model
+having no compliance between the motor and the piston (`models/README.md`,
+"Measured values"). A backlash or a windup that the dither resolves
+would add a dead zone and a spring to the plant's drive and to the
+chamber's effective stiffness at the end of a delivery, where the
+chamber is stiffest.

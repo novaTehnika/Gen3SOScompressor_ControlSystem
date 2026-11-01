@@ -16,11 +16,15 @@ sequences them and says what each run is for.
 | Drive dead time `t_dead` and lag `tauV` at the motor | 0 | `frictionRun('s1', 'steps')` |
 | Whether the drive slews (`slew_limited`) | 0 | the same steps with `G_cfgDirectCtrlAccel` at 1 mm/s² |
 | Friction `Fc`, `b`, breakaway | 0 | `frictionRun` unloaded, in the bore and withdrawn |
+| Reflected inertia `mr` | 0 | the same steps, `charDrivePath` |
+| Backlash and motor-side friction of the drive path | 0 | direct reversals in the open chamber, `charDriveRecipe('reversal')` |
 | Fill and dead volume `Vl0`, `V_passages` | 1 | the fill weighed against the geometry |
 | Bulk modulus `K`, liquid against series compliance | 1 | `K300` x3, then `K200` x2 on the drained-down fill |
 | Lag at the piston | 1 | `lag_wet` with the probe; the `K300` captures too |
 | Stop distance under load (`G_cfgPressureDecel` and its delay) | 1 | `charStopPath` at 8 and 10 MPa |
 | Load friction `mu` | 1 | the stops' legs and the deliveries |
+| Drive path stiffness (bound) and friction reversal under load | 1 | the `K300` ramps, `charDrivePath`; the dither at 1, 5 and 9 MPa |
+| Backlash and windup under load | 1 | the dither, `charDriveRecipe('dither')` |
 | Hose compliance `C_hose`, wall against air | 1 | `K300_hose` before and after a hose purge |
 | Orifice `Cd` | 1 | deliveries at 4, 7 and 10 MPa, discharge weighed |
 | Hose procedure inputs: purge volume, `tube_refills`, `Tclose` | 1 and 2 | observed during the deliveries |
@@ -75,7 +79,25 @@ Piston in the bore, chamber open, no liquid.
    longer than 60 ms the `Acceleration` input does limit the drive and
    `slew_limited` is a real option; if not, the question in TODO.md is
    closed.
-4. **Friction unloaded** (`bench/friction/README.md` 4.1), both passes,
+4. **Inertia and backlash of the drive path**
+   (`bench/characterisation/README.md` section 10), after the drive
+   steps, the chamber still open and the piston in the bore, 5 mm clear
+   of the position guard in the direction of the first command: direct
+   reversals from +v to -v with no stop, at 0.3, 1 and 2.5 mm/s, each
+   command held 2 s, the probe armed at every command change:
+
+   ```matlab
+   opts.probe = true;
+   [path, info] = charDriveRecipe('reversal');       % 27 captures, 54 s
+   rrev = charRun('rev', path, opts);
+   rd = charDrivePath([r1.capFiles r2.capFiles rrev.capFiles]);
+   ```
+
+   `rd.inertia.mass_kg` is `mr` (lossless); `rd.reversal.backlash_um` and
+   `rd.reversal.motorFriction_kN` are the backlash and the motor-side
+   friction, or a bound on the backlash where the torque reverses with
+   no flat segment. The 0.3 mm/s reversals are the clean ones.
+5. **Friction unloaded** (`bench/friction/README.md` 4.1), both passes,
    with the probe so the breakaway and the stick time are captured:
 
    ```matlab
@@ -87,7 +109,7 @@ Piston in the bore, chamber open, no liquid.
    Coulomb term is the one open question in the friction set: 6.1 kN
    from the friction bench, 4.4 kN from the loaded legs of the stops
    runs. The loaded legs of session 1 settle it.
-5. **While the controller is idle, if time allows** (the link model, not
+6. **While the controller is idle, if time allows** (the link model, not
    the physical models): the register count sweep with Wireshark
    (`bench/modbus/README.md`, "Register count") and a pull of the cable
    with the shell running, to settle when the model stops (TODO.md,
@@ -96,7 +118,7 @@ Piston in the bore, chamber open, no liquid.
 ## Session 1: one liquid-only fill, about three hours
 
 Fill A: about 343 mL at the 283 mm start, proximal valve shut, the hose
-prefilled with saline at atmosphere. Everything up to step 7 runs on
+prefilled with saline at atmosphere. Everything up to step 8 runs on
 this one fill; the deliveries then drain it to the second fill level, so
 no second fill is needed.
 
@@ -117,7 +139,7 @@ no second fill is needed.
    falls with pressure. Three things here can: the weighed fill (air
    shows as a shortfall against the geometry), the hold at 10 MPa (gas
    dissolves and the pressure decays at constant position; a compliance
-   does not), and the second fill level of step 7 (a series compliance
+   does not), and the second fill level of step 8 (a series compliance
    is the same at both fills). Take the liquid K from the fit's liquid
    term (`K_liq_GPa`) and record the gas term of every run.
 2. **Bulk modulus**, three runs, probe on (section 3):
@@ -130,7 +152,11 @@ no second fill is needed.
    ```
 
    The schedule check is the first commissioning step of the gain
-   schedule: the bound must not sit below the measured stiffness.
+   schedule: the bound must not sit below the measured stiffness. The
+   same logs give the friction reversal under load and the bound on the
+   drive path's stiffness, `charDrivePath({r1.file, r2.file, r3.file})`:
+   the up/down offset of the motor position at the same pressure,
+   through a 25 kN reversal.
 3. **Lag at the piston** (section 5, closed chamber at 3 to 5 MPa):
 
    ```matlab
@@ -141,7 +167,25 @@ no second fill is needed.
    `rl.tauP_s` is the parameter the robustness study spans 10 to 50 ms
    for; the K300 captures carry the same information at every ramp
    start and end.
-4. **Stops under load** at 8 and 10 MPa (section 6), the probe armed for
+4. **Dither** about 1, 5 and 9 MPa, before the stops, on the same fill
+   with the proximal valve shut. Triangles of +-0.15 mm at
+   0.2 mm/s, legs of 1.5 s, ten cycles at each level, the probe armed at
+   every command change:
+
+   ```matlab
+   opts.probe = true;
+   [path, info] = charDriveRecipe('dither');         % 75 captures, 105 s; errors if the swing nears the guard
+   rdi = charRun('dither', path, opts);
+   rd = charDrivePath([r1.capFiles r2.capFiles rrev.capFiles rdi.capFiles]);   % session 0's steps and reversals too
+   ```
+
+   At each reversal the torque changes by the friction reversal while
+   the pressure stands still; `rd.dither.groups` has, per reversal
+   pressure and direction, the backlash (at 1 MPa the pressure force,
+   3.4 kN, is below the friction, so the force through the path passes
+   zero and the flat segment shows; at 5 and 9 MPa it does not), the
+   windup and the stiffness or its bound.
+5. **Stops under load** at 8 and 10 MPa (section 6), the probe armed for
    every stop:
 
    ```matlab
@@ -158,7 +202,7 @@ no second fill is needed.
    `mu` and the loaded Coulomb term against session 0's unloaded one.
    The liquid-only chamber is the stiffest case, which is the one the
    allowance must cover.
-5. **Hose compliance** (section 3, "Hose stiffness"). Bring the chamber
+6. **Hose compliance** (section 3, "Hose stiffness"). Bring the chamber
    to atmosphere, open the proximal valve, run the K path once; purge
    the hose with a short delivery at 2 MPa (the distal valve open until
    no bubbles leave the orifices; weigh the discharge, which is the purge
@@ -178,7 +222,7 @@ no second fill is needed.
    by the purge volume. The gas term of these runs less the closed
    chamber's pocket is the hose's air, a second reading of the same
    split.
-6. **Orifice Cd**, three deliveries at held pressure with the discharge
+7. **Orifice Cd**, three deliveries at held pressure with the discharge
    weighed (section 4), hose open as in service:
 
    ```matlab
@@ -198,7 +242,7 @@ no second fill is needed.
    log for the 0.24 mL step at the next opening that says the tube
    drained (`tube_refills`). The deliveries also give loaded friction
    points at three pressures, in one direction.
-7. **Second fill level, from what is left.** After the deliveries the
+8. **Second fill level, from what is left.** After the deliveries the
    chamber holds `V1` minus the purge and the three discharges, about
    190 mL of purged liquid. Shut the proximal valve and run the K path
    twice:
@@ -269,9 +313,12 @@ state.
 ## Carrying the results over
 
 - `models/params.py`: `K`, `C_hose`, `Cd`, `t_dead`, `tauV` (the piston
-  value if resolved), `tauDiss`, `Fc`, `b`, `mu`, `noise`, `P_offset`
-  (zero with the input calibrated), `Vl0` and `V_passages` from the
-  weighed fill. `models/README.md` "Measured values" and the
+  value if resolved), `tauDiss`, `Fc`, `b`, `mu`, `mr`, `noise`,
+  `P_offset` (zero with the input calibrated), `Vl0` and `V_passages`
+  from the weighed fill. A backlash or a windup that the reversal and
+  dither runs resolve is a dead zone and a spring the model does not
+  have; the stiffness bound (4.7 kN/um from the October ramps) is what
+  keeps it out. `models/README.md` "Measured values" and the
   characterisation README's results table carry the run names.
 - `design/pressure-loop/robust.py`: narrow the ranges to the new spread,
   then rerun `study_robust`, `study_compare` and `study_delivery` with
