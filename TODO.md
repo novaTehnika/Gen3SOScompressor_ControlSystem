@@ -1,7 +1,8 @@
 # TODO
 
 Open items after the step probe, position speed, configuration and cleanup
-work (PR #21). Grouped by where they have to be done.
+work (PR #21) and the simulator, models and link timing work (PR #22).
+Grouped by where they have to be done.
 
 ## MotionWorks project
 
@@ -51,7 +52,9 @@ reference for every declaration.
       registers and a `PositionSpeed` Constant block is added.
 - [ ] Relaunch the operator app and check the new "Move speed" field.
 - [ ] Run `tests\run_all.bat` under MATLAB, including the MEX build of the
-      compiled simulated slave. It has only been run under Octave.
+      compiled simulated slave. It has only been run under Octave. The
+      Python parity tests (`stTargetParity.py`, `plantParity.py`) also need
+      a C compiler as `CC` (for example `set CC=gcc` with MinGW-w64).
 
 ## Checks on the machine
 
@@ -75,6 +78,45 @@ reference for every declaration.
       waits for the probe's arm acknowledgement.
 - [ ] When reading delays from probe captures, allow one scan: the probe
       logs the velocity feedback one scan older than the command.
+- [ ] Run `bench/modbus/modbusCountSweep.m` with a Wireshark capture and
+      analyse it with `modbusCaptureTiming.py` (README "Register count").
+      Fill the table there and set `perRegister` in
+      `slave-sim/modbusLinkConfig.m`. Writes need a block of holding
+      registers inside the group that the program does not use, passed as
+      `writeStart`. If the same-tick share falls with the register count,
+      make `pNextTick` depend on the count too.
+- [ ] Measure what the models still assume (`design/pressure-loop/README.md`,
+      "Open questions"): the dissolution time constant `tauDiss`, the lag
+      at the piston, and how much of the hose's compliance is wall and how
+      much trapped air.
+
+## Simulator and tests
+
+- [ ] The link timing model (`slave-sim/modbusLink.m`) leaves out what the
+      Simulink side adds: the master's step overrunning while a Modbus call
+      blocks, the exchange that arrives a period late (about one a minute
+      at 50 ms on the bench), and a lost link stopping the Simulink model
+      (bench case D). `closedLoopModbusStep` assumes every exchange
+      completes.
+- [ ] Speed up `tests/fakeProbeLink.m`: `logScan` reads the whole
+      `S.sl.G` every scan, which on the compiled slave builds a snapshot
+      each time. `frictionRunSim` and `charRunSim` went from about 55 s and
+      88 s to 135 s and 165 s with it. Read only the fields it needs.
+- [ ] `PRG_PressureProbe` is emulated by hand in `tests/fakeProbeLink.m`,
+      not translated from its ST. Translate the bench slave programs with
+      the c target, or drop the emulation if the program is retired (see
+      Open decisions).
+- [ ] Simplifications of the simulated slave to keep in mind or remove:
+  - [ ] Position moves, jog and stop prescribe the piston's velocity; the
+        drive's dead time and lag apply only in `Y_DirectControl`'s
+        velocity and torque modes.
+  - [ ] The chamber always holds a run's starting contents (the 1:1 charge
+        at the supply pressure, hose open); there is no fill or vent.
+  - [ ] Before the cylinder entry the pressure reads zero while the plant
+        keeps its contents.
+- [ ] Optional: a Modbus TCP server in front of the simulated slave, so the
+      bench scripts and the Simulink shell can run against it over the
+      network.
 
 ## Documentation
 
@@ -96,6 +138,12 @@ reference for every declaration.
 - [ ] Retire `PRG_PressureProbe`: the main probe records the raw pressure
       voltage every scan, so the noise statistics could be computed on the
       master.
+- [ ] On the plant model the slave's pressure loop overshoots a 10 MPa
+      target by about 0.6 MPa and settles in about 13 s
+      (`tests/slavePressureMode.m`), as `design/pressure-loop/README.md`
+      reports for the GVL loop. In the studies `ScheduledSlaveController`
+      arrives in 2.4 s without overshooting the reading. Decide whether to
+      port it to the slave.
 - [ ] The probe's record index wraps after 2^32 scans (about 200 days at
       4 ms of uninterrupted running), and the master does not handle the
       wrap.
