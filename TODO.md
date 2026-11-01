@@ -21,18 +21,30 @@ reference for every declaration.
   - [ ] Add `E_ProbeState`, `E_ProbeXferState`, `ARRAY104WORD` and
         `ARRAY65536WORD`.
 - [ ] Function blocks:
+  - [ ] Mode and confirmation path read from the Modbus registers
+        (PR #14), if not already done: add `FB_IntToMode`; delete
+        `FB_BitsToMode`, `FB_ModeToBits`, `FB_FaultToBits` and
+        `FB_OutputMux`; rename the `FB_FaultResetHandler` input
+        `BitsStable` to `CodeStable`.
   - [ ] Rename `FB_PositionCommandGate` to `FB_PositionPathShaper`.
   - [ ] Add `FB_Probe` (`Stage` is a `VAR_OUTPUT`).
   - [ ] Update the declarations of `FB_GoHome` (`StopDeceleration`
         input), `FB_SafetyMonitor` (state-property inputs),
         `FB_AnalogInputFilter` and `FB_ModeDecoder`.
 - [ ] `PRG_Main` locals:
+  - [ ] PR #14, if not already done: remove `fbFilterModeBit0`-`2`,
+        `bFilteredModeBit0`-`2` and `fbOutputMux`; add
+        `fbConfModeToInt : FB_ModeToInt`.
   - [ ] Add the state-property BOOLs, `rPosShaperVelMax`, `fbProbe` and
         `nProbeWord`.
   - [ ] Rename `fbPosGate` to `fbPosShaper` and `bPosGateActive` to
         `bPosShaperActive`.
 - [ ] `PRG_PressureProbe`: add the local `nWindow : INT`.
 - [ ] Globals:
+  - [ ] PR #14, if not already done: add `G_sysConfirmedModeCode : UINT`.
+        First confirm the LD POU reads none of `G_diModeBit0`-`2`,
+        `G_diMotionEnable`, `G_diFaultReset` and `G_doModeConfBit0`-`2`
+        (`%IX0.0`-`0.4`, `%QX0.0`-`0.2`), then remove them.
   - [ ] Remove `G_cmdMoveVelocity`, `G_staMoveVelocity`,
         `G_sysCycleCount`, `G_posModeEntryPosition`,
         `G_posExitGuardBoundary`, `G_sysMotionActive`, `G_sysInPosition`,
@@ -210,9 +222,18 @@ reference for every declaration.
       `G_cfgPosSoftLimitMax`. The piston exit boundary is
       `G_cfgPosCylinderEntry + G_cfgPosExitGuardMargin`, not the soft
       limit.
+- [ ] `docs/slave/FB_Review_Summary.md` carries review dates in its
+      heading and in the `FB_HandshakeManager` and `FB_SafetyMonitor`
+      status lines. Restate it as a description of the current blocks, or
+      retire it.
 
 ## Open decisions
 
+- [ ] Slave outputs DO3-DO6 (`G_doPerformanceStatus`, `G_doFaultActive`,
+      `G_doHomingComplete`, `G_doInMotion`) are still driven in
+      `PRG_Output`, but nothing on the master side is wired to them; the
+      master reads the same values from IR5-IR8. Keep them as status lines
+      or stop driving them. DI0-DI5 and DO0-DO2 are unused.
 - [ ] Merge `G_cfgGoHomeAccel` and `G_cfgHomeLimAccel` (both 5 mm/s², the
       same kind of move) into one `G_cfgMoveAccel`.
 - [ ] `G_cfgGearRatio` and `G_cfgLeadScrewPitch` duplicate the Hardware
