@@ -77,7 +77,7 @@ task interval.
 | 9–10 | `%MD3.483344` | REAL | `G_mbSalineVolume` | Saline volume of the fill, mL, for the pressure gain schedule. Latched by the slave on entry to pressure mode; 0 (never written) makes the schedule fall back to the configured gains |
 | 11–12 | `%MD3.483348` | REAL | `G_mbOxygenRatio` | Oxygen charge as STP volume per saline volume (1.0 for 1:1), for the pressure gain schedule. Latched on entry to pressure mode |
 | 13–20 | | | | Reserved |
-| 101–110 | | | | Bench areas (`bench/modbus`, `bench/pressure`): not loaded with the main program in service |
+| 101–110 | | | | Bench area (`bench/modbus`): not loaded with the main program in service |
 | 111 | `%MW3.483548` | UINT | `G_mbProbeArm` | Step probe (section 6): a changed value is an arm |
 | 112–113 | `%MW3.483550` | UINT ×2 | `G_mbProbeReqLo`, `G_mbProbeReqHi` | Step probe: index of the first record wanted in the window (low word first) |
 | 114 | `%MW3.483554` | UINT | `G_mbProbeLength` | Step probe: records the next arm wants, 0 = open ended |
@@ -102,7 +102,8 @@ task interval.
 | 15–16 | `%QD73820` | REAL | `G_mbActualTorque` | `G_sysActualTorque` (% of rated) |
 | 17–18 | `%QD73824` | REAL | `G_mbCommandedPosition` | `G_sysCommandedPosition` (mm) |
 | 19–20 | `%QD73828` | REAL | `G_mbActualPressure` | `G_sysActualPressure` (MPa gauge): the transducer on the slave's analog input, scaled by `FB_PressureInput`. Valid in every mode; below zero or above range when the loop current is out of range |
-| 101–370 | | | | Bench areas (`bench/modbus`, `bench/pressure`): not loaded with the main program in service |
+| 101–108 | | | | Bench area (`bench/modbus`): not loaded with the main program in service |
+| 109–400 | | | | Free |
 | 401–524 | | | | Step probe, the next table (section 6) |
 
 ---

@@ -116,9 +116,9 @@
         STEP PROBE REGISTERS (FB_Probe), an optional side channel beside the
         protocol: nothing in the master/slave protocol depends on them.
         Holding group FC#03,06,16 extends to HR114 (HR101-110 are left to
-        the bench programs in bench/). Input group FC#04 extends to IR524
-        (IR101-370 are left to PRG_PressureProbe). See
-        docs/master/ModbusRegisterMap.md.
+        the bench program in bench/modbus). Input group FC#04 extends to
+        IR524 (IR101-108 are left to the same bench program, IR109-400 are
+        free). See docs/master/ModbusRegisterMap.md.
         ======================================================================== *)
 
      (* Holding registers, master -> slave *)

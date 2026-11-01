@@ -267,9 +267,8 @@ by default):
    compiler refuses the 65536-word ring, shrink it: the constant `cDepth`,
    the `ARRAY65536WORD` bound (`cDepth` x 8 words) change together, and the
    master reads the depth from the slave.
-3. Do not load `PRG_PressureProbe` or `PRG_ModbusBench` with the same
-   registers in service; the first uses HR101 and IR101-370 (`G_mbNoise*`),
-   the second HR101-110 and IR101-108.
+3. Do not load `PRG_ModbusBench` (HR101-110 and IR101-108) with the main
+   program in service. IR109-400 are free.
 4. Compile, download, start.
 
 Then, with the piston placed as for the unloaded set:
