@@ -21,7 +21,7 @@ reference for every declaration.
   - [ ] Remove `ST_CmdMoveVelocity`, `ST_StaMoveVelocity` and the
         `Deceleration` field of `ST_CmdDirectControl`.
   - [ ] Add `E_ProbeState`, `E_ProbeXferState`, `ARRAY104WORD` and
-        `ARRAY65536WORD`.
+        `ARRAY32768WORD`.
 - [ ] Function blocks:
   - [ ] Mode and confirmation path read from the Modbus registers
         (PR #14), if not already done: add `FB_IntToMode`; delete

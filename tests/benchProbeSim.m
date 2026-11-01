@@ -33,7 +33,7 @@ pr = bcfg.probe;
 scan = bcfg.slaveScan;
 
 % --- A lost arm is written again and acknowledged ----------------------------------
-[link, env] = freshLink(8192);
+[link, env] = freshLink(4096);
 p = benchProbe('new', pr, scan);
 p = benchProbe('arm', p, struct('step', 3, 'tag', 'a', 'nRecords', 100));
 assert(p.armBusy && p.nPending == 1);
@@ -57,7 +57,7 @@ checkAgainstRing(caps{1}, S, scan);
 assert(S.sp.echo == S.sp.arm && S.sp.arm == 2, 'arm values %d, %d', S.sp.arm, S.sp.echo);
 
 % --- A torn read is discarded and read again ---------------------------------------
-[link, env] = freshLink(8192);
+[link, env] = freshLink(4096);
 p = benchProbe('new', pr, scan);
 p = benchProbe('arm', p, struct('step', 1, 'nRecords', 300));
 [p, caps] = runSlots(p, link, env, 0.05, 3, @(p, caps) ~p.armBusy);
@@ -71,7 +71,7 @@ checkAgainstRing(caps{1}, S, scan);
 fprintf('ok  three torn reads discarded, capture of 300 records intact\n');
 
 % --- An arm made while an earlier capture is being read ------------------------------
-[link, env] = freshLink(8192);
+[link, env] = freshLink(4096);
 p = benchProbe('new', pr, scan);
 p = benchProbe('arm', p, struct('step', 1, 'tag', 'first', 'nRecords', 500));
 [p, caps] = runSlots(p, link, env, 0.05, 3, @(p, caps) ~p.armBusy);
@@ -121,7 +121,7 @@ assert(t < 12, 'overrun found only at %.1f s', t);
 fprintf('ok  stream lost to a %.0f ms reader after %.1f s (%d records kept)\n', 25 * scan * 1000, t, N);
 
 % --- Drain reads everything pending ---------------------------------------------------
-[link, env] = freshLink(8192);
+[link, env] = freshLink(4096);
 p = benchProbe('new', pr, scan);
 n = [300 500 100];
 for k = 1:3
@@ -140,7 +140,7 @@ fprintf('ok  drain read three queued captures (marks %d, %d, %d)\n', ...
     caps{1}.mark, caps{2}.mark, caps{3}.mark);
 
 % An arm the slave never sees is given up after the timeout and counted.
-[link, env] = freshLink(8192);
+[link, env] = freshLink(4096);
 pr2 = pr;
 pr2.timeout = 1;
 p = benchProbe('new', pr2, scan);
@@ -191,11 +191,11 @@ assert(r.state == 1 && r.echo ~= 9 && r.written == w + 3, 'enabled again: state 
 fprintf('ok  recording states: CAPTURING, HELD at the last record, RECORDING once the ring overwrites the mark (65 scans on a 64 ring); length 1, longer than the ring (no HELD), open ended; off\n');
 
 % --- Transfer: a fill spread over several scans --------------------------------------
-freshLink(8192);
+freshLink(4096);
 fakeProbeLink('linkTiming', []);
 step(250);
 r0 = probeRegs();
-assert(r0.depth == 8192 && r0.xfer == 0 && r0.count == 13 && r0.start == 0, 'start: depth %d, count %d', r0.depth, r0.count);
+assert(r0.depth == 4096 && r0.xfer == 0 && r0.count == 13 && r0.start == 0, 'start: depth %d, count %d', r0.depth, r0.count);
 [seen, wins] = watchWindow([120 0], 5, false);
 assert(all(seen(1:2, 1) == 1) && all(all(seen(1:2, 2:4) == repmat([0 0 13], 2, 1))), 'half window published: %s', mat2str(seen));
 assert(isequal(wins{1}, r0.window) && isequal(wins{2}, r0.window), 'the window changed before the fill completed');
@@ -243,19 +243,19 @@ fprintf('ok  request %d records ahead is PENDING, then served from the first rec
 fakeProbeLink('slave', @(sl) setWritten(sl, 100000));
 step(3);
 r = probeRegs();
-assert(r.written == 100003 && r.depth == 8192);
+assert(r.written == 100003 && r.depth == 4096);
 prev = r.start;
-gone = r.written - 8192;                            % the scan that serves it writes one more record
+gone = r.written - 4096;                            % the scan that serves it writes one more record
 fakeProbeLink('write', 112, [mod(gone, 65536) floor(gone / 65536)]);
 step(1);
 r = probeRegs();
 assert(gone > 65535 && r.xfer == 3 && r.start == prev && r.tail == prev, 'start overwritten: xfer %d', r.xfer);
-late = r.written - 8192;
+late = r.written - 4096;
 fakeProbeLink('write', 112, [mod(late, 65536) floor(late / 65536)]);
 step(1);
 r = probeRegs();
 assert(r.xfer == 3, 'a start one record past the ring''s oldest was served');
-ok = r.written + 1 - 8192;
+ok = r.written + 1 - 4096;
 fakeProbeLink('write', 112, [mod(ok, 65536) floor(ok / 65536)]);
 step(3);
 r = probeRegs();
@@ -281,13 +281,13 @@ assert(r.xfer == 3 && r.start == prev && r.tail == prev, 'overwritten during the
 step(5);
 r = probeRegs();
 assert(r.xfer == 3 && r.start == prev, 'overrun not held');
-fprintf('ok  start behind the ring is OVERRUN (exact boundary, index %d above 65535, ring 8192), also when overwritten mid-fill; nothing published\n', gone);
+fprintf('ok  start behind the ring is OVERRUN (exact boundary, index %d above 65535, ring 4096), also when overwritten mid-fill; nothing published\n', gone);
 
 % --- Fault mark, the history around a fault, the new columns --------------------------------
-[link, env] = freshLink(8192);
+[link, env] = freshLink(4096);
 p = benchProbe('new', pr, scan);
 p = benchProbe('poll', p, link, env.now());
-assert(p.faultMark == 0 && p.probeState == 1 && p.depth == 8192 && p.xferState == 0, 'status fields after a poll');
+assert(p.faultMark == 0 && p.probeState == 1 && p.depth == 4096 && p.xferState == 0, 'status fields after a poll');
 p = benchProbe('arm', p, struct('step', 1, 'tag', 'run', 'nRecords', Inf));
 p = benchProbe('fault', p, struct('step', 2, 'tag', 'fault', 'nPre', 100, 'nPost', 60, 'wait', true));
 t0 = env.now();
