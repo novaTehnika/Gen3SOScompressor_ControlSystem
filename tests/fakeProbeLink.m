@@ -67,7 +67,12 @@ function out = fakeProbeLink(cmd, varargin)
 %   velocity (mm/s), P the chamber pressure (MPa) and A the piston area
 %   (mm^2). A nonzero tStick holds the axis still for that long after each
 %   command from rest while the torque ramps to F0 + sign (Fc + dFs) + P A,
-%   which is what breakaway looks like in the log.
+%   which is what breakaway looks like in the log. An optional field mr
+%   (kg) is the reflected mass of the drive path, which the plant model
+%   carries (par.mr) in torque mode only: it is set as sl.hook.mass, and
+%   the simulated axis adds the force mr a to the reported torque, a the
+%   change of the axis velocity over the scan, in step with the velocity
+%   feedback.
 
 persistent S R
 out = [];
@@ -111,6 +116,10 @@ switch cmd
         end
     case 'torqueModel'
         S.torque = varargin{1};
+        S.sl.hook.mass = 0;
+        if ~isempty(S.torque) && isfield(S.torque, 'mr')
+            S.sl.hook.mass = S.torque.mr;
+        end
     case 'dropArm'
         S.hook.dropArm = varargin{1};
     case 'tearRead'
