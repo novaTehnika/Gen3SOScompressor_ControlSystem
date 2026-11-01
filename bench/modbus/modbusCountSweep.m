@@ -11,12 +11,21 @@ function result = modbusCountSweep(nCycles, opts)
 %   opts.readCounts    registers per read, FC04 (default [1 2 20 60 125])
 %   opts.writeStart    first holding register written, FC16. Default []:
 %                      no writes. It must lie inside the holding register
-%                      group and outside every register the program uses
-%                      (check the Global Variables worksheet); HR1-12 (the
-%                      protocol) and HR111-114 (the step probe) are refused.
+%                      group (opts.holdingLast) and outside every register
+%                      the program uses (check the Global Variables
+%                      worksheet); HR1-12 (the protocol) and HR111-114 (the
+%                      step probe) are refused. HR101-110 belong to the
+%                      bench programs: stay below them (writeStart 13 with
+%                      the default counts ends at HR100).
 %                      The block is read once (FC03) and the same values
 %                      are written back, so its content does not change.
-%   opts.writeCounts   registers per write (default [1 6 60 123])
+%   opts.writeCounts   registers per write (default [1 6 30 88]). The
+%                      holding group is shorter than the 123 registers of
+%                      the Modbus limit, so the sweep stops at the free
+%                      block's length; the model's split at 123 does not
+%                      depend on a measurement.
+%   opts.holdingLast   last register of the holding group (default 114,
+%                      slave-src/GVL/GlobalVariables_Reference.st)
 %   opts.address, opts.port   the server (default bench/common/benchConfig)
 %
 %   Each cycle sends one request of every case, in turn, so drift affects
@@ -41,7 +50,8 @@ end
 opts = withDefault(opts, 'readStart', 1);
 opts = withDefault(opts, 'readCounts', [1 2 20 60 125]);
 opts = withDefault(opts, 'writeStart', []);
-opts = withDefault(opts, 'writeCounts', [1 6 60 123]);
+opts = withDefault(opts, 'writeCounts', [1 6 30 88]);
+opts = withDefault(opts, 'holdingLast', 114);
 cfg = modbusBenchConfig();
 opts = withDefault(opts, 'address', cfg.address);
 opts = withDefault(opts, 'port', cfg.port);
@@ -49,10 +59,12 @@ assert(all(opts.readCounts >= 1 & opts.readCounts <= 125), 'a read takes 1 to 12
 assert(all(opts.writeCounts >= 1 & opts.writeCounts <= 123), 'a write takes 1 to 123 registers');
 
 % Refuse writes into the protocol's and the step probe's holding registers
-% before connecting
+% and past the end of the holding group, before connecting
 if ~isempty(opts.writeStart)
     last = opts.writeStart + max(opts.writeCounts) - 1;
-    protected = [1 8; 111 114];
+    assert(last <= opts.holdingLast, ...
+        'writes to HR%d-%d run past the holding group (HR1-%d)', opts.writeStart, last, opts.holdingLast);
+    protected = [1 12; 111 114];
     for p = 1:size(protected, 1)
         assert(last < protected(p, 1) || opts.writeStart > protected(p, 2), ...
             'writes to HR%d-%d would overwrite HR%d-%d', opts.writeStart, last, protected(p, :));

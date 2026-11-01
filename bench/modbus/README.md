@@ -103,23 +103,61 @@ tick, so a long transfer costs a tick per request. What it cannot know
 is whether a request with more registers takes the controller longer to
 answer; its `perRegister` term is 0 until this measures it.
 
-```matlab
-r = modbusCountSweep;                                  % reads of 1, 2, 20, 60 and 125 registers
-r = modbusCountSweep(500, struct('writeStart', 201));  % and writes of 1, 6, 60 and 123 registers
-```
+The sweep needs the protocol program (`PRG_Main`, which holds the Modbus
+groups at IR1-524 and HR1-114) loaded with the axis idle and the shell
+stopped: case A of section 4. Reads take input registers from IR1. Writes
+need a block of holding registers that the program does not use: the
+group ends at HR114, HR1-12 are the protocol's, HR101-110 are left to the
+bench programs and HR111-114 are the step probe's, so the free block is
+HR13-100. Pass `writeStart` 13: the default write counts (1, 6, 30 and 88
+registers) end at HR100. The group is shorter than the 123 registers of one
+write, so the sweep cannot reach the largest write; the slope from 1 to 88
+registers gives the term, and the model splits at 123 whatever is measured.
+`modbusCountSweep` refuses a write into HR1-12 or HR111-114, or past the
+end of the group (`opts.holdingLast`), before it connects. The block is
+read once and the same values are written back, so nothing changes.
 
-Reads take input registers from IR1. Writes need a block of holding
-registers inside the holding group that the program does not use: check
-the group's range and the variables in the Global Variables worksheet and
-pass its first register as `writeStart`. HR1-12 and HR111-114 are refused.
-The block is read once and the same values are written back. Capture the
-run in Wireshark and run `modbusCaptureTiming.py` on it: besides the
-figures above it reports, per function code and register count, the
-controller's request → response time and the share answered in the same
-tick (from the controller's separate TCP ACK), and per function code the
-slope of the median against the count, the value for
-`modbusLinkConfig.perRegister`. If the same-tick share falls with the
-count, the model's `pNextTick` needs to depend on the count as well.
+1. Start the Wireshark capture on the lab PC's Ethernet interface with the
+   capture filter `tcp port 502` and leave it running.
+2. In MATLAB:
+
+   ```matlab
+   cd bench/modbus
+   r = modbusCountSweep(500, struct('writeStart', 13));
+   ```
+
+   It sends 500 cycles of reads of 1, 2, 20, 60 and 125 registers and
+   writes of 1, 6, 30 and 88 registers (about one minute) and saves the
+   result under `bench/common/captures`. For a read-only sweep call
+   `modbusCountSweep` with no arguments.
+3. Stop the capture and save it as
+   `bench/modbus/captures/countSweep_01.pcapng` (gitignored). Wireshark's
+   `tshark` must be on the PATH (it installs with Wireshark).
+4. Analyse it with the controller's address as the second argument if it
+   is not 192.168.1.1:
+
+   ```sh
+   cd bench/modbus
+   python3 modbusCaptureTiming.py captures/countSweep_01.pcapng 192.168.1.1
+   ```
+
+   Besides the figures above it reports, per function code and register
+   count, the controller's request -> response time and the share answered
+   in the same tick (from the controller's separate TCP ACK), and per
+   function code the slope of the median against the count with the line
+   `modbusLinkConfig perRegister = ... s`.
+5. Fill the table from the report.
+6. Set `cfg.perRegister` in `slave-sim/modbusLinkConfig.m` to the larger of
+   the two slopes (FC04 and FC16; the model has one term, in seconds per
+   register) and update its comment to say it is measured. A slope within
+   the scatter is reported as 0 and then the term stays 0.
+7. Read the same-tick column. If the share is about 81 % at every count,
+   `cfg.pNextTick` (0.19, one minus the share) stays. If it falls with
+   the count, `pNextTick` has to depend on the count: change
+   `modbusLink.m` (the `tResp` line) to take the probability from the
+   request's register count, and give `modbusLinkConfig.m` the fit.
+8. Run `tests/run_all.sh modbusLinkTiming` to check the model still holds
+   the section 5 figures with the new term.
 
 | Function | Registers | Request → response median / p99 (ms) | Same tick (%) |
 |----------|-----------|--------------------------------------|---------------|
@@ -127,7 +165,9 @@ count, the model's `pNextTick` needs to depend on the count as well.
 | FC04 | 20 | | |
 | FC04 | 125 | | |
 | FC16 | 6 | | |
-| FC16 | 123 | | |
+| FC16 | 88 | | |
+
+Slope of the median against the count (us per register): FC04 ___, FC16 ___.
 
 ## 3. Simulink run
 
