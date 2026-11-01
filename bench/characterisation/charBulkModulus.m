@@ -1,6 +1,6 @@
 function r = charBulkModulus(files, opts)
-%CHARBULKMODULUS Effective bulk modulus K of the saline-filled chamber from
-%   slow constant-velocity ramps logged by frictionRun (README section 3).
+%CHARBULKMODULUS Bulk modulus K of the saline-filled chamber from slow
+%   constant-velocity ramps logged by frictionRun (README section 3).
 %
 %   r = charBulkModulus(file)
 %   r = charBulkModulus({file1, file2, ...}, opts)
@@ -9,10 +9,20 @@ function r = charBulkModulus(files, opts)
 %   opts.pressureRange) is fitted as x(P) = x0 + c1 (P - P0) + c2 g(P),
 %   with g(P) = 1/(P0 + Patm) - 1/(P + Patm). A liquid of bulk modulus K
 %   gives c1 = V / (K A); an undissolved gas volume Vg at P0 gives
-%   c2 = Vg (P0 + Patm) / A, isothermal. So K follows from c1 and the
-%   residual gas is bounded by c2. The linear slope dP/dx of the same data
-%   is the stiffness the pressure loop sees; its K ("effective", including
-%   any gas) is the value for the design model when the gas bound is small.
+%   c2 = Vg (P0 + Patm) / A, isothermal, where Vg is the gas volume at the
+%   segment's mean pressure P0. So K follows from c1 and the gas is
+%   bounded by c2. The linear slope dP/dx of the same data is the
+%   stiffness the pressure loop sees; its K ("effective", including the
+%   gas) is what the loop sees, not the value for the model.
+%
+%   The chamber always holds a pocket of air that cannot be purged: the
+%   passage to the pressure transducer and the transducer's cavity,
+%   opts.airVolume_mL at atmosphere (params.py V_air). It is a fixed,
+%   non-dissolving isothermal gas, so at P0 it is Vg = airVolume Patm /
+%   (P0 + Patm) and the gas term has that floor. The liquid-only K_liq_GPa
+%   (from c1, with the gas term absorbing the pocket) is the value for
+%   params.py's K, and r.K_Pa is set to it. A fitted gas volume beyond the
+%   pocket is free gas the purge left, and the acceptance flags it.
 %
 %   The liquid volume V is the chamber volume at the segment's mean
 %   position, A (posEOT - x) + deadVolume, unless opts.fillVolume_mL gives
@@ -23,10 +33,18 @@ function r = charBulkModulus(files, opts)
 %   compliance dx/dP is also regressed on V: slope 1/(K A) gives the liquid
 %   alone, intercept A/ks the series compliance of the actuator and frame
 %   (ks in N/mm), which the motor encoder cannot separate from the liquid
-%   in a single fill.
+%   in a single fill. The pocket has the same volume at every fill, so it
+%   leaves the slope alone but adds its compliance to the intercept; the
+%   expected pocket compliance of each segment is removed from dx/dP first,
+%   so that the intercept is the series compliance of the machine.
 %
 %   opts.deadVolume_mL     measured dead volume (mL)
 %   opts.fillVolume_mL     measured liquid volume at zero gauge (mL)
+%   opts.airVolume_mL      air in the transducer passage and cavity at
+%                          atmosphere (mL; default charConfig, the value of
+%                          params.py V_air)
+%   opts.airTolerance_mL   gas volume at P0 allowed beyond the pocket
+%                          before the acceptance fails (default 0.3)
 %   opts.pressureRange     [min max] MPa gauge fitted (default [2.5 10.5])
 %   opts.skip              s dropped at the start of each segment (default 1)
 %   opts.minSpeed          mm/s, rows slower are dropped (default 0.03)
@@ -42,10 +60,15 @@ function r = charBulkModulus(files, opts)
 %   opts.quiet             no printing
 %
 %   r.segments  one row per segment: file, step, direction, Pmin, Pmax,
-%               xMean, V_mL, dPdx (MPa/mm), K_lin_GPa, K_liq_GPa, Vg_mL,
-%               residual_MPa, n, and fileIdx (index into files) and rowTop
-%               (the row of the segment's highest pressure in that file)
-%   r.K_Pa      effective bulk modulus for params.py (mean of the segments)
+%               xMean, V_mL, dPdx (MPa/mm), K_lin_GPa, K_liq_GPa, Vg_mL
+%               (fitted gas at P0), P0 (MPa), airAtP0_mL (the pocket at
+%               P0), VgExcess_mL (Vg_mL less the pocket), Vair_fit_mL (the
+%               fitted gas brought to atmosphere), residual_MPa, n, and
+%               fileIdx (index into files) and rowTop (the row of the
+%               segment's highest pressure in that file)
+%   r.K_Pa      liquid bulk modulus for params.py K (mean K_liq_GPa)
+%   r.K_eff_Pa  effective bulk modulus, pocket included (mean K_lin_GPa)
+%   r.gasExcess_mL  largest fitted gas volume beyond the pocket (mL)
 %   r.pass      every acceptance check passed
 %   r.checks    the checks, with their values and limits
 
@@ -62,6 +85,8 @@ opts = withDefault(opts, 'minRows', 20);
 opts = withDefault(opts, 'chargeRatio', []);
 opts = withDefault(opts, 'logShuntOhms', []);
 opts = withDefault(opts, 'quiet', false);
+opts = withDefault(opts, 'airVolume_mL', cfg.airVolume_mL);
+opts = withDefault(opts, 'airTolerance_mL', 0.3);
 if ~isfield(opts, 'deadVolume_mL')
     opts.deadVolume_mL = cfg.deadVolume_mL;
 end
@@ -73,8 +98,8 @@ say('\n=== charBulkModulus: %d file(s), %.1f..%.1f MPa\n', numel(files), opts.pr
 expectedTable(say, A, cfg);
 
 seg = struct('file', {}, 'step', {}, 'dir', {}, 'Pmin', {}, 'Pmax', {}, 'xMean', {}, ...
-    'V_mL', {}, 'dPdx', {}, 'K_lin_GPa', {}, 'K_liq_GPa', {}, 'Vg_mL', {}, ...
-    'residual_MPa', {}, 'residual_x_mm', {}, 'n', {}, 'rate_MPa_s', {}, 'fileIdx', {}, 'rowTop', {});
+    'V_mL', {}, 'dPdx', {}, 'K_lin_GPa', {}, 'K_liq_GPa', {}, 'Vg_mL', {}, 'P0', {}, ...
+    'airAtP0_mL', {}, 'VgExcess_mL', {}, 'Vair_fit_mL', {}, 'residual_MPa', {}, 'residual_x_mm', {}, 'n', {}, 'rate_MPa_s', {}, 'fileIdx', {}, 'rowTop', {});
 for f = 1:numel(files)
     d = benchReadCsv(files{f});
     d.pressure = benchPressureRescale(d.pressure, opts.logShuntOhms);
@@ -123,8 +148,11 @@ for f = 1:numel(files)
         s.V_mL = V / 1000;
         s.K_lin_GPa = s.dPdx * V / A / 1000;            % MPa -> GPa
         s.K_liq_GPa = V / (A * s.c1) / 1000;
-        s.Vg_mL = s.c2 * A / (s.P0 + Patm) / 1000;
-        seg(end + 1) = orderfields(rmfield(s, {'c1', 'c2', 'P0'}), seg); %#ok<AGROW>
+        s.Vg_mL = s.c2 * A / (s.P0 + Patm) / 1000;                  % mm^3 -> mL at P0
+        s.airAtP0_mL = opts.airVolume_mL * Patm / (s.P0 + Patm);   % the pocket at P0
+        s.VgExcess_mL = s.Vg_mL - s.airAtP0_mL;
+        s.Vair_fit_mL = s.Vg_mL * (s.P0 + Patm) / Patm;            % the fitted gas at atmosphere
+        seg(end + 1) = orderfields(rmfield(s, {'c1', 'c2'}), seg); %#ok<AGROW>
     end
 end
 r.segments = seg;
@@ -133,13 +161,16 @@ if isempty(seg)
 end
 
 % --- Report -----------------------------------------------------------------
-say('\n%-22s %4s %-4s %11s %8s %8s %10s %7s %7s %7s %8s\n', 'file', 'step', 'dir', 'P range MPa', ...
-    'x mm', 'V mL', 'dP/dx', 'K lin', 'K liq', 'Vg mL', 'res MPa');
+say('\n%-22s %4s %-4s %11s %8s %8s %10s %7s %7s %7s %7s %8s\n', 'file', 'step', 'dir', 'P range MPa', ...
+    'x mm', 'V mL', 'dP/dx', 'K lin', 'K liq', 'Vg mL', 'pocket', 'res MPa');
 for k = 1:numel(seg)
     s = seg(k);
-    say('%-22s %4d %-4s %5.2f-%5.2f %8.3f %8.1f %7.2f/mm %7.2f %7.2f %7.3f %8.3f\n', s.file, s.step, ...
-        s.dir, s.Pmin, s.Pmax, s.xMean, s.V_mL, s.dPdx, s.K_lin_GPa, s.K_liq_GPa, s.Vg_mL, s.residual_MPa);
+    say('%-22s %4d %-4s %5.2f-%5.2f %8.3f %8.1f %7.2f/mm %7.2f %7.2f %7.3f %7.3f %8.3f\n', s.file, s.step, ...
+        s.dir, s.Pmin, s.Pmax, s.xMean, s.V_mL, s.dPdx, s.K_lin_GPa, s.K_liq_GPa, s.Vg_mL, ...
+        s.airAtP0_mL, s.residual_MPa);
 end
+say('Vg and pocket are gas volumes at the segment''s mean pressure; the pocket is %.3f mL at atmosphere.\n', ...
+    opts.airVolume_mL);
 
 Klin = [seg.K_lin_GPa];
 Kliq = [seg.K_liq_GPa];
@@ -147,9 +178,12 @@ Vg = [seg.Vg_mL];
 up = strcmp({seg.dir}, 'up');
 r.K_lin_GPa = mean(Klin);
 r.K_liq_GPa = mean(Kliq);
-r.K_Pa = r.K_lin_GPa * 1e9;
+r.K_Pa = r.K_liq_GPa * 1e9;                             % liquid alone, the pocket is a gas term
+r.K_eff_Pa = r.K_lin_GPa * 1e9;
 r.dPdx_MPa_mm = mean([seg.dPdx]);
 r.Vg_mL = max(Vg);
+r.gasExcess_mL = max([seg.VgExcess_mL]);
+r.Vair_fit_mL = [min([seg.Vair_fit_mL]) max([seg.Vair_fit_mL])];
 if any(up) && any(~up)
     r.hysteresis = abs(mean(Klin(up)) - mean(Klin(~up))) / mean(Klin);
 else
@@ -168,6 +202,10 @@ r.split = [];
 Vs = [seg.V_mL];
 if (max(Vs) - min(Vs)) / mean(Vs) > 0.2
     C = 1 ./ [seg.dPdx];                                 % mm/MPa
+    % Remove the pocket's compliance averaged over each segment's pressure
+    % range, Patm Vair / (A (Pmin + Patm) (Pmax + Patm)), mm/MPa
+    Cair = Patm * opts.airVolume_mL * 1000 ./ (A * ([seg.Pmin] + Patm) .* ([seg.Pmax] + Patm));
+    C = C - Cair;
     p = polyfit(Vs * 1000, C, 1);                        % C = V/(K A) + A/ks
     split.K_GPa = 1 / (p(1) * A) / 1000;
     if p(2) > 0
@@ -193,7 +231,8 @@ if ~isempty(opts.chargeRatio)
         nfree = max(n - kH * Pabs * Vl, 0);
         say('  %5.1f MPa: %.3f mL free gas\n', P, nfree * R * T / Pabs * 1e6);
     end
-    say('  fitted gas bound: %.3f mL (largest segment)\n', r.Vg_mL);
+    say('  fitted gas bound: %.3f mL (largest segment), of which the pocket is %.3f mL at P0\n', ...
+        r.Vg_mL, max([seg.airAtP0_mL]));
 end
 
 % --- Acceptance ---------------------------------------------------------------
@@ -201,7 +240,8 @@ checks = {};
 checks{end + 1} = check('segments', numel(seg), 2, Inf, 'at least two ramps');
 checks{end + 1} = check('K_lin_GPa', [min(Klin) max(Klin)], 0.5, 2.5, 'every segment inside 0.5..2.5 GPa');
 checks{end + 1} = check('residual_MPa', max([seg.residual_MPa]), 0, 0.1, 'fit residual (as pressure)');
-checks{end + 1} = check('gasShare', r.gasShare, 0, 0.05, 'gas compliance share of the total');
+checks{end + 1} = check('gasExcess_mL', r.gasExcess_mL, -Inf, opts.airTolerance_mL, ...
+    'fitted gas at P0 beyond the transducer pocket');
 checks{end + 1} = check('scatter', std(Klin) / mean(Klin), 0, 0.1, 'segment-to-segment spread of K');
 if ~isnan(r.hysteresis)
     checks{end + 1} = check('hysteresis', r.hysteresis, 0, 0.15, 'up against down');
@@ -211,8 +251,10 @@ r.pass = all(cellfun(@(c) c.pass, checks));
 printChecks(say, checks);
 
 say('\nparams.py:\n');
-say('  K = %.3g          # [Pa] effective bulk modulus, %d ramps, %.1f..%.1f MPa\n', ...
+say('  K = %.3g          # [Pa] liquid bulk modulus, %d ramps, %.1f..%.1f MPa\n', ...
     r.K_Pa, numel(seg), min([seg.Pmin]), max([seg.Pmax]));
+say('  (effective K with the gas %.3g Pa; fitted gas %.2f..%.2f mL at atmosphere against V_air %.2f mL)\n', ...
+    r.K_eff_Pa, r.Vair_fit_mL, opts.airVolume_mL);
 say('  Vl0 = %.3g       # [m^3] liquid volume of these runs\n', mean(Vs) * 1e-6);
 say('  stiffness at %.0f mL: %.1f MPa/mm (A K / V)\n', mean(Vs), r.dPdx_MPa_mm);
 end

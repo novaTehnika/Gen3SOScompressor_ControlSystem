@@ -359,9 +359,10 @@ class Params:
 
     def legacy(self):
         """Return a copy with the earlier model: a fixed liquid volume, a
-        single slew limit on the command, and no dead time."""
+        single slew limit on the command, no dead time and no air pocket
+        at the transducer."""
         return replace(self, liquid_depletes=False, slew_asym=False,
-                       slew_limited=True, t_dead=0.0)
+                       slew_limited=True, t_dead=0.0, V_air=0.0)
 
     @classmethod
     def from_overrides(cls, items, base=None):

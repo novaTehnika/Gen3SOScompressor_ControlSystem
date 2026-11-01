@@ -69,6 +69,10 @@ fprintf('ok  velocity session: two ramps, dwell, steps, hold; five captures\n');
 S = fakeProbeLink('state');
 tauV = S.sl.plant.par.tauV;                                         % [s]
 Td = double(S.sl.plant.n_dead) * S.sl.plant.par.Ts;                % [s]
+% The bench's pocket volume (charConfig) is the plant's (params.py V_air)
+assert(abs(S.sl.plant.par.nRT_air / S.sl.plant.par.Patm * 1e6 - ccfg.airVolume_mL) < 1e-9, ...
+    'charConfig airVolume_mL %.4f mL, the plant holds %.4f mL', ccfg.airVolume_mL, ...
+    S.sl.plant.par.nRT_air / S.sl.plant.par.Patm * 1e6);   % [m^3 -> mL]
 lag = charDriveLag([r.capFiles {r.file}], struct('quiet', true, 'accel', 1e6, 'decel', 1e6));
 assert(all(abs([lag.captures.tauV] - tauV) < 0.003), 'lag %s s, plant %.4f', mat2str([lag.captures.tauV], 3), tauV);
 assert(all(abs([lag.captures.Td] - Td) <= ccfg.scanTime + 1e-3), 'dead time %s s, plant %.3f', ...
@@ -92,13 +96,14 @@ fprintf('ok  drive lag fit: captures %.1f ms and %.1f ms dead (plant %.1f, %.1f)
 
 % The charge is gas, not liquid: the bulk modulus fit must reject it and
 % attribute the compliance to gas. Its gas stands for all of the chamber's
-% compliance, eqs. (4) and (42): the free gas (as it was before the
-% ramps; it dissolves as the session runs), the saline and the hose, as
-% the gas volume with that compliance at 2.5 MPa.
+% compliance, eqs. (4), (42) and (46): the free gas (as it was before the
+% ramps; it dissolves as the session runs), the air pocket at the
+% transducer, the saline and the hose, as the gas volume with that
+% compliance at 2.5 MPa.
 bk = charBulkModulus(r.file, struct('quiet', true, 'deadVolume_mL', 10, 'pressureRange', [2.0 3.1]));
 Pabs = 2.5e6 + pl0.par.Patm;                                        % [Pa]
-C = (pl0.n_tot - pl0.n_dis) * pl0.par.RT / Pabs^2 + (pl0.V_l + pl0.V_vir) / pl0.par.K ...
-    + pl0.par.C_hose;                                               % [m^3/Pa]
+C = (pl0.n_tot - pl0.n_dis) * pl0.par.RT / Pabs^2 + pl0.par.nRT_air / Pabs^2 ...
+    + (pl0.V_l + pl0.V_vir) / pl0.par.K + pl0.par.C_hose;           % [m^3/Pa]
 vGas = C * Pabs * 1e6;                                              % [m^3 -> mL]
 assert(~bk.pass && bk.K_lin_GPa < 0.5, 'gas charge accepted as a liquid (K %.3f GPa)', bk.K_lin_GPa);
 assert(abs(bk.Vg_mL - vGas) / vGas < 0.3, 'gas volume %.2f mL, chamber holds about %.2f mL', bk.Vg_mL, vGas);
@@ -114,6 +119,7 @@ opts.probe = 'stops';
 S = fakeProbeLink('state');
 pl = S.sl.plant;
 kPlant = @(Pq) pl.par.A ./ ((pl.n_tot - pl.n_dis) * pl.par.RT ./ (Pq * 1e6 + pl.par.Patm).^2 ...
+    + pl.par.nRT_air ./ (Pq * 1e6 + pl.par.Patm).^2 ...
     + pl.V_l / pl.par.K) * 1e-9;                                    % [Pa/m -> MPa/mm]
 [path, plan] = charStopPath(struct('levels_MPa', [2 3], 'speeds', [0.5 2], 'budget_MPa', 1.0, ...
     'rampSpeed', 0.5, 'stiffness', kPlant, 'T0_s', tauV + Td, 'latency_s', 0.05, 'D_mm_s2', ccfg.velDecel, ...
@@ -139,6 +145,7 @@ opts.probe = 'stops';
 S = fakeProbeLink('state');
 pl = S.sl.plant;
 kPlant = @(Pq) pl.par.A ./ ((pl.n_tot - pl.n_dis) * pl.par.RT ./ (Pq * 1e6 + pl.par.Patm).^2 ...
+    + pl.par.nRT_air ./ (Pq * 1e6 + pl.par.Patm).^2 ...
     + (pl.V_l / pl.par.K + pl.par.C_hose)) * 1e-9;                  % [Pa/m -> MPa/mm]
 [path, plan] = charStopPath(struct('levels_MPa', [8 10], 'speeds', [0.25 0.5], 'budget_MPa', [2 0.7], ...
     'rampOvershoot_MPa', 0.2, 'minRun_mm', 0.03, 'minSteady_s', 0, 'P_start_MPa', 7.5, 'pause_s', 3, ...
@@ -176,7 +183,7 @@ pl = S.sl.plant;
 tEnd = max(L(inStep, T));
 collected = interp1(S.collectLog(:, 1), S.collectLog(:, 2), tEnd) / 1000;
 nFree = @(tq) interp1(S.collectLog(:, 1), S.collectLog(:, 3), tq, 'linear', 'extrap');   % [mol]
-vGasAt = @(Pq, tq) nFree(tq) * pl.par.RT ./ (Pq * 1e6 + pl.par.Patm) * 1e6;          % [m^3 -> mL]
+vGasAt = @(Pq, tq) (nFree(tq) * pl.par.RT + pl.par.nRT_air) ./ (Pq * 1e6 + pl.par.Patm) * 1e6;   % [m^3 -> mL]
 fl = charOrificeFlow(r.file, struct('quiet', true, 'tOpen', 12, 'collected_mL', collected));
 assert(abs(fl.Cd - 0.68) / 0.68 < 0.06, 'Cd %.3f, valve set to 0.68', fl.Cd);
 % The loop pulls the pressure back up during the window, so the piston also
@@ -185,8 +192,8 @@ assert(abs(fl.Cd - 0.68) / 0.68 < 0.06, 'Cd %.3f, valve set to 0.68', fl.Cd);
 % that and Cd comes back within 2 %.
 late = inStep & L(:, T) > 15;
 Pm = mean(L(late, P)); xm = mean(L(late, POS)); tm = mean(L(late, T));
-Cm = nFree(tm) * pl.par.RT / (Pm * 1e6 + pl.par.Patm)^2 + (pl.V_l + pl.V_vir) / pl.par.K ...
-    + pl.par.C_hose;                                                       % [m^3/Pa]
+Cm = (nFree(tm) * pl.par.RT + pl.par.nRT_air) / (Pm * 1e6 + pl.par.Patm)^2 ...
+    + (pl.V_l + pl.V_vir) / pl.par.K + pl.par.C_hose;                      % [m^3/Pa]
 Kgas = (ccfg.pistonArea_mm2 * (ccfg.posEOT - xm) + ccfg.deadVolume_mL * 1000) * 1e-9 ...
     / Cm * 1e-6;                                                           % [mm^3 -> m^3, Pa -> MPa]
 flk = charOrificeFlow(r.file, struct('quiet', true, 'tOpen', 12, 'K_Pa', Kgas * 1e6));
