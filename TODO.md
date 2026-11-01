@@ -33,6 +33,32 @@ reference for every declaration.
   - [ ] Update the declarations of `FB_GoHome` (`StopDeceleration`
         input), `FB_SafetyMonitor` (state-property inputs),
         `FB_AnalogInputFilter` and `FB_ModeDecoder`.
+  - [ ] Remove the `VAR_OUTPUT` members nothing reads, and declare the
+        ones the block still uses as `VAR` locals (types and initial values
+        as in the block's header):
+    - [ ] `FB_DigitalInputFilter`: `RisingEdge`, `FallingEdge`, `Stable`,
+          `RawPassthrough`; delete the local `bLastFiltered`.
+    - [ ] `FB_GoHome`: `Active`, `AtPosition`. `FB_HomeLimit`: `Active`.
+    - [ ] `FB_HandshakeManager`: `HandshakeActive`, `HandshakeTimeout_Q`.
+    - [ ] `FB_ModeDecoder`: `ModeChanged`; `ModeValue` becomes the local
+          `nModeValue : INT`.
+    - [ ] `FB_PistonExitGuard`: `ApproachingLimit`.
+    - [ ] `FB_PositionPathShaper`: `RateLimiting`, `TetherHold`;
+          `ParamError` becomes the local `bParamError : BOOL`.
+    - [ ] `FB_PressureController`: `Error`, `VelLimit`, `Saturated`,
+          `ParamError` become the locals `rError : LREAL`,
+          `rVelLimit : LREAL`, `bSaturated : BOOL`, `bParamError : BOOL`.
+    - [ ] `FB_PressureInput`: `LoopMa`, `OutOfRange`, `ParamError` become
+          the locals `rLoopMa : LREAL`, `bOutOfRange : BOOL`,
+          `bParamError : BOOL`.
+    - [ ] `FB_PressureSchedule`: `Lag` becomes the local `rLag : LREAL`.
+    - [ ] `FB_Probe`: `StartTail` and `Xfer`; `State` becomes the local
+          `eState : E_ProbeState := PROBE_RECORDING`.
+    - [ ] `FB_SafetyMonitor`: `FaultDrive`, `FaultComm` and
+          `FaultPistonExit` (used as the inputs directly); `FaultLimitSwitch`,
+          `FaultPosition` and `FaultPressureSensor` become the locals
+          `bFaultLimitSwitch`, `bFaultPosition` and `bFaultPressureSensor`
+          (BOOL).
 - [ ] `PRG_Main` locals:
   - [ ] PR #14, if not already done: remove `fbFilterModeBit0`-`2`,
         `bFilteredModeBit0`-`2` and `fbOutputMux`; add
@@ -271,16 +297,6 @@ reference for every declaration.
       `ST_DRIVE_RESET`, `ST_PRESSURE_CTRL`, `ST_RECOVERY`,
       `ST_RECOVERY_POSITION` and `ST_RECOVERY_VELOCITY`.
       `docs/master/StateTransitionDiagram.md` is the current text version.
-- [ ] `docs/slave/development/ConfigurationGuide.md` says it covers every
-      `G_cfg*` global but has no rows for `G_cfgCommTimeout`,
-      `G_cfgHoldPositionTimeout`, `G_cfgTorqueStallThreshold`,
-      `G_cfgGearRatio`, `G_cfgLeadScrewPitch`, `G_cfgPosCylinderEntry`
-      and the pressure transducer and loop settings
-      (`G_cfgPressureShuntOhms`, `ZeroMa`, `SpanMa`, `RangeMin`,
-      `RangeMax`, `SensorMinMa`, `SensorMaxMa`, `SensorFaultTime`, `Kp`,
-      `Ki`, `Accel`, `VelMax`, `Decel`, `StopStiffness`, `StopVelMin`,
-      `TorqueLimit`, `TargetMax`, `InBand`). Take defaults and
-      descriptions from the GVL.
 - [ ] `docs/slave/reference/HomingSequenceGuide.md`: the Mode 110
       parameter table gives `G_cfgHomeLimFastApproachVel` as 5.0; the GVL
       has 6.0.
@@ -320,16 +336,6 @@ reference for every declaration.
 
 ## Open decisions
 
-- [ ] 34 function block outputs are read by nothing outside their block
-      (diagnostics; counted once per block, 46 per instance): all four
-      edge and status outputs of `FB_DigitalInputFilter`, the six
-      `Fault*` of `FB_SafetyMonitor`, `FB_Probe`'s `StartTail`, `State`
-      and `Xfer` (PRG_Main reads `StateCode` and `XferCode`),
-      `FB_PressureSchedule`'s `KEst`, `KEstTarget` and `Lag` (read by
-      `tests/slavePressureMode.m` through the simulator), and the rest
-      spread over `FB_GoHome`, `FB_HomeLimit`, `FB_HandshakeManager`,
-      `FB_ModeDecoder`, `FB_PistonExitGuard`, `FB_PositionPathShaper`,
-      `FB_PressureController` and `FB_PressureInput`. Keep or remove.
 - [ ] Retire `PRG_PressureProbe`: the main probe records the raw pressure
       voltage every scan, so the noise statistics could be computed on the
       master.

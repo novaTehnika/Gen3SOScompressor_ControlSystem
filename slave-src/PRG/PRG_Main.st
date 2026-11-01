@@ -836,7 +836,7 @@ bHandshakeState := (G_sysCurrentState = E_SystemState#ST_IDLE) OR
                    (G_sysCurrentState = E_SystemState#ST_RECOVERY);
 
 (* States that move the axis from the master's reference: a stale heartbeat
-   is a fault only here (fbSafetyMonitor, FaultComm) *)
+   is a fault only here (fbSafetyMonitor, link loss) *)
 bCommandedMotion := (G_sysCurrentState = E_SystemState#ST_POSITION_CTRL) OR
                     (G_sysCurrentState = E_SystemState#ST_VELOCITY_CTRL) OR
                     (G_sysCurrentState = E_SystemState#ST_TORQUE_CTRL) OR
