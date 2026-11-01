@@ -67,7 +67,7 @@ reference for every declaration.
         `nProbeWord`.
   - [ ] Rename `fbPosGate` to `fbPosShaper` and `bPosGateActive` to
         `bPosShaperActive`.
-- [ ] `PRG_PressureProbe`: add the local `nWindow : INT`.
+- [ ] Delete `PRG_PressureProbe` from the project and the task.
 - [ ] Pressure gain schedule:
   - [ ] Add `FB_PressureSchedule`, and `IntegScale` (initial value 1.0) to
         `FB_PressureController`.
@@ -268,14 +268,6 @@ reference for every declaration.
       at 50 ms on the bench), and a lost link stopping the Simulink model
       (bench case D). `closedLoopModbusStep` assumes every exchange
       completes.
-- [ ] Speed up `tests/fakeProbeLink.m`: `logScan` reads the whole
-      `S.sl.G` every scan, which on the compiled slave builds a snapshot
-      each time. `frictionRunSim` and `charRunSim` went from about 55 s and
-      88 s to 135 s and 165 s with it. Read only the fields it needs.
-- [ ] `PRG_PressureProbe` is emulated by hand in `tests/fakeProbeLink.m`,
-      not translated from its ST. Translate the bench slave programs with
-      the c target, or drop the emulation if the program is retired (see
-      Open decisions).
 - [ ] Simplifications of the simulated slave to keep in mind or remove:
   - [ ] Position moves, jog and stop prescribe the piston's velocity; the
         drive's dead time and lag apply only in `Y_DirectControl`'s
@@ -301,9 +293,6 @@ reference for every declaration.
 
 ## Open decisions
 
-- [ ] Retire `PRG_PressureProbe`: the main probe records the raw pressure
-      voltage every scan, so the noise statistics could be computed on the
-      master.
 - [ ] The scheduled pressure controller is ported (`FB_PressureSchedule`
       behind `G_cfgPressureScheduleEnable`, off by default; the stiffness
       bound taken at the present and the target pressure; lockstep with

@@ -36,9 +36,8 @@ directory and takes these from here.
    20 ms (p99 30) to 50 ms (p99 70), too slow for the 50 ms exchange
    against the slave's 300 ms watchdog. The probe therefore keeps its
    records in plain memory and maps only IR401-524 and HR111-114. The
-   bench programs `PRG_PressureProbe` (HR101, IR101-370, globals
-   `G_mbNoise*`) and `PRG_ModbusBench` use other registers; only one of
-   those is loaded at a time.
+   bench program `PRG_ModbusBench` uses other registers (HR101-110,
+   IR101-108) and is not loaded with the main program in service.
 
 ## The step probe
 

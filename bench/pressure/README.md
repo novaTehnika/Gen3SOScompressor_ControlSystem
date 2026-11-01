@@ -4,13 +4,16 @@ Measures the noise on the pressure transducer input at the slave's full
 4 ms sample rate, to size the sensor filter (`G_cfgAnalogFilterTimeConst`)
 and to decide whether a capacitor across the loop shunt is needed. The
 protocol registers cannot show this: IR19-20 carry the pressure after the
-median and low-pass filters, read every 50 ms.
+median and low-pass filters, read every 50 ms. The samples come from the
+slave's step probe (`FB_Probe`), which records the raw input voltage
+every scan (record word 6, 0.2 mV per count); the statistics are computed
+on the master.
 
 | File | Contents |
 |------|----------|
-| `slave/PRG_PressureProbe.st` | Slave program: one-second statistics of the raw input and a 250-scan capture on request, in the probe registers |
-| `pressureNoiseProbe.m` | Axis at rest: reads the statistics and a capture through the MATLAB `modbus` object, reports them and saves the capture under `captures/` |
-| `pressureNoiseRun.m` | Axis moving: acts as the master for the run, drives a path of steps through `masterStep` and reads the probe registers between exchanges; one capture and the windows per step |
+| `pressureNoiseProbe.m` | Axis at rest: arms one-second probe captures through `benchProbe`, reports the windows' statistics and a capture's spectrum, saves the capture under `captures/` |
+| `pressureNoiseRun.m` | Axis moving: acts as the master for the run, drives a path of steps through `masterStep` and takes the windows and a capture per step through `benchProbe` in the gaps between exchanges |
+| `pressureNoiseStats.m` | The statistics of one window: mean, rms about the mean, minimum, maximum |
 | `pressureNoiseReport.m` | The report alone: statistics, capture rms and spectrum. Takes the arrays or a saved CSV |
 
 `SafetyHold.slx` (`bench/common/buildSafetyHold`), the Modbus link and the
@@ -22,23 +25,24 @@ The transducer is wired as in service: loop shunt (434 ohm; with the
 input's load, 421.4 ohm effective, `G_cfgPressureShuntOhms`) and, when fitted, the capacitor at the controller terminals, shunt
 low side to the controller's analog ground, `MO1_AI_01` across the shunt.
 
-1. Hardware Configuration, online: the Modbus server setup from
-   `bench/modbus/README.md` section 1, with the **FC#04 input register
-   group enlarged to at least 370 registers** (byte range `%QB73792` to
-   `%QB74531`) so that the capture block IR121-370 lies inside it. Save
-   and cycle power.
-2. Declare the globals listed in the header of `slave/PRG_PressureProbe.st`
-   in the matching groups. `G_mbNoiseSamples` is a located array; if the
-   editor refuses an array at a direct address, declare it with a named
-   type `ARRAY[0..249] OF UINT` from the Data Types worksheet.
-3. Add `PRG_PressureProbe` to the project and assign it to the 4 ms cyclic
-   task. It uses only its own globals and runs beside `PRG_Main`. Do not
-   load it together with `PRG_ModbusBench`, which uses the same registers.
-   Its globals are named `G_mbNoise*` so that it loads beside the main
-   program, whose step probe uses `G_mbProbe*` (HR111-114, IR401-524): the
-   registers do not overlap, and the main program's input group to IR524
-   already contains IR121-370.
-4. Compile, download, start.
+The scripts need no program of their own. The step probe is part of the
+main program and records every scan (`G_cfgProbeEnable` is TRUE by default).
+Its setup is the one of `bench/friction/README.md` section 4.5: the Modbus
+server of `bench/modbus/README.md` section 1 with the FC#04 input register
+group to IR524 and the holding register group to HR114, the probe's globals
+and `FB_Probe` in the project. The probe's registers are
+`docs/master/ModbusRegisterMap.md` section 6; the layout the master reads is
+in `bench/common/benchConfig.m` (`probe`).
+
+A window is a probe capture of one second of consecutive records (250 at
+the 4 ms scan). The probe's ring holds 8192 records, 33 s, and the master
+reads a capture out of it at best one 13-record window per 50 ms gap, so
+the readout of 250 records takes about as long as the second it records.
+The scripts arm the captures one at a time, the next once the one before
+is read out: each window is a second of consecutive scans, and the windows
+of a step do not tile it. The raw input is recorded in 0.2 mV counts, so a
+window's rms includes the quantisation, 0.06 mV rms, which adds in
+quadrature and changes a 2 mV rms by less than 0.1 %.
 
 ## 2. Running
 
@@ -54,8 +58,11 @@ cd bench/pressure
 r = pressureNoiseProbe('idle');          % 5 one-second windows and one capture
 ```
 
-The script prints each window's mean, rms and peak-to-peak in volts and in
-MPa, then arms a capture, waits for it, prints its rms, the rms in three
+The script writes only the probe's registers (it is not a master: nothing
+is commanded, and the slave faults on a missing heartbeat only while
+motion is commanded). It arms five window captures and one more capture,
+one after another, and prints each window's mean, rms and peak-to-peak in
+volts and in MPa, then the capture's rms, the rms in three
 bands (below 25 Hz, 25 to 100 Hz, 100 to 250 Hz) and the five largest
 spectral lines, and saves the capture as
 `bench/common/captures/<label>_<yyyymmdd_HHMMSS>.csv` (time, volts, MPa). A saved
@@ -65,8 +72,9 @@ capture is re-analysed with `pressureNoiseReport('../common/captures/<file>.csv'
 
 `pressureNoiseRun` is the master for the run. It opens one connection,
 exchanges the protocol registers every 50 ms with `masterStep` sequencing
-the handshake, the motion and the stop as the shell does, and reads one
-probe register block in each gap. The safety relay (P0.0), which the shell
+the handshake, the motion and the stop as the shell does, and makes one
+`benchProbe` transaction (a read of IR401-524 and at most one write) in each
+gap. The safety relay (P0.0), which the shell
 normally drives, is held by `SafetyHold.slx`: build it once with
 `bench/common/buildSafetyHold`, open it, select **Connected IO** on the Desktop
 Real-Time tab and save. The run starts the model before the first command
@@ -87,22 +95,26 @@ r = pressureNoiseRun('noCap', {{'idle', 5}, {'jog', 2, 8}, {'jog', -2, 8}, {'pre
 | `{'position', x, s}` | Position mode to `x` mm, then held for `s` seconds after arrival |
 | `{'pressure', P, s}` | Pressure mode at `P` MPa gauge for `s` seconds |
 
-Steps run in order with a stop between them. Each collects the one-second
-windows while it runs and takes one capture `opts.settle` seconds (default
-1) after its running status appears, or after arrival for a position step;
-the step ends after its seconds once the capture is in. The windows and the
-captures are reported per step at the end, the captures saved as
+Steps run in order with a stop between them. Each arms a window whenever
+none is waiting to be read out while it runs, and one more capture
+`opts.settle` seconds (default 1) after its running status appears, or
+after arrival for a position step; the step ends after its seconds once
+the records of its last window and of the capture are written. The records
+are read out in the gaps that follow, as the ring keeps them, and the
+captures still in the ring at the end are drained before the report. The
+windows and the captures are reported per step at the end, the captures saved as
 `bench/common/captures/<label>_<n>_<step>_<timestamp>.csv` and the run as
 `bench/common/captures/<label>_run_<timestamp>.csv` (time, position, velocity, MPa,
 master status, step, exchange time). A window's rms includes any change of
 the pressure itself during that second; the capture's spectrum separates a
-drift (below 25 Hz) from noise.
+drift (below 25 Hz) from noise. `r.windows` has one row per window: step,
+time armed, mean, rms, minimum, maximum (volts).
 
 The run ends early, with the axis stopped, when the master reports a fault,
 link loss or an unconfirmed mode (`r.abort`). Ctrl-C sends one exchange
 with MotionEnable low, and if the script dies the slave's own watchdog stops
-the axis within 300 ms. `tests/pressureNoiseRunSim` runs the script against
-the simulated slave.
+the axis within 300 ms. `tests/pressureNoiseRunSim` runs both scripts
+against the simulated slave's own `FB_Probe`.
 
 The scale is 1 MPa per mA and 421.4 ohm per mA: 1 mV is 0.0024 MPa, and the
 transducer's own 0.2 % of span is 0.03 MPa, about 14 mV.

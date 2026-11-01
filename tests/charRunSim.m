@@ -1,7 +1,7 @@
 function charRunSim()
 %CHARRUNSIM Run bench/characterisation/charRun against the simulated slave
-%   through fakeProbeLink (the friction bench's stand-in, with its step
-%   probe emulation and an outlet valve), then the three fits on what it
+%   through fakeProbeLink (the friction bench's stand-in: the slave's own
+%   step probe behind the link, and an outlet valve), then the three fits on what it
 %   logged: pressure-ended ramps, a dwell, velocity steps and a hold in one
 %   velocity session with captures; the one-pass stopping-distance path of
 %   test 4 (charStopPath) and its fit (charStopDistance); a delivery
