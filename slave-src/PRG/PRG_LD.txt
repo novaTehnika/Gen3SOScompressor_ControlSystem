@@ -42,7 +42,7 @@
 
    Variables (define in MWiec GUI):
      VAR_EXTERNAL:
-       G_sysAxis           : AXIS_REF         (* The axis, created by Hardware Configuration (AXIS1 in the project)
+       AXIS1           : AXIS_REF         (* The axis, created by Hardware Configuration (AXIS1 in the project)
      VAR:
        (* Built-in motion FB instances, one network each
        fbPower             : MC_Power         (* Servo power on and off
@@ -68,11 +68,11 @@
    fbPower : MC_Power - Servo power on and off
    PRG_Main sets the three enables TRUE together in every drive-active
    state and, in ST_FAULT_IDLE, until the brake has engaged.
-     Axis            <- G_sysAxis
+     Axis            <- AXIS1
      Enable          <- G_cmdPower.Enable
      Enable_Positive <- G_cmdPower.EnablePositive
      Enable_Negative <- G_cmdPower.EnableNegative
-     Axis            -> G_sysAxis
+     Axis            -> AXIS1
      Status          -> G_staPower.Status    (* ST_DRIVE_ENABLE waits for it; ST_HOLD_POSITION and
                                                 ST_FAULT_IDLE take it dropping as the drive going off
      Error           -> G_staPower.Error     (* FAULT_DRIVE in ST_DRIVE_ENABLE
@@ -81,9 +81,9 @@
 (* --------------------------------------------------------------------------
    fbReset : MC_Reset - Drive alarm reset
    Execute is held TRUE for the whole of ST_DRIVE_RESET.
-     Axis            <- G_sysAxis
+     Axis            <- AXIS1
      Execute         <- G_cmdReset.Execute
-     Axis            -> G_sysAxis
+     Axis            -> AXIS1
      Done            -> G_staReset.Done      (* ST_DRIVE_RESET -> ST_DRIVE_ENABLE
      Busy            -> G_staReset.Busy      (* Not read by the ST
      Error           -> G_staReset.Error     (* FAULT_DRIVE in ST_DRIVE_RESET
@@ -96,10 +96,10 @@
    Go Home move. Deceleration is G_cfgStopDecel in every case. While it is
    Busy and fbDirectControl.Active has dropped, PRG_Main releases the
    Y_DirectControl hand-off (see fbDirectControl).
-     Axis            <- G_sysAxis
+     Axis            <- AXIS1
      Execute         <- G_cmdStop.Execute
      Deceleration    <- G_cmdStop.Deceleration   (* mm/s^2
-     Axis            -> G_sysAxis
+     Axis            -> AXIS1
      Done            -> G_staStop.Done       (* Ends the stop in ST_HOLD_POSITION, ST_FAULT, ST_RECOVERY, FB_GoHome
      Busy            -> G_staStop.Busy       (* Hand-off release, with fbDirectControl Active FALSE
      Error           -> G_staStop.Error      (* Also releases the hand-off
@@ -112,14 +112,14 @@
    Execute is FALSE and the rates keep the Go Home values, so a move
    interrupted by a hold or fault keeps real rates until fbStop takes the
    axis. The ST sends Direction = Current_Direction.
-     Axis            <- G_sysAxis
+     Axis            <- AXIS1
      Execute         <- G_cmdMoveAbsolute.Execute
      Position        <- G_cmdMoveAbsolute.Position        (* mm, absolute
      Velocity        <- G_cmdMoveAbsolute.Velocity        (* mm/s
      Acceleration    <- G_cmdMoveAbsolute.Acceleration    (* mm/s^2
      Deceleration    <- G_cmdMoveAbsolute.Deceleration    (* mm/s^2
      Direction       <- G_cmdMoveAbsolute.Direction       (* MC_Direction
-     Axis            -> G_sysAxis
+     Axis            -> AXIS1
      Done            -> G_staMoveAbsolute.Done
      Busy            -> G_staMoveAbsolute.Busy
      Active          -> G_staMoveAbsolute.Active
@@ -133,13 +133,13 @@
    overtravel switch and the back-off. Outside homing Forward and Reverse
    are FALSE and the rates keep the homing values, so an abort into
    ST_HOLD_POSITION lets the block decelerate on its own Deceleration.
-     Axis            <- G_sysAxis
+     Axis            <- AXIS1
      Forward         <- G_cmdJog.Forward
      Reverse         <- G_cmdJog.Reverse
      Velocity        <- G_cmdJog.Velocity          (* mm/s
      Acceleration    <- G_cmdJog.Acceleration      (* mm/s^2
      Deceleration    <- G_cmdJog.Deceleration      (* mm/s^2
-     Axis            -> G_sysAxis
+     Axis            -> AXIS1
      InVelocity      -> G_staJog.InVelocity
      Done            -> G_staJog.Done        (* One-scan pulse once stopped after both inputs FALSE
      Busy            -> G_staJog.Busy
@@ -151,11 +151,11 @@
    fbSetPosition : MC_SetPosition - Sets the homed zero
    FB_HomeLimit executes it once at the end of homing with
    G_cfgHomeLimSetPosition. The ST sends Mode = FALSE (absolute).
-     Axis            <- G_sysAxis
+     Axis            <- AXIS1
      Execute         <- G_cmdSetPosition.Execute
      Position        <- G_cmdSetPosition.Position    (* mm
      Mode            <- G_cmdSetPosition.Mode        (* FALSE absolute, TRUE relative
-     Axis            -> G_sysAxis
+     Axis            -> AXIS1
      Done            -> G_staSetPosition.Done
      Busy            -> G_staSetPosition.Busy
      Error           -> G_staSetPosition.Error
@@ -172,7 +172,7 @@
    Velocity and Acceleration set no limit there: FB_PositionPathShaper
    shapes the command and the block is given the shaper's speed. The
    block has no Deceleration pin.
-     Axis            <- G_sysAxis
+     Axis            <- AXIS1
      Enable          <- G_cmdDirectControl.Enable
      ControlMode     <- G_cmdDirectControl.ControlMode   (* Y_ControlMode: PositionMode, VelocityTLMode, TorqueVLMode
      Position        <- G_cmdDirectControl.Position      (* mm; the shaper's command in position mode
@@ -181,25 +181,36 @@
      Acceleration    <- G_cmdDirectControl.Acceleration  (* mm/s^2; G_cfgDirectCtrlAccel, G_cfgPressureAccel in ST_PRESSURE_CTRL
      Torque          <- G_cmdDirectControl.Torque        (* % of rated; the command in torque mode, the limit otherwise
      FilterTimeConstant <- G_cmdDirectControl.FilterTimeConstant  (* s, G_cfgDirectCtrlFilterTime
-     Axis            -> G_sysAxis
+     Axis            -> AXIS1
      Active          -> G_staDirectControl.Active   (* The hand-off waits for it to drop
      Error           -> G_staDirectControl.Error    (* Releases the hand-off
    -------------------------------------------------------------------------- *)
 
 (* --------------------------------------------------------------------------
    fbReadActualPosition : MC_ReadActualPosition - Position feedback
-   fbReadActualVelocity : MC_ReadActualVelocity - Velocity feedback
-   fbReadActualTorque   : MC_ReadActualTorque   - Torque feedback
-   Enable is the left power rail, so each reads every scan. The outputs
-   are the source of every position, velocity and torque the ST uses: the
-   limit and exit-guard checks, the path shaper's seed and tether, the
-   in-motion output, homing, the step probe record and the Modbus
-   feedback registers.
-     Axis            <- G_sysAxis
+   Enable is the left power rail, so position is read every scan.
+     Axis            <- AXIS1
      Enable          <- TRUE (power rail)
-     Axis            -> G_sysAxis
+     Axis            -> AXIS1
      Position        -> G_sysActualPosition   (* mm, fbReadActualPosition
+   -------------------------------------------------------------------------- *)
+
+(* --------------------------------------------------------------------------
+   fbReadActualVelocity : MC_ReadActualVelocity - Velocity feedback
+   Enable is the left power rail, so velocity is read every scan. 
+   feedback registers.
+     Axis            <- AXIS1
+     Enable          <- TRUE (power rail)
+     Axis            -> AXIS1
      ActualVelocity  -> G_sysActualVelocity   (* mm/s, fbReadActualVelocity
+   -------------------------------------------------------------------------- *)
+
+(* --------------------------------------------------------------------------
+   fbReadActualTorque   : MC_ReadActualTorque   - Torque feedback
+   Enable is the left power rail, so torque is read every scan.
+     Axis            <- AXIS1
+     Enable          <- TRUE (power rail)
+     Axis            -> AXIS1
      ActualTorque    -> G_sysActualTorque     (* % of rated, fbReadActualTorque
    -------------------------------------------------------------------------- *)
 
@@ -213,8 +224,8 @@
    ST_DRIVE_RESET and the recovery expect of the flag. Enable is the left
    power rail, as for the feedback readers. The simulator sets the flag
    directly (sl.hook.driveFault).
-     Axis            <- G_sysAxis
+     Axis            <- AXIS1
      Enable          <- TRUE (power rail)
-     Axis            -> G_sysAxis
+     Axis            -> AXIS1
      ErrorStop       -> G_sysDriveFault
    -------------------------------------------------------------------------- *)

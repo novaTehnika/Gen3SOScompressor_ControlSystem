@@ -588,7 +588,7 @@ class ScheduledSlaveControllerST(SlaveController):
         s.CycleTime = c['G_cfgScanTime']                        # [s]
         s.FilterTime = c['G_cfgAnalogFilterTimeConst']          # [s]
         s.MedianSize = c['G_cfgAnalogMedianSize']               # [-]
-        s.DriveDeadTime = c['G_cfgPressureSchedDriveDeadTime']  # [s]
+        s.DriveDeadTime = c['G_cfgPressureSchedDeadTime']  # [s]
         s.DriveLag = c['G_cfgPressureSchedDriveLag']            # [s]
         s.Crossover = c['G_cfgPressureSchedCrossover']
         s.KiRatio = c['G_cfgPressureSchedKiRatio']
@@ -599,9 +599,9 @@ class ScheduledSlaveControllerST(SlaveController):
             s.SalineVolume = par.Vl0 * 1e6      # [m^3 -> mL]
         else:
             s.SalineVolume = self.saline_ml                     # [mL]
-        s.PassagesVolume = c['G_cfgPressureSchedPassagesVolume']
+        s.PassagesVolume = c['G_cfgPressureSchedPassagesVol']
         s.HoseVolume = c['G_cfgPressureSchedHoseVolume']
-        s.HoseCompliance = c['G_cfgPressureSchedHoseCompliance']
+        s.HoseCompliance = c['G_cfgPressureSchedHoseCompl']
         s.HoseOpen = c['G_cfgPressureSchedHoseOpen']
         s.BulkModulus = c['G_cfgPressureSchedBulkModulus']
         if self.oxygen_ratio is None:

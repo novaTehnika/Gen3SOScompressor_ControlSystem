@@ -33,7 +33,7 @@ import st_target_c as stc  # noqa: E402
 
 STEPS = 3000                # calls for the blocks named in CORE, STEPS_OTHER for the rest
 STEPS_OTHER = 800
-STEPS_LONG = {'FB_Probe': 12000}     # past its ring depth of 8192, so the overrun paths run
+STEPS_LONG = {'FB_Probe': 12000}     # past its ring depth of 4096, so the overrun paths run
 # BOOL inputs that follow a schedule of the call number instead of toggling at
 # random: the probe is on except for calls 3000-3099, so its recording runs long
 # enough to reach the ring depth.

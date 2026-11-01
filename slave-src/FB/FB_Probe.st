@@ -6,7 +6,7 @@
 
    Description:
    Every scan the block appends one record to a ring buffer in plain memory.
-   The ring holds the last 8192 records (33 s at the 4 ms scan). The master
+   The ring holds the last 4096 records (16 s at the 4 ms scan). The master
    takes records out through a window of 13 records in the input registers:
    it writes the index of the first record it wants and reads the window,
    the counters and a copy of the window's start index in one FC#04 read.
@@ -106,11 +106,11 @@
        XferCode        : UINT := 0        (* Xfer as the published integer
        Publish         : BOOL := FALSE    (* TRUE in the scan a fill completes: Stage, Start, Count are new
      VAR CONSTANT:
-       cDepth          : UDINT := 8192    (* Ring depth in records; the ring array holds cDepth * cWords words
+       cDepth          : UDINT := 4096    (* Ring depth in records; the ring array holds cDepth * cWords words
        cWords          : UDINT := 8       (* Words per record
        cWindow         : UDINT := 13      (* Records in the window; Stage holds cWindow * cWords words
      VAR:
-       aRing           : ARRAY65536WORD   (* Ring: records of cWords words, record n in words (n MOD cDepth) * cWords
+       aRing           : ARRAY32768WORD   (* Ring: records of cWords words, record n in words (n MOD cDepth) * cWords
        bFirstScan      : BOOL := TRUE
        bPrevFault      : BOOL := FALSE    (* FaultState on the previous scan
        nLastArm        : UINT := 0        (* Arm value already acted on

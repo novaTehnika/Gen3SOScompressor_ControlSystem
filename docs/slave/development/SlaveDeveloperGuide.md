@@ -176,7 +176,7 @@ in the slave: it did not work out on this controller. It uses `MOD`, `SHR`, the 
 `DWORD_TO_WORD` / `DINT_TO_DWORD` conversions (which wrap modulo 2^16 and 2^32,
 as on the controller) and IF/ELSIF chains, no CASE. MotionWorks setup for it:
 the `FB_Probe` block, the `E_ProbeState` / `E_ProbeXferState` enumerations and
-the `ARRAY104WORD` / `ARRAY65536WORD` types from `DataTypes.st`; the `G_cfgProbe*`,
+the `ARRAY104WORD` / `ARRAY32768WORD` types from `DataTypes.st`; the `G_cfgProbe*`,
 `G_mbProbe*` and `G_sysProbe*` globals of `GlobalVariables_Reference.st` with the
 Modbus holding group extended to HR114 and the input group to IR524; and an
 `fbProbe : FB_Probe` instance in `PRG_Main`.

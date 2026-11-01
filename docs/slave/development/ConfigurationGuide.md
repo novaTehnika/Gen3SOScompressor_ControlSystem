@@ -137,14 +137,14 @@ When `G_cfgPressureScheduleEnable` is TRUE on entry to pressure mode, `FB_Pressu
 | `G_cfgPressureSchedKpMax` | 5.0 | mm/s per MPa | Upper bound on the scheduled Kp. |
 | `G_cfgPressureSchedPistonArea` | 3431.0 | mm² | Piston area (2.602 in bore). |
 | `G_cfgPressureSchedEndOfTravel` | 367.0 | mm | Position at the end of travel, where the chamber is down to the passages (the same frame as `G_cfgPosSoftLimitMax`). The chamber volume is the swept volume from the piston to this position plus the passages and, when open, the hose. |
-| `G_cfgPressureSchedPassagesVolume` | 57.0 | mL | Cylinder passages: chamber volume at the end of travel without the hose, measured with the present fittings. Must be at or below the true value; re-measure when the fittings change. |
+| `G_cfgPressureSchedPassagesVol` | 57.0 | mL | Cylinder passages: chamber volume at the end of travel without the hose, measured with the present fittings. Must be at or below the true value; re-measure when the fittings change. |
 | `G_cfgPressureSchedHoseVolume` | 29.0 | mL | Hose between the cylinder head and the outlet, measured. Counted only while `G_cfgPressureSchedHoseOpen` is TRUE. Must be at or below the true value. |
-| `G_cfgPressureSchedHoseCompliance` | 1.2E-13 | m³/Pa | Hose compliance beyond its liquid (wall and any trapped air), a lower bound on the measured 0.24 mL/MPa. Counted only while `G_cfgPressureSchedHoseOpen` is TRUE. |
+| `G_cfgPressureSchedHoseCompl` | 1.2E-13 | m³/Pa | Hose compliance beyond its liquid (wall and any trapped air), a lower bound on the measured 0.24 mL/MPa. Counted only while `G_cfgPressureSchedHoseOpen` is TRUE. |
 | `G_cfgPressureSchedHoseOpen` | FALSE | BOOL | The proximal valve is open during the compression, so the hose volume and compliance are part of the chamber. Leave FALSE while the valve opens after mixing; set TRUE for a procedure that opens it before the compression. The measured hose values above do not change with it. |
 | `G_cfgPressureSchedBulkModulus` | 1.0E9 | Pa | Saline bulk modulus. Must be at or above the true value. |
 | `G_cfgPressureSchedHenry` | 1.22E-5 | mol/(m³·Pa) | Henry constant of oxygen in 0.9 % saline. |
 | `G_cfgPressureSchedGasTemp` | 293.0 | K | Gas temperature. |
 | `G_cfgPressureSchedPatm` | 101325.0 | Pa | Atmospheric pressure. |
 | `G_cfgPressureSchedArriveBand` | 0.5 | MPa | |error| at which the integrator is first released; it is held at zero until then. |
-| `G_cfgPressureSchedDriveDeadTime` | 0.0228 | s | Drive dead time from command to response, measured on the bench (`bench/characterisation`) with `Y_DirectControl`'s FilterTimeConstant as wired. Re-measure if that pin changes. |
+| `G_cfgPressureSchedDeadTime` | 0.0228 | s | Drive dead time from command to response, measured on the bench (`bench/characterisation`) with `Y_DirectControl`'s FilterTimeConstant as wired. Re-measure if that pin changes. |
 | `G_cfgPressureSchedDriveLag` | 0.0182 | s | Drive velocity-loop time constant, measured as above. |
