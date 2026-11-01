@@ -254,7 +254,9 @@ function [S, words] = serveRead(S, start, n)
 % slave's own (protocol and step probe).
 regs = zeros(1, 524);
 regs(1:S.map.nRead) = readInputRegisters(S.sl, 1, S.map.nRead);
-regs(401:524) = readInputRegisters(S.sl, 401, 124);
+if start + n - 1 >= 401
+    regs(401:524) = readInputRegisters(S.sl, 401, 124);
+end
 if start <= 519 && start + n - 1 >= 520 && S.hook.tear > 0
     tail = regs(519) + 65536 * regs(520) + 1;       % a window that changed under the read
     regs(519:520) = [mod(tail, 65536), floor(tail / 65536)];
@@ -340,16 +342,17 @@ w = S.sl.s.fbProbe.Written;
 if w <= S.nT
     return;
 end
-G = S.sl.G;
+% Single-field reads: a read of S.sl.G builds a snapshot of every global.
 lim = @(x, lo, hi) min(max(round(x), lo), hi);
-status = G.G_doInMotion + 2 * G.G_doPerformanceStatus + 4 * G.G_doFaultActive ...
-    + 8 * G.G_doHomingComplete + 256 * min(G.G_sysConfirmedModeCode, 255);
-row = [lim(G.G_sysCommandedVelocity * 1000, -32767, 32767), ...
+status = S.sl.G.G_doInMotion + 2 * S.sl.G.G_doPerformanceStatus ...
+    + 4 * S.sl.G.G_doFaultActive + 8 * S.sl.G.G_doHomingComplete ...
+    + 256 * min(S.sl.G.G_sysConfirmedModeCode, 255);
+row = [lim(S.sl.G.G_sysCommandedVelocity * 1000, -32767, 32767), ...
        lim(pre(1) * 1000, -32767, 32767), ...
        lim(pre(2) * 100, -32767, 32767), ...
        round(pre(3) * 1e5), ...
-       lim(G.G_sysActualPressure * 1000, -32767, 32767), ...
-       lim(G.G_aiPressure * 5000, 0, 65535), double(status)];
+       lim(S.sl.G.G_sysActualPressure * 1000, -32767, 32767), ...
+       lim(S.sl.G.G_aiPressure * 5000, 0, 65535), double(status)];
 while w > size(R, 1)
     R(end + size(R, 1), 1) = 0;                 % twice the rows
 end

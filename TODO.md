@@ -228,10 +228,6 @@ reference for every declaration.
       at 50 ms on the bench), and a lost link stopping the Simulink model
       (bench case D). `closedLoopModbusStep` assumes every exchange
       completes.
-- [ ] Speed up `tests/fakeProbeLink.m`: `logScan` reads the whole
-      `S.sl.G` every scan, which on the compiled slave builds a snapshot
-      each time. `frictionRunSim` and `charRunSim` went from about 55 s and
-      88 s to 135 s and 165 s with it. Read only the fields it needs.
 - [ ] Simplifications of the simulated slave to keep in mind or remove:
   - [ ] Position moves, jog and stop prescribe the piston's velocity; the
         drive's dead time and lag apply only in `Y_DirectControl`'s
