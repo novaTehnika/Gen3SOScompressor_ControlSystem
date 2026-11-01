@@ -30,9 +30,7 @@
        StaMoveAbsolute     : ST_StaMoveAbsolute    (* Status from MC_MoveAbsolute
        StaStop             : ST_StaStop            (* Status from MC_Stop
      VAR_OUTPUT:
-       Active              : BOOL             (* Sequence is running
        Done                : BOOL             (* At home position
-       AtPosition          : BOOL             (* Currently at home position
        InMotion            : BOOL             (* Currently moving
        Error               : BOOL             (* Error occurred
        CmdMoveAbsolute     : ST_CmdMoveAbsolute  (* Command output for MC_MoveAbsolute
@@ -54,9 +52,7 @@
    ============================================================================ *)
 
 IF NOT Enable THEN
-    Active := FALSE;
     Done := FALSE;
-    AtPosition := FALSE;
     InMotion := FALSE;
     Error := FALSE;
     eState := GOH_IDLE;
@@ -81,9 +77,7 @@ END_IF;
 IF eState = GOH_IDLE THEN
 
     (* GOH_IDLE - Waiting for execute command *)
-        Active := FALSE;
         Done := FALSE;
-        AtPosition := FALSE;
         InMotion := FALSE;
         Error := FALSE;
 
@@ -91,7 +85,6 @@ IF eState = GOH_IDLE THEN
         CmdStop.Execute := FALSE;
 
         IF rTrigExecute.Q OR Execute THEN
-            Active := TRUE;
             eState := GOH_MOVING;
         END_IF;
 
@@ -111,7 +104,6 @@ ELSIF eState = GOH_MOVING THEN
         IF StaMoveAbsolute.Done THEN
             CmdMoveAbsolute.Execute := FALSE;
             Done := TRUE;
-            AtPosition := TRUE;
             InMotion := FALSE;
             eState := GOH_AT_POSITION;
 
@@ -130,9 +122,7 @@ ELSIF eState = GOH_AT_POSITION THEN
 
     (* GOH_AT_POSITION - At home position - hold here until mode change *)
         Done := TRUE;
-        AtPosition := TRUE;
         InMotion := FALSE;
-        Active := TRUE;
 
         IF NOT Execute THEN
             Done := FALSE;
@@ -148,7 +138,6 @@ ELSIF eState = GOH_ABORTING THEN
 
         IF StaStop.Done THEN
             CmdStop.Execute := FALSE;
-            Active := FALSE;
             InMotion := FALSE;
             eState := GOH_IDLE;
 
@@ -161,7 +150,6 @@ ELSIF eState = GOH_ABORTING THEN
 ELSIF eState = GOH_ERROR THEN
 
     (* GOH_ERROR *)
-        Active := FALSE;
         InMotion := FALSE;
         Done := FALSE;
 

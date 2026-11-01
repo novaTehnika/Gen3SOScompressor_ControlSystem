@@ -126,5 +126,5 @@ The main program orchestrates a number of critical function blocks.
 | `fbHome*` | `FB_HomeLimit`, `FB_GoHome` | **Homing Logic:** Encapsulates the multi-step homing sequence and the Go Home move. |
 | `fbSafetyMonitor`| `FB_SafetyMonitor` | **System Watchdog:** The central authority for detecting unsafe conditions and triggering a fault. |
 | `fbCommWatchdog` | `FB_CommWatchdog` | **Link Supervision:** Raises `FAULT_COMM` through the safety monitor when the master heartbeat register stops changing. |
-| `fbProbe` | `FB_Probe` | **Data Capture:** Records every scan into the probe ring, serves the master's window requests and marks the scan of a fault. Called once, last in the file, so the scan's state, status outputs and confirmed mode code are final. Optional; `G_cfgProbeEnable` FALSE stops it. |
+| `fbProbe` | `FB_Probe` | **Data Capture:** Records every scan into the probe ring, serves the master's window requests and marks the scan of a fault. Called once, last in the file, so the scan's state, status bits and confirmed mode code are final. Optional; `G_cfgProbeEnable` FALSE stops it. |
 | `fbIntToFaultCode` | `FB_IntToFaultCode` | **Fault Acknowledgement:** Decodes the full fault code the master mirrors in the mode register for `FB_FaultResetHandler`. |

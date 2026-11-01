@@ -93,10 +93,10 @@ task interval.
 | 2 | `%QW73794` | UINT | `G_mbSlaveCounter` | Incremented every scan, wraps 65535 → 0 |
 | 3 | `%QW73796` | UINT | `G_mbConfCode` | Mode confirmation: the mode the handshake manager has confirmed, 0 outside the handshake (and so while a fault is active) |
 | 4 | `%QW73798` | UINT | `G_mbFaultCode` | `G_sysActiveFault` as its full integer value, 0 when no fault. May exceed 7 |
-| 5 | `%QW73800` | UINT | `G_mbFaultActive` | 1 = fault active (`G_doFaultActive`, also on DO4) |
-| 6 | `%QW73802` | UINT | `G_mbInMotion` | 1 = axis moving (`G_doInMotion`, also on DO6) |
-| 7 | `%QW73804` | UINT | `G_mbPerformanceStatus` | `G_doPerformanceStatus` (also on DO3) |
-| 8 | `%QW73806` | UINT | `G_mbHomingComplete` | `G_doHomingComplete` (also on DO5) |
+| 5 | `%QW73800` | UINT | `G_mbFaultActive` | 1 = fault active (`G_sysFaultActive`) |
+| 6 | `%QW73802` | UINT | `G_mbInMotion` | 1 = axis moving (`G_sysInMotion`) |
+| 7 | `%QW73804` | UINT | `G_mbPerformanceStatus` | `G_sysPerformanceStatus` |
+| 8 | `%QW73806` | UINT | `G_mbHomingComplete` | `G_sysHomingComplete` |
 | 9–10 | `%QW73808` | UINT | | Reserved |
 | 11–12 | `%QD73812` | REAL | `G_mbActualPosition` | `G_sysActualPosition` (mm) |
 | 13–14 | `%QD73816` | REAL | `G_mbActualVelocity` | `G_sysActualVelocity` (mm/s) |
@@ -136,10 +136,10 @@ reads as a counter frozen at 0.
   directly. `FB_ModeDecoder` debounces the mode code
   (`G_cfgDebounceTimeMode`) and decodes it with `FB_IntToMode`;
   MotionEnable and FaultReset pass through `FB_DigitalInputFilter`
-  (`G_cfgDebounceTimeMotion`, `G_cfgDebounceTimeFault`). The full value of
+  (`G_cfgDebounceTimeCommand` for both). The full value of
   `G_mbModeCode` is decoded by `FB_IntToFaultCode` for the fault
   acknowledgement. `PRG_Input` copies `G_mbReference` to `G_sysReference`.
-- `PRG_Output` fills the input registers from the `G_do*` and `G_sys*`
+- `PRG_Output` fills the input registers from the `G_sys*`
   globals. `G_mbConfCode` comes from `G_sysConfirmedModeCode`,
   `G_mbSlaveCounter` from `G_sysScanCounter` and `G_mbFaultCode` from
   `G_sysActiveFaultCode`, all maintained by `PRG_Main`.

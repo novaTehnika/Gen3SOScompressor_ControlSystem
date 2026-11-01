@@ -46,7 +46,6 @@
        FaultTriggered      : BOOL             (* Dangerous condition detected - transition to fault
        GuardActive         : BOOL             (* Guard is actively monitoring
        InDangerZone        : BOOL             (* Position is within GuardMargin of cylinder entry
-       ApproachingLimit    : BOOL             (* Moving toward exit limit
      VAR:
        rGuardBoundary      : LREAL            (* Boundary = CylinderEntry + GuardMargin
    ============================================================================ *)
@@ -60,7 +59,6 @@ IF NOT Enable THEN
     FaultTriggered := FALSE;
     GuardActive := FALSE;
     InDangerZone := FALSE;
-    ApproachingLimit := FALSE;
     RETURN;
 END_IF;
 
@@ -69,7 +67,6 @@ rGuardBoundary := CylinderEntry + GuardMargin;
 
 (* Determine position and motion status *)
 InDangerZone := (ActualPosition <= rGuardBoundary);
-ApproachingLimit := (ActualVelocity < -VelocityThreshold);  (* Negative = toward exit *)
 
 (* Guard is always active when enabled *)
 GuardActive := TRUE;

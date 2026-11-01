@@ -33,6 +33,32 @@ reference for every declaration.
   - [ ] Update the declarations of `FB_GoHome` (`StopDeceleration`
         input), `FB_SafetyMonitor` (state-property inputs),
         `FB_AnalogInputFilter` and `FB_ModeDecoder`.
+  - [ ] Remove the `VAR_OUTPUT` members nothing reads, and declare the
+        ones the block still uses as `VAR` locals (types and initial values
+        as in the block's header):
+    - [ ] `FB_DigitalInputFilter`: `RisingEdge`, `FallingEdge`, `Stable`,
+          `RawPassthrough`; delete the local `bLastFiltered`.
+    - [ ] `FB_GoHome`: `Active`, `AtPosition`. `FB_HomeLimit`: `Active`.
+    - [ ] `FB_HandshakeManager`: `HandshakeActive`, `HandshakeTimeout_Q`.
+    - [ ] `FB_ModeDecoder`: `ModeChanged`; `ModeValue` becomes the local
+          `nModeValue : INT`.
+    - [ ] `FB_PistonExitGuard`: `ApproachingLimit`.
+    - [ ] `FB_PositionPathShaper`: `RateLimiting`, `TetherHold`;
+          `ParamError` becomes the local `bParamError : BOOL`.
+    - [ ] `FB_PressureController`: `Error`, `VelLimit`, `Saturated`,
+          `ParamError` become the locals `rError : LREAL`,
+          `rVelLimit : LREAL`, `bSaturated : BOOL`, `bParamError : BOOL`.
+    - [ ] `FB_PressureInput`: `LoopMa`, `OutOfRange`, `ParamError` become
+          the locals `rLoopMa : LREAL`, `bOutOfRange : BOOL`,
+          `bParamError : BOOL`.
+    - [ ] `FB_PressureSchedule`: `Lag` becomes the local `rLag : LREAL`.
+    - [ ] `FB_Probe`: `StartTail` and `Xfer`; `State` becomes the local
+          `eState : E_ProbeState := PROBE_RECORDING`.
+    - [ ] `FB_SafetyMonitor`: `FaultDrive`, `FaultComm` and
+          `FaultPistonExit` (used as the inputs directly); `FaultLimitSwitch`,
+          `FaultPosition` and `FaultPressureSensor` become the locals
+          `bFaultLimitSwitch`, `bFaultPosition` and `bFaultPressureSensor`
+          (BOOL).
 - [ ] `PRG_Main` locals:
   - [ ] PR #14, if not already done: remove `fbFilterModeBit0`-`2`,
         `bFilteredModeBit0`-`2` and `fbOutputMux`; add
@@ -67,6 +93,21 @@ reference for every declaration.
   - [ ] Rename `G_cfgPosGateAccelMax` to `G_cfgPosShaperAccelMax` and
         `G_cfgPosGateMaxDeviation` to `G_cfgPosShaperMaxDeviation`.
   - [ ] Set `G_cfgVelLimitMax` to 6.0.
+  - [ ] Replace `G_cfgGoHomeAccel` and `G_cfgHomeLimAccel` by one
+        `G_cfgMoveAccel : LREAL := 5.0`.
+  - [ ] Replace `G_cfgDebounceTimeMotion` and `G_cfgDebounceTimeFault` by
+        `G_cfgDebounceTimeCommand : TIME := T#20MS`, and
+        `G_cfgDebounceTimeOvertravelNeg` and
+        `G_cfgDebounceTimeOvertravelPos` by
+        `G_cfgDebounceTimeOvertravel : TIME := T#10MS`.
+  - [ ] Delete `G_doPerformanceStatus`, `G_doFaultActive`,
+        `G_doHomingComplete` and `G_doInMotion` (`%QX0.3`-`%QX0.6`) and
+        add `G_sysPerformanceStatus`, `G_sysFaultActive`,
+        `G_sysHomingComplete` and `G_sysInMotion` as `BOOL := FALSE` with no
+        address; the output points `MO1_DO_03`-`MO1_DO_06` are no longer
+        written. Check the LD POU does not use the old four.
+  - [ ] `G_cfgGearRatio` and `G_cfgLeadScrewPitch` stay; their comments now
+        call them reference copies of the Hardware Configuration scaling.
   - [ ] Add `G_cfgStopDecel`, `G_cfgProbeEnable`, `G_cfgProbeFillPerScan`,
         `G_mbPositionSpeed`, `G_sysPositionSpeed`, the `G_mbProbe*`
         globals and the `G_sysProbe*` globals.
@@ -249,16 +290,6 @@ reference for every declaration.
 
 ## Documentation
 
-- [ ] `docs/slave/development/ConfigurationGuide.md` says it covers every
-      `G_cfg*` global but has no rows for `G_cfgCommTimeout`,
-      `G_cfgHoldPositionTimeout`, `G_cfgTorqueStallThreshold`,
-      `G_cfgGearRatio`, `G_cfgLeadScrewPitch`, `G_cfgPosCylinderEntry`
-      and the pressure transducer and loop settings
-      (`G_cfgPressureShuntOhms`, `ZeroMa`, `SpanMa`, `RangeMin`,
-      `RangeMax`, `SensorMinMa`, `SensorMaxMa`, `SensorFaultTime`, `Kp`,
-      `Ki`, `Accel`, `VelMax`, `Decel`, `StopStiffness`, `StopVelMin`,
-      `TorqueLimit`, `TargetMax`, `InBand`). Take defaults and
-      descriptions from the GVL.
 - [ ] `docs/slave/reference/TimingSpecification.md` §12: the Range column
       for `G_cfgBrakeEngageDelay` and `G_cfgBrakeDisengageDelay`
       (100-1000 ms) was widened only so the defaults fall inside it. Set
@@ -270,30 +301,6 @@ reference for every declaration.
 
 ## Open decisions
 
-- [ ] Slave outputs DO3-DO6 (`G_doPerformanceStatus`, `G_doFaultActive`,
-      `G_doHomingComplete`, `G_doInMotion`) are still driven in
-      `PRG_Output`, but nothing on the master side is wired to them; the
-      master reads the same values from IR5-IR8. Keep them as status lines
-      or stop driving them. DI0-DI5 and DO0-DO2 are unused.
-- [ ] Merge `G_cfgGoHomeAccel` and `G_cfgHomeLimAccel` (both 5 mm/s², the
-      same kind of move) into one `G_cfgMoveAccel`.
-- [ ] `G_cfgGearRatio` and `G_cfgLeadScrewPitch` duplicate the Hardware
-      Configuration scaling and nothing reads them: `benchGvl.m` lists
-      them only as parse fallbacks and `frictionBenchConfig.m` hardcodes
-      70 and 5.08. Label them as bench copies, move them to the bench
-      config, or delete them.
-- [ ] Share one debounce setting each between the two overtravel inputs
-      (both 10 ms) and between MotionEnable and FaultReset (both 20 ms).
-- [ ] 34 function block outputs are read by nothing outside their block
-      (diagnostics; counted once per block, 46 per instance): all four
-      edge and status outputs of `FB_DigitalInputFilter`, the six
-      `Fault*` of `FB_SafetyMonitor`, `FB_Probe`'s `StartTail`, `State`
-      and `Xfer` (PRG_Main reads `StateCode` and `XferCode`),
-      `FB_PressureSchedule`'s `KEst`, `KEstTarget` and `Lag` (read by
-      `tests/slavePressureMode.m` through the simulator), and the rest
-      spread over `FB_GoHome`, `FB_HomeLimit`, `FB_HandshakeManager`,
-      `FB_ModeDecoder`, `FB_PistonExitGuard`, `FB_PositionPathShaper`,
-      `FB_PressureController` and `FB_PressureInput`. Keep or remove.
 - [ ] Retire `PRG_PressureProbe`: the main probe records the raw pressure
       voltage every scan, so the noise statistics could be computed on the
       master.

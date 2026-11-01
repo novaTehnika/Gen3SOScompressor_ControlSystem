@@ -97,7 +97,7 @@ keep the table to what the picture shows.
 | Execute | in | `G_cmdMoveAbsolute.Execute` | The struct is written whole from `FB_GoHome.CmdMoveAbsolute` or `FB_HomeLimit.CmdMoveAbsolute` while those blocks own the axis; otherwise `PRG_Main` holds Execute FALSE. |
 | Position | in | `G_cmdMoveAbsolute.Position` | |
 | Velocity | in | `G_cmdMoveAbsolute.Velocity` | |
-| Acceleration | in | `G_cmdMoveAbsolute.Acceleration` | Default `G_cfgGoHomeAccel`. |
+| Acceleration | in | `G_cmdMoveAbsolute.Acceleration` | Default `G_cfgMoveAccel`. |
 | Deceleration | in | `G_cmdMoveAbsolute.Deceleration` | Default `G_cfgGoHomeDecel`. |
 | Jerk | in | not wired | |
 | Direction | in | `G_cmdMoveAbsolute.Direction` | `MC_Direction`; `PRG_Main` sets `Current_Direction`. |
@@ -120,7 +120,7 @@ keep the table to what the picture shows.
 | Forward | in | `G_cmdJog.Forward` | The struct is written whole from `FB_HomeLimit.CmdJog` while homing; otherwise `PRG_Main` holds Forward and Reverse FALSE. |
 | Reverse | in | `G_cmdJog.Reverse` | |
 | Velocity | in | `G_cmdJog.Velocity` | |
-| Acceleration | in | `G_cmdJog.Acceleration` | Default `G_cfgHomeLimAccel`. |
+| Acceleration | in | `G_cmdJog.Acceleration` | Default `G_cfgMoveAccel`. |
 | Deceleration | in | `G_cmdJog.Deceleration` | Default `G_cfgHomeLimDecel`; the block stops on it when an abort drops Forward/Reverse. |
 | Jerk | in | not wired | |
 | Axis | out | `AXIS1` | |
@@ -174,7 +174,7 @@ keep the table to what the picture shows.
 | Busy | out | not wired | |
 | Error | out | not wired | |
 | ErrorID | out | not wired | |
-| ActualVelocity | out | `G_sysActualVelocity` | mm/s; `G_doInMotion`, the exit guard and the probe read it, published in IR13-14. |
+| ActualVelocity | out | `G_sysActualVelocity` | mm/s; `G_sysInMotion`, the exit guard and the probe read it, published in IR13-14. |
 
 ## MC_ReadActualTorque_1
 

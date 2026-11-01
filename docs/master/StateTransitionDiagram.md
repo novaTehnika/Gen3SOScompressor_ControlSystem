@@ -188,7 +188,7 @@ change from an operational state always goes through `ST_HOLD_POSITION`; only
         v
 +---------------+
 | ST_HOME       |  PRG_Main sets G_flagHomingComplete and
-| _COMPLETE     |  G_doHomingComplete; wait for mode change
+| _COMPLETE     |  G_sysHomingComplete; wait for mode change
 +---------------+
 ```
 
@@ -229,7 +229,7 @@ change from an operational state always goes through `ST_HOLD_POSITION`; only
     +---------------+
     | ST_FAULT      |
     |               |
-    | - G_doFaultActive = HIGH
+    | - G_sysFaultActive = HIGH
     | - Fault code in IR4 (G_mbFaultCode)
     | - MC_Stop (motion stopped)
     +-------+-------+
@@ -246,7 +246,7 @@ change from an operational state always goes through `ST_HOLD_POSITION`; only
     | ST_BRAKE_HOLD |           |               |
     | (drive stays  |           | - Brake engaged
     |  enabled)     |           | - Drive disabled
-    +---------------+           | - G_doFaultActive = HIGH
+    +---------------+           | - G_sysFaultActive = HIGH
                                 +-------+-------+
                                         |
                                 (FaultReset HIGH
