@@ -582,9 +582,6 @@ class OctaveInit:
     def array(self, elem, n):
         return f'zeros(1, {n})'
 
-    def enum(self, typ, member):
-        return f'E.{typ}.{member}'
-
     def instance(self, typ):
         return f'init_{typ}(E)'
 
@@ -598,8 +595,13 @@ def init_value(decl, ctx, spell=OctaveInit()):
     if m:
         return spell.array(m.group(3), int(m.group(2)) - int(m.group(1)) + 1)
     if typ in ctx['enums']:
-        member = (init or '').split('#')[-1]
-        return spell.enum(typ, member) if member in ctx['enums'][typ] else '0'
+        # The controller does not take an initial value for an enumerated
+        # variable; it starts at the type's first member.
+        if init:
+            raise STError(f"{decl['name']}: an enumerated variable takes no "
+                          f"initial value; it starts at the first member "
+                          f"of {typ}")
+        return '0'
     if typ in ctx['structs'] or typ in ctx['fbs'] or typ in STD_FBS:
         return spell.instance(typ)
     if typ == 'BOOL':
