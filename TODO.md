@@ -78,10 +78,6 @@ reference for every declaration.
 - [ ] Enable the cyclic task's watchdog, at the 4 ms interval. The 2 ms
       task overran for weeks (about 2.5 ms of work a scan) and ran on
       every second motion cycle with nothing reported.
-- [ ] LD POU, `Y_DirectControl_1`: wire `FilterTimeConstant` from
-      `G_cmdDirectControl.FilterTimeConstant` (it is hard-wired to
-      `LREAL#0.05`) and `Error` to `G_staDirectControl.Error` (it is wired
-      to `.Active`), as `docs/slave/ld/README.md` records.
 - [ ] Export the GVL from MotionWorks and diff it against
       `slave-src/GVL/GlobalVariables_Reference.st`. The soft limit, the
       cylinder entry, the velocities and the scan were found to differ
@@ -89,15 +85,20 @@ reference for every declaration.
 
 ## Lab PC
 
-- [ ] Rerun `buildShell`. The Modbus Client Write block becomes 8
-      registers and a `PositionSpeed` Constant block is added.
+- [ ] Rerun `buildShell`. The Modbus Client Write block becomes 12
+      registers (HR1-12) and the `PositionSpeed`, `SalineVolume` and
+      `OxygenRatio` Constant blocks are added.
 - [ ] Relaunch the operator app and check the new "Move speed" field.
+      The app does not write `SalineVolume` or `OxygenRatio`; HR9-12 stay
+      at the `buildShell` defaults (`masterConfig.m`: 343 mL, 1.0) until
+      the app's oxygen:saline field is wired to the shell.
 - [ ] Run `tests\run_all.bat` under MATLAB, including the MEX build of the
       compiled simulated slave. It has only been run under Octave. The
       Python parity tests (`stTargetParity.py`, `plantParity.py`) also need
       a C compiler as `CC` (for example `set CC=gcc` with MinGW-w64).
-      `charFitsSynthetic` and `frictionRunSim` seed with the legacy
-      `randn('seed', n)`, which MATLAB accepts with a warning; `rng` is
+      `charFitsSynthetic`, `frictionRunSim`, `benchProbeSim` and
+      `modbusLinkTiming` seed with the legacy `randn('seed', n)` (and
+      `rand('seed', n)`), which MATLAB accepts with a warning; `rng` is
       the replacement if it objects.
 
 ## Checks on the machine
@@ -128,7 +129,10 @@ reference for every declaration.
       `slave-sim/modbusLinkConfig.m`. Writes need a block of holding
       registers inside the group that the program does not use, passed as
       `writeStart`. If the same-tick share falls with the register count,
-      make `pNextTick` depend on the count too.
+      make `pNextTick` depend on the count too. Before running it, widen
+      the sweep's protected range: `modbusCountSweep.m` refuses HR1-8 and
+      HR111-114, but the protocol now uses HR1-12, so a `writeStart` of
+      9 to 12 would overwrite the saline and oxygen registers.
 - [ ] Repeat the characterisation (`bench/characterisation/README.md`) on
       the calibrated pressure input (`G_cfgPressureShuntOhms` 421.4) at
       the 4 ms scan:
@@ -185,18 +189,21 @@ reference for every declaration.
       stops). The 50 ms log gave 0.031 s times the speed from 2 to 10 MPa
       with no load dependence; the captures confirm it at the scan rate
       and settle the delay term. Then set the slave's allowance from the
-      fit (`charStopDistance`: `r.T0_s`, `r.D_mm_s2`; today 0.05 s and
-      50 mm/s², conservative by three to four times at 5 mm/s). The
-      bench's capture reader expects the old step probe's record; adapt
-      `charRun`'s 'stops' probe mode and `charStopDistance` to `FB_Probe`.
+      fit (`charStopDistance`: `r.T0_s`, `r.D_mm_s2`). Today the bench
+      compares against 0.05 s (`charStopDistance` `opts.lag_s`, not a
+      GVL setting) and `G_cfgPressureDecel` 50 mm/s², conservative by
+      three to four times at 5 mm/s; the slave's unscheduled stop law has
+      no delay term, and `FB_PressureSchedule` computes its own `Lag`.
 - [ ] From the one-pass logs already taken (`bench/captures/stops_char_*`):
       the friction at speed under load (`frictionFit` on the legs) and the
       stiffness against pressure (`charBulkModulus` with `chargeRatio`).
       Neither fit has been run on them.
 - [ ] Confirm that `Y_DirectControl`'s `Acceleration` input limits the
       drive in VelocityTLMode: velocity steps at 1 and at 100 mm/s². The
-      bench saw the command followed within 30 ms whatever the step, which
-      says it does not.
+      bench saw every step complete in 60 ms whatever its size
+      (`bench/characterisation/README.md` section 8), which says it does
+      not. `bench/friction/README.md` still gives `G_cfgDirectCtrlAccel`
+      as 5 mm/s²; the GVL has 10.
 - [ ] Hose procedure: the proximal valve stays shut during the
       compression and opens after mixing; a switched bypass orifice is
       deferred. Opening the proximal valve at 10 MPa drops the chamber to
@@ -209,8 +216,9 @@ reference for every declaration.
       saline.
 - [ ] The hose model's inputs that only the procedure can give: whether
       the whole 29 mL is purged, the pause between purge and delivery,
-      whether the tube drains in it (`tube_refills`), and how fast the
-      distal valve is shut (`Params.Tclose`).
+      whether the tube drains in it (`Scenario.tube_refills` in
+      `scenarios.py`), and how fast the distal valve is shut
+      (`StudyParams.Tclose`).
 
 ## Simulator and tests
 
@@ -248,18 +256,19 @@ reference for every declaration.
 - [ ] Redraw `docs/slave/diagrams/MainStateMachine.svg` from `PRG_Main`.
       It shows `ST_ENCODER_CHECK`, `ST_REQUIRE_ABS_HOME` and
       `ST_FAULT_RECOVERY`, which `E_SystemState` does not have, and lacks
-      `ST_PRESSURE_CTRL`, `ST_RECOVERY`, `ST_RECOVERY_POSITION` and
-      `ST_RECOVERY_VELOCITY`. `docs/master/StateTransitionDiagram.md` is
-      the current text version.
+      `ST_DRIVE_RESET`, `ST_PRESSURE_CTRL`, `ST_RECOVERY`,
+      `ST_RECOVERY_POSITION` and `ST_RECOVERY_VELOCITY`.
+      `docs/master/StateTransitionDiagram.md` is the current text version.
 - [ ] `docs/slave/development/ConfigurationGuide.md` says it covers every
       `G_cfg*` global but has no rows for `G_cfgCommTimeout`,
       `G_cfgHoldPositionTimeout`, `G_cfgTorqueStallThreshold`,
-      `G_cfgGearRatio`, `G_cfgLeadScrewPitch` and the pressure
-      transducer and loop settings (`G_cfgPressureShuntOhms`, `ZeroMa`,
-      `SpanMa`, `RangeMin`, `RangeMax`, `SensorMinMa`, `SensorMaxMa`,
-      `SensorFaultTime`, `Kp`, `Ki`, `Decel`, `StopStiffness`,
-      `StopVelMin`, `TorqueLimit`, `TargetMax`, `InBand`). Take defaults
-      and descriptions from the GVL.
+      `G_cfgGearRatio`, `G_cfgLeadScrewPitch`, `G_cfgPosCylinderEntry`
+      and the pressure transducer and loop settings
+      (`G_cfgPressureShuntOhms`, `ZeroMa`, `SpanMa`, `RangeMin`,
+      `RangeMax`, `SensorMinMa`, `SensorMaxMa`, `SensorFaultTime`, `Kp`,
+      `Ki`, `Accel`, `VelMax`, `Decel`, `StopStiffness`, `StopVelMin`,
+      `TorqueLimit`, `TargetMax`, `InBand`). Take defaults and
+      descriptions from the GVL.
 - [ ] `docs/slave/reference/HomingSequenceGuide.md`: the Mode 110
       parameter table gives `G_cfgHomeLimFastApproachVel` as 5.0; the GVL
       has 6.0.
@@ -280,9 +289,22 @@ reference for every declaration.
       `G_cfgPosCylinderEntry + G_cfgPosExitGuardMargin`, not the soft
       limit.
 - [ ] `docs/slave/FB_Review_Summary.md` carries review dates in its
-      heading and in the `FB_HandshakeManager` and `FB_SafetyMonitor`
+      heading and in the `FB_PistonExitGuard` and `FB_SafetyMonitor`
       status lines. Restate it as a description of the current blocks, or
       retire it.
+- [ ] Register numbers left from before the fill moved to HR9-12:
+      `docs/master/ModbusRegisterMap.md` ("keeps the groups at IR20 and
+      HR6": HR12), `design/pressure-loop/README.md` "Porting the schedule"
+      (HR7-10, HR7-8, HR9-10: HR9-12, HR9-10, HR11-12) and `AGENTS.md`
+      ("8-register write vector": 12).
+- [ ] `design/pressure-loop/README.md` "What this means for the machine"
+      still says to open the proximal valve before the compression; the
+      settled procedure (its "Settled" list and the hose item above) keeps
+      it shut until after mixing.
+- [ ] Capture directory: `charRun` saves to `bench/common/captures` by
+      default and `bench/characterisation/README.md` reads from
+      `../common/captures`, but the committed logs are in
+      `bench/captures`. Point both at one place.
 
 ## Open decisions
 
@@ -294,12 +316,22 @@ reference for every declaration.
 - [ ] Merge `G_cfgGoHomeAccel` and `G_cfgHomeLimAccel` (both 5 mm/s², the
       same kind of move) into one `G_cfgMoveAccel`.
 - [ ] `G_cfgGearRatio` and `G_cfgLeadScrewPitch` duplicate the Hardware
-      Configuration scaling and only the benches read them: label them as
-      bench copies or move them to the bench config.
+      Configuration scaling and nothing reads them: `benchGvl.m` lists
+      them only as parse fallbacks and `frictionBenchConfig.m` hardcodes
+      70 and 5.08. Label them as bench copies, move them to the bench
+      config, or delete them.
 - [ ] Share one debounce setting each between the two overtravel inputs
       (both 10 ms) and between MotionEnable and FaultReset (both 20 ms).
-- [ ] About 25 function block outputs are read by nothing outside their
-      block (diagnostics). Keep or remove.
+- [ ] 34 function block outputs are read by nothing outside their block
+      (diagnostics; counted once per block, 46 per instance): all four
+      edge and status outputs of `FB_DigitalInputFilter`, the six
+      `Fault*` of `FB_SafetyMonitor`, `FB_Probe`'s `StartTail`, `State`
+      and `Xfer` (PRG_Main reads `StateCode` and `XferCode`),
+      `FB_PressureSchedule`'s `KEst`, `KEstTarget` and `Lag` (read by
+      `tests/slavePressureMode.m` through the simulator), and the rest
+      spread over `FB_GoHome`, `FB_HomeLimit`, `FB_HandshakeManager`,
+      `FB_ModeDecoder`, `FB_PistonExitGuard`, `FB_PositionPathShaper`,
+      `FB_PressureController` and `FB_PressureInput`. Keep or remove.
 - [ ] Retire `PRG_PressureProbe`: the main probe records the raw pressure
       voltage every scan, so the noise statistics could be computed on the
       master.
@@ -310,10 +342,10 @@ reference for every declaration.
       HR9-12). Commission it in this order: the stiffness estimate against
       the measured slope on the characterisation bench; a water-only
       delivery with the full valve sequence, comparing the opening dip and
-      the purge-closing peak with the model's 0.8 and 1.0 MPa; oxygen at
-      1:1, then 2:1. The GVL gains let the purge closing reach 12.2 MPa in
-      every plausible case; until the schedule is on, stop the piston
-      before shutting the distal valve.
+      the purge-closing rise with the model's 0.9 and 1.1 MPa at the
+      11 rad/s crossover; oxygen at 1:1, then 2:1. The GVL gains let the
+      purge closing reach 12.3 MPa in every plausible case; until the
+      schedule is on, stop the piston before shutting the distal valve.
 - [ ] An on-line stiffness estimate (dP against dx while the piston moves)
       as a monitor beside the configured bound, logging its value and
       flagging disagreement, which is the schedule's one failure mode (a
@@ -330,7 +362,9 @@ reference for every declaration.
 - [ ] Decide the schedule's default switch and crossover once it has run
       on the machine: `G_cfgPressureSchedCrossover` 11 rad/s overshoots a
       gas-dominated chamber by 1 MPa with the measured drive lag, 6 rad/s
-      by 0.06 MPa (`design/pressure-loop/test_model.py`).
+      by 0.06 MPa (the figures are in the message of commit b457360;
+      `design/pressure-loop/test_model.py` checks only the 6 rad/s case,
+      overshoot below 0.3 MPa).
 - [ ] The probe's record index wraps after 2^32 scans (about 200 days at
       4 ms of uninterrupted running), and the master does not handle the
       wrap.
