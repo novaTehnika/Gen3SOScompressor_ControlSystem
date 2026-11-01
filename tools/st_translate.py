@@ -523,6 +523,13 @@ class Translator:
                 field = self.next()[1]
                 code, typ = f'{code}.{field}', self.member_type(typ, field)
             elif self.accept('['):
+                # The controller's compiler takes only a variable or an
+                # integer literal as an array index.
+                kind, text, iline = self.peek()
+                if kind not in ('id', 'num') or self.peek(1)[1] != ']':
+                    raise STError(f'{self.pou} line {iline}: array index '
+                                  f'must be a variable or an integer '
+                                  f'literal; compute it into a variable')
                 index = self.expr()[0]
                 self.expect(']')
                 code = self.index(code, index)
