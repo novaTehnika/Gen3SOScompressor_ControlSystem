@@ -3,8 +3,10 @@
 Open items after the step probe, position speed, configuration and cleanup
 work (PR #21), the simulator, models and link timing work (PR #22), and
 the pressure-loop design, bench and scheduled-controller work (PR #17 and
-the scheduled pressure controller). Grouped by where they have to be
-done.
+the scheduled pressure controller), and the pressure input calibration.
+Grouped by where they have to be done. Settled: the mechanical pressure
+ceiling is 12 MPa; the saline volume and oxygen charge reach the slave in
+holding registers.
 
 ## MotionWorks project
 
@@ -127,6 +129,31 @@ reference for every declaration.
       registers inside the group that the program does not use, passed as
       `writeStart`. If the same-tick share falls with the register count,
       make `pNextTick` depend on the count too.
+- [ ] Repeat the characterisation (`bench/characterisation/README.md`) on
+      the calibrated pressure input (`G_cfgPressureShuntOhms` 421.4) at
+      the 4 ms scan:
+  - [ ] Fill and purge longer than the 26 October runs and weigh the
+        fill; one of those fills held enough gas to read 0.42 GPa.
+  - [ ] Bulk modulus with the proximal valve shut: `K300` three times,
+        then a second fill level so `charBulkModulus` separates the liquid
+        from the series compliance.
+  - [ ] Hose stiffness: the same path with the valve open, then again
+        after a thorough hose purge.
+  - [ ] Drive response: the open-chamber velocity steps (`s1`, `s2`)
+        again now that `FilterTimeConstant` is wired, and the closed,
+        liquid-filled `lag_wet` path with the probe armed for the lag at
+        the piston.
+  - [ ] Optionally a Cd check at two or three held pressures.
+- [ ] Carry the results into `models/params.py` (`K`, `Cd`, `t_dead`,
+      `tauV`) and rerun the studies (`study_robust`, `study_compare`,
+      `study_delivery`). Until then `K` 0.72 GPa and `Cd` 0.85 are the
+      26 October fits as logged; refitted on the calibrated scale
+      (`opts.logShuntOhms = 434`) they are 0.74 GPa and 0.83.
+- [ ] Pressure input calibration (`bench/pressure/README.md` section 6):
+      it rests on a hand-held meter's mA range, about 1 %. Repeat it with
+      a loop calibrator, and measure the 4.7 uF capacitor's leakage out of
+      circuit (the input's load in parallel with the shunt fitted as about
+      15 kohm).
 - [ ] Measure what the models still assume (`design/pressure-loop/README.md`,
       "Open questions"): the dissolution time constant `tauDiss`, the lag
       at the piston, and how much of the hose's compliance is wall and how
@@ -149,14 +176,16 @@ reference for every declaration.
       drive in VelocityTLMode: velocity steps at 1 and at 100 mm/s². The
       bench saw the command followed within 30 ms whatever the step, which
       says it does not.
-- [ ] Before the next oxygen run, choose the hose procedure. Opening the
-      proximal valve at 10 MPa drops the chamber to 6.4 MPa in one scan
-      and degasses any charge above about 1.8:1. Either open it before
-      the compression, or fit a bypass metering orifice of 0.3 mm or less
-      (Cv about 0.003) that is opened ahead of the ball valve; the model
-      sizes both (`study_hose_opening.py`). The purge must then carry the
-      slug that degassed entering the hose, 2 to 3 mL behind the 29 mL of
-      virgin saline.
+- [ ] Hose procedure: the proximal valve stays shut during the
+      compression and opens after mixing; a switched bypass orifice is
+      deferred. Opening the proximal valve at 10 MPa drops the chamber to
+      6.4 MPa in one scan and degasses any charge above about 1.8:1, so
+      until the bypass is fitted, keep oxygen runs at or below that charge
+      or accept the degassed slug. The bypass, when fitted, is a metering
+      orifice of 0.3 mm or less (Cv about 0.003) opened ahead of the ball
+      valve (`study_hose_opening.py`). The purge must carry the slug that
+      degassed entering the hose, 2 to 3 mL behind the 29 mL of virgin
+      saline.
 - [ ] The hose model's inputs that only the procedure can give: whether
       the whole 29 mL is purged, the pause between purge and delivery,
       whether the tube drains in it (`tube_refills`), and how fast the
