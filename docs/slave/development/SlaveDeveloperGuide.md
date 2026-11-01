@@ -109,6 +109,15 @@ END_CASE;
 
 **Note:** All state machines in this project (both `PRG_Main` with enums and internal FB state machines with INT constants) use the IF-ELSIF pattern for MWiec Express compatibility.
 
+**No Initial Value on Enum Variables:**
+
+MotionWorks IEC Express does not accept an initial value on a variable of a user-defined enum type, in the global variable worksheet or in a POU's variables. Declare it without one; it starts at the enum's first member (the implicit 0), so order an enum's members with the starting state first (`ST_INIT`, `FAULT_NONE`, `PROBE_OFF`, `XFER_IDLE`). The translator rejects an enum declared with an initial value.
+
+```structuredtext
+eState : E_HomeLimitState;                          (* ✓ starts at the first member *)
+eState : E_HomeLimitState := E_HomeLimitState#IDLE; (* ✗ will not compile *)
+```
+
 **Function Output Limitation:**
 
 Functions can only have one output. For multiple outputs, use a function block instead.

@@ -100,9 +100,9 @@
        ArmEcho         : UINT := 0        (* Arm value last acted on
        Depth           : UINT := 0        (* Ring depth in records
        Words           : UINT := 0        (* Words per record
-       State           : E_ProbeState := E_ProbeState#PROBE_RECORDING
+       State           : E_ProbeState     (* Recording state; starts at its first member, PROBE_OFF
        StateCode       : UINT := 0        (* State as the published integer
-       Xfer            : E_ProbeXferState := E_ProbeXferState#XFER_IDLE
+       Xfer            : E_ProbeXferState (* Transfer state; starts at its first member, XFER_IDLE
        XferCode        : UINT := 0        (* Xfer as the published integer
        Publish         : BOOL := FALSE    (* TRUE in the scan a fill completes: Stage, Start, Count are new
      VAR CONSTANT:
