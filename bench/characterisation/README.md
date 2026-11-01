@@ -169,9 +169,9 @@ Then, for every liquid-only run:
    only slowly through the passage; it stays in every run as a fixed gas
    pocket (`V_air` in `models/params.py`, about 0.1 mL by the geometry)
    and appears in the K fit as the floor of its gas term, the same
-   volume at every fill. Tens of mL of air at atmosphere, which is what
-   the October fits' gas term amounts to, show on the scale as the same
-   shortfall of the fill against the geometry.
+   volume at every fill. Air beyond it shows on the scale as a shortfall
+   of the fill against the geometry, and in the hold as a pressure that
+   decays at constant position while it dissolves.
 
 `A` is 3431 mm^2 (3.431e-3 m^2, 2.602 in bore), so the piston sweeps
 3.43 mL per mm.

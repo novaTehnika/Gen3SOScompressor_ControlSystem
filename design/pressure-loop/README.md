@@ -317,9 +317,9 @@ measured 22.8 ms. The air pocket at the pressure transducer, `V_air`,
 is explicit in the model (eq. (46) of `models/README.md`) and is held at
 its default, 0.1 mL; it is not sampled, since its compliance is below
 0.1 % of the liquid's above 1 MPa. The K range above is the effective
-value of fills that held free gas; the liquid K the fits give
-(0.81 GPa gas-corrected in the fits of 2026-10-26) replaces it once the
-runs are repeated on a weighed, purged fill.
+value of runs whose compliance curved with pressure; the liquid K the
+fits give (0.81 GPa with the curvature removed, 2026-10-26) replaces it
+once the runs at two fill levels have settled what the curvature is.
 Each sample runs compress and deliver and checks these requirements:
 
 - The pressure never exceeds the ceiling, 12 MPa (`StudyParams.P_ceiling`).

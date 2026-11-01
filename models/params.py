@@ -94,11 +94,10 @@ class Params:
     # alone is 2.2 GPa; the seals, hoses and residual gas lower it.
     # Measured 0.72 GPa (0.67 to 0.78 over the segments, 0.81 with the
     # gas-like curvature removed) on 2026-10-26, bench/characterisation.
-    # It is the effective value of those runs, which held free gas
-    # (the fits' gas term, about 40 mL at atmosphere); the liquid value
-    # is the fits' liquid-only term, 0.81 GPa, and replaces this once the
-    # runs are repeated on a weighed, purged fill with the pocket V_air
-    # below explicit.
+    # It is the effective value of those runs, whose x(P) curved as a
+    # gas would (the fits' gas-law term); the liquid-only term of the
+    # fits, 0.81 GPa, is the value once the origin of the curvature is
+    # known (the runs at two fill levels of the measurement plan).
     K: float = 0.72e9
     # [m^3] Saline volume at the start of a run, including the dead
     # volume: the fill at the 280 mm start position of the bench runs
@@ -117,10 +116,11 @@ class Params:
     # model holds it as a fixed amount of isothermal gas that never
     # dissolves, eq. (46). The default is an estimate from the geometry:
     # the passage (1 to 2 mm bore) holds 0.02 to 0.06 mL and the cavity
-    # about as much. It is not the gas-like term of the bulk-modulus
-    # fits (0.65 mL at the ramps' mean pressure, about 40 mL at
-    # atmosphere), which was free gas in those fills; the fits at two
-    # fill levels, on a weighed and purged fill, settle V_air.
+    # about as much. It is far too small to be the gas-law term of the
+    # bulk-modulus fits (0.65 mL at the ramps' mean pressure, which as
+    # isothermal gas would be about 40 mL at atmosphere, more air than
+    # the machine holds), so that curvature has another origin; the
+    # fits at two fill levels settle both.
     V_air: float = 0.1e-6
 
     # ----- Oxygen charge -------------------------------------------------
