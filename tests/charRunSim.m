@@ -5,14 +5,16 @@ function charRunSim()
 %   logged: pressure-ended ramps, a dwell, velocity steps and a hold in one
 %   velocity session with captures; the one-pass stopping-distance path of
 %   test 4 (charStopPath) and its fit (charStopDistance); a delivery
-%   through the orifice bank in pressure mode; the pressure and position
-%   guards and a slave fault.
+%   through the orifice bank in pressure mode; the two recipes of test 5
+%   (charDriveRecipe: reversals in the open chamber, a dither in the closed
+%   one) and the drive-path fit (charDrivePath) on what they log; the
+%   pressure and position guards and a slave fault.
 %   Run from the repository root after  addpath slave-sim; buildSlaveSim
 %     addpath master-src/logic slave-sim slave-sim/generated tests
-%   Depends on: master-src/logic slave-src slave-sim tools models bench/characterisation bench/common tests/fakeProbeLink.m
+%   Depends on: master-src/logic slave-src slave-sim tools models bench/characterisation bench/common bench/friction tests/fakeProbeLink.m
 
 here = fileparts(mfilename('fullpath'));
-addpath(fullfile(here, '..', 'bench', 'characterisation'), fullfile(here, '..', 'bench', 'common'));
+addpath(fullfile(here, '..', 'bench', 'characterisation'), fullfile(here, '..', 'bench', 'common'), fullfile(here, '..', 'bench', 'friction'));
 saveDir = tempname();
 ccfg = charConfig();
 T = 1; STEP = 2; STATUS = 3; MODE = 4; REF = 5; POS = 6; P = 9;    % log columns
@@ -208,6 +210,72 @@ fl2 = charOrificeFlow(r.file, struct('quiet', true));
 assert(abs(fl2.windows(1).t1 - fl.windows(1).t1) < 2, 'valve opening detected at %.1f s, set at 12 s', fl2.windows(1).t1);
 fprintf('ok  delivery: Cd %.3f (%.3f with the gas correction), collected %.1f %% of swept (%.1f expected), opening found at %.1f s\n', ...
     fl.Cd, flk.Cd, 100 * fl.gravimetric.ratio, 100 * expected, fl2.windows(1).t1);
+
+% --- Test 5: the drive path (README section 10) ----------------------------------
+% The torque feedback of the simulated slave is the friction law of the
+% test (fakeProbeLink's torque model) plus the plant's reflected mass times
+% the axis acceleration. The plant has no drive-path spring and no
+% backlash, so the fit must report a bound on the stiffness and no
+% backlash, and find the mass.
+fcfg = frictionBenchConfig();
+S = fakeProbeLink('state');
+mrPlant = S.sl.plant.par.mr;                                        % [kg]
+truth = struct('F0', 0, 'Fc', 2000, 'dFs', 0, 'vs', 0.3, 'b', 150, 'mu', 0.12, 'noisePct', 0.3, ...
+    'tStick', 0, 'newtonPerPct', fcfg.newtonPerPct, 'mr', mrPlant);
+randn('seed', 5);
+
+% Reversals in the open chamber at 0.3 and 1 mm/s
+opts = linkOpts(saveDir, 240);
+opts.probe = true;
+fakeProbeLink('torqueModel', truth);
+[path, info] = charDriveRecipe('reversal', struct('speeds', [0.3 1], 'nReversals', 3, 'hold_s', 2));
+assert(numel(path) == 1 && strcmp(path{1}{1}, 'velstep') && info.nCaptures == 10 && info.travel_mm <= 2.1, ...
+    'reversal recipe: %d captures, travel %.1f mm', info.nCaptures, info.travel_mm);
+r = charRun('simrev', path, opts);
+assert(isempty(r.abort), r.abort);
+assert(numel(r.capFiles) == info.nCaptures && r.probeFailures == 0, '%d captures of %d', numel(r.capFiles), info.nCaptures);
+dp = charDrivePath(r.capFiles, struct('quiet', true));
+assert(numel(dp.reversal.rec) == 6 && all([dp.reversal.rec.ok]), '%d of 6 reversals analysed', sum([dp.reversal.rec.ok]));
+assert(isnan(dp.reversal.backlash_um) && sum([dp.reversal.rec.plateau]) <= 1, ...
+    'backlash %.1f um reported by a drive with none (%d plateaus)', dp.reversal.backlash_um, sum([dp.reversal.rec.plateau]));
+assert(all(isnan([dp.reversal.groups.ks_N_per_um])), 'a stiffness value from a drive with no spring');
+% The inertia: the plant's own drive has an acceleration that jumps at the
+% end of its dead time, which the fit's central difference smooths over a
+% row and reads a little high
+assert(dp.inertia.n == 4, '%d steps', dp.inertia.n);
+massErr = dp.inertia.mass_kg / mrPlant - 1;
+assert(abs(massErr) < 0.15, 'reflected mass %.3g kg, the plant''s %.3g', dp.inertia.mass_kg, mrPlant);
+% The torque reversal is the friction law's: twice (Fc + the viscous term at the speed)
+dTlaw = 2 * (truth.Fc + truth.b * [0.3 1]) / fcfg.newtonPerPct;     % [%]
+dTfit = [dp.reversal.groups.dT_pct];
+assert(all(abs(dTfit ./ dTlaw - 1) < 0.15), 'torque reversal %s %%, the law gives %s', mat2str(dTfit, 3), mat2str(dTlaw, 3));
+fprintf('ok  reversal recipe: no backlash (bound %.1f um), reflected mass %.3g kg (plant %.3g, %+.0f %%), torque reversal %s %%\n', ...
+    dp.reversal.backlashBound_um, dp.inertia.mass_kg, mrPlant, 100 * massErr, mat2str(dTfit, 3));
+
+% Dither in the closed liquid chamber (4.8 MPa/mm, the charge dissolved) at 5 and 9 MPa
+opts = linkOpts(saveDir, @(sl) dissolvedAt(sl, 7.5));
+opts.probe = true;
+fakeProbeLink('torqueModel', truth);
+[path, info] = charDriveRecipe('dither', struct('levels_MPa', [5 9], 'P_start_MPa', 7.5, 'cycles', 3, ...
+    'stiffness_MPa_mm', 4.8));
+assert(info.maxPressure_MPa < ccfg.pressureStop - 0.5 && strcmp(path{1}{1}, 'ramp') && path{1}{2} < 0 && path{4}{2} > 0, ...
+    'dither recipe');
+r = charRun('simdither', path, opts);
+assert(isempty(r.abort), r.abort);
+assert(max(r.runLog(:, P)) < ccfg.pressureStop, 'the dither reached the guard');
+dd = charDrivePath(r.capFiles, struct('quiet', true));
+nRev = sum([dd.dither.rec.ok]);
+assert(numel(dd.dither.rec) >= 8 && nRev >= 0.8 * numel(dd.dither.rec), '%d of %d reversals analysed', nRev, numel(dd.dither.rec));
+assert(isnan(dd.dither.backlash_um) && all([dd.dither.groups.b_um] == 0), 'backlash reported by a drive with none');
+assert(all(isnan([dd.dither.groups.ks_N_per_um])) && all([dd.dither.groups.ksBound_N_per_um] >= 0), ...
+    'a stiffness value from a drive with no spring');
+% The reversal of the friction law at the turn's pressure: 2 (Fc + mu P A + b v) over newtonPerPct
+Pg = [dd.dither.groups.P_MPa];
+dTlaw = 2 * (truth.Fc + truth.mu * Pg * ccfg.pistonArea_mm2 + truth.b * 0.2) / fcfg.newtonPerPct;   % [%]
+assert(all(abs([dd.dither.groups.dT_pct] ./ dTlaw - 1) < 0.2), 'torque reversal %s %% against the law %s', ...
+    mat2str([dd.dither.groups.dT_pct], 3), mat2str(dTlaw, 3));
+fprintf('ok  dither recipe: %d reversals at %s MPa, no backlash, k_s > %s N/um (no spring in the plant)\n', ...
+    nRev, mat2str(Pg, 3), mat2str(round([dd.dither.groups.ksBound_N_per_um])));
 
 % --- Guards ----------------------------------------------------------------------
 % From 9 MPa, ramping at 0.3 mm/s: the undersaturated charge dissolves

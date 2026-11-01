@@ -1,5 +1,5 @@
 function charFitsSynthetic()
-%CHARFITSSYNTHETIC The three characterisation fits on synthetic logs with
+%CHARFITSSYNTHETIC The characterisation fits on synthetic logs with
 %   known parameters: charBulkModulus recovers K, the air pocket at the
 %   pressure transducer (a fixed isothermal gas of Vair / 1000 at
 %   atmosphere in every chamber), a residual gas bubble beyond it and
@@ -11,13 +11,16 @@ function charFitsSynthetic()
 %   sensor chain; charScheduleCheck compares the schedule's stiffness bound
 %   with a known stiffness; charStopDistance recovers the delay and the
 %   deceleration of the stopping-distance law from captures and a run
-%   log of stops in both directions. The logs are in frictionRun's
+%   log of stops in both directions; charDrivePath recovers the inertia,
+%   the friction reversal, the backlash, the windup and the stiffness
+%   (or its bound) of a synthetic two-mass drive, and gives the October
+%   numbers on the committed logs. The logs are in frictionRun's
 %   formats.
 %   Run from the repository root:  addpath master-src/logic tests
-%   Depends on: master-src/logic slave-src bench/characterisation bench/common bench/captures
+%   Depends on: master-src/logic slave-src bench/characterisation bench/common bench/friction bench/captures
 
 here = fileparts(mfilename('fullpath'));
-addpath(fullfile(here, '..', 'bench', 'characterisation'), fullfile(here, '..', 'bench', 'common'));
+addpath(fullfile(here, '..', 'bench', 'characterisation'), fullfile(here, '..', 'bench', 'common'), fullfile(here, '..', 'bench', 'friction'));
 cfg = charConfig();
 A = cfg.pistonArea_mm2;
 Patm = cfg.Patm_MPa;
@@ -308,7 +311,385 @@ assert(rs.pass, 'stopping-distance checks failed on the synthetic stops');
 fprintf('ok  stopping distance: D %.1f / %.1f mm/s^2 (set %.0f), T0 %.0f / %.0f ms (set %.0f)\n', ...
     rs.fit.comp.D_mm_s2, rs.fit.ret.D_mm_s2, D, 1000 * rs.fit.comp.T0_s, 1000 * rs.fit.ret.T0_s, 1000 * T0);
 
+% --- Drive path: the October analyses --------------------------------------------
+% The three analyses on the committed logs, with the numbers the README
+% reports: the inertia from the open-chamber velocity steps, the friction
+% reversal under load and the stiffness bound from the K300 ramps, and the
+% hose-open run as the contrast.
+steps26 = {fullfile(cap, 's1_cap_steps_*.csv'), fullfile(cap, 's2_cap_steps_*.csv')};
+rp = charDrivePath(steps26, struct('quiet', true));
+assert(rp.inertia.n == 74, '%d steps', rp.inertia.n);
+assert(abs(rp.inertia.J_pct_per_mm_s2 - 0.418) < 0.005 && abs(rp.inertia.mass_kg / 4.6e5 - 1) < 0.01, ...
+    'J %.4f %% per mm/s^2, %.3g kg', rp.inertia.J_pct_per_mm_s2, rp.inertia.mass_kg);
+Jsize = [rp.inertia.sizes.J];
+assert(isequal([rp.inertia.sizes.size], [0.3 1 2.5]) && all(abs(Jsize - [0.379 0.412 0.440]) < 0.005), ...
+    'J by step size %s', mat2str(Jsize, 3));
+assert(rp.pass, 'the October steps failed the inertia checks');
+fprintf('ok  drive path, October steps: J %.3f / %.3f / %.3f %%/(mm/s^2) at 0.3 / 1 / 2.5 mm/s, %.3f overall = %.2g kg (lossless)\n', ...
+    Jsize, rp.inertia.J_pct_per_mm_s2, rp.inertia.mass_kg);
+
+rk = charDrivePath(k300, struct('quiet', true));
+assert(numel(rk.friction.logs) == 3 && all([rk.friction.logs.nPairs] == 7));
+dts = [rk.friction.logs.medDT_pct];
+assert(all(abs(dts - [25.1 21.6 22.5]) < 0.2), 'median torque reversal %s', mat2str(dts, 3));
+i4 = find(rk.friction.P_MPa == 4);
+i9 = find(rk.friction.P_MPa == 9);
+dT4 = arrayfun(@(l) l.dT_pct(i4), rk.friction.logs);
+dT9 = arrayfun(@(l) l.dT_pct(i9), rk.friction.logs);
+assert(all(dT4 > 16.5 & dT4 < 18.5) && all(dT9 > 28.5 & dT9 < 32.5), ...
+    'torque reversal %s %% at 4 MPa, %s %% at 9', mat2str(dT4, 3), mat2str(dT9, 3));
+dF = [dT4 dT9] * rk.newtonPerPct / 1e3;
+assert(min(dF(1:3)) > 18 && max(dF(1:3)) < 21 && min(dF(4:6)) > 31 && max(dF(4:6)) < 36, ...
+    'force reversal %s kN', mat2str(dF, 3));
+bnd = [rk.friction.logs.bound_N_per_um];
+assert(all(abs(bnd ./ [5513 4747 4948] - 1) < 0.01), 'stiffness bounds %s N/um', mat2str(bnd, 4));
+assert(rk.stiffness.bound_N_per_um > 4500 && rk.stiffness.bound_N_per_um < 5000 && ~rk.stiffness.resolved, ...
+    'bound %.0f N/um', rk.stiffness.bound_N_per_um);
+assert(all([rk.friction.logs.medDX_um] < 3), 'offsets %s um', mat2str([rk.friction.logs.medDX_um], 2));
+assert(abs(rk.friction.mu - 0.41) < 0.03 && abs(rk.friction.Fc_N / 1e3 - 3.8) < 0.3, ...
+    'mu %.2f, Fc %.2f kN', rk.friction.mu, rk.friction.Fc_N / 1e3);
+assert(rk.pass);
+fprintf('ok  drive path, October K300: torque reversal %.1f..%.1f %% at 4 MPa and %.1f..%.1f %% at 9 (%.0f..%.0f kN and %.0f..%.0f kN lossless), k_s > %.0f N/um\n', ...
+    min(dT4), max(dT4), min(dT9), max(dT9), min(dF(1:3)), max(dF(1:3)), min(dF(4:6)), max(dF(4:6)), rk.stiffness.bound_N_per_um);
+rh = charDrivePath(fullfile(cap, 'K300_char_20261026_193603.csv'), struct('quiet', true));
+assert(rh.friction.logs.medDX_um > 30 && rh.friction.logs.medDX_um < 50 && rh.stiffness.resolved && ~rh.pass, ...
+    'hose-open offset %.1f um', rh.friction.logs.medDX_um);
+assert(abs(rh.friction.logs.medDT_pct / 23.4 - 1) < 0.02);
+fprintf('ok  drive path, October hose-open run: offset %.0f um, the hose and not the drive; it fails the offset check\n', ...
+    rh.friction.logs.medDX_um);
+
+% --- Drive path: synthetic two-mass drive ----------------------------------------
+% A velocity-controlled motor (dead time Td, lag tauV, reflected inertia mr)
+% drives a piston through a backlash and a spring ks; the piston sticks
+% unless the force through the path exceeds the force it feels, the chamber
+% pressure and its friction (Coulomb plus load-dependent mu P A); the
+% motor has friction of its own. The chamber is liquid, at the stiffness of
+% the K300 runs. The torque has white noise and a ripple that goes with the
+% motor position, the pressure goes through the slave's sensor chain, and
+% the velocity and position carry the drive's resolution.
+fcfg = frictionBenchConfig();
+nPP = fcfg.newtonPerPct;                                    % [N per % rated]
+mrTrue = 0.42;                                              % [% per mm/s^2]
+base = struct('Ts', cfg.scanTime, 'sub', 8, 'nPP', nPP, 'areaN', 3431, 'tau', 0.0182, 'Td', 0.0228, ...
+    'kch', 0, 'P0', 0, 'b_um', 0, 'ks_N_um', 8000, 'Fcp', 2500, 'mu', 0.2, 'Fcm', 3000, ...
+    'J', mrTrue, 'noiseV', 0.0005, 'noiseT', 0.3, 'ripple', 0.8, 'noiseX', 0.0003, 'noiseP', 0.002, ...
+    'x0', 280, 'filterTau', cfg.filterTau, 'medianSize', cfg.medianSize, 'pipeline', cfg.pipelineScans);
+fmTrue = base.Fcm / nPP;                                    % [%] motor-side friction
+
+% Inertia from steps: 0 -> v -> 2v -> v -> 0 and the same downward, at three
+% sizes, as the friction bench's steps set.
+randn('seed', 21);
+fs = {};
+for v = [0.3 1 2.5]
+    seqs = v * [0 1; 1 2; 2 1; 1 0; 0 -1; -1 -2; -2 -1; -1 0];
+    for q = 1:8
+        d = driveCapture(base, seqs(q, :), [0 0.1], 500);
+        fs{end + 1} = writeDriveCapture(dir, sprintf('step_%g_%d', v, q), d); %#ok<AGROW>
+    end
+end
+rp = charDrivePath(fs, struct('quiet', true));
+assert(rp.inertia.n == 24 && abs(rp.inertia.J_pct_per_mm_s2 / mrTrue - 1) < 0.06, ...
+    'inertia %.4f %% per mm/s^2 from %d steps, set %.2f', rp.inertia.J_pct_per_mm_s2, rp.inertia.n, mrTrue);
+big = rp.inertia.sizes([rp.inertia.sizes.size] >= 1);
+assert(all(abs([big.J] / mrTrue - 1) < 0.06), 'J at the larger steps %s', mat2str([big.J], 3));
+assert(abs(rp.inertia.mass_kg / (mrTrue * nPP * 1e3) - 1) < 0.06 && rp.pass);
+fprintf('ok  drive path, synthetic steps: J %.3f %% per mm/s^2 (set %.2f), %.3g kg (set %.3g)\n', ...
+    rp.inertia.J_pct_per_mm_s2, mrTrue, rp.inertia.mass_kg, mrTrue * nPP * 1e3);
+
+% Reversal, open chamber, a stiff path with 12 um of backlash: the
+% backlash and the motor-side friction come out of the plateau.
+randn('seed', 22);
+bTrue = 12;                                                 % [um]
+par = base; par.b_um = bTrue;
+fr = {};
+for v = [0.3 1]
+    for q = 1:6
+        sgn = 1 - 2 * mod(q, 2);
+        d = driveCapture(par, [sgn * v, -sgn * v], [0 0.1], 500);
+        fr{end + 1} = writeDriveCapture(dir, sprintf('rev_%g_%d', v, q), d); %#ok<AGROW>
+    end
+end
+rr = charDrivePath(fr, struct('quiet', true, 'inertia_pct', mrTrue));
+rv = rr.reversal;
+assert(numel(rv.rec) == 12 && all([rv.rec.ok]), 'a reversal was not analysed');
+assert(abs(rv.backlash_um - bTrue) < 3, 'backlash %.1f um, set %g', rv.backlash_um, bTrue);
+assert(abs(rv.motorFriction_pct - fmTrue) < 0.5, 'motor-side friction %.2f %%, set %.2f', rv.motorFriction_pct, fmTrue);
+assert(rv.groups(1).speed < 0.4 && rv.groups(1).nPlateau >= 5 && abs(rv.groups(1).b_um - bTrue) < 3, ...
+    'at 0.3 mm/s: %d of 6 with a plateau, backlash %.1f um', rv.groups(1).nPlateau, rv.groups(1).b_um);
+assert(abs(rv.motorFriction_kN * 1e3 - base.Fcm) < 0.5 * nPP, 'motor-side friction %.2f kN', rv.motorFriction_kN);
+assert(all(abs([rv.rec.dT_pct] - 2 * (base.Fcm + base.Fcp) / nPP) < 1.5), ...
+    'torque reversal %s %% against %.1f', mat2str([rv.rec.dT_pct], 3), 2 * (base.Fcm + base.Fcp) / nPP);
+fprintf('ok  drive path, synthetic reversals: backlash %.1f um (set %g), motor-side friction %.2f %% = %.2f kN (set %.2f %%), plateau in %d of %d\n', ...
+    rv.backlash_um, bTrue, rv.motorFriction_pct, rv.motorFriction_kN, fmTrue, sum([rv.rec.plateau]), numel(rv.rec));
+
+% Without backlash no flat segment is found, and the travel of the
+% transition bounds it.
+randn('seed', 23);
+par = base; par.b_um = 0;
+fr0 = {};
+for v = [0.3 1]
+    for q = 1:6
+        sgn = 1 - 2 * mod(q, 2);
+        d = driveCapture(par, [sgn * v, -sgn * v], [0 0.1], 500);
+        fr0{end + 1} = writeDriveCapture(dir, sprintf('rev0_%g_%d', v, q), d); %#ok<AGROW>
+    end
+end
+rr = charDrivePath(fr0, struct('quiet', true, 'inertia_pct', mrTrue));
+rv = rr.reversal;
+assert(isnan(rv.backlash_um) && rv.backlashBound_um < 8 && sum([rv.rec.plateau]) <= 2, ...
+    'backlash %.1f um, bound %.1f um, %d plateaus without backlash', rv.backlash_um, rv.backlashBound_um, sum([rv.rec.plateau]));
+fprintf('ok  drive path, synthetic reversals with no backlash: none reported, the transition is within %.1f um\n', rv.backlashBound_um);
+
+% Dither, closed liquid chamber (7.2 MPa/mm), at 1, 5 and 9 MPa, triangles of
+% +-0.15 mm at 0.2 mm/s with legs of 1.5 s: captures at the top and at the
+% bottom turn of each level (the next reversal follows 1.5 s later, inside the
+% same capture, and is not part of the fit).
+%   a soft path, 0.4 kN/um: windup of tens of um at the force reversal
+randn('seed', 24);
+par = base; par.kch = 7.2; par.ks_N_um = 400; par.b_um = 0;
+fdS = ditherSet(dir, 'ditS', par, [1 5 9]);
+rd = charDrivePath(fdS, struct('quiet', true, 'inertia_pct', mrTrue));
+dt = rd.dither;
+assert(all([dt.rec.ok]) && isnan(dt.backlash_um) && all([dt.groups.b_um] == 0), ...
+    'backlash in a dither with none: %s', mat2str([dt.groups.b_um], 3));
+hi = dt.groups([dt.groups.P_MPa] > 3);
+ksRes = [hi.ks_N_per_um];
+assert(numel(hi) >= 4 && all(abs(ksRes / par.ks_N_um - 1) < 0.45) && abs(median(ksRes) / par.ks_N_um - 1) < 0.2, ...
+    'stiffness %s N/um, set %g', mat2str(ksRes, 3), par.ks_N_um);
+assert(all(abs([dt.rec.dP_MPa]) < 0.1), 'the pressure moved by %.3f MPa during a windup', max(abs([dt.rec.dP_MPa])));
+[~, w] = max([hi.P_MPa]);
+fTrue = base.Fcp + par.mu * hi(w).P_MPa * base.areaN;       % [N] piston-side friction at the turn
+wTrue = 2 * fTrue / par.ks_N_um;                            % [N / (N/um) -> um] windup over the force reversal
+assert(abs(hi(w).windup_um - wTrue) < 0.4 * wTrue, 'windup %.1f um at %.1f MPa, expected %.1f', ...
+    hi(w).windup_um, hi(w).P_MPa, wTrue);
+fprintf('ok  drive path, synthetic dither on a soft path: k_s %s N/um (set %g) at %s MPa, windup %.0f um (%.0f expected) at %.1f MPa, no backlash\n', ...
+    mat2str(round(ksRes)), par.ks_N_um, mat2str([hi.P_MPa], 3), hi(w).windup_um, wTrue, hi(w).P_MPa);
+
+%   backlash of 20 um on a 2 kN/um path: where the pressure force is below
+%   the friction the force through the path passes zero and the flat
+%   segment shows (the lowest turn); where it is above, there is none
+randn('seed', 25);
+par = base; par.kch = 7.2; par.ks_N_um = 2000; par.b_um = 20;
+fdB = ditherSet(dir, 'ditB', par, [1 5 9]);
+rd = charDrivePath(fdB, struct('quiet', true, 'inertia_pct', mrTrue));
+dt = rd.dither;
+lo = dt.groups([dt.groups.P_MPa] < 0.5);
+hiB = dt.groups([dt.groups.P_MPa] > 3);
+assert(numel(lo) == 1 && lo.nPlateau == lo.n && abs(lo.b_um - par.b_um) < 6, ...
+    'low-pressure turn: %d plateaus of %d, backlash %.1f um (set %g)', lo.nPlateau, lo.n, lo.b_um, par.b_um);
+assert(all([hiB.b_um] == 0), 'backlash %s um in the loaded turns', mat2str([hiB.b_um], 3));
+fprintf('ok  drive path, synthetic dither with %g um of backlash: %.1f um at %.2f MPa (%d of %d), none at %s MPa\n', ...
+    par.b_um, lo.b_um, lo.P_MPa, lo.nPlateau, lo.n, mat2str([hiB.P_MPa], 3));
+
+%   a path stiffer than the travel resolves: the windup is within
+%   opts.res_um, the stiffness is a bound, and the bound is below it
+randn('seed', 26);
+par = base; par.kch = 7.2; par.ks_N_um = 30000; par.b_um = 0;
+fdH = ditherSet(dir, 'ditH', par, [5 9]);
+rd = charDrivePath(fdH, struct('quiet', true, 'inertia_pct', mrTrue));
+dt = rd.dither;
+assert(all(isnan([dt.groups.ks_N_per_um])) && all([dt.groups.ksBound_N_per_um] > 0), ...
+    'a stiffness %s N/um from a transition within the resolution', mat2str([dt.groups.ks_N_per_um], 3));
+assert(all([dt.groups.ksBound_N_per_um] < par.ks_N_um), 'bound %s N/um against a stiffness of %g', ...
+    mat2str([dt.groups.ksBound_N_per_um], 3), par.ks_N_um);
+fprintf('ok  drive path, synthetic dither on a stiff path (%g N/um): k_s > %s N/um, the windup is within the %g um resolution\n', ...
+    par.ks_N_um, mat2str(round([dt.groups.ksBound_N_per_um])), 3);
+
+% K logs with the friction reversal 2 (Fc + mu P A), the motor's own part
+% of Fc not passing the path, and the path's deflection under the rest: a
+% stiff path (20 kN/um) deflects less than the logs resolve and gets a
+% bound below its stiffness; a soft one (0.8 kN/um) is resolved, and the
+% bound with the motor-side friction out is its stiffness.
+kStiff = writeKLog(dir, 'kl_stiff', base, 20000);
+kSoft = writeKLog(dir, 'kl_soft', base, 800);
+rs = charDrivePath(kStiff, struct('quiet', true));
+assert(~rs.stiffness.resolved && rs.stiffness.bound_N_per_um < 20000 && rs.stiffness.bound_N_per_um > 1000, ...
+    'stiff path: resolved %d, bound %.0f N/um', rs.stiffness.resolved, rs.stiffness.bound_N_per_um);
+assert(abs(rs.friction.mu - base.mu) < 0.02 && abs(rs.friction.Fc_N - base.Fcp - base.Fcm) < 300, ...
+    'mu %.3f (set %g), Fc %.0f N (set %g)', rs.friction.mu, base.mu, rs.friction.Fc_N, base.Fcp + base.Fcm);
+rs2 = charDrivePath(kSoft, struct('quiet', true, 'motorFriction_pct', fmTrue));
+assert(rs2.stiffness.resolved && abs(rs2.stiffness.boundPath_N_per_um / 800 - 1) < 0.15, ...
+    'soft path: resolved %d, bound %.0f N/um (set 800)', rs2.stiffness.resolved, rs2.stiffness.boundPath_N_per_um);
+% The whole reversal is not what passes the path when the motor has
+% friction of its own: the bound that takes it so is above the stiffness
+assert(rs2.stiffness.bound_N_per_um > 800 * 1.2, 'the whole-reversal bound %.0f N/um is not above the stiffness', ...
+    rs2.stiffness.bound_N_per_um);
+fprintf('ok  drive path, synthetic K logs: stiff path (20 kN/um) bound %.0f N/um, not resolved; soft path (0.8 kN/um) bound %.0f N/um with the motor-side friction out, resolved; mu %.2f (set %g)\n', ...
+    rs.stiffness.bound_N_per_um, rs2.stiffness.boundPath_N_per_um, rs.friction.mu, base.mu);
+
 fprintf('all passed\n');
+end
+
+
+% ===========================================================================
+function d = driveCapture(par, cmdSeq, tChange, N)
+% Step probe capture of a two-mass drive: cmdSeq(k) [mm/s] from the time
+% tChange(k) [s], N rows of one scan. The motor follows the command after a
+% dead time Td through a lag tau (the drive's velocity loop and the command
+% filter in series, not slewed);
+% its torque is mr a + its own friction + the force through the path. The
+% path is a spring ks with a gap b (dead zone) between the motor position
+% and the piston's; the piston, whose own mass is neglected, stays where it
+% is while the force through the path is within its friction
+% (Coulomb + mu P A) of the force the chamber puts on it, and otherwise
+% moves to where that balance holds (a play operator). The chamber is
+% P = P0 + kch x_p; the pressure column goes through the slave's median,
+% low-pass and two-scan pipeline. par.Fcm, par.Fcp and par.mu are in N, par.ks_N_um in N/um.
+Ts = par.Ts;
+dt = Ts / par.sub;                                          % [s] integration step
+nF = N * par.sub;
+t = (0:nF - 1)' * dt;
+cmd = zeros(nF, 1);
+for k = 1:numel(cmdSeq)
+    cmd(t >= tChange(k)) = cmdSeq(k);
+end
+nd = round(par.Td / dt);
+cd = [cmd(1) * ones(nd, 1); cmd(1:end - nd)];               % dead time
+a = exp(-dt / (par.tau / 2));                                % two lags of tau / 2: the command filter and the velocity loop
+w = cmd(1);
+A = par.areaN;                                              % [N per MPa]
+c = par.kch * A;                                            % [N/mm] chamber stiffness
+F0 = par.P0 * A;                                            % [N] chamber force at x_p = 0
+g = par.b_um / 2000;                                        % [um -> mm] half the gap
+ks = par.ks_N_um * 1000;                                    % [N/um -> N/mm]
+v = cmd(1);
+x = 0;
+fp0 = par.Fcp + par.mu * max(par.P0, 0) * A;
+xp = playSolve(ks, g, F0, c, sign(cmd(1)) * fp0, x);        % the path loaded in the direction of motion
+vm = zeros(nF, 1); xm = zeros(nF, 1); am = zeros(nF, 1); Fs = zeros(nF, 1); Pv = zeros(nF, 1);
+for i = 1:nF
+    w = a * w + (1 - a) * cd(i);
+    vNew = a * v + (1 - a) * w;
+    am(i) = (vNew - v) / dt;                                % [mm/s^2]
+    v = vNew;
+    x = x + v * dt;
+    fp = par.Fcp + par.mu * max((F0 + c * xp) / A, 0) * A;  % [N] piston friction
+    r = pathForce(ks, g, x - xp) - (F0 + c * xp);
+    if r > fp
+        xn = playSolve(ks, g, F0, c, fp, x);
+        xp = max(xp, xn);
+    elseif r < -fp
+        xn = playSolve(ks, g, F0, c, -fp, x);
+        xp = min(xp, xn);
+    end
+    vm(i) = v; xm(i) = x;
+    Fs(i) = pathForce(ks, g, x - xp);
+    Pv(i) = (F0 + c * xp) / A;
+end
+Tq = par.J * am + (par.Fcm * tanh(vm / 0.01) + Fs) / par.nPP;   % [% rated]
+idx = (par.sub:par.sub:nF)';
+d.t = (0:N - 1)' * Ts;
+d.vCmd = cmd(idx);
+d.velocity = vm(idx) + par.noiseV * randn(N, 1);
+ripple = par.ripple * sin(2 * pi * xm(idx) / 0.0726) + 0.5 * par.ripple * sin(4 * pi * xm(idx) / 0.0726 + 1);   % [%] per motor turn: 5.08 mm / 70
+d.torque = Tq(idx) + par.noiseT * randn(N, 1) + ripple;
+d.position = par.x0 + xm(idx) + par.noiseX * randn(N, 1);
+Praw = Pv(idx);
+med = (par.medianSize - 1) / 2;
+Pm = [Praw(1) * ones(med, 1); Praw(1:end - med)];
+alpha = Ts / (par.filterTau + Ts);
+Pf = Pm;
+for i = 2:N
+    Pf(i) = Pf(i - 1) + alpha * (Pm(i) - Pf(i - 1));
+end
+Pp = [Pf(1) * ones(par.pipeline, 1); Pf(1:end - par.pipeline)];
+d.pressure = Pp + par.noiseP * randn(N, 1);
+end
+
+
+function F = pathForce(ks, g, dl)
+% Force through a spring ks with a gap of 2 g, for the motor ahead of the
+% piston by dl.
+if dl > g
+    F = ks * (dl - g);
+elseif dl < -g
+    F = ks * (dl + g);
+else
+    F = 0;
+end
+end
+
+
+function xp = playSolve(ks, g, F0, c, tgt, x)
+% The piston position at which the force through the path exceeds the
+% chamber's by tgt, for the motor at x.
+xa = (ks * (x - g) - F0 - tgt) / (ks + c);
+if x - xa > g
+    xp = xa;
+    return;
+end
+xb = (ks * (x + g) - F0 - tgt) / (ks + c);
+if x - xb < -g
+    xp = xb;
+    return;
+end
+if c > 0
+    xp = -(F0 + tgt) / c;
+else
+    xp = xb;
+end
+end
+
+
+function f = writeDriveCapture(dir, name, d)
+f = fullfile(dir, [name '.csv']);
+fid = fopen(f, 'w');
+fprintf(fid, 't,vCmd,velocity,torque,position,pressure\n');
+fprintf(fid, '%.3f,%.3f,%.3f,%.2f,%.5f,%.4f\n', [d.t d.vCmd d.velocity d.torque d.position d.pressure]');
+fclose(fid);
+end
+
+
+function files = ditherSet(dir, name, par, levels)
+% Dither captures at the pressures in levels (the mean of the triangle):
+% two at the top turn and two at the bottom turn, each the first command
+% change of a capture, with the next reversal 1.5 s later in the same one.
+amp = 0.15;                                                 % [mm] half the triangle
+files = {};
+for P = levels
+    for q = 1:4
+        sgn = 1 - 2 * mod(q, 2);                            % +1: moving up, turning at the top
+        p = par;
+        p.P0 = P + sgn * amp * par.kch - sgn * 0.2;         % [MPa] 0.2 MPa short of the turn at the capture start
+        d = driveCapture(p, [sgn * 0.2, -sgn * 0.2, sgn * 0.2], [0 0.1 1.6], 500);
+        files{end + 1} = writeDriveCapture(dir, sprintf('%s_%g_%d', name, P, q), d); %#ok<AGROW>
+    end
+end
+end
+
+
+function file = writeKLog(dir, name, par, ks_N_um)
+% 50 ms run log of up and down ramps at 0.1 mm/s between 3 and 10 MPa
+% (7.2 MPa/mm): the motor force is P A + sgn (Fc + mu P A), the torque that
+% over newtonPerPct, and the motor is ahead of the piston by the force
+% through the path over ks_N_um.
+file = fullfile(dir, [name '.csv']);
+k = 7.2;                                                    % [MPa/mm]
+rows = zeros(0, 12);
+t = 0;
+x0 = 280;
+for cycle = 1:2
+    for sgn = [1 -1]
+        if sgn > 0
+            Ps = linspace(3, 10, 700);
+        else
+            Ps = linspace(10, 3, 700);
+        end
+        tr = t + (0:numel(Ps) - 1)' * 0.05;
+        xp = x0 + (Ps' - 3) / k;                            % [mm]
+        PA = Ps' * par.areaN;                               % [N]
+        Fm = PA + sgn * (par.Fcp + par.Fcm + par.mu * PA);  % [N] motor force
+        Fs = PA + sgn * (par.Fcp + par.mu * PA);            % [N] through the path
+        xm = xp + Fs / (ks_N_um * 1000);                    % [N / (N/mm) -> mm]
+        rows = [rows; tr ones(numel(tr), 1) 4 * ones(numel(tr), 1) 3 * ones(numel(tr), 1) ...
+            0.1 * sgn * ones(numel(tr), 1) xm 0.1 * sgn * ones(numel(tr), 1) Fm / par.nPP ...
+            Ps' ones(numel(tr), 1) zeros(numel(tr), 1) 12 * ones(numel(tr), 1)];  %#ok<AGROW>
+        t = tr(end) + 0.05;
+    end
+end
+rows(:, 8) = rows(:, 8) + 0.1 * randn(size(rows, 1), 1);   % [%] torque noise
+rows(:, 9) = rows(:, 9) + 0.002 * randn(size(rows, 1), 1); % [MPa]
+writeRun(file, rows);
 end
 
 
