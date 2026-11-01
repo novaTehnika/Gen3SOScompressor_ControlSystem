@@ -22,7 +22,10 @@ gas that dissolves change the volume available to the contents, and the
 chamber capacitance (the gas term plus the liquid term) converts that
 volume change to a pressure change. When the option liquid_depletes is
 set, the outflow removes saline and carries away the gas dissolved in
-it. Equations (1) to (10) of the README give the chamber model.
+it. A pocket of air in the passage to the pressure transducer cannot be
+purged and does not dissolve; it is a second isothermal gas of fixed
+amount beside the oxygen, eq. (46). Equations (1) to (10) and (46) of
+the README give the chamber model.
 
 The outlet is a hose, a tube and the orifice bank. The hose holds virgin
 saline at atmosphere behind the proximal valve; opening that valve joins
@@ -118,6 +121,9 @@ class Plant:
         self.A = par.A                  # [m^2]
         self.RT = par.R * par.T         # [J/mol] R T
         self.Patm = par.Patm            # [Pa]
+        # [J] Pocket of air at the transducer: n_air R T = Patm V_air,
+        # eq. (46). The amount is fixed; it never dissolves or leaves.
+        self.nRT_air = par.Patm * par.V_air
         self.K = par.K                  # [Pa]
         self.kH = par.kH                # [mol/(m^3 Pa)]
         self.tauDiss = par.tauDiss      # [s]
@@ -176,9 +182,10 @@ class Plant:
 
         # [m^3] Cylinder volume at x = 0 (passages and swept volume, not
         # the hose). The contents fill it, so it equals the stressed
-        # liquid plus the free gas (eq. (9)).
+        # liquid plus the free gas and the air pocket (eq. (9)).
         self.Vch0 = (par.Vl0 * (1 - P0 / par.K)
-                     + ng0 * self.RT / (P0 + par.Patm))
+                     + ng0 * self.RT / (P0 + par.Patm)
+                     + self.nRT_air / (P0 + par.Patm))
         if self.hose_open:
             # The hose is already part of the system: its virgin saline
             # is at the chamber pressure and its wall is dilated, so the
@@ -226,7 +233,7 @@ class Plant:
         The contents must fill the cylinder and the hose, so the new
         pressure P1 solves
           (V_l + V_vir + V_hose)(1 - P1/K) + n_g R T / (P1 + Patm)
-            = V_cyl + V_hose + C_hose P1
+            + Patm V_air / (P1 + Patm) = V_cyl + V_hose + C_hose P1
         where V_cyl is the cylinder volume now; it is found by bisection.
         The solution that moved into the hose to stress its saline and
         fill its dilation is logged as one parcel that met the hose at
@@ -286,6 +293,7 @@ class Plant:
         # Equalisation volume: dP over the two capacitances in series
         P_abs = P + self.Patm
         C_ch = ((y[iy_ntot] - y[iy_ndis]) * self.RT / P_abs**2
+                + self.nRT_air / P_abs**2
                 + (y[iy_Vl] - V_in) / self.K)               # [m^3/Pa]
         C_h = self.C_hose + (self.V_hose + V_in) / self.K   # [m^3/Pa]
         dV_eq = dP / (1 / C_ch + 1 / C_h)                   # [m^3]
@@ -362,9 +370,11 @@ class Plant:
         r_dis = (n_eq - n_dis) / self.tauDiss               # [mol/s]
 
         # Chamber capacitance [m^3/Pa], the volume change per unit
-        # pressure change of the free gas plus the liquid and, with the
-        # hose open, its compliance, eqs. (4) and (42)
+        # pressure change of the free gas, the air pocket and the
+        # liquid and, with the hose open, its compliance, eqs. (4), (42)
+        # and (46)
         C = ((n_tot - n_dis) * self.RT / P_abs**2
+             + self.nRT_air / P_abs**2
              + self.liquid_capacitance(V_l - V_in, V_vir))
 
         # Piston acceleration
@@ -381,7 +391,7 @@ class Plant:
 
         # Chamber pressure from continuity, eq. (5). The piston adds
         # volume flow A v; the outflow Q and the gas leaving the free
-        # phase remove volume.
+        # phase remove volume. The air pocket exchanges no gas.
         dP = (self.A * v - Q - Q_prox
               - self.RT / P_abs * r_dis) / C                # [Pa/s]
 
@@ -537,11 +547,12 @@ class Plant:
         return self.y[iy_Vvir]
 
     def capacitance(self):
-        """[m^3/Pa] chamber capacitance at the present state, eqs. (4)
-        and (42)"""
+        """[m^3/Pa] chamber capacitance at the present state, eqs. (4),
+        (42) and (46)"""
         x, v, P, n_dis, n_tot, V_l, n_out, V_out, V_vir, V_in = self.y
         P_abs = P + self.Patm
         return ((n_tot - n_dis) * self.RT / P_abs**2
+                + self.nRT_air / P_abs**2
                 + self.liquid_capacitance(V_l - V_in, V_vir))
 
     @property
@@ -562,14 +573,16 @@ class Plant:
         """[m^3] System volume minus the volume of its contents, eq. (9).
 
         The system is the cylinder plus, with the hose open, the hose
-        and its dilation; the contents are the stressed liquid and the
-        free gas; dissolved gas takes no volume. The result is zero up
-        to the integration error when liquid_depletes is set.
+        and its dilation; the contents are the stressed liquid, the free
+        gas and the air pocket (eq. (46)); dissolved gas takes no
+        volume. The result is zero up to the integration error when
+        liquid_depletes is set.
         """
         x, v, P, n_dis, n_tot, V_l, n_out, V_out, V_vir, V_in = self.y
         system = self.chamber_volume
         if self.hose_open:
             system += self.V_hose + self.C_hose * P
         contents = ((V_l - V_in + V_vir) * (1 - P / self.K)
-                    + (n_tot - n_dis) * self.RT / (P + self.Patm))
+                    + (n_tot - n_dis) * self.RT / (P + self.Patm)
+                    + self.nRT_air / (P + self.Patm))
         return system - contents

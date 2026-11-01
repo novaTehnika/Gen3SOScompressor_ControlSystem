@@ -21,7 +21,7 @@ enum { IY_X, IY_V, IY_P, IY_NDIS, IY_NTOT, IY_VL, IY_NOUT, IY_VOUT, IY_VVIR, IY_
 /* The parameters plant_init takes, by the names of the Plant attributes
  * they come from (n_dead is len(cmd_queue), heun is solver == 'heun'). */
 #define PLANT_PARAMS(X) \
-    X(A) X(RT) X(Patm) X(K) X(kH) X(tauDiss) X(Ts) X(nsub) X(heun) \
+    X(A) X(RT) X(Patm) X(nRT_air) X(K) X(kH) X(tauDiss) X(Ts) X(nsub) X(heun) \
     X(Qf) X(k_orifice) X(V_passages) X(V_hose) X(C_hose) X(k_prox) \
     X(slew_limited) X(accel) X(decel) X(tauV) X(n_dead) X(Fcap) X(mu) \
     X(mr) X(b) X(Fc) X(veps) X(vmax) X(liquid_depletes)

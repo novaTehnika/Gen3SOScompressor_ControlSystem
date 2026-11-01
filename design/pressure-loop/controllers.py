@@ -333,8 +333,11 @@ def limit_position(par, scenario):
     down to the cylinder head's passages (the limit switch)."""
     RT = par.R * par.T                                          # [J/mol]
     P0, ng0, nd0 = scenario.initial(par)
+    # Stressed liquid, free gas and the air pocket at the transducer,
+    # eq. (9) with eq. (46)
     Vch0 = (par.Vl0 * (1 - P0 / par.K)
-            + ng0 * RT / (P0 + par.Patm))                       # [m^3]
+            + ng0 * RT / (P0 + par.Patm)
+            + par.Patm * par.V_air / (P0 + par.Patm))           # [m^3]
     return (Vch0 - par.V_passages) / par.A                      # [m]
 
 

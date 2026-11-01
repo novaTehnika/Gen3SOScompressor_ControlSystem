@@ -33,7 +33,7 @@ linear-model equations (19) to (33) and (39) to (41).
 | File | Role |
 |---|---|
 | `params.py` | Defines `Params`: the chamber, oxygen charge, outlet, actuator, sensor and simulation parameters. The values the slave configures are read from the GVL and can be overridden through `slave_cfg`. `Params.contents()` gives the chamber's contents at the start of a run. |
-| `plant.py` | Models the chamber, the hose, the outlet and the actuator, equations (1) to (14), (36) to (38) and (42) to (45). `Plant.derivatives` is the continuous-time model and `Plant.scan` advances one slave scan. |
+| `plant.py` | Models the chamber, the hose, the outlet and the actuator, equations (1) to (14), (36) to (38) and (42) to (46). `Plant.derivatives` is the continuous-time model and `Plant.scan` advances one slave scan. |
 | `solver.py` | Holds the fixed-step integration methods, equations (34) and (35). |
 | `sensor.py` | Models the measurement chain: `SlaveSensor` (transducer, shunt, noise and the slave's filter and scaling blocks) and `LegacySensor`. |
 | `slave.py` | Puts the translated slave blocks on the import path, regenerating them if stale, and reads the `G_cfg*` defaults from the GVL. |
@@ -51,8 +51,26 @@ gas term plus the liquid term, so its stiffness dP/dx rises from about
 0.002 MPa/mm when gas-rich to 10 to 25 MPa/mm once the gas has dissolved.
 The piston position is integrated, and the chamber volume is the initial
 volume minus A times the position. The contents fill the chamber, so the
-stressed liquid plus the free gas equals that volume. Every run reports
-the stroke used, so it can be checked against the axis travel.
+stressed liquid plus the free gas and the air pocket equals that volume.
+Every run reports the stroke used, so it can be checked against the axis
+travel.
+
+**Air pocket at the transducer.** A passage about 2 cm long leads from
+the chamber to the pressure transducer, and it and the transducer's
+cavity hold air that cannot be purged. It is present in every run, with
+or without an oxygen charge. Its air dissolves only very slowly through
+the narrow passage, so the model holds it as a fixed amount of isothermal
+gas, `V_air` at atmosphere, eq. (46): it adds its own gas term to the
+capacitance, eq. (4), and its volume to the volume closure, eq. (9), and
+to the hose-opening equalisation, eq. (43), and it never dissolves or
+leaves with the outflow. Its compliance falls with the square of the
+pressure: with the 0.65 mL default and the full 343 mL fill it is 3.4
+times the liquid's at 0.1 MPa, 11 % of it at 1 MPa and 0.14 % at 10 MPa,
+and in a liquid-only compression it is the whole gas term. The default
+is the upper bound given by the gas-like term of the closed-chamber
+bulk-modulus fits; the passage's geometry alone suggests 0.02 to 0.06 mL.
+K is the bulk modulus of the liquid alone, which is what the fits give
+once their gas term is read as this pocket.
 
 The outflow Q removes saline. The saline volume falls with the outflow,
 the compliance uses the present saline volume, and the gas dissolved in
@@ -195,9 +213,11 @@ the dissolution rate:
     (3)  r_dis = (n_eq - n_dis) / tauDiss
 
 Chamber capacitance, the volume change of the contents per unit pressure
-change, from the isothermal free gas and the liquid:
+change, from the isothermal free gas, the air pocket of eq. (46) and the
+liquid:
 
-    (4)  C = (n_tot - n_dis) R T / P_abs^2 + V_l / K
+    (4)  C = (n_tot - n_dis) R T / P_abs^2 + Patm V_air / P_abs^2
+             + V_l / K
 
 Chamber pressure from continuity. The piston adds the volume flow A v;
 the outflow and the gas leaving the free phase remove volume:
@@ -221,10 +241,12 @@ balances:
          dn_out/dt = r_out
 
 Volume closure. The chamber volume equals the stressed liquid plus the
-free gas; dissolved gas takes no volume. The model does not impose this
-identity, so it serves as a check on the integration:
+free gas and the air pocket; dissolved gas takes no volume. The model
+does not impose this identity, so it serves as a check on the
+integration:
 
     (9)  V_ch0 - A x = V_l (1 - P/K) + (n_tot - n_dis) R T / P_abs
+                       + Patm V_air / P_abs
 
 Chamber stiffness:
 
@@ -310,13 +332,14 @@ virgin saline is not in the system and C_hose does not apply:
     (42) C_liq = (V_l + V_vir) / K + C_hose
 
 Pressure P1 after the proximal valve opens on a cylinder of volume
-V_cyl at pressure P, holding n_g moles of free gas: the contents (the
-liquid now including the hose's V_hose of virgin saline at atmosphere)
-fill the cylinder, the hose and the hose's dilation. The model solves
+V_cyl at pressure P, holding n_g moles of free gas and the air pocket of
+eq. (46): the contents (the liquid now including the hose's V_hose of
+virgin saline at atmosphere) fill the cylinder, the hose and the hose's
+dilation. The model solves
 it by bisection and applies it within the scan the valve opens:
 
     (43) (V_l + V_vir + V_hose)(1 - P1/K) + n_g R T / (P1 + Patm)
-           = V_cyl + V_hose + C_hose P1
+           + Patm V_air / (P1 + Patm) = V_cyl + V_hose + C_hose P1
 
 The virgin saline leaves through the outlet before the solution and
 carries no dissolved gas, so eqs. (7) and (8) act on V_vir, with
@@ -343,6 +366,23 @@ C_hose + (V_hose + V_in) / K:
 The solution that enters while P_h is below the saturation pressure
 of eq. (38) degasses; its volume is P_sat C_h to first order,
 whatever the bore.
+
+
+### Air pocket
+
+The passage to the pressure transducer and the transducer's cavity hold
+`V_air` of air at atmospheric pressure, a fixed amount of isothermal gas
+that never dissolves and never leaves. Its amount, its volume at the
+absolute pressure P_abs and its share of the capacitance of eq. (4) are
+
+    (46) n_air R T = Patm V_air,   V_pocket = Patm V_air / P_abs,
+         dV_pocket/dP = -Patm V_air / P_abs^2
+
+It is the term added to eqs. (4), (9) and (43), and it is part of the
+initial cylinder volume V_ch0 of eq. (9): at a run's starting pressure P0
+the cylinder holds Patm V_air / (P0 + Patm) more than the liquid and the
+oxygen alone. The stiffness, eq. (10), uses the capacitance that
+contains it.
 
 
 ## Numerical solution
@@ -397,7 +437,8 @@ assumed before:
 
 | Parameter | Measured | Assumed before | Where |
 |---|---|---|---|
-| Effective bulk modulus K | 0.72 GPa (0.67–0.78; 0.81 gas-corrected) | 1 GPa | `charBulkModulus`, 3 runs at a 343 mL fill |
+| Bulk modulus K | 0.72 GPa effective (0.67–0.78; 0.81 gas-corrected, the liquid value once the pocket is explicit) | 1 GPa | `charBulkModulus`, 3 runs at a 343 mL fill |
+| Trapped air V_air at the transducer | upper bound 0.65 mL (the gas term of the closed-chamber K runs); the 2 cm passage of 1–2 mm bore holds 0.02–0.06 mL; to be settled by the fits at two fill levels | not modelled | `charBulkModulus`, `Vg_mL` of the closed-chamber runs |
 | Saline volume Vl0 | 343 mL at the 280 mm start, including the dead volume | 300 mL | geometry |
 | Dead volume | 57 mL of passages (hose shut, with the present fittings); 86 mL with the 29 mL hose and the tube (delivery) | 20–30 mL (then 10 mL in the master) | 57 g of water fills it |
 | Hose compliance | 0.24 mL/MPa | not modelled | difference between bulk-modulus runs with the hose shut and open |

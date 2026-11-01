@@ -20,12 +20,13 @@ a comment states otherwise.
 The parameters describe five parts of the model:
 
   Chamber     A piston of area A compresses a chamber that holds saline
-              of effective bulk modulus K and oxygen gas. The gas is
-              isothermal and dissolves into the saline according to
-              Henry's law with time constant tauDiss. The chamber
-              stiffness dP/dx therefore rises from about 0.02 MPa/mm at
-              the start of a run to 10 to 25 MPa/mm once the gas has
-              dissolved.
+              of bulk modulus K and oxygen gas. The gas is isothermal
+              and dissolves into the saline according to Henry's law
+              with time constant tauDiss. A pocket of air V_air in the
+              passage to the pressure transducer is a second isothermal
+              gas that never dissolves. The chamber stiffness dP/dx
+              therefore rises from about 0.02 MPa/mm at the start of a
+              run to 10 to 25 MPa/mm once the gas has dissolved.
   Charge      The oxygen charge is given as the ratio of its STP volume
               to the saline volume, and is admitted at the supply
               pressure, where the run starts. The saturation pressure of
@@ -93,6 +94,9 @@ class Params:
     # alone is 2.2 GPa; the seals, hoses and residual gas lower it.
     # Measured 0.72 GPa (0.67 to 0.78 over the segments, 0.81 with the
     # gas-like curvature removed) on 2026-10-26, bench/characterisation.
+    # With the air pocket V_air below explicit, K is the liquid value,
+    # to be re-read from the fits' liquid-only term; the 0.72 GPa is
+    # an effective value that includes the pocket's compliance.
     K: float = 0.72e9
     # [m^3] Saline volume at the start of a run, including the dead
     # volume: the fill at the 280 mm start position of the bench runs
@@ -104,6 +108,16 @@ class Params:
     tauDiss: float = 30.0
     # [kg/m^3] Saline density
     rho: float = 1000.0
+    # [m^3] Air trapped in the passage to the pressure transducer (about
+    # 2 cm long) and in the transducer's cavity, at atmospheric
+    # pressure. It cannot be purged, so it is present in every run, and
+    # it dissolves only very slowly through the narrow passage, so the
+    # model holds it as a fixed amount of isothermal gas that never
+    # dissolves, eq. (46). The default is the largest gas-like term the
+    # bulk-modulus fits found in the closed chamber (0.65 mL), an upper
+    # bound: the passage alone (1 to 2 mm bore) holds 0.02 to 0.06 mL,
+    # and the fits at two fill levels are to settle the rest.
+    V_air: float = 0.65e-6
 
     # ----- Oxygen charge -------------------------------------------------
     # [-] Oxygen charge as the ratio of its volume at STP (0 degC, 1 atm)
