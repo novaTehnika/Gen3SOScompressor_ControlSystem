@@ -30,10 +30,10 @@ Usage:
 
 FILE DEPENDENCY:
 ./
-    metrics.py, params.py, robust.py, scenarios.py, sim.py
+    studyparams.py, metrics.py, robust.py, scenarios.py, sim.py
 tests/run_all.sh reruns this script when a file under these paths
 changes (paths from the repository root):
-Depends on: design/pressure-loop slave-src tools
+Depends on: design/pressure-loop models slave-src tools
 """
 
 import math
@@ -47,7 +47,7 @@ import numpy as np  # noqa: E402
 import metrics  # noqa: E402
 import robust as R  # noqa: E402
 import scenarios  # noqa: E402
-from params import Params  # noqa: E402
+from studyparams import StudyParams  # noqa: E402
 from sim import Result  # noqa: E402
 
 
@@ -97,7 +97,7 @@ def hand_result(P, scen, P_sat, V_out, target=10e6):
 
 
 def check_process_metrics():
-    par = Params(tol=0.1e6, degas_margin=0.5e6, P_ceiling=12e6,
+    par = StudyParams(tol=0.1e6, degas_margin=0.5e6, P_ceiling=12e6,
                  e_crash=1.0e6)
     s = scenarios.Scenario('deliver', 10.0, 1.0, P0=10e6, t_open=1.0)
     n = 5000

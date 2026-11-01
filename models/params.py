@@ -9,9 +9,13 @@ CREATION DATE:
 10/15/2026
 
 PURPOSE/DESCRIPTION:
-This module defines Params, the set of plant, actuator, sensor and
-simulation parameters used by every study. All values are in SI units
-unless a comment states otherwise.
+This module defines Params, the parameters of the models: the plant
+(plant.py, ported to C in c/plant.c), the sensor chain (sensor.py) and
+their integration. The simulated slave takes its defaults (through
+plant_export.py), and the design studies extend it with their own
+settings and may override its defaults
+(design/pressure-loop/studyparams.py). All values are in SI units unless
+a comment states otherwise.
 
 The parameters describe five parts of the model:
 
@@ -54,7 +58,9 @@ The slave's own settings (controller gains, velocity clamp, slew limits,
 stop law, filter, median size, scan time, shunt and transducer range) are
 not stored here. They are read from the slave's global variable list
 (GVL) through slave.slave_config(), and the field slave_cfg overrides
-individual G_cfg* entries for a study.
+individual G_cfg* entries for a study. The charge (ratio, P_supply) is
+the default start of a run; Params.contents() gives the chamber's
+contents for any start.
 
 FILE DEPENDENCY:
 ./
@@ -125,17 +131,6 @@ class Params:
     # holds air at atmosphere before the valve opens, so the chamber loses
     # this volume of liquid in the scan the valve opens, eq. (37).
     V_tube: float = 0.236e-6
-    # [s] Valve opening time; 0 opens the valve in one scan. The ball
-    # valve is opened rapidly.
-    Topen: float = 0.0
-    # [s] Valve closing time at the end of the purge; 0 closes it in
-    # one scan. Set from the hand's speed on the ball valve.
-    Tclose: float = 0.0
-    # True if the proximal valve is opened before the compression, so
-    # the hose is part of the chamber throughout (the proposed
-    # procedure); False if it is opened after mixing, at pressure (the
-    # present procedure), which costs the equalisation drop of eq. (43).
-    hose_before: bool = False
     # [m^3] Dead volume of the cylinder head: the passages the piston
     # cannot sweep, left when the piston reaches the limit switch at the
     # end of its stroke, with the proximal valve shut. The machine halts
@@ -159,16 +154,14 @@ class Params:
     C_hose: float = 2.4e-13
     # ----- Proximal valve ------------------------------------------------
     # The proximal valve throttles the solution that fills the hose when
-    # it is opened at pressure, eqs. (44) and (45). Its area rises
-    # linearly over Topen_prox to the bore of a d_prox valve; 0 opens it
-    # in one scan (the equalisation of eq. (43)). A needle valve in its
-    # place is a smaller d_prox.
+    # it is opened at pressure, eqs. (44) and (45). Its area rises to the
+    # bore of a d_prox valve over the opening time a study gives; opened
+    # in one scan it is the equalisation of eq. (43). A needle valve in
+    # its place is a smaller d_prox.
     # [m] Bore of the proximal valve: 1/4 in ball valve
     d_prox: float = 6.35e-3
     # [-] Discharge coefficient of the proximal valve
     Cd_prox: float = 0.6
-    # [s] Opening time of the proximal valve; 0 for one scan
-    Topen_prox: float = 0.0
 
     # ----- Derived outlet quantities -------------------------------------
     @property
@@ -204,6 +197,25 @@ class Params:
         dissolved in V_l [m^3] of saline, eq. (38). Below this pressure
         the solution degasses."""
         return n_dis / (self.kH * V_l) - self.Patm
+
+    def contents(self, P0, ratio, dissolved=False):
+        """Return the chamber contents at the start of a run at gauge
+        pressure P0 [Pa] with a charge of STP ratio ratio, as (P0 [Pa],
+        free gas [mol], dissolved gas [mol]).
+
+        The saline can hold n_sat = kH (P0 + Patm) Vl0 by Henry's law.
+        If the charge starts dissolved, n_dis = min(charge, n_sat) and
+        the rest is free; otherwise the charge is free and the saline
+        carries n_sat, the equilibrium it reached during the fill.
+        """
+        n_sat = self.kH * (P0 + self.Patm) * self.Vl0       # [mol]
+        if ratio <= 0:
+            return P0, 0.0, n_sat
+        n_charge = self.n_charge(ratio)                     # [mol]
+        if dissolved:
+            n_dis = min(n_charge, n_sat)                    # [mol]
+            return P0, n_charge - n_dis, n_dis
+        return P0, n_charge, n_sat
 
     # ----- Simulation ----------------------------------------------------
     # [-] Plant integration steps per slave scan
@@ -259,29 +271,6 @@ class Params:
     # (G_cfgPressureShuntOhms the effective 421.4 ohm, measured
     # +0.002 MPa vented); -0.11e6 with the 434 ohm setting.
     P_offset: float = 0.0
-    # [s] Time constant of the derivative filter in the legacy
-    # controller
-    Tf: float = 0.02
-
-    # ----- Process -------------------------------------------------------
-    # [Pa] Target pressure for the compression, hold and delivery
-    P_target: float = 10e6
-
-    # ----- Metrics and requirements --------------------------------------
-    # [Pa] Half-width of the band used for the settling time
-    tol: float = 0.1e6
-    # [Pa] Required margin of the chamber pressure above the saturation
-    # pressure during the hold and delivery (no degassing)
-    degas_margin: float = 0.5e6
-    # [Pa] Highest pressure allowed at any time (mechanical limit)
-    P_ceiling: float = 12e6
-    # [Pa] Largest error tolerated during a delivery once the opening
-    # dip has had t_recover to settle; a larger error counts as loss of
-    # control
-    e_crash: float = 1.0e6
-    # [s] Time after the valve opens allowed for the opening dip to
-    # recover; the dip metric is the lowest pressure in this window
-    t_recover: float = 5.0
 
     # ----- Model options -------------------------------------------------
     # Setting both options to False (with slew_limited True) gives the

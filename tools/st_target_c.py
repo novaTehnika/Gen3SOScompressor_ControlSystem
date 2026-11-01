@@ -12,7 +12,9 @@ Generated code
                      void PRG_<Name>(PRG_<Name>_t *s, G_t *G, IO_t *IO, double dt)
     st_names.c   st_names[]: every variable of G, IO and the PRG_Main
                  instance (nested blocks included) by path, type and
-                 offset, and st_enums[]: every enumeration member
+                 offset; st_enums[]: every enumeration member; and
+                 st_holding_regs[] / st_input_regs[]: the Modbus
+                 registers, from the globals' AT addresses (MODBUS_GROUPS)
 
 The runtime it relies on (TON, R_TRIG, F_TRIG, st_* helpers) is the
 hand-written slave-sim/c/st_runtime.h. Variables keep the controller's
@@ -44,6 +46,15 @@ STD_FB_FIELDS = {'TON': [('IN', 'BOOL'), ('PT', 'TIME'), ('Q', 'BOOL'), ('ET', '
                          ('M', 'BOOL')],
                  'R_TRIG': [('CLK', 'BOOL'), ('Q', 'BOOL'), ('M', 'BOOL')],
                  'F_TRIG': [('CLK', 'BOOL'), ('Q', 'BOOL'), ('M', 'BOOL')]}
+# The Modbus register groups of the controller's Hardware Configuration:
+# register k is the word at byte base + 2 (k - 1) of the group's area
+# (docs/master/ModbusRegisterMap.md, "Addressing"). A 32-bit value spans
+# two registers, low word first.
+MODBUS_GROUPS = {'holding': (('MW3.', 'MD3.'), 483328),
+                 'input': (('QW', 'QD'), 73792)}
+REG_TYPES = {'UINT': ('ST_U16', 1), 'WORD': ('ST_U16', 1), 'INT': ('ST_I16', 1),
+             'UDINT': ('ST_U32', 2), 'DWORD': ('ST_U32', 2), 'DINT': ('ST_I32', 2),
+             'REAL': ('ST_F32', 2)}
 ARRAY_RE = re.compile(r'ARRAY\s*\[\s*(\d+)\s*\.\.\s*(\d+)\s*\]\s*OF\s+(\w+)')
 
 
@@ -300,6 +311,37 @@ def name_entries(prefix, root, cpath, typ, ctx, out):
                f'offsetof({rtype}, {cpath}), {n or 1}}},')
 
 
+def register_rows(ctx):
+    """st_reg_t rows of each Modbus group, from the globals' AT addresses."""
+    rows = {g: [] for g in MODBUS_GROUPS}
+    for name in sorted(ctx['globals']):
+        at = ctx['globals'][name].get('at')
+        if not at:
+            continue
+        for group, (prefixes, base) in MODBUS_GROUPS.items():
+            prefix = next((pf for pf in prefixes if at.startswith(pf)), None)
+            if prefix is None:
+                continue
+            typ = ctx['globals'][name]['type']
+            m = ARRAY_RE.match(typ)
+            elem, count = (m.group(3), int(m.group(2)) - int(m.group(1)) + 1) if m else (typ, 1)
+            if elem not in REG_TYPES:
+                raise STError(f'{name} AT %{at}: no Modbus register form for {typ}')
+            code, words = REG_TYPES[elem]
+            if (prefix[1] == 'D') != (words == 2):
+                raise STError(f'{name} AT %{at}: a {elem} needs a {"D" if words == 2 else "W"} address')
+            offset = int(at[len(prefix):]) - base
+            if offset < 0 or offset % 2:
+                raise STError(f'{name} AT %{at}: not a register of the {group} group')
+            rows[group].append((offset // 2 + 1, words * count, code, name, count))
+    for group, regs in rows.items():
+        regs.sort()
+        for a, b in zip(regs, regs[1:]):
+            if a[0] + a[1] > b[0]:
+                raise STError(f'{a[3]} and {b[3]} overlap in the {group} registers')
+    return rows
+
+
 def gen_names(ctx):
     rows = []
     for fname, ftyp in global_fields(ctx):
@@ -310,11 +352,18 @@ def gen_names(ctx):
         name_entries(f's.{fname}', 'S', fname, ftyp, ctx, rows)
     enums = [f'    {{"{e}.{m}", {v}}},' for e, ms in sorted(ctx['enums'].items())
              for v, m in enumerate(ms)]
+    regs = register_rows(ctx)
+    reg_lines = []
+    for group, entries in regs.items():
+        reg_lines += [f'const st_reg_t st_{group}_regs[] = {{']
+        reg_lines += [f'    {{"G.{n}", {first}, {words}, {code}, offsetof(G_t, {n}), {count}}},'
+                      for first, words, code, n, count in entries]
+        reg_lines += ['};', f'const int st_{group}_regs_count = {len(entries)};', '']
     return [HEADER, '#include <stddef.h>', '#include "st_slave.h"', '#include "st_names.h"', '',
             'const st_name_t st_names[] = {'] + rows + ['};',
             f'const int st_names_count = {len(rows)};', '',
             'const st_enum_t st_enums[] = {'] + enums + ['};',
-            f'const int st_enums_count = {len(enums)};', '']
+            f'const int st_enums_count = {len(enums)};', ''] + reg_lines
 
 
 def generate(src, out):

@@ -26,7 +26,7 @@ parts, each of which prints a table:
      the drive velocity lag.
 
 It writes the tables as CSV and the plots as PNG to the output
-directory. --set takes Params fields and G_cfg* names, as in the other
+directory. --set takes StudyParams fields and G_cfg* names, as in the other
 studies.
 
 Usage:
@@ -34,9 +34,8 @@ Usage:
 
 FILE DEPENDENCY:
 ./
-    linear.py
+    studyparams.py, linear.py
     studyutil.py
-    params.py, slave.py (through studyutil.py)
 """
 
 import numpy as np

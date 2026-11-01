@@ -18,6 +18,7 @@ the same heartbeat registers (HR1, IR1–2) and a separate probe area (101+).
 | `captures/` | Wireshark captures from bench runs (gitignored) |
 | `buildModbusBench.m` | Generates `ModbusBench.slx` (gitignored) |
 | `modbusBenchStep.m` | Called each model step: writes the heartbeat, reads echo and counter |
+| `modbusCountSweep.m` | Times reads and writes against their register count, for the link timing model |
 | `modbusBenchReport.m` | Summarises a model run |
 
 The bench model reads the DAQ inputs only, to load and pace the model like the
@@ -91,6 +92,42 @@ service tick, which is what the protocol exchange needs.
 ```matlab
 r = modbusRawProbe;
 ```
+
+### Register count
+
+Every figure above was taken with one or two registers per request. The
+link timing model of the simulated slave (`slave-sim/modbusLink.m`,
+`slave-sim/modbusLinkConfig.m`) splits a transfer into requests by the
+Modbus limits (125 registers per read, 123 per write) and serves one per
+tick, so a long transfer costs a tick per request. What it cannot know
+is whether a request with more registers takes the controller longer to
+answer; its `perRegister` term is 0 until this measures it.
+
+```matlab
+r = modbusCountSweep;                                  % reads of 1, 2, 20, 60 and 125 registers
+r = modbusCountSweep(500, struct('writeStart', 201));  % and writes of 1, 6, 60 and 123 registers
+```
+
+Reads take input registers from IR1. Writes need a block of holding
+registers inside the holding group that the program does not use: check
+the group's range and the variables in the Global Variables worksheet and
+pass its first register as `writeStart`. HR1-8 and HR111-114 are refused.
+The block is read once and the same values are written back. Capture the
+run in Wireshark and run `modbusCaptureTiming.py` on it: besides the
+figures above it reports, per function code and register count, the
+controller's request → response time and the share answered in the same
+tick (from the controller's separate TCP ACK), and per function code the
+slope of the median against the count, the value for
+`modbusLinkConfig.perRegister`. If the same-tick share falls with the
+count, the model's `pNextTick` needs to depend on the count as well.
+
+| Function | Registers | Request → response median / p99 (ms) | Same tick (%) |
+|----------|-----------|--------------------------------------|---------------|
+| FC04 | 1 | | |
+| FC04 | 20 | | |
+| FC04 | 125 | | |
+| FC16 | 6 | | |
+| FC16 | 123 | | |
 
 ## 3. Simulink run
 

@@ -1,10 +1,11 @@
 function out = fakeProbeLink(cmd, varargin)
 %FAKEPROBELINK Stand-in for the bench runs' Modbus link and clock: the
-%   simulated slave behind the protocol registers (IR1-20, HR1-8), an
-%   emulation of PRG_PressureProbe behind the noise registers (HR101,
-%   IR101-113, IR121-370) and, behind the step probe registers (HR111-114,
-%   IR401-524), the slave's own FB_Probe: the registers are read from and
-%   written to the generated slave's globals (G_mbProbe*), so the ring,
+%   simulated slave's own registers behind the protocol registers (IR1-20,
+%   HR1-8), an emulation of PRG_PressureProbe behind the noise registers
+%   (HR101, IR101-113, IR121-370) and, behind the step probe registers
+%   (HR111-114, IR401-524), the slave's own FB_Probe. The slave's
+%   registers are packed and unpacked by its register map (the GVL's AT
+%   addresses, readInputRegisters / writeHoldingRegisters), so the ring,
 %   the arm latch, the recording and transfer state machines, the window
 %   and the fault mark are the slave source's. Only the link is emulated:
 %   the hooks below lose an arm write or tear a read. The test keeps a log
@@ -25,11 +26,20 @@ function out = fakeProbeLink(cmd, varargin)
 %                                       plant's orifice bank (32 of 40 um,
 %                                       discharge coefficient Cd) drains the
 %                                       chamber, after the tube fills
+%   fakeProbeLink('linkTiming', cfg)    the link's timing (modbusLinkConfig,
+%                                       the default); [] makes calls instant
 %   t    = fakeProbeLink('now')
 %          fakeProbeLink('wait', t)     run the slave until t
 %   regs = fakeProbeLink('read', start, n)
 %          fakeProbeLink('write', start, values)
 %          fakeProbeLink('writeOne', address, value)
+%
+%   A read or write is a blocking call through the Modbus link model
+%   (modbusLink): it is split into requests by the Modbus limits, served
+%   one per slave tick around the scans (reads before a scan, writes after
+%   it) and returns after the client delay, with the slave running all the
+%   while. S.calls logs every call as [t called, t returned, requests,
+%   registers, is a read].
 %   S    = fakeProbeLink('state')       S.collectLog is [t, mm^3 collected at
 %                                       the orifices, mol of free gas in the
 %                                       chamber] while the valve is open;
@@ -41,7 +51,7 @@ function out = fakeProbeLink(cmd, varargin)
 %                                       faultMark and the hooks' counts
 %
 %   The simulated chamber, outlet and drive are the design model's plant
-%   (slave-sim/c/plant.c), so the drive's dead time and lag and the
+%   (models/c/plant.c), so the drive's dead time and lag and the
 %   chamber's stiffness are its own (sl.plant.par). The torque model stands
 %   in for the drive's torque feedback, which the simulated slave reports as
 %   zero: it is a friction law chosen by the test, for the friction fit to
@@ -66,7 +76,7 @@ switch cmd
         S.sl.ax.x = S.sl.sim.chamberContactPos + 40;
         S.u = struct('heartbeat', 0, 'modeCode', 0, 'motionEnable', 0, ...
             'faultReset', 0, 'reference', 0, 'positionSpeed', 0);
-        [S.sl, S.y] = slaveStep(S.sl, S.u);
+        S.y = scan(S.sl);
         S.tick = 0;
         S.faultAt = Inf;
         S.faultUntil = Inf;
@@ -75,6 +85,9 @@ switch cmd
         S.collectLog = zeros(0, 3);
         S.stick = struct('until', -Inf, 'sign', 0, 'armed', true);
         S.hook = struct('dropArm', 0, 'tear', 0);
+        S.linkCfg = modbusLinkConfig();
+        S.link = modbusLink('init', S.linkCfg, S.sl.G.G_cfgScanTime);
+        S.calls = zeros(0, 5);
         S.nT = 0;
         R = zeros(4096, 7);
         S.noise = 0.001;        % V rms added to the sampled input
@@ -97,6 +110,11 @@ switch cmd
         S.hook.tear = varargin{1};
     case 'ringDepth'
         S.sl.s.fbProbe.cDepth = varargin{1};
+    case 'linkTiming'
+        S.linkCfg = varargin{1};
+        if ~isempty(S.linkCfg)
+            S.link = modbusLink('init', S.linkCfg, S.sl.G.G_cfgScanTime);
+        end
     case 'valveAt'
         S.valve.at = varargin{1};
         if numel(varargin) > 1
@@ -105,94 +123,31 @@ switch cmd
     case 'now'
         out = S.tick / 1000;
     case 'wait'
-        while S.tick / 1000 < varargin{1}
-            S.tick = S.tick + 1;
-            if S.tick / 1000 >= S.faultAt && S.tick / 1000 < S.faultUntil
-                S.sl.hook.driveFault = true;
-            elseif S.tick / 1000 >= S.faultUntil
-                S.sl.hook.driveFault = false;
-            end
-            if mod(S.tick, round(1000 * S.sl.G.G_cfgScanTime)) == 0
-                if ~isempty(S.torque)
-                    S = torqueScan(S);
-                end
-                S = valveScan(S);
-                pre = [S.sl.G.G_sysActualVelocity, S.sl.G.G_sysActualTorque, ...
-                       S.sl.G.G_sysActualPosition];     % what the probe is given
-                [S.sl, S.y] = slaveStep(S.sl, S.u);
-                S = probeScan(S);
-                [S, R] = logScan(S, R, pre);
-            end
-        end
+        [S, R] = advance(S, R, varargin{1}, []);
     case 'read'
         start = varargin{1};
         n = varargin{2};
-        regs = zeros(1, 524);
-        regs(1:S.map.nRead) = packRead(S.y, S.map);
-        regs(101:102) = modbusPack(S.p.stats(1));
-        regs(103:104) = modbusPack(S.p.stats(2));
-        regs(105:106) = modbusPack(S.p.stats(3));
-        regs(107:108) = modbusPack(S.p.stats(4));
-        regs(109) = S.p.window;
-        regs(110) = S.p.state;
-        regs(111:112) = modbusPack(S.p.live);
-        regs(113) = S.p.echo;
-        regs(121:370) = S.p.samples;
-        G = S.sl.G;
-        regs(401:402) = u32Words(G.G_mbProbeWritten);
-        regs(403:404) = u32Words(G.G_mbProbeMark);
-        regs(405:406) = u32Words(G.G_mbProbeStart);
-        regs(407) = G.G_mbProbeArmEcho;
-        regs(408) = G.G_mbProbeCount;
-        regs(409) = G.G_mbProbeDepth;
-        regs(410) = G.G_mbProbeWords;
-        regs(411:514) = G.G_mbProbeWindow;
-        regs(519:520) = u32Words(G.G_mbProbeStartTail);
-        regs(521) = G.G_mbProbeState;
-        regs(522) = G.G_mbProbeXfer;
-        regs(523:524) = u32Words(G.G_mbProbeFaultMark);
         assert(start >= 1 && start + n - 1 <= 524, 'read outside the register groups');
-        if start <= 519 && start + n - 1 >= 520 && S.hook.tear > 0
-            regs(519:520) = u32Words(G.G_mbProbeStartTail + 1);     % a window that changed under the read
-            S.hook.tear = S.hook.tear - 1;
-        end
-        out = regs(start:start + n - 1);
+        [S, R, out] = call(S, R, 'read', start, n);
     case 'write'
         w = varargin{2};
         first = varargin{1};
-        if first >= 111 && first <= 114
-            assert(first + numel(w) - 1 <= 114, 'write past HR114');
-            if first == 111 && S.hook.dropArm > 0
-                S.hook.dropArm = S.hook.dropArm - 1;
-                return;
-            end
-            for k = 1:numel(w)
-                S = probeRegister(S, first + k - 1, w(k));
-            end
-            return;
+        inProbe = first >= 111 && first <= 114;
+        assert((inProbe && first + numel(w) - 1 <= 114) || (first == 1 && numel(w) == S.map.nWrite), ...
+            'write is not HR1-8 or HR111-114');
+        if first == 1
+            % The master's last write, decoded, for the tests' checks
+            S.u.heartbeat    = w(S.map.hr.heartbeat);
+            S.u.modeCode     = w(S.map.hr.modeCode);
+            S.u.motionEnable = w(S.map.hr.motionEnable);
+            S.u.faultReset   = w(S.map.hr.faultReset);
+            S.u.reference    = modbusUnpack(w(S.map.hr.reference), w(S.map.hr.reference + 1));
+            S.u.positionSpeed = modbusUnpack(w(S.map.hr.positionSpeed), w(S.map.hr.positionSpeed + 1));
         end
-        assert(first == 1 && numel(w) == S.map.nWrite, 'write is not HR1-8 or HR111-114');
-        S.u.heartbeat    = w(S.map.hr.heartbeat);
-        S.u.modeCode     = w(S.map.hr.modeCode);
-        S.u.motionEnable = w(S.map.hr.motionEnable);
-        S.u.faultReset   = w(S.map.hr.faultReset);
-        S.u.reference    = modbusUnpack(w(S.map.hr.reference), w(S.map.hr.reference + 1));
-        S.u.positionSpeed = modbusUnpack(w(S.map.hr.positionSpeed), w(S.map.hr.positionSpeed + 1));
+        [S, R] = call(S, R, 'write', first, w);
     case 'writeOne'
-        switch varargin{1}
-            case 101
-                S.p.arm = varargin{2};
-            case 111
-                if S.hook.dropArm > 0
-                    S.hook.dropArm = S.hook.dropArm - 1;
-                else
-                    S = probeRegister(S, 111, varargin{2});
-                end
-            case {112, 113, 114}
-                S = probeRegister(S, varargin{1}, varargin{2});
-            otherwise
-                error('single write is not HR101 or HR111-114');
-        end
+        assert(any(varargin{1} == [101 111 112 113 114]), 'single write is not HR101 or HR111-114');
+        [S, R] = call(S, R, 'write', varargin{1}, varargin{2});
     case 'state'
         out = S;
         out.ring = R(1:S.nT, :);        % the log of records, one row per index from 0, counts
@@ -202,6 +157,127 @@ switch cmd
             'state', G.G_mbProbeState, 'xfer', G.G_mbProbeXfer, ...
             'faultMark', G.G_mbProbeFaultMark, 'dropArm', S.hook.dropArm, 'tear', S.hook.tear);
 end
+end
+
+
+function [S, R, data] = call(S, R, kind, start, arg)
+% A blocking call: through the link model, the slave running until it
+% returns; instant (served at once, no time passing) without link timing.
+data = [];
+t0 = S.tick / 1000;
+if isempty(S.linkCfg)
+    if strcmp(kind, 'read')
+        [S, data] = serveRead(S, start, arg);
+    else
+        S = serveWrite(S, start, arg);
+    end
+    S.calls(end + 1, :) = [t0, t0, 1, numel(data) + numel(arg) * strcmp(kind, 'write'), strcmp(kind, 'read')];
+    return;
+end
+[S.link, id] = modbusLink('submit', S.link, t0, kind, start, arg);
+[S, R, d] = advance(S, R, Inf, id);
+data = d.data;
+S.calls(end + 1, :) = [d.tCall, d.tDone, d.requests, ...
+    ifelse(strcmp(kind, 'read'), arg, numel(arg)), strcmp(kind, 'read')];
+end
+
+
+function v = ifelse(c, a, b)
+if c
+    v = a;
+else
+    v = b;
+end
+end
+
+
+function [S, R, done] = advance(S, R, tEnd, id)
+% Run the slave on the 1 ms tick until tEnd or, with id, until the link
+% returns that call (done: its record). Around each scan the link's due
+% requests are served: reads before the scan, writes after it.
+done = [];
+scanTicks = round(1000 * S.sl.G.G_cfgScanTime);
+while isempty(id) && S.tick / 1000 < tEnd || ~isempty(id)
+    S.tick = S.tick + 1;
+    if S.tick / 1000 >= S.faultAt && S.tick / 1000 < S.faultUntil
+        S.sl.hook.driveFault = true;
+    elseif S.tick / 1000 >= S.faultUntil
+        S.sl.hook.driveFault = false;
+    end
+    if mod(S.tick, scanTicks) == 0
+        k = S.tick / scanTicks;
+        if ~isempty(S.torque)
+            S = torqueScan(S);
+        end
+        S = valveScan(S);
+        if ~isempty(S.linkCfg)
+            [S.link, reqs] = modbusLink('due', S.link, k, 'read');
+            for q = reqs
+                [S, words] = serveRead(S, q.start, q.n);
+                S.link = modbusLink('answer', S.link, q.slot, words);
+            end
+        end
+        pre = [S.sl.G.G_sysActualVelocity, S.sl.G.G_sysActualTorque, ...
+               S.sl.G.G_sysActualPosition];     % what the probe is given
+        S.y = scan(S.sl);
+        S = probeScan(S);
+        [S, R] = logScan(S, R, pre);
+        if ~isempty(S.linkCfg)
+            [S.link, reqs] = modbusLink('due', S.link, k, 'write');
+            for q = reqs
+                S = serveWrite(S, q.start, q.words);
+                S.link = modbusLink('answer', S.link, q.slot, []);
+            end
+        end
+    end
+    if ~isempty(id)
+        [S.link, fin] = modbusLink('poll', S.link, S.tick / 1000);
+        if ~isempty(fin) && any([fin.id] == id)
+            done = fin([fin.id] == id);
+            return;
+        end
+    end
+end
+end
+
+
+function [S, words] = serveRead(S, start, n)
+% The registers start..start+n-1 as the controller answers a read now: the
+% slave's own (protocol and step probe) and PRG_PressureProbe's emulation.
+regs = zeros(1, 524);
+regs(1:S.map.nRead) = readInputRegisters(S.sl, 1, S.map.nRead);
+regs(101:102) = modbusPack(S.p.stats(1));
+regs(103:104) = modbusPack(S.p.stats(2));
+regs(105:106) = modbusPack(S.p.stats(3));
+regs(107:108) = modbusPack(S.p.stats(4));
+regs(109) = S.p.window;
+regs(110) = S.p.state;
+regs(111:112) = modbusPack(S.p.live);
+regs(113) = S.p.echo;
+regs(121:370) = S.p.samples;
+regs(401:524) = readInputRegisters(S.sl, 401, 124);
+if start <= 519 && start + n - 1 >= 520 && S.hook.tear > 0
+    tail = regs(519) + 65536 * regs(520) + 1;       % a window that changed under the read
+    regs(519:520) = [mod(tail, 65536), floor(tail / 65536)];
+    S.hook.tear = S.hook.tear - 1;
+end
+words = regs(start:start + n - 1);
+end
+
+
+function S = serveWrite(S, start, words)
+% A write as the controller takes it: HR101 to PRG_PressureProbe's
+% emulation, the rest to the slave's registers; a lost arm write (the
+% dropArm hook) never arrives.
+if start == 101
+    S.p.arm = words(1);
+    return;
+end
+if start <= 111 && start + numel(words) - 1 >= 111 && S.hook.dropArm > 0
+    S.hook.dropArm = S.hook.dropArm - 1;
+    return;
+end
+writeHoldingRegisters(S.sl, start, words);
 end
 
 
@@ -240,7 +316,7 @@ end
 function S = valveScan(S)
 % The outlet valve: from its opening, the plant's orifice bank at the
 % valve's discharge coefficient, and in the opening scan the flow that
-% fills the tube, eq. (37) of design/pressure-loop/README.md.
+% fills the tube, eq. (37) of models/README.md.
 if isinf(S.valve.at)
     return;
 end
@@ -258,21 +334,6 @@ elseif S.valve.open
     S.sl.hook.outflow = 0;
     S.collectLog(end + 1, :) = [t, S.sl.ax.vOut - S.valve.vOut0 - S.valve.tube, ...
         S.sl.plant.n_tot - S.sl.plant.n_dis];
-end
-end
-
-
-function S = probeRegister(S, hr, value)
-% A write to one of the step probe's holding registers (HR111-114).
-switch hr
-    case 111
-        S.sl.G.G_mbProbeArm = value;
-    case 112
-        S.sl.G.G_mbProbeReqLo = value;
-    case 113
-        S.sl.G.G_mbProbeReqHi = value;
-    case 114
-        S.sl.G.G_mbProbeLength = value;
 end
 end
 
@@ -300,12 +361,6 @@ while w > size(R, 1)
 end
 R(w, :) = row;
 S.nT = w;
-end
-
-
-function w = u32Words(x)
-% An unsigned 32-bit value as two registers, low word first.
-w = [mod(x, 65536), floor(x / 65536)];
 end
 
 
@@ -345,23 +400,4 @@ if p.state == 1
     end
 end
 S.p = p;
-end
-
-
-function regs = packRead(y, map)
-regs = zeros(1, map.nRead);
-regs(map.ir.heartbeatEcho)     = y.heartbeatEcho;
-regs(map.ir.slaveCounter)      = y.slaveCounter;
-regs(map.ir.confCode)          = y.confCode;
-regs(map.ir.faultCode)         = y.faultCode;
-regs(map.ir.faultActive)       = y.faultActive;
-regs(map.ir.inMotion)          = y.inMotion;
-regs(map.ir.performanceStatus) = y.performanceStatus;
-regs(map.ir.homingComplete)    = y.homingComplete;
-regs(map.ir.position:map.ir.position + 1)   = modbusPack(y.actualPosition);
-regs(map.ir.velocity:map.ir.velocity + 1)   = modbusPack(y.actualVelocity);
-regs(map.ir.torque:map.ir.torque + 1)       = modbusPack(y.actualTorque);
-regs(map.ir.commandedPosition:map.ir.commandedPosition + 1) = ...
-    modbusPack(y.commandedPosition);
-regs(map.ir.pressure:map.ir.pressure + 1) = modbusPack(y.actualPressure);
 end

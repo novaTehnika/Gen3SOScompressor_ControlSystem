@@ -3,7 +3,7 @@ slave-sim/generated/
 # Generated from slave-src by tools/st_translate.py --target c
 slave-sim/generated-c/
 # Generated from slave-src by tools/st_translate.py --target py
-design/generated/
+models/generated/
 *.asv
 slprj/
 master-src/shell/SOS_Gen3_Master_Shell.slx

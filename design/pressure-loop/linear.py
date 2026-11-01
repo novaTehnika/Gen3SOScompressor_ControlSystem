@@ -50,7 +50,7 @@ frequency, where the double pole at z = 1 makes the expanded polynomials
 lose precision.
 
 FILE DEPENDENCY:
-None. The functions take a Params object (params.py).
+None. The functions take a StudyParams object (studyparams.py).
 """
 
 from dataclasses import dataclass

@@ -15,8 +15,8 @@ sim.bootFrameError = 0.0;    % controller position minus x at power-up (mm); 0 =
 sim.powerOnDelay   = 0.1;    % MC_Power Enable -> Status (s)
 
 % Chamber, outlet and drive: the design model's plant (design/pressure-loop,
-% ported to slave-sim/c/plant.c), with its parameters and contents at a
-% run's start (tools/plant_export.py). Its piston coordinate is zero at
+% ported to models/c/plant.c), with its parameters and contents at a
+% run's start (models/plant_export.py). Its piston coordinate is zero at
 % plantStartPos, the axis position of Params.Vl0's fill; before
 % chamberContactPos the piston is out of the cylinder, which is open, and
 % the pressure reads zero.

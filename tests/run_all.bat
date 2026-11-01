@@ -11,7 +11,7 @@ cd /d "%~dp0.."
 set PY=python
 where py >nul 2>nul && set PY=py -3
 
-%PY% tools\st_translate.py --target py slave-src design\generated || exit /b 1
+%PY% tools\st_translate.py --target py slave-src models\generated || exit /b 1
 %PY% tests\stTargetParity.py || exit /b 1
 %PY% tests\plantParity.py || exit /b 1
 %PY% design\pressure-loop\test_model.py || exit /b 1

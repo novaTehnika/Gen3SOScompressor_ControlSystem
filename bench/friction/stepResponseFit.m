@@ -25,7 +25,7 @@ function r = stepResponseFit(files, opts)
 %                drive's response is modelled as the command slewed at
 %                accel or decel (the profile Y_DirectControl generates),
 %                passed through a first-order lag tauV and a delay td,
-%                eq. (11) and (12) of design/pressure-loop/README.md. tauV
+%                eq. (11) and (12) of models/README.md. tauV
 %                and td are found by a grid search on the rms velocity
 %                error over the capture. The tracking lag is also measured
 %                without the model, as the time between the command
@@ -171,7 +171,7 @@ if ~isempty(rest)
     r.Fbreak = mean(abs([rest.Fbreak]));
     r.tStick = mean([rest.tStick]);
 end
-say('\ndesign/pressure-loop/params.py values (SI):\n');
+say('\nmodels/params.py values (SI):\n');
 if ~isnan(r.tauV)
     say('    tauV = %-10.4g  # [s] drive velocity loop lag, median of %d steps (delay %.1f ms besides)\n', ...
         r.tauV, numel(moving), r.td * 1000);

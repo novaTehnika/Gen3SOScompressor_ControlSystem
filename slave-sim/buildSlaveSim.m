@@ -7,9 +7,9 @@ function buildSlaveSim(force)
 %   buildSlaveSim(true)   rebuild regardless
 %
 %   The C code is generated into slave-sim/generated-c by
-%   tools/st_translate.py --target c (the slave) and tools/plant_export.py
-%   (the plant's parameters and initial state, from design/pressure-loop);
-%   the hand-written part is in slave-sim/c.
+%   tools/st_translate.py --target c (the slave) and models/plant_export.py
+%   (the plant's parameters and initial state, from models/); the plant
+%   is models/c and the rest of the hand-written part is slave-sim/c.
 
 here = fileparts(mfilename('fullpath'));
 root = fileparts(here);
@@ -23,7 +23,7 @@ mexFile = fullfile(out, ['slaveSimMex.' mexext()]);
 
 inputs = [dir(fullfile(root, 'slave-src', '**', '*.st')); dir(fullfile(src, '*.*')); ...
           dir(fullfile(root, 'tools', '*.py')); ...
-          dir(fullfile(root, 'design', 'pressure-loop', '*.py'))];
+          dir(fullfile(root, 'models', '*.py')); dir(fullfile(root, 'models', 'c', '*.*'))];
 if (nargin < 1 || ~force) && exist(mexFile, 'file') == 2
     built = dir(mexFile);
     if all([inputs.datenum] < built.datenum)
@@ -38,19 +38,20 @@ for k = 1:numel(py)
         fullfile(root, 'tools', 'st_translate.py'), fullfile(root, 'slave-src'), gen));
     if status == 0
         status = system(sprintf('%s "%s" "%s"', py{k}, ...
-            fullfile(root, 'tools', 'plant_export.py'), fullfile(gen, 'plant_defaults.h')));
+            fullfile(root, 'models', 'plant_export.py'), fullfile(gen, 'plant_defaults.h')));
         ok = status == 0;
         break
     end
 end
 if ~ok
     error('buildSlaveSim:translate', ['could not run tools/st_translate.py --target c ' ...
-        'and tools/plant_export.py (Python 3 with design/requirements.txt)']);
+        'and models/plant_export.py (Python 3 with design/requirements.txt)']);
 end
 
-files = {fullfile(src, 'slaveSimMex.c'), fullfile(src, 'slave_sim.c'), fullfile(src, 'plant.c'), ...
+files = {fullfile(src, 'slaveSimMex.c'), fullfile(src, 'slave_sim.c'), ...
+         fullfile(root, 'models', 'c', 'plant.c'), ...
          fullfile(gen, 'st_slave.c'), fullfile(gen, 'st_names.c')};
-incs = {['-I' src], ['-I' gen]};
+incs = {['-I' src], ['-I' gen], ['-I' fullfile(root, 'models', 'c')]};
 if exist('OCTAVE_VERSION', 'builtin')
     setenv('CFLAGS', '-O2 -std=c11');
     [out_, status] = mkoctfile('--mex', incs{:}, files{:}, '-o', mexFile);

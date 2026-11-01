@@ -7,7 +7,7 @@ function slavePressureMode()
 %   closed on it.
 %   Run from the repository root after  addpath slave-sim; buildSlaveSim
 %     addpath slave-sim slave-sim/generated tests
-%   Depends on: slave-src slave-sim tools design/pressure-loop
+%   Depends on: slave-src slave-sim tools models
 
 MODE_PRESSURE = 7;
 FAULT_PRESSURE_SENSOR = 8;
@@ -24,10 +24,10 @@ assert(h.y.faultActive == 0 && h.y.actualPressure < 0);
 h.sl.hook.pressureVolt = NaN;
 fprintf('ok  broken loop while idle does not fault\n');
 
-% The simulated chamber is the design model's (design/pressure-loop), and
-% so are the criteria: a compression ends within the status band, and the
-% overshoot is judged only against the pressure ceiling.
-P_CEILING = 12;                         % MPa, Params.P_ceiling
+% The simulated chamber is the plant model (models/), and the criteria
+% are the design studies': a compression ends within the status band, and
+% the overshoot is judged only against the pressure ceiling.
+P_CEILING = 12;                         % MPa, StudyParams.P_ceiling
 settled = @(h) h.y.performanceStatus == 1 && abs(h.sl.ax.v) < 0.05;
 
 % Enter pressure mode with a 10 MPa target: compresses within the velocity

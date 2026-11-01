@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Translate the slave's Structured Text into a simulation language.
 
-    python3 tools/st_translate.py --target py slave-src design/generated
+    python3 tools/st_translate.py --target py slave-src models/generated
     python3 tools/st_translate.py --target c  slave-src slave-sim/generated-c
 
 Covers the ST subset used in slave-src: assignments, IF/ELSIF/ELSE, FOR,
@@ -143,17 +143,18 @@ def parse_header_decls(text, known_types, aliases=None):
 def parse_globals(text, known_types, aliases=None):
     decls = {}
     for line in text.splitlines():
-        m = re.match(r'^\s*(G_\w+)\s*(?:AT\s+%\S+\s*)?:\s*'
+        m = re.match(r'^\s*(G_\w+)\s*(?:AT\s+%(\S+)\s*)?:\s*'
                      r'(ARRAY\s*\[\s*\d+\s*\.\.\s*\d+\s*\]\s*OF\s+\w+|\w+)'
                      r'\s*(?::=\s*([^\s(]+))?', line)
         if not m:
             continue
-        typ = re.sub(r'\s+', ' ', m.group(2))
+        typ = re.sub(r'\s+', ' ', m.group(3))
         typ = (aliases or {}).get(typ, typ)
         base = typ.split(' OF ')[-1] if typ.startswith('ARRAY') else typ
         if base in known_types:
             decls[m.group(1)] = {'name': m.group(1), 'type': typ,
-                                 'init': m.group(3), 'section': 'VAR_GLOBAL'}
+                                 'init': m.group(4), 'section': 'VAR_GLOBAL',
+                                 'at': m.group(2)}       # e.g. 'QD73812', or None
     return decls
 
 

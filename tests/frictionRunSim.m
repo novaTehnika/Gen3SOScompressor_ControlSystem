@@ -9,7 +9,7 @@ function frictionRunSim()
 %   pressure passes its limit.
 %   Run from the repository root after  addpath slave-sim; buildSlaveSim
 %     addpath master-src/logic slave-sim slave-sim/generated tests
-%   Depends on: master-src/logic slave-src slave-sim tools design/pressure-loop bench/friction bench/common tests/fakeProbeLink.m
+%   Depends on: master-src/logic slave-src slave-sim tools models bench/friction bench/common tests/fakeProbeLink.m
 
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'bench', 'friction'), fullfile(here, '..', 'bench', 'common'));
@@ -55,7 +55,7 @@ fprintf('ok  unloaded fit: Fc %.0f N, b %.0f N s/m, Fs %.0f N at %.2f mm/s, brea
     st.Fc, st.b * 1000, st.Fs, st.vs, f.breakaway.F);
 
 % --- Step probe: velocity steps and the breakaway at the scan rate ----------
-% The drive's lag is the simulated plant's (design/pressure-loop), which
+% The drive's lag is the simulated plant's (models/), which
 % does not slew the command, so the fit is told no slew limit binds.
 opts = linkOpts(saveDir);
 fakeProbeLink('torqueModel', truth);
