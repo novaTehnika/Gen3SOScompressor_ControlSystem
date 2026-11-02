@@ -118,6 +118,24 @@ eState : E_HomeLimitState;                          (* ✓ starts at the first m
 eState : E_HomeLimitState := E_HomeLimitState#IDLE; (* ✗ will not compile *)
 ```
 
+**Array Index Is a Variable or a Literal:**
+
+The compiler takes only a variable or an integer literal as an array index (`Illegal variable location or multi-element variable` otherwise). Compute an index expression into an INT variable first:
+
+```structuredtext
+nIx := nBase + 1;            (* ✓ *)
+aRing[nIx] := wValue;
+aRing[nBase + 1] := wValue;  (* ✗ will not compile *)
+```
+
+**FOR Counters Are INT:**
+
+The compiler types bare literals and a FOR loop's implicit step as INT, so the counter and its bounds must be INT; a DINT counter fails with type mismatches on the assignment, SUB and ADD.
+
+**No VAR_IN_OUT:**
+
+`VAR_IN_OUT` did not work on this controller. A block hands an array back as a `VAR_OUTPUT`, which the caller copies.
+
 **Function Output Limitation:**
 
 Functions can only have one output. For multiple outputs, use a function block instead.
