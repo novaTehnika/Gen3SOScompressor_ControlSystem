@@ -13,6 +13,8 @@ function sl = slaveInit()
 %   sl.hook.driveFault  sets G_sysDriveFault
 %   sl.hook.blocked     axis cannot move (mechanical stall)
 %   sl.hook.torque      reported actual torque (%)
+%   sl.hook.mass        reflected mass (kg): its inertial force, over the
+%                       velocity change of the scan, is added to the torque
 %   sl.hook.outflow     liquid leaving the chamber (mm^3/s)
 %   sl.hook.valve       outlet valve area fraction (the orifice bank)
 %   sl.hook.pressureVolt  analog input override (V); NaN = transducer model

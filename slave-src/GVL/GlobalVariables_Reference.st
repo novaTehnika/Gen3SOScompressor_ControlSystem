@@ -58,14 +58,8 @@
         DIGITAL OUTPUTS (8 Available)
         ======================================================================== *)
 
-     (* DO0-DO2 are not used: the mode confirmation and fault code are
-        published in the Modbus input registers below. *)
-
-     (* Status Outputs, also published in the Modbus input registers *)
-     G_doPerformanceStatus AT %QX0.3 : BOOL   (* Mode-dependent status indicator *)
-     G_doFaultActive       AT %QX0.4 : BOOL   (* Fault indicator: HIGH = fault active *)
-     G_doHomingComplete    AT %QX0.5 : BOOL   (* Homing sequence complete *)
-     G_doInMotion          AT %QX0.6 : BOOL   (* Axis in motion indicator *)
+     (* DO0-DO6 are not driven: the mode confirmation, fault code and status
+        bits are published in the Modbus input registers below. *)
 
      (* Brake Control *)
      (* Spring-engaged, electrically released: HIGH = brake disengaged (motion allowed) *)
@@ -81,10 +75,10 @@
      G_mbSlaveCounter      AT %QW73794 : UINT  (* IR2: scan counter *)
      G_mbConfCode          AT %QW73796 : UINT  (* IR3: confirmed mode code, 0 outside the handshake *)
      G_mbFaultCode         AT %QW73798 : UINT  (* IR4: G_sysActiveFault, full value *)
-     G_mbFaultActive       AT %QW73800 : UINT  (* IR5: G_doFaultActive *)
-     G_mbInMotion          AT %QW73802 : UINT  (* IR6: G_doInMotion *)
-     G_mbPerformanceStatus AT %QW73804 : UINT  (* IR7: G_doPerformanceStatus *)
-     G_mbHomingComplete    AT %QW73806 : UINT  (* IR8: G_doHomingComplete *)
+     G_mbFaultActive       AT %QW73800 : UINT  (* IR5: G_sysFaultActive *)
+     G_mbInMotion          AT %QW73802 : UINT  (* IR6: G_sysInMotion *)
+     G_mbPerformanceStatus AT %QW73804 : UINT  (* IR7: G_sysPerformanceStatus *)
+     G_mbHomingComplete    AT %QW73806 : UINT  (* IR8: G_sysHomingComplete *)
      G_mbActualPosition    AT %QD73812 : REAL  (* IR11-12: mm *)
      G_mbActualVelocity    AT %QD73816 : REAL  (* IR13-14: mm/s *)
      G_mbActualTorque      AT %QD73820 : REAL  (* IR15-16: % of rated *)
@@ -140,8 +134,11 @@
         Motor: Yaskawa Sigma-7 400W (SGM7J-04A6A6C)
         ======================================================================== *)
 
-     G_cfgGearRatio            : LREAL := 70.0        (* Motor turns per lead screw turn *)
-     G_cfgLeadScrewPitch       : LREAL := 5.08        (* mm per lead screw turn (0.2 inch) *)
+     (* Bench reference copies of the Hardware Configuration scaling, which
+        sets the unit conversion in the controller. Nothing in slave-src reads
+        them; the benches (bench/common/benchGvl.m) take them as fallbacks. *)
+     G_cfgGearRatio            : LREAL := 70.0        (* Motor turns per lead screw turn (reference copy) *)
+     G_cfgLeadScrewPitch       : LREAL := 5.08        (* mm per lead screw turn, 0.2 inch (reference copy) *)
 
 
      (* ========================================================================
@@ -316,10 +313,8 @@
 
      (* Debounce times: Modbus command registers and the overtravel inputs *)
      G_cfgDebounceTimeMode         : TIME := T#50MS   (* Mode code (G_mbModeCode) debounce *)
-     G_cfgDebounceTimeMotion       : TIME := T#20MS   (* Motion enable (G_mbMotionEnable) debounce *)
-     G_cfgDebounceTimeFault        : TIME := T#20MS   (* Fault reset (G_mbFaultReset) debounce *)
-     G_cfgDebounceTimeOvertravelNeg: TIME := T#10MS   (* Negative overtravel / home reference (short for homing precision) *)
-     G_cfgDebounceTimeOvertravelPos: TIME := T#10MS   (* Positive overtravel standard debounce *)
+     G_cfgDebounceTimeCommand      : TIME := T#20MS   (* Motion enable (G_mbMotionEnable) and fault reset (G_mbFaultReset) debounce *)
+     G_cfgDebounceTimeOvertravel   : TIME := T#10MS   (* Both overtravel inputs; short for the negative switch's homing precision *)
 
      (* Analog input filter parameters (pressure channel) *)
      G_cfgAnalogFilterTimeConst: TIME := T#20MS       (* Low-pass filter time constant *)
@@ -337,6 +332,9 @@
         HOMING PARAMETERS
         ======================================================================== *)
 
+     (* Acceleration of every move the homing modes make (Mode 110's approaches, backoff and retract; Mode 101's Go Home) *)
+     G_cfgMoveAccel              : LREAL := 5.0       (* Acceleration of the homing and Go Home moves (mm/s²) *)
+
      (* Mode 110 - Home to Negative Overtravel Switch (two-stage approach + fixed retract) *)
      G_cfgHomeLimFastApproachVel : LREAL := 6.0       (* Coarse approach toward switch (mm/s) *)
      G_cfgHomeLimSlowApproachVel : LREAL := 1.0       (* Slow re-approach for precise switch detect (mm/s) *)
@@ -344,13 +342,11 @@
      G_cfgHomeLimRetractDist     : LREAL := 5.0       (* Retract distance from precise switch to position 0 (mm).
                                                           Switch lands at -G_cfgHomeLimRetractDist in the homed frame. *)
      G_cfgHomeLimSetPosition     : LREAL := 0.0       (* Position value at the retract endpoint (becomes coord-frame zero) *)
-     G_cfgHomeLimAccel           : LREAL := 5.0       (* Acceleration for all homing moves (mm/s²) *)
      G_cfgHomeLimDecel           : LREAL := 50.0       (* Deceleration for all homing moves (mm/s²) *)
 
      (* Mode 101 - Go Home *)
      G_cfgGoHomePosition       : LREAL := 0.0         (* Target position for Go Home *)
      G_cfgGoHomeVelocity       : LREAL := 6.0         (* Velocity for Go Home move *)
-     G_cfgGoHomeAccel          : LREAL := 510.0         (* Acceleration for Go Home move (mm/s²) *)
      G_cfgGoHomeDecel          : LREAL := 10.0         (* Deceleration for Go Home move (mm/s²) *)
 
 
@@ -464,6 +460,12 @@
 
      (* Motion status *)
      G_sysHalted               : BOOL := FALSE    (* Halt is active (ST_HOLD_POSITION) *)
+
+     (* Status bits published in the Modbus input registers IR5-IR8 *)
+     G_sysPerformanceStatus    : BOOL := FALSE    (* Mode-dependent status: in band in pressure mode *)
+     G_sysFaultActive          : BOOL := FALSE    (* Fault active (ST_FAULT, ST_FAULT_IDLE) *)
+     G_sysHomingComplete       : BOOL := FALSE    (* Homing sequence complete *)
+     G_sysInMotion             : BOOL := FALSE    (* Axis in motion *)
 
      (* Limit status *)
      G_sysOvertravelNegActive  : BOOL := FALSE    (* Negative overtravel switch triggered *)

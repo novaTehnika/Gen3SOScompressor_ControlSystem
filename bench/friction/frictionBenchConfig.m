@@ -17,10 +17,13 @@ here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', '..', 'master-src', 'logic'), fullfile(here, '..', 'common'));
 master = masterConfig();
 
-% Drivetrain, as configured on the slave (G_cfgGearRatio, G_cfgLeadScrewPitch).
+% Slave settings from the GVL reference (bench/common/benchGvl)
+gvl = benchGvl();
+
+% Drivetrain, as configured on the slave
 cfg.ratedTorqueNm = 1.27;   % N m, SGM7J-04A rated torque; 100 % in IR15-16
-cfg.gearRatio     = 70;     % motor turns per screw turn
-cfg.leadMm        = 5.08;   % mm per screw turn
+cfg.gearRatio     = gvl.G_cfgGearRatio;        % motor turns per screw turn
+cfg.leadMm        = gvl.G_cfgLeadScrewPitch;   % mm per screw turn
 cfg.newtonPerPct  = cfg.ratedTorqueNm / 100 * 2 * pi * cfg.gearRatio / (cfg.leadMm / 1000);
 cfg.pistonAreaM2  = pi / 4 * (master.boreDiameter / 1000)^2;   % m^2
 cfg.etaAssumed    = 0.85;   % efficiency the design model's Fcap assumes, replaced by the measured value
@@ -29,9 +32,11 @@ cfg.etaAssumed    = 0.85;   % efficiency the design model's Fcap assumes, replac
 % The slew to speed (G_cfgDirectCtrlAccel) is added to each step. The
 % times give at least one screw lead of travel at every speed, so the
 % torque ripple at the lead period averages out.
-gvl = benchGvl();
 cfg.accel        = gvl.G_cfgDirectCtrlAccel;   % mm/s^2, velocity-mode slew on the slave (GVL)
-cfg.speeds       = [0.1 0.3 1 3 5];     % mm/s; 5 is G_cfgVelLimitMax and masterConfig.jogVelMax
+cfg.velMax       = gvl.G_cfgVelLimitMax;       % mm/s, velocity-mode clamp on the slave (GVL)
+cfg.speeds       = [0.1 0.3 1 3 5];     % mm/s; the fastest point, below cfg.velMax
+assert(all(cfg.speeds <= min(cfg.velMax, master.jogVelMax)), ...
+    'a speed point exceeds G_cfgVelLimitMax or the master''s jog limit');
 cfg.tSteady      = [60 40 20 10 10];    % s at speed, unloaded
 cfg.gasStrokeMax = 20;                  % mm per step under a gas charge: bounds the pressure excursion
 cfg.repeats      = 2;                   % passes over the speeds: descending, then ascending
@@ -47,7 +52,7 @@ cfg.pMax.unloaded = 0.3;      % MPa gauge: the chamber is vented for this set
 cfg.pMax.gas      = 3.5;      % MPa gauge
 cfg.pMax.delivery = 11.5;     % MPa gauge, under the 12 MPa mechanical ceiling
 cfg.torqueAbort   = 90;       % % of rated, under the slave's 100 % limit
-cfg.exitGuardPos  = 220;      % mm, G_cfgPosCylinderEntry + G_cfgPosExitGuardMargin
+cfg.exitGuardPos  = gvl.G_cfgPosCylinderEntry + gvl.G_cfgPosExitGuardMargin;   % mm, the slave's piston exit boundary
 
 % Velocity steps for the drive lag (the 'stepv' step of frictionRun): the
 % reference goes 0, v, 2v, v, 0, -v, -2v, -v, 0, each held stepHold

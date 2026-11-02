@@ -107,6 +107,7 @@ static double prox_flow(const plant_t *pl, const double *y, double prox)
     double Q = prox * pl->p.k_prox * sqrt(dP);
     double P_abs = P + pl->p.Patm;
     double C_ch = ((y[IY_NTOT] - y[IY_NDIS]) * pl->p.RT / (P_abs * P_abs)
+                   + pl->p.nRT_air / (P_abs * P_abs)
                    + (y[IY_VL] - V_in) / pl->p.K);
     double C_h = pl->p.C_hose + (pl->p.V_hose + V_in) / pl->p.K;
     double dV_eq = dP / (1 / C_ch + 1 / C_h);
@@ -146,7 +147,8 @@ static void derivatives(const plant_t *pl, const double *y, double u_act, double
     double n_eq = dmin(p->kH * P_abs * V_l, n_tot);             /* eqs. (2), (3) */
     double r_dis = (n_eq - n_dis) / p->tauDiss;
 
-    double C = ((n_tot - n_dis) * p->RT / (P_abs * P_abs)       /* eqs. (4), (42) */
+    double C = ((n_tot - n_dis) * p->RT / (P_abs * P_abs)       /* eqs. (4), (42), (46) */
+                + p->nRT_air / (P_abs * P_abs)
                 + liquid_capacitance(pl, V_l - V_in, V_vir));
 
     double dv;
@@ -311,6 +313,7 @@ static double capacitance(const plant_t *pl)
     const double *y = pl->y;
     double P_abs = y[IY_P] + pl->p.Patm;
     return ((y[IY_NTOT] - y[IY_NDIS]) * pl->p.RT / (P_abs * P_abs)
+            + pl->p.nRT_air / (P_abs * P_abs)
             + liquid_capacitance(pl, y[IY_VL] - y[IY_VIN], y[IY_VVIR]));
 }
 
@@ -335,7 +338,8 @@ double plant_volume_closure(const plant_t *pl)                  /* eq. (9) */
     if (pl->hose_open)
         system += pl->p.V_hose + pl->p.C_hose * P;
     double contents = ((y[IY_VL] - y[IY_VIN] + y[IY_VVIR]) * (1 - P / pl->p.K)
-                       + (y[IY_NTOT] - y[IY_NDIS]) * pl->p.RT / (P + pl->p.Patm));
+                       + (y[IY_NTOT] - y[IY_NDIS]) * pl->p.RT / (P + pl->p.Patm)
+                       + pl->p.nRT_air / (P + pl->p.Patm));
     return system - contents;
 }
 

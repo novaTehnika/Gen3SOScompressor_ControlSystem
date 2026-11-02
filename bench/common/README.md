@@ -15,7 +15,8 @@ directory and takes these from here.
 | `benchReadCsv.m` | Reads a run log or a capture into a struct of columns named by the header |
 | `buildSafetyHold.m` | Generates `SafetyHold.slx` (gitignored): a Desktop Real-Time model that holds the safety relay (P0.0) on and the stir bar off; the run scripts start it before the first command and stop it at the end |
 | `benchProbe.m` | Master side of the step probe, used by `frictionRun` and `charRun`: arms captures, reads them out of the slave's ring through the register window, fetches the history before a fault, decodes them |
-| `captures/` | Run logs and captures of every bench (gitignored) |
+| `benchFiles.m` | Expands a file name, a pattern or a cell array of either into a cell array of paths; the characterisation fits call it, so they take `'../captures/K300_char_*.csv'` |
+| `captures/` | Where the run scripts write their logs and captures (gitignored). The committed reference logs, the 26 October characterisation and friction runs and the 30 and 31 October one-pass stops runs, are in `bench/captures/`; the fits take either directory, and nothing is moved between them |
 
 ## Setup, once
 
@@ -36,9 +37,8 @@ directory and takes these from here.
    20 ms (p99 30) to 50 ms (p99 70), too slow for the 50 ms exchange
    against the slave's 300 ms watchdog. The probe therefore keeps its
    records in plain memory and maps only IR401-524 and HR111-114. The
-   bench programs `PRG_PressureProbe` (HR101, IR101-370, globals
-   `G_mbNoise*`) and `PRG_ModbusBench` use other registers; only one of
-   those is loaded at a time.
+   bench program `PRG_ModbusBench` uses other registers (HR101-110,
+   IR101-108) and is not loaded with the main program in service.
 
 ## The step probe
 
@@ -64,6 +64,19 @@ and `FB_Probe.st` alone defines the record.
 | IR521 | Recording state: 0 off, 1 recording, 2 capturing, 3 held |
 | IR522 | Transfer state: 0 idle, 1 filling, 2 pending, 3 overrun |
 | IR523-524 | FaultMark: index of the record written in the scan the slave entered `ST_FAULT` |
+
+**What a record's columns are.** The probe is called last in `PRG_Main`.
+The velocity, position and torque it records are the motion status
+`PRG_Main` reads in the scan, which the LD POU's read blocks last updated
+at the end of the previous scan (`PRG_Main` sees motion status one scan
+late), while the commanded velocity is the one `PRG_Main` computes in this
+very scan. A record's feedback is one scan (`G_cfgScanTime`, 4 ms) older
+than the command in the same row. A delay or a stopping travel read
+from a capture's rows (from the command row to the row where the feedback
+responds) includes that scan: allow one scan when comparing it with the
+drive's own response, with a model's dead time or with a figure from the
+50 ms log. `charDriveLag`, `stepResponseFit` and `charStopDistance`
+report what the rows show and do not remove it.
 
 `benchProbe` does the master's part in the gap between two protocol
 exchanges, one read of IR401-524 (124 registers) and at most one write:

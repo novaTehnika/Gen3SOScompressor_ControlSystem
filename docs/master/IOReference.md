@@ -9,7 +9,7 @@
 > reference, confirmation, fault code, status bits and feedback) travel over
 > Modbus TCP; see [ModbusRegisterMap.md](ModbusRegisterMap.md) and
 > [MasterProtocolGuide.md](MasterProtocolGuide.md). This document covers the
-> hardwired lines only: the slave's overtravel switches, brake, status outputs
+> hardwired lines only: the slave's overtravel switches, brake
 > and pressure transducer, and the master's DAQ lines for the safety relay
 > and the stir bar.
 
@@ -44,15 +44,13 @@ serves as the home reference switch for Mode 110 homing. `DI7`
 
 | Pin | Signal Name | Description |
 |-----|-------------|-------------|
-| DO0-DO2 | - | Not driven |
-| DO3 | `G_doPerformanceStatus` | Mode-dependent status, also in IR7 |
-| DO4 | `G_doFaultActive` | HIGH while a fault is active (ST_FAULT, ST_FAULT_IDLE), also in IR5 |
-| DO5 | `G_doHomingComplete` | HIGH in ST_HOME_COMPLETE, also in IR8 |
-| DO6 | `G_doInMotion` | Axis in motion, also in IR6 |
+| DO0-DO6 | - | Not driven |
 | DO7 | `G_doBrakeDisengage` | Brake release command |
 
-DO3-DO6 are not wired to the master; the master reads the same values from
-the input registers. Their meanings are given with the registers in
+DO3-DO6 are no longer driven. The slave's status bits (`G_sysPerformanceStatus`,
+`G_sysFaultActive`, `G_sysHomingComplete`, `G_sysInMotion`) are internal
+globals published only in input registers IR7, IR5, IR8 and IR6. Their
+meanings are given with the registers in
 [MasterProtocolGuide.md](MasterProtocolGuide.md#slave-to-master-input-registers-one-fc04-read).
 
 #### DO7: Brake Disengage
@@ -87,10 +85,10 @@ The scaled pressure is `G_sysActualPressure`, published in IR19-20.
 | Signal | Value | Notes |
 |--------|-------|-------|
 | Mode code (HR2) | 50 ms | `G_cfgDebounceTimeMode` |
-| MotionEnable (HR3) | 20 ms | `G_cfgDebounceTimeMotion` |
-| FaultReset (HR4) | 20 ms | `G_cfgDebounceTimeFault` |
-| OvertravelNeg (DI6) | 10 ms | `G_cfgDebounceTimeOvertravelNeg` |
-| OvertravelPos (DI7) | 10 ms | `G_cfgDebounceTimeOvertravelPos` |
+| MotionEnable (HR3) | 20 ms | `G_cfgDebounceTimeCommand` |
+| FaultReset (HR4) | 20 ms | `G_cfgDebounceTimeCommand` |
+| OvertravelNeg (DI6) | 10 ms | `G_cfgDebounceTimeOvertravel` |
+| OvertravelPos (DI7) | 10 ms | `G_cfgDebounceTimeOvertravel` |
 | Output Update | 4 ms | Scan cycle time |
 
 ### Analog Input

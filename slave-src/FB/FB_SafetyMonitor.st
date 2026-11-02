@@ -55,13 +55,10 @@
      VAR_OUTPUT:
        FaultDetected       : BOOL             (* A fault condition exists
        FaultCode           : E_FaultCode      (* Fault code to report
-       FaultLimitSwitch    : BOOL             (* Limit switch fault detected
-       FaultPosition       : BOOL             (* Position limit exceeded
-       FaultDrive          : BOOL             (* Drive fault detected
-       FaultComm           : BOOL             (* Link loss detected
-       FaultPistonExit     : BOOL             (* Piston exit guard fault
-       FaultPressureSensor : BOOL             (* Pressure sensor fault while in pressure control
      VAR:
+       bFaultLimitSwitch   : BOOL             (* Limit switch fault detected this scan
+       bFaultPosition      : BOOL             (* Position limit exceeded this scan
+       bFaultPressureSensor: BOOL             (* Pressure sensor fault while in pressure control this scan
        bLatchedFault       : BOOL
        eLatchedFaultCode   : E_FaultCode
    ============================================================================ *)
@@ -74,23 +71,10 @@ IF NOT Enable THEN
     (* Reset all outputs when disabled *)
     FaultDetected := FALSE;
     FaultCode := E_FaultCode#FAULT_NONE;
-    FaultLimitSwitch := FALSE;
-    FaultPosition := FALSE;
-    FaultDrive := FALSE;
-    FaultComm := FALSE;
-    FaultPistonExit := FALSE;
-    FaultPressureSensor := FALSE;
     bLatchedFault := FALSE;
     eLatchedFaultCode := E_FaultCode#FAULT_NONE;
     RETURN;
 END_IF;
-
-(* --------------------------------------------------------------------------
-   DRIVE FAULT MONITORING
-   Most critical - servo amplifier has detected an issue
-   -------------------------------------------------------------------------- *)
-
-FaultDrive := DriveFault;
 
 (* --------------------------------------------------------------------------
    LINK LOSS MONITORING
@@ -102,7 +86,7 @@ FaultDrive := DriveFault;
    idle on its own.
    -------------------------------------------------------------------------- *)
 
-FaultComm := CommLost AND InCommandedMotion;
+(* The fault is CommLost AND InCommandedMotion, taken in the priority chain below *)
 
 (* --------------------------------------------------------------------------
    OVERTRAVEL FAULT MONITORING
@@ -115,9 +99,9 @@ IF InHoming THEN
     (* During homing, negative overtravel is the expected target.
        Positive overtravel is never expected - always faults. *)
     IF OvertravelPosActive THEN
-        FaultLimitSwitch := TRUE;
+        bFaultLimitSwitch := TRUE;
     ELSE
-        FaultLimitSwitch := FALSE;
+        bFaultLimitSwitch := FALSE;
     END_IF;
 ELSIF InRecovery THEN
     (* During recovery, the active switch is expected (we are jogging off it).
@@ -125,20 +109,20 @@ ELSIF InRecovery THEN
        Only a simultaneous both-switches reading is impossible mechanically and
        indicates a wiring/sensor fault. *)
     IF OvertravelNegActive AND OvertravelPosActive THEN
-        FaultLimitSwitch := TRUE;
+        bFaultLimitSwitch := TRUE;
     ELSE
-        FaultLimitSwitch := FALSE;
+        bFaultLimitSwitch := FALSE;
     END_IF;
 ELSIF InMotionWatched THEN
     (* During normal motion, hitting either overtravel switch is a fault. *)
     IF OvertravelNegActive OR OvertravelPosActive THEN
-        FaultLimitSwitch := TRUE;
+        bFaultLimitSwitch := TRUE;
     ELSE
-        FaultLimitSwitch := FALSE;
+        bFaultLimitSwitch := FALSE;
     END_IF;
 ELSE
     (* Not in motion - ignore switch state. *)
-    FaultLimitSwitch := FALSE;
+    bFaultLimitSwitch := FALSE;
 END_IF;
 
 (* --------------------------------------------------------------------------
@@ -160,17 +144,10 @@ END_IF;
 IF (CurrentState <> E_SystemState#ST_HOME_LIMIT) AND
    (NOT InRecovery) AND
    ((ActualPosition < SoftLimitMin) OR (ActualPosition > SoftLimitMax)) THEN
-    FaultPosition := TRUE;
+    bFaultPosition := TRUE;
 ELSE
-    FaultPosition := FALSE;
+    bFaultPosition := FALSE;
 END_IF;
-
-(* --------------------------------------------------------------------------
-   PISTON EXIT GUARD MONITORING
-   Triggered by FB_PistonExitGuard
-   -------------------------------------------------------------------------- *)
-
-FaultPistonExit := ExitGuardTriggered;
 
 (* --------------------------------------------------------------------------
    PRESSURE SENSOR MONITORING
@@ -179,7 +156,7 @@ FaultPistonExit := ExitGuardTriggered;
    drives nothing.
    -------------------------------------------------------------------------- *)
 
-FaultPressureSensor := PressureSensorFault AND
+bFaultPressureSensor := PressureSensorFault AND
                        (CurrentState = E_SystemState#ST_PRESSURE_CTRL);
 
 (* --------------------------------------------------------------------------
@@ -189,28 +166,31 @@ FaultPressureSensor := PressureSensorFault AND
    value, not a stale value from the previous scan's latch override below.
    -------------------------------------------------------------------------- *)
 
-(* Priority order: Drive > Comm > LimitSwitch > Position > PressureSensor > PistonExit *)
-IF FaultDrive THEN
+(* Priority order: Drive > Comm > LimitSwitch > Position > PressureSensor > PistonExit.
+   Drive: the servo amplifier has detected an issue (DriveFault).
+   Comm: the link is lost while motion is commanded.
+   PistonExit: triggered by FB_PistonExitGuard (ExitGuardTriggered). *)
+IF DriveFault THEN
     FaultDetected := TRUE;
     FaultCode := E_FaultCode#FAULT_DRIVE;
 
-ELSIF FaultComm THEN
+ELSIF CommLost AND InCommandedMotion THEN
     FaultDetected := TRUE;
     FaultCode := E_FaultCode#FAULT_COMM;
 
-ELSIF FaultLimitSwitch THEN
+ELSIF bFaultLimitSwitch THEN
     FaultDetected := TRUE;
     FaultCode := E_FaultCode#FAULT_LIMIT_SWITCH;
 
-ELSIF FaultPosition THEN
+ELSIF bFaultPosition THEN
     FaultDetected := TRUE;
     FaultCode := E_FaultCode#FAULT_POSITION;
 
-ELSIF FaultPressureSensor THEN
+ELSIF bFaultPressureSensor THEN
     FaultDetected := TRUE;
     FaultCode := E_FaultCode#FAULT_PRESSURE_SENSOR;
 
-ELSIF FaultPistonExit THEN
+ELSIF ExitGuardTriggered THEN
     FaultDetected := TRUE;
     FaultCode := E_FaultCode#FAULT_PISTON_EXIT;
 

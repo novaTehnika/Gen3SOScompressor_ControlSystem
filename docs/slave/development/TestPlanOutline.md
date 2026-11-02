@@ -96,7 +96,7 @@ This plan does **not** cover the testing of the Simulink master controller softw
     -   **Mode 101 (Go Home):**
         1.  Command Mode 101 and verify it moves directly to the home position (`G_cfgGoHomePosition`).
         2.  After a controller and drive power cycle, without homing, command Mode 101 and Mode 010 and verify both are accepted and the position is unchanged.
--   **Acceptance Criteria:** All sequences complete successfully, `G_doHomingComplete` is set HIGH, and the final position is correct and repeatable.
+-   **Acceptance Criteria:** All sequences complete successfully, `G_sysHomingComplete` is set HIGH, and the final position is correct and repeatable.
 
 ### 3.5 Fault Injection Testing
 -   **Objective:** Verify the system detects all specified faults and enters a safe state.
@@ -109,7 +109,7 @@ This plan does **not** cover the testing of the Simulink master controller softw
         -   `FAULT_PISTON_EXIT`: Physically push the actuator back while in torque mode near the exit boundary.
         -   `FAULT_LIMIT_SWITCH`: Manually trigger a limit switch during a normal move.
         -   `FAULT_ENCODER`: Reserved / not emitted by firmware — encoder alarms surface as `FAULT_DRIVE` via the servopack. Trigger by disconnecting the encoder battery or simulating an A.810 alarm; expect `FAULT_DRIVE`.
-    -   **Acceptance Criteria:** In every case, the `G_doFaultActive` signal must go HIGH, and the correct fault code must be present in `G_mbFaultCode` (IR4). The system must perform a controlled stop.
+    -   **Acceptance Criteria:** In every case, the `G_sysFaultActive` signal must go HIGH, and the correct fault code must be present in `G_mbFaultCode` (IR4). The system must perform a controlled stop.
 -   **Limit Recovery (`ST_RECOVERY`):** For `FAULT_LIMIT_SWITCH` and `FAULT_POSITION` with the limit **still active** at reset:
     -   Reset from `ST_FAULT` (fast path) → verify the slave enters `ST_RECOVERY` (drive stays on), not `ST_BRAKE_HOLD`.
     -   Reset from `ST_FAULT_IDLE` (after `G_cfgFaultIdleTimeout`) → verify the drive re-enables and the slave lands in `ST_RECOVERY`.

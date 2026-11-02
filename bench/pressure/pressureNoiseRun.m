@@ -1,13 +1,14 @@
 function r = pressureNoiseRun(label, path, opts)
-%PRESSURENOISERUN Drive the axis along a path and probe the transducer
-%   while it moves. The script is the master for the run: one Modbus TCP
-%   connection carries the protocol exchange (HR1-12 out, IR1-20 back,
-%   every 50 ms, sequenced by masterStep as in the shell) and, between
-%   exchanges, the probe registers of PRG_PressureProbe. The shell model
-%   must not be running: a second client on the controller stalls the
-%   shell's exchange and the slave raises FAULT_COMM while motion is
-%   commanded. The safety relay is held by bench/common/SafetyHold.slx (buildSafetyHold),
-%   started and stopped by this script.
+%PRESSURENOISERUN Drive the axis along a path and measure the noise on the
+%   transducer input while it moves. The script is the master for the run:
+%   one Modbus TCP connection carries the protocol exchange (HR1-12 out,
+%   IR1-20 back, every 50 ms, sequenced by masterStep as in the shell) and,
+%   between exchanges, the slave's step probe (FB_Probe, read by
+%   benchProbe), which records the raw pressure input every scan. The
+%   shell model must not be running: a second client on the controller
+%   stalls the shell's exchange and the slave raises FAULT_COMM while motion
+%   is commanded. The safety relay is held by bench/common/SafetyHold.slx
+%   (buildSafetyHold), started and stopped by this script.
 %
 %   r = pressureNoiseRun(label)             jog +2 mm/s 8 s, then -2 mm/s 8 s
 %   r = pressureNoiseRun(label, path)
@@ -18,10 +19,15 @@ function r = pressureNoiseRun(label, path, opts)
 %     {'jog', mm_per_s, seconds}    velocity mode (3), signed
 %     {'position', mm, seconds}     position mode (2): move, then hold
 %     {'pressure', MPa, seconds}    pressure mode (7), target in MPa gauge
-%   Each step collects the one-second windows while it runs and takes one
-%   250-scan capture opts.settle seconds after its running status appears
-%   (position: after arrival). The step ends after its seconds, once the
-%   capture is in.
+%   Each step takes one-second windows while it runs and one more
+%   one-second capture opts.settle seconds after its running status appears
+%   (position: after arrival). A window and the capture are each a probe
+%   capture of round(1 / scan) consecutive records (250 at the 4 ms scan),
+%   armed one at a time, the next window once the one before is read out
+%   of the slave's ring; the window's mean, rms, minimum and maximum are
+%   computed here (pressureNoiseStats). The step ends after its seconds,
+%   once the records of its last window and of the capture are written;
+%   they are read out in the following gaps, as the ring keeps them.
 %
 %   opts.settle        s before the capture (default 1)
 %   opts.safetyModel   model that holds the safety relay ('SafetyHold';
@@ -33,7 +39,8 @@ function r = pressureNoiseRun(label, path, opts)
 %   the format pressureNoiseReport reads, and the run as
 %   captures/<label>_run_<timestamp>.csv (t, position, velocity, MPa
 %   gauge, status, step, exchange ms). r holds the same with the per-step
-%   windows and the reports.
+%   windows (r.windows rows [step, t armed, mean, rms, min, max], volts)
+%   and the reports.
 %
 %   The run ends early when the master reports a fault, link loss or an
 %   unconfirmed mode; r.abort says which. Ctrl-C stops the axis: the
@@ -71,15 +78,8 @@ if ~isfield(opts, 'link')
 end
 link = opts.link;
 
-% Probe registers (1-based), as declared in slave/PRG_PressureProbe.st.
-pr.hrArm      = 101;
-pr.irStats    = 101;    % IR101-108 mean, rms, min, max (REAL, low word first)
-pr.irWindow   = 109;    % IR109 window, IR110 state, IR111-112 live, IR113 arm echo
-pr.irSamples  = 121;    % IR121-370
-pr.nSamples   = 250;
-pr.countsPerVolt = 5000;
-pr.captureTimeout = 3;  % s from arm to ready
 fs = 1 / bcfg.slaveScan;
+nRecords = round(fs);                   % records in one second
 
 C = codes();
 
@@ -105,18 +105,16 @@ seq.phase = 'wait';     % wait, next, enter, run, stop, finish
 seq.tPhase = 0;
 seq.tRun = 0;
 seq.armed = false;
+seq.armRequest = false;
+seq.armTag = '';
+seq.tCapEnd = 0;       % s, when the records of the last arm are written
 seq.abort = '';
 
-probe.next = 'poll';    % poll, stats, cap1, cap2
-probe.armRequest = false;
-probe.armValue = 0;
-probe.pending = false;
-probe.tArm = 0;
-probe.lastWindow = NaN;
-probe.counts = zeros(1, pr.nSamples);
-probe.failures = 0;
+probe = benchProbe('new', bcfg.probe, bcfg.slaveScan);
+clock = struct('now', opts.now, 'wait', opts.wait);
+ctx = struct('settle', opts.settle, 'capSeconds', nRecords * bcfg.slaveScan);
 
-windows = zeros(0, 7);          % [step inRun t mean rms min max], volts
+windows = zeros(0, 6);          % [step t mean rms min max], volts
 captures = {};
 runLog = zeros(0, 7);
 exchangeFailures = 0;
@@ -143,9 +141,10 @@ while true
     [mbWrite, m] = stepMaster(mbRead, app, map);
 
     % --- Path sequencing on the master's status ----------------------------
-    [seq, app] = sequence(seq, app, m, steps, tNow, opts.settle, probe.pending, C, cfg);
+    [seq, app] = sequence(seq, app, m, steps, tNow, probe.armBusy, probe.nPending, ctx, C, cfg);
     if seq.armRequest
-        probe.armRequest = true;
+        probe = benchProbe('arm', probe, struct('step', seq.idx, 'tag', seq.armTag, ...
+            'nRecords', nRecords, 'nPre', 0));
         seq.armRequest = false;
     end
     runLog(end + 1, :) = [tNow m.position m.velocity ...
@@ -158,14 +157,20 @@ while true
     end
 
     % --- One probe transaction in the gap ----------------------------------
-    [probe, windows, captures] = probeSlot(probe, link, pr, windows, captures, ...
-        seq, tNow, fs);
+    if exchangeMs <= 150
+        [probe, got] = benchProbe('slot', probe, link, tNow);
+        [windows, captures] = keepCaptures(windows, captures, got, fs);
+    end
 
     % --- Second master step of the cycle, registers held -------------------
     opts.wait(tCycle + cfg.dt);
     [mbWrite, m] = stepMaster(mbRead, app, map);
     k = k + 1;
 end
+
+% --- Captures still in the slave's ring ---------------------------------------
+[probe, got] = benchProbe('drain', probe, link, clock);
+[windows, captures] = keepCaptures(windows, captures, got, fs);
 
 % --- Reports and files --------------------------------------------------------
 r.label = label;
@@ -175,7 +180,7 @@ r.runLog = runLog;
 r.windows = windows;
 r.captures = captures;
 r.exchangeFailures = exchangeFailures;
-r.probeFailures = probe.failures;
+r.probeFailures = probe.failures + probe.lost;
 r.files = {};
 if ~isempty(seq.abort)
     fprintf('\nRUN ABORTED: %s; master status %d, fault code %d\n', seq.abort, ...
@@ -190,13 +195,12 @@ mpaPerVolt = 1000 / shuntOhm;
 for c = 1:numel(captures)
     cap = captures{c};
     name = sprintf('%s_%d_%s', label, cap.step, steps(cap.step).name);
-    inRun = windows(:, 1) == cap.step & windows(:, 2) == 1;
-    stats = windows(inRun, 4:7);
+    stats = windows(windows(:, 1) == cap.step, 3:6);
     if opts.report
         cap.report = pressureNoiseReport(cap.volts, fs, stats, name);
     end
     fname = fullfile(opts.saveDir, sprintf('%s_%s.csv', name, stamp));
-    t = (0:pr.nSamples - 1)' / fs;
+    t = (0:numel(cap.volts) - 1)' / fs;
     fid = fopen(fname, 'w');
     fprintf(fid, 't,volts,MPa\n');
     fprintf(fid, '%.4f,%.5f,%.5f\n', [t cap.volts(:) mpaPerVolt * (cap.volts(:) - 4 * shuntOhm / 1000)]');
@@ -216,8 +220,8 @@ r.runFile = fname;
 fprintf('\n%-4s %-10s %-12s %8s %12s %12s %12s\n', 'step', 'type', 'target', 'windows', ...
     'window rms', 'capture rms', 'strongest');
 for s = 1:nSteps
-    inRun = windows(:, 1) == s & windows(:, 2) == 1;
-    wrms = mean(windows(inRun, 5)) * 1000;
+    inStep = windows(:, 1) == s;
+    wrms = mean(windows(inStep, 4)) * 1000;
     crms = NaN; line = '';
     for c = 1:numel(captures)
         if captures{c}.step == s && isfield(captures{c}, 'report')
@@ -227,10 +231,10 @@ for s = 1:nSteps
         end
     end
     fprintf('%-4d %-10s %-12s %8d %9.2f mV %9.2f mV %12s\n', s, steps(s).name, ...
-        steps(s).targetText, sum(inRun), wrms, crms, line);
+        steps(s).targetText, sum(inStep), wrms, crms, line);
 end
 fprintf('exchange failures %d, probe failures %d, exchange p99 %.1f ms\n', ...
-    exchangeFailures, probe.failures, prctileOf(runLog(:, 7), 99));
+    exchangeFailures, probe.failures + probe.lost, prctileOf(runLog(:, 7), 99));
 fprintf('saved %s\n', fname);
 end
 
@@ -256,10 +260,13 @@ C.ST_IDLE = 1;
 end
 
 
-function [seq, app] = sequence(seq, app, m, steps, tNow, settle, capturePending, C, cfg)
+function [seq, app] = sequence(seq, app, m, steps, tNow, armBusy, nPending, ctx, C, cfg)
 % Advance the path: command each step through the app inputs, wait for its
-% running status, time it, then stop and wait for idle.
+% running status, time it, then stop and wait for idle. Arms the capture
+% once the settle time has passed and a window whenever none is waiting to
+% be read out; the step ends once the records of what it armed are written.
 seq.armRequest = false;
+settle = ctx.settle;
 inPhase = tNow - seq.tPhase;
 
 if any(m.statusCode == C.abortStatus) && ~strcmp(seq.phase, 'finish')
@@ -341,11 +348,20 @@ switch seq.phase
 
     case 'run'
         s = steps(seq.idx);
-        if ~seq.armed && inPhase >= settle
+        if ~seq.armed && inPhase >= settle && ~armBusy
             seq.armRequest = true;
+            seq.armTag = 'capture';
             seq.armed = true;
+        elseif ~armBusy && nPending == 0 && inPhase < s.seconds
+            seq.armRequest = true;
+            seq.armTag = 'window';
         end
-        if inPhase >= max(s.seconds, settle + 0.1) && seq.armed && ~capturePending
+        if seq.armRequest
+            % The slave acts on the arm a gap or two after it is written.
+            seq.tCapEnd = tNow + ctx.capSeconds + 2 * cfg.exchangePeriod;
+        end
+        if inPhase >= max(s.seconds, settle + 0.1) && seq.armed && ~armBusy && ...
+                tNow >= seq.tCapEnd
             app.op = C.OP_STOP;
             seq.phase = 'stop';
             seq.tPhase = tNow;
@@ -365,59 +381,24 @@ end
 end
 
 
-function [probe, windows, captures] = probeSlot(probe, link, pr, windows, captures, seq, tNow, fs)
-% One probe transaction per cycle: arm when asked, otherwise poll the
-% window counter and capture state, and fetch statistics or the capture
-% block when they are new.
-isRun = double(strcmp(seq.phase, 'run'));
-if probe.pending && tNow - probe.tArm > pr.captureTimeout
-    fprintf('  capture armed at %.2f s not ready after %g s: skipped\n', ...
-        probe.tArm, pr.captureTimeout);
-    probe.pending = false;
-    probe.next = 'poll';
-end
-try
-    if probe.armRequest && strcmp(probe.next, 'poll')
-        probe.armValue = mod(probe.armValue, 65534) + 1;
-        link.writeOne(pr.hrArm, probe.armValue);
-        probe.armRequest = false;
-        probe.pending = true;
-        probe.tArm = tNow;
-        return;
+function [windows, captures] = keepCaptures(windows, captures, got, fs)
+% File the probe captures read out in this gap: a window gives its
+% statistics, the capture its samples for the spectrum.
+for k = 1:numel(got)
+    c = got{k};
+    if c.lost
+        fprintf('  %s of step %d lost: the ring was overwritten before it was read\n', ...
+            c.tag, c.step);
+        continue;
     end
-    switch probe.next
-        case 'poll'
-            s = link.read(pr.irWindow, 5);
-            if s(1) ~= probe.lastWindow
-                probe.lastWindow = s(1);
-                probe.next = 'stats';
-            elseif probe.pending && s(2) == 2 && s(5) == probe.armValue
-                probe.next = 'cap1';
-            end
-        case 'stats'
-            raw = link.read(pr.irStats, 8);
-            windows(end + 1, :) = [seq.idx isRun tNow realOf(raw(1:2)) realOf(raw(3:4)) ...
-                realOf(raw(5:6)) realOf(raw(7:8))];
-            probe.next = 'poll';
-        case 'cap1'
-            probe.counts(1:125) = link.read(pr.irSamples, 125);
-            probe.next = 'cap2';
-        case 'cap2'
-            probe.counts(126:250) = link.read(pr.irSamples + 125, 125);
-            cap.step = seq.idx;
-            cap.tArm = probe.tArm;
-            cap.tRead = tNow;
-            cap.volts = probe.counts / pr.countsPerVolt;
-            cap.fs = fs;
-            captures{end + 1} = cap;
-            probe.pending = false;
-            probe.next = 'poll';
-            fprintf('  capture %d taken at %.2f s\n', numel(captures), probe.tArm);
-    end
-catch err
-    probe.failures = probe.failures + 1;
-    if probe.failures <= 3
-        fprintf('  probe transaction failed at %.2f s: %s\n', tNow, err.message);
+    volts = c.data(:, 7);               % raw pressure input [V]
+    if strcmp(c.tag, 'window')
+        windows(end + 1, :) = [c.step c.tArm pressureNoiseStats(volts)]; %#ok<AGROW>
+    else
+        captures{end + 1} = struct('step', c.step, 'tArm', c.tArm, ...
+            'tRead', c.tRead, 'volts', volts, 'fs', fs); %#ok<AGROW>
+        fprintf('  capture %d of step %d armed at %.2f s, read at %.2f s\n', ...
+            numel(captures), c.step, c.tArm, c.tRead);
     end
 end
 end
@@ -509,12 +490,6 @@ function opts = withDefault(opts, name, value)
 if ~isfield(opts, name)
     opts.(name) = value;
 end
-end
-
-
-function x = realOf(words)
-% REAL from two registers, low word first (the controller's word order).
-x = double(typecast(uint16(words(:)'), 'single'));
 end
 
 

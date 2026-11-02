@@ -47,7 +47,7 @@
    the soft box in ST_RECOVERY_POSITION and must ramp inward.
 
    Parameter guard: a negative VelMax or a non-positive AccelMax or
-   CycleTime holds the command and sets ParamError. Fails to "not moving",
+   CycleTime holds the command. Fails to "not moving",
    never to passing Target through unshaped.
 
    Variables (define in MWiec GUI):
@@ -63,9 +63,6 @@
      VAR_OUTPUT:
        CommandedPosition   : LREAL            (* Command to Y_DirectControl.Position (mm)
        CommandedRate       : LREAL            (* Command rate (mm/s), diagnostic
-       RateLimiting        : BOOL             (* Shaper is limiting (target not reachable this scan)
-       TetherHold          : BOOL             (* Command held at MaxDeviation ahead of axis
-       ParamError          : BOOL             (* VelMax negative or AccelMax/CycleTime not positive
      VAR:
        rCmdPos             : LREAL := 0.0     (* Last command issued (mm)
        rCmdRate            : LREAL := 0.0     (* Rate of last command (mm/s)
@@ -74,7 +71,8 @@
        rAdt                : LREAL            (* AccelMax * CycleTime
        rRateStop           : LREAL            (* Max rate that can still stop at target
        rRateTgt            : LREAL            (* Rate the accel limit slews toward
-       bHold               : BOOL
+       bHold               : BOOL             (* Tether holds the command this scan
+       bParamError         : BOOL             (* VelMax negative or AccelMax/CycleTime not positive
    ============================================================================ *)
 
 (* ============================================================================
@@ -90,9 +88,7 @@ IF (NOT Enable) OR Reset THEN
     rCmdRate := LREAL#0.0;
     CommandedPosition := rCmdPos;
     CommandedRate := rCmdRate;
-    RateLimiting := FALSE;
-    TetherHold := FALSE;
-    ParamError := FALSE;
+    bParamError := FALSE;
     RETURN;
 END_IF;
 
@@ -100,14 +96,12 @@ END_IF;
    Parameter guard - hold the command rather than pass Target through
    -------------------------------------------------------------------------- *)
 
-ParamError := (VelMax < LREAL#0.0) OR (AccelMax <= LREAL#0.0) OR (CycleTime <= LREAL#0.0);
+bParamError := (VelMax < LREAL#0.0) OR (AccelMax <= LREAL#0.0) OR (CycleTime <= LREAL#0.0);
 
-IF ParamError THEN
+IF bParamError THEN
     rCmdRate := LREAL#0.0;
     CommandedPosition := rCmdPos;
     CommandedRate := rCmdRate;
-    RateLimiting := TRUE;
-    TetherHold := FALSE;
     RETURN;
 END_IF;
 
@@ -152,5 +146,4 @@ END_IF;
 
 CommandedPosition := rCmdPos;
 CommandedRate := rCmdRate;
-TetherHold := bHold;
-RateLimiting := bHold OR (ABS(Target - rCmdPos) > (VelMax * CycleTime));
+

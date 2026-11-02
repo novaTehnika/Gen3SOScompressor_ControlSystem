@@ -26,9 +26,7 @@
        HandshakeTimeout    : TIME := T#500MS  (* Timeout for handshake
      VAR_OUTPUT:
        ConfirmedMode       : E_OperatingMode  (* Current confirmed mode (valid when HandshakeComplete)
-       HandshakeActive     : BOOL             (* TRUE from handshake start until complete/timeout
        HandshakeComplete   : BOOL             (* TRUE when handshake succeeded
-       HandshakeTimeout_Q  : BOOL             (* TRUE when timeout occurred
      VAR:
        eState              : INT := 0         (* Handshake state - initialized to HS_IDLE
        tTimeout            : TON              (* Handshake timeout timer (single call site)
@@ -50,9 +48,7 @@
 IF NOT Enable THEN
     (* Reset all outputs when disabled *)
     ConfirmedMode := E_OperatingMode#MODE_IDLE;
-    HandshakeActive := FALSE;
     HandshakeComplete := FALSE;
-    HandshakeTimeout_Q := FALSE;
     eState := HS_IDLE;
     bTimeoutIN := FALSE;
 
@@ -67,9 +63,7 @@ ELSE
 IF eState = HS_IDLE THEN
 
     (* HS_IDLE - Reset outputs *)
-        HandshakeActive := FALSE;
         HandshakeComplete := FALSE;
-        HandshakeTimeout_Q := FALSE;
 
         (* Start handshake when mode is stable and different from idle
            (or when transitioning to a new mode) *)
@@ -77,7 +71,6 @@ IF eState = HS_IDLE THEN
             ConfirmedMode := RequestedMode;
             eModeAtStart := RequestedMode;
             bModeStableAtStart := TRUE;
-            HandshakeActive := TRUE;
             eState := HS_WAIT_MOTION_EN;
             bTimeoutIN := TRUE;
         ELSIF ModeStable AND (RequestedMode = E_OperatingMode#MODE_IDLE) THEN
@@ -105,7 +98,6 @@ ELSIF eState = HS_VERIFY_MODE THEN
         bTimeoutIN := FALSE;
         IF RequestedMode = eModeAtStart THEN
             HandshakeComplete := TRUE;
-            HandshakeActive := FALSE;
             eState := HS_COMPLETE;
         ELSE
             eState := HS_TIMEOUT;
@@ -123,13 +115,10 @@ ELSIF eState = HS_COMPLETE THEN
 ELSIF eState = HS_TIMEOUT THEN
 
     (* HS_TIMEOUT - Handshake timed out or failed *)
-        HandshakeTimeout_Q := TRUE;
-        HandshakeActive := FALSE;
         ConfirmedMode := E_OperatingMode#MODE_IDLE;
         bTimeoutIN := FALSE;
 
         IF NOT MotionEnable THEN
-            HandshakeTimeout_Q := FALSE;
             eState := HS_IDLE;
         END_IF;
 
