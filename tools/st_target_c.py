@@ -61,9 +61,6 @@ ARRAY_RE = re.compile(r'ARRAY\s*\[\s*(\d+)\s*\.\.\s*(\d+)\s*\]\s*OF\s+(\w+)')
 class CInit(OctaveInit):
     true, false = 'true', 'false'
 
-    def enum(self, typ, member):
-        return f'{typ}__{member}'
-
 
 class CTranslator(Translator):
     COMMENT = '//'

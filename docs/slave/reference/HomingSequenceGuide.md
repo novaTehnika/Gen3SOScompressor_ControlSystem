@@ -125,7 +125,7 @@ a `Jog`, `MC_MoveAbsolute` or `MC_SetPosition` error, or the expiry of
 
 ### Timing Expectations
 
-The approach speeds are limited to `G_cfgVelLimitMax` (6.0 mm/s); the figures
+The approach speeds are limited to `G_cfgVelLimitMax` (7.0 mm/s); the figures
 use the GVL defaults (fast 6, backoff and retract 5, slow 1 mm/s; acceleration
 5 mm/s², deceleration 50 mm/s²). The switch's hysteresis is not measured, so
 the backoff and slow-approach durations take an allowance of a couple of

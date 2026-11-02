@@ -240,7 +240,7 @@ from standing.
 The 50 ms log cannot show the drive's velocity-loop lag (`tauV`, 18 ms in
 the model), a breakaway shorter than one exchange, or the torque ripple
 at the motor turn. The slave's step probe (`FB_Probe`, part of the main
-program) records every scan (4 ms) into a ring of 8192 records of the
+program) records every scan (4 ms) into a ring of 4096 records of the
 commanded velocity, the actual velocity, the torque, the position, the
 chamber pressure, the raw pressure input and a status word. The run writes an arm
 register before each change it wants to see, `benchProbe` takes the
@@ -261,11 +261,12 @@ by default):
 2. Declare the globals of `GlobalVariables_Reference.st` (the `G_cfgProbe*`
    parameters, the `G_mbProbe*` registers and the `G_sysProbe*` variables),
    the `E_ProbeState` / `E_ProbeXferState` enumerations and the
-   `ARRAY104WORD` / `ARRAY65536WORD` types of `DataTypes.st`, add `FB_Probe`
+   `ARRAY104WORD` / `ARRAY32768WORD` types of `DataTypes.st`, add `FB_Probe`
    and the `fbProbe : FB_Probe` instance of `PRG_Main`, and the probe call
-   and the register block at the end of `PRG_Main` and `PRG_Output`. If the
-   compiler refuses the 65536-word ring, shrink it: the constant `cDepth`,
-   the `ARRAY65536WORD` bound (`cDepth` x 8 words) change together, and the
+   and the register block at the end of `PRG_Main` and `PRG_Output`. The
+   compiler takes array bounds as INT, so the ring is at most 32768 words
+   (4096 records); to change it, the constant `cDepth` and the
+   `ARRAY32768WORD` bound (`cDepth` x 8 words) change together, and the
    master reads the depth from the slave.
 3. Do not load `PRG_ModbusBench` (HR101-110 and IR101-108) with the main
    program in service. IR109-400 are free.

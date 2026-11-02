@@ -90,7 +90,7 @@ Beside the protocol the slave carries a scan-rate data recorder, `FB_Probe`,
 for experiments and benches: IR401-524 and HR111-114, read and written by
 `bench/common/benchProbe.m` in the gaps between exchanges. It records the
 commanded and actual velocity, torque, position, pressure, the raw pressure
-input and a status word every scan into a ring of 8192 records, and marks the
+input and a status word every scan into a ring of 4096 records, and marks the
 record of the scan the slave entered `ST_FAULT`, so the history up to a fault
 can be read back. Nothing in the protocol depends on it: the shell does not
 read or write these registers, no master state or timeout depends on them, and
@@ -328,7 +328,7 @@ FAULT_PERSISTENT:
 | Mode | Unit | Limits applied by the slave |
 |------|------|-----------------------------|
 | Position | mm | Soft limits, position path shaper (speed from HR7-8, acceleration `G_cfgPosShaperAccelMax`) |
-| Velocity | mm/s | `G_cfgVelLimitMax` (6 mm/s) |
+| Velocity | mm/s | `G_cfgVelLimitMax` (7 mm/s) |
 | Torque | % of rated | `G_cfgTorqueLimitNormal` |
 | Pressure | MPa gauge | `0` to `G_cfgPressureTargetMax` (15 MPa); velocity within `G_cfgPressureVelMax` (5 mm/s) and the stop law; torque within `G_cfgPressureTorqueLimit` |
 

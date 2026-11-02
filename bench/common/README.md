@@ -42,7 +42,7 @@ directory and takes these from here.
 
 ## The step probe
 
-The slave records one record per scan into a ring of 8192 (33 s at the 4 ms scan).
+The slave records one record per scan into a ring of 4096 (16 s at the 4 ms scan).
 A record is 8 words: commanded velocity, velocity, torque, position
 (absolute, two words), pressure, the raw pressure input and a status word
 (in motion, performance status, fault active, homing complete, confirmed
@@ -112,7 +112,7 @@ exchanges, one read of IR401-524 (124 registers) and at most one write:
   the files are written.
 - The history before a fault: the slave latches FaultMark, the index of the
   record written in the scan it entered `ST_FAULT`, and the ring holds the
-  last 33 s. `benchProbe('fault', p, info)` queues a capture of
+  last 16 s. `benchProbe('fault', p, info)` queues a capture of
   `info.nPre` records before and `info.nPost` after it (the slave is not
   armed); with `info.wait` true it waits for a fault after the first read,
   so a script queues it before provoking the fault. `p.faultMark`, `p.probeState`

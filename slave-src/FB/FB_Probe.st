@@ -6,7 +6,7 @@
 
    Description:
    Every scan the block appends one record to a ring buffer in plain memory.
-   The ring holds the last 8192 records (33 s at the 4 ms scan). The master
+   The ring holds the last 4096 records (16 s at the 4 ms scan). The master
    takes records out through a window of 13 records in the input registers:
    it writes the index of the first record it wants and reads the window,
    the counters and a copy of the window's start index in one FC#04 read.
@@ -28,7 +28,7 @@
                                            confirmed mode code
    Index values are UDINT and wrap after 2^32 scans.
 
-   Recording state (eState): PROBE_OFF while Enable is FALSE. Otherwise
+   Recording state (State): PROBE_OFF while Enable is FALSE. Otherwise
    PROBE_RECORDING. A change of the arm register acts at once, whatever
    else is going on: it publishes Mark, the index of the record written in
    that scan, echoes the arm value in ArmEcho, latches the register Length
@@ -44,18 +44,19 @@
    history up to every fault can be read back while it is in the ring.
    FaultMark is 0 until the first fault.
 
-   Transfer state (XferCode): the master's request is the index of the first
+   Transfer state (Xfer): the master's request is the index of the first
    record it wants (ReqLo, ReqHi: two UINT registers, low word first,
    because the pair starts 2 bytes past a 4-byte boundary). A request that
    differs from the fill target restarts the fill; the same request written
    again changes nothing. The block copies at most FillPerScan records per
    scan from the ring into Stage, so a transfer never stretches a scan.
-   When the copy is complete Publish is TRUE for that scan and Start and
-   Count hold the new window; they change only then. In that scan PRG_Main
-   copies Stage to G_sysProbeStage, and PRG_Output copies that into the
-   mapped window and writes the register StartTail (G_mbProbeStartTail) last,
-   so a read that straddles an update shows Start <> StartTail and is
-   discarded.
+   FillPerScan below 1 is taken as 1; above 13 it changes nothing, since a
+   window never needs more. When the copy is complete Publish is TRUE for
+   that scan and Start and Count hold the new window; they change only
+   then. In that scan PRG_Main copies Stage to G_sysProbeStage, and
+   PRG_Output copies that into the mapped window and writes the register
+   StartTail (a copy of Start) last, so a read that straddles an update
+   shows Start <> StartTail and is discarded.
      XFER_IDLE     the window is complete for the request
      XFER_FILLING  records are being copied
      XFER_PENDING  the requested start is not recorded yet
@@ -66,12 +67,13 @@
 
    Cost per scan: the 8-word record, the arm and fault logic and at most
    FillPerScan * 8 word copies (48 at the default of 6), plus, in the scan a
-   fill completes, the 104-word copy in PRG_Output.
+   fill completes, two 104-word copies: Stage to G_sysProbeStage in
+   PRG_Main and that to the mapped window in PRG_Output.
 
    Variables (define in MWiec GUI):
      VAR_INPUT:
        Enable          : BOOL             (* FALSE: no recording, PROBE_OFF
-       FillPerScan     : INT              (* Records copied into the window per scan, limited to 1-13
+       FillPerScan     : INT              (* Records copied into the window per scan, at least 1
        VelCmd          : LREAL            (* Commanded velocity (mm/s)
        Vel             : LREAL            (* Actual velocity (mm/s)
        Torque          : LREAL            (* Actual torque (% of rated)
@@ -98,16 +100,17 @@
        ArmEcho         : UINT := 0        (* Arm value last acted on
        Depth           : UINT := 0        (* Ring depth in records
        Words           : UINT := 0        (* Words per record
-       StateCode       : UINT := 0        (* Recording state as the published integer (E_ProbeState)
-       XferCode        : UINT := 0        (* Transfer state as the published integer (E_ProbeXferState)
+       State           : E_ProbeState     (* Recording state; starts at its first member, PROBE_OFF
+       StateCode       : UINT := 0        (* State as the published integer
+       Xfer            : E_ProbeXferState (* Transfer state; starts at its first member, XFER_IDLE
+       XferCode        : UINT := 0        (* Xfer as the published integer
        Publish         : BOOL := FALSE    (* TRUE in the scan a fill completes: Stage, Start, Count are new
      VAR CONSTANT:
-       cDepth          : UDINT := 8192    (* Ring depth in records; the ring array holds cDepth * cWords words
+       cDepth          : UDINT := 4096    (* Ring depth in records; the ring array holds cDepth * cWords words
        cWords          : UDINT := 8       (* Words per record
        cWindow         : UDINT := 13      (* Records in the window; Stage holds cWindow * cWords words
      VAR:
-       aRing           : ARRAY65536WORD   (* Ring: records of cWords words, record n in words (n MOD cDepth) * cWords
-       eState          : E_ProbeState := E_ProbeState#PROBE_RECORDING  (* Recording state
+       aRing           : ARRAY32768WORD   (* Ring: records of cWords words, record n in words (n MOD cDepth) * cWords
        bFirstScan      : BOOL := TRUE
        bPrevFault      : BOOL := FALSE    (* FaultState on the previous scan
        nLastArm        : UINT := 0        (* Arm value already acted on
@@ -122,12 +125,13 @@
        nFilled         : UDINT := 0       (* Records of the target copied into Stage
        nPlanned        : UDINT := 0       (* Records the window is to hold
        nAvail          : UDINT := 0       (* Records written from the target on, up to cWindow
-       nPerScan        : UDINT := 6       (* FillPerScan limited to 1..cWindow
        nStep           : UDINT := 0       (* Records to copy this scan
        nSrc            : UDINT := 0       (* First ring word of the records being copied
        nDst            : UDINT := 0       (* First Stage word they go to
-       nWords          : DINT := 0        (* Words to copy this scan
-       nI              : DINT := 0
+       nWords          : INT := 0         (* Words to copy this scan, at most cWindow * cWords = 104
+       nI              : INT := 0         (* Word counter of the copy: INT, the type of the FOR literals and step
+       nRingIx         : INT := 0         (* aRing index (the compiler takes only a variable as an index)
+       nStageIx        : INT := 0         (* Stage index
        bOverrun        : BOOL := FALSE    (* The target (or the rest of a fill) was overwritten
    ============================================================================ *)
 
@@ -145,16 +149,17 @@ IF bFirstScan THEN
 END_IF;
 
 IF NOT Enable THEN
-    eState := E_ProbeState#PROBE_OFF;
+    State := E_ProbeState#PROBE_OFF;
     StateCode := UINT#0;
+    Xfer := E_ProbeXferState#XFER_IDLE;
     XferCode := UINT#0;
     nLastArm := Arm;
     bPrevFault := FaultState;
     RETURN;
 END_IF;
 
-IF eState = E_ProbeState#PROBE_OFF THEN
-    eState := E_ProbeState#PROBE_RECORDING;
+IF State = E_ProbeState#PROBE_OFF THEN
+    State := E_ProbeState#PROBE_RECORDING;
 END_IF;
 
 (* --------------------------------------------------------------------------
@@ -165,7 +170,7 @@ IF Arm <> nLastArm THEN
     ArmEcho := Arm;
     Mark := Written;
     nCapLen := UINT_TO_UDINT(Length);
-    eState := E_ProbeState#PROBE_CAPTURING;
+    State := E_ProbeState#PROBE_CAPTURING;
 END_IF;
 
 (* --------------------------------------------------------------------------
@@ -186,14 +191,22 @@ nStatus := BOOL_TO_UINT(InMotion) + BOOL_TO_UINT(Performance) * UINT#2
            + BOOL_TO_UINT(FaultActive) * UINT#4 + BOOL_TO_UINT(HomingComplete) * UINT#8
            + MIN(ModeCode, UINT#255) * UINT#256;
 
-aRing[nBase]              := INT_TO_WORD(LREAL_TO_INT(LIMIT(LREAL#-32767.0, VelCmd * LREAL#1000.0, LREAL#32767.0)));
-aRing[nBase + UDINT#1]    := INT_TO_WORD(LREAL_TO_INT(LIMIT(LREAL#-32767.0, Vel * LREAL#1000.0, LREAL#32767.0)));
-aRing[nBase + UDINT#2]    := INT_TO_WORD(LREAL_TO_INT(LIMIT(LREAL#-32767.0, Torque * LREAL#100.0, LREAL#32767.0)));
-aRing[nBase + UDINT#3]    := DWORD_TO_WORD(dwPos);
-aRing[nBase + UDINT#4]    := DWORD_TO_WORD(SHR(dwPos, UINT#16));
-aRing[nBase + UDINT#5]    := INT_TO_WORD(LREAL_TO_INT(LIMIT(LREAL#-32767.0, Pressure * LREAL#1000.0, LREAL#32767.0)));
-aRing[nBase + UDINT#6]    := UINT_TO_WORD(LREAL_TO_UINT(LIMIT(LREAL#0.0, Volts * LREAL#5000.0, LREAL#65535.0)));
-aRing[nBase + UDINT#7]    := UINT_TO_WORD(nStatus);
+nRingIx := UDINT_TO_INT(nBase);
+aRing[nRingIx] := INT_TO_WORD(LREAL_TO_INT(LIMIT(LREAL#-32767.0, VelCmd * LREAL#1000.0, LREAL#32767.0)));
+nRingIx := nRingIx + 1;
+aRing[nRingIx] := INT_TO_WORD(LREAL_TO_INT(LIMIT(LREAL#-32767.0, Vel * LREAL#1000.0, LREAL#32767.0)));
+nRingIx := nRingIx + 1;
+aRing[nRingIx] := INT_TO_WORD(LREAL_TO_INT(LIMIT(LREAL#-32767.0, Torque * LREAL#100.0, LREAL#32767.0)));
+nRingIx := nRingIx + 1;
+aRing[nRingIx] := DWORD_TO_WORD(dwPos);
+nRingIx := nRingIx + 1;
+aRing[nRingIx] := DWORD_TO_WORD(SHR(dwPos, UINT#16));
+nRingIx := nRingIx + 1;
+aRing[nRingIx] := INT_TO_WORD(LREAL_TO_INT(LIMIT(LREAL#-32767.0, Pressure * LREAL#1000.0, LREAL#32767.0)));
+nRingIx := nRingIx + 1;
+aRing[nRingIx] := UINT_TO_WORD(LREAL_TO_UINT(LIMIT(LREAL#0.0, Volts * LREAL#5000.0, LREAL#65535.0)));
+nRingIx := nRingIx + 1;
+aRing[nRingIx] := UINT_TO_WORD(nStatus);
 Written := Written + UDINT#1;
 
 IF Written > cDepth THEN
@@ -206,20 +219,20 @@ END_IF;
    Recording state: CAPTURING -> HELD when the last record is written,
    HELD -> RECORDING when the record at Mark is overwritten
    -------------------------------------------------------------------------- *)
-IF eState = E_ProbeState#PROBE_CAPTURING THEN
+IF State = E_ProbeState#PROBE_CAPTURING THEN
     IF (nCapLen > UDINT#0) AND (Written >= Mark + nCapLen) THEN
-        eState := E_ProbeState#PROBE_HELD;
+        State := E_ProbeState#PROBE_HELD;
     END_IF;
 END_IF;
-IF eState = E_ProbeState#PROBE_HELD THEN
+IF State = E_ProbeState#PROBE_HELD THEN
     IF Mark < nOldest THEN
-        eState := E_ProbeState#PROBE_RECORDING;
+        State := E_ProbeState#PROBE_RECORDING;
     END_IF;
 END_IF;
 
-IF eState = E_ProbeState#PROBE_CAPTURING THEN
+IF State = E_ProbeState#PROBE_CAPTURING THEN
     StateCode := UINT#2;
-ELSIF eState = E_ProbeState#PROBE_HELD THEN
+ELSIF State = E_ProbeState#PROBE_HELD THEN
     StateCode := UINT#3;
 ELSE
     StateCode := UINT#1;
@@ -228,14 +241,6 @@ END_IF;
 (* --------------------------------------------------------------------------
    Transfer: plan the window for the request
    -------------------------------------------------------------------------- *)
-IF FillPerScan < 1 THEN
-    nPerScan := UDINT#1;
-ELSIF FillPerScan > 13 THEN
-    nPerScan := cWindow;
-ELSE
-    nPerScan := INT_TO_UDINT(FillPerScan);
-END_IF;
-
 nReq := UINT_TO_UDINT(ReqHi) * UDINT#65536 + UINT_TO_UDINT(ReqLo);
 IF nReq <> nTarget THEN
     nTarget := nReq;
@@ -250,10 +255,7 @@ IF NOT bOverrun THEN
     ELSIF (nFilled < nPlanned) AND (nTarget + nFilled < nOldest) THEN
         bOverrun := TRUE;
     ELSIF nTarget < Written THEN
-        nAvail := Written - nTarget;
-        IF nAvail > cWindow THEN
-            nAvail := cWindow;
-        END_IF;
+        nAvail := MIN(Written - nTarget, cWindow);
         IF (nAvail > nPlanned) AND (nTarget + nFilled >= nOldest) THEN
             nPlanned := nAvail;
         END_IF;
@@ -261,18 +263,19 @@ IF NOT bOverrun THEN
 END_IF;
 
 (* --------------------------------------------------------------------------
-   Transfer: copy at most nPerScan records, publish when the window is complete
+   Transfer: copy at most FillPerScan records, publish when the window is
+   complete. The rest of a window is at most cWindow records, so only the
+   lower bound of FillPerScan needs enforcing.
    -------------------------------------------------------------------------- *)
 IF (NOT bOverrun) AND (nFilled < nPlanned) THEN
-    nStep := nPlanned - nFilled;
-    IF nStep > nPerScan THEN
-        nStep := nPerScan;
-    END_IF;
+    nStep := MIN(nPlanned - nFilled, INT_TO_UDINT(MAX(FillPerScan, INT#1)));
     nSrc := ((nTarget + nFilled) MOD cDepth) * cWords;
     nDst := nFilled * cWords;
-    nWords := UDINT_TO_DINT(nStep * cWords);
+    nWords := UDINT_TO_INT(nStep * cWords);
     FOR nI := 0 TO nWords - 1 DO
-        Stage[nDst + DINT_TO_UDINT(nI)] := aRing[(nSrc + DINT_TO_UDINT(nI)) MOD (cDepth * cWords)];
+        nStageIx := UDINT_TO_INT(nDst + INT_TO_UDINT(nI));
+        nRingIx := UDINT_TO_INT((nSrc + INT_TO_UDINT(nI)) MOD (cDepth * cWords));
+        Stage[nStageIx] := aRing[nRingIx];
     END_FOR;
     nFilled := nFilled + nStep;
     IF nFilled = nPlanned THEN
@@ -283,11 +286,15 @@ IF (NOT bOverrun) AND (nFilled < nPlanned) THEN
 END_IF;
 
 IF bOverrun THEN
+    Xfer := E_ProbeXferState#XFER_OVERRUN;
     XferCode := UINT#3;
 ELSIF nFilled < nPlanned THEN
+    Xfer := E_ProbeXferState#XFER_FILLING;
     XferCode := UINT#1;
 ELSIF nPlanned = UDINT#0 THEN
+    Xfer := E_ProbeXferState#XFER_PENDING;
     XferCode := UINT#2;
 ELSE
+    Xfer := E_ProbeXferState#XFER_IDLE;
     XferCode := UINT#0;
 END_IF;

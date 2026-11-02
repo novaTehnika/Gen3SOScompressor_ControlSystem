@@ -1,9 +1,15 @@
 # Ladder Diagram POU wiring record
 
-The LD POU that owns `G_sysAxis` and the built-in motion function blocks
-lives only in the MotionWorks IEC project; it cannot be exported as text.
-This directory records its wiring block by block: a screenshot of each
-block as it is in the project, and a table of what is wired to each pin.
+The LD POU (`PRG_LD`) that owns the axis and the built-in motion function
+blocks lives only in the MotionWorks IEC project; it cannot be exported as
+text. `slave-src/PRG/PRG_LD.txt` is its specification, in the form of the
+ST headers: the instances to declare and, network by network, what is
+wired to each pin. This directory records the wiring as it is in the
+project: a screenshot of each block, and a table of what is wired to each
+pin. The screenshots are named after the instances of the specification
+(`fbPower` and so on); the tables below were written from the earlier
+screenshots, whose instances were named `MC_Power_1` and so on, and the
+axis `AXIS1`.
 The Structured Text writes the `G_cmd*` structs and reads the `G_sta*`
 structs (`slave-src/DUT/DataTypes.st`), so this record is the contract
 between the two halves. When a field is added to one of those structs,
@@ -14,9 +20,9 @@ Take the screenshot with the POU offline (online values show `???`) so
 the pin labels are legible, name the file after the block instance, and
 keep the table to what the picture shows.
 
-## Y_DirectControl_1
+## fbDirectControl
 
-![Y_DirectControl_1](Y_DirectControl_1.PNG)
+![fbDirectControl](fbDirectControl.PNG)
 
 | Pin | Direction | Wired to | Note |
 |---|---|---|---|
@@ -27,7 +33,7 @@ keep the table to what the picture shows.
 | Velocity | in | `G_cmdDirectControl.Velocity` | In PositionMode the block does no path shaping, so this input (and Acceleration) sets no limit; `FB_PositionPathShaper`'s `VelMax` and `AccelMax` do. |
 | Acceleration | in | `G_cmdDirectControl.Acceleration` | The block has no Deceleration pin, so `ST_CmdDirectControl` has no `Deceleration` field. The bench measured no slew of the velocity reference at this value in VelocityTLMode (`bench/characterisation/README.md` section 8). |
 | Torque | in | `G_cmdDirectControl.Torque` | |
-| FilterTimeConstant | in | `G_cmdDirectControl.FilterTimeConstant` | `PRG_Main` sets it from `G_cfgDirectCtrlFilterTime` (default 0.05 s), so the filter is tuned in the GVL. |
+| FilterTimeConstant | in | `G_cmdDirectControl.FilterTimeConstant` | `PRG_Main` sets it from `G_cfgDirectCtrlFilterTime` (default 0.02 s), so the filter is tuned in the GVL. |
 | BufferMode | in | not wired | |
 | Axis | out | `AXIS1` | |
 | Busy | out | not wired | |
@@ -36,9 +42,9 @@ keep the table to what the picture shows.
 | Error | out | `G_staDirectControl.Error` | Read by `PRG_Main` in the hand-off to `MC_Stop`. |
 | ErrorID | out | not wired | |
 
-## MC_Power_1
+## fbPower
 
-![MC_Power_1](MC_Power_1.PNG)
+![fbPower](fbPower.PNG)
 
 | Pin | Direction | Wired to | Note |
 |---|---|---|---|
@@ -54,9 +60,9 @@ keep the table to what the picture shows.
 | Error | out | `G_staPower.Error` | Read by `PRG_Main` in `ST_DRIVE_ENABLE` (`FAULT_DRIVE`). |
 | ErrorID | out | not wired | |
 
-## MC_Stop_1
+## fbStop
 
-![MC_Stop_1](MC_Stop_1.PNG)
+![fbStop](fbStop.PNG)
 
 | Pin | Direction | Wired to | Note |
 |---|---|---|---|
@@ -73,9 +79,9 @@ keep the table to what the picture shows.
 | Error | out | `G_staStop.Error` | Read by `PRG_Main` in the hand-off and by `FB_GoHome`. |
 | ErrorID | out | not wired | |
 
-## MC_Reset_1
+## fbReset
 
-![MC_Reset_1](MC_Reset_1.PNG)
+![fbReset](fbReset.PNG)
 
 | Pin | Direction | Wired to | Note |
 |---|---|---|---|
@@ -87,9 +93,9 @@ keep the table to what the picture shows.
 | Error | out | `G_staReset.Error` | Read by `PRG_Main` in `ST_DRIVE_RESET` (`FAULT_DRIVE`). |
 | ErrorID | out | not wired | |
 
-## MC_MoveAbsolute_1
+## fbMoveAbsolute
 
-![MC_MoveAbsolute_1](MC_MoveAbsolute_1.PNG)
+![fbMoveAbsolute](fbMoveAbsolute.PNG)
 
 | Pin | Direction | Wired to | Note |
 |---|---|---|---|
@@ -110,9 +116,9 @@ keep the table to what the picture shows.
 | Error | out | `G_staMoveAbsolute.Error` | Read by `FB_GoHome` and `FB_HomeLimit`. |
 | ErrorID | out | not wired | |
 
-## Jog_1
+## fbJog
 
-![Jog_1](Jog_1.PNG)
+![fbJog](fbJog.PNG)
 
 | Pin | Direction | Wired to | Note |
 |---|---|---|---|
@@ -130,9 +136,9 @@ keep the table to what the picture shows.
 | Error | out | `G_staJog.Error` | Read by `FB_HomeLimit`. |
 | ErrorID | out | `G_staJog.ErrorID` | Not read by the ST. |
 
-## MC_SetPosition_1
+## fbSetPosition
 
-![MC_SetPosition_1](MC_SetPosition_1.PNG)
+![fbSetPosition](fbSetPosition.PNG)
 
 | Pin | Direction | Wired to | Note |
 |---|---|---|---|
@@ -146,9 +152,9 @@ keep the table to what the picture shows.
 | Error | out | `G_staSetPosition.Error` | Read by `FB_HomeLimit`. |
 | ErrorID | out | not wired | |
 
-## MC_ReadActualPosition_1
+## fbReadActualPosition
 
-![MC_ReadActualPosition_1](MC_ReadActualPosition_1.PNG)
+![fbReadActualPosition](fbReadActualPosition.PNG)
 
 | Pin | Direction | Wired to | Note |
 |---|---|---|---|
@@ -161,9 +167,9 @@ keep the table to what the picture shows.
 | ErrorID | out | not wired | |
 | Position | out | `G_sysActualPosition` | mm; read throughout `PRG_Main` and the user FBs, published in IR11-12. |
 
-## MC_ReadActualVelocity_1
+## fbReadActualVelocity
 
-![MC_ReadActualVelocity_1](MC_ReadActualVelocity_1.PNG)
+![fbReadActualVelocity](fbReadActualVelocity.PNG)
 
 | Pin | Direction | Wired to | Note |
 |---|---|---|---|
@@ -176,9 +182,9 @@ keep the table to what the picture shows.
 | ErrorID | out | not wired | |
 | ActualVelocity | out | `G_sysActualVelocity` | mm/s; `G_sysInMotion`, the exit guard and the probe read it, published in IR13-14. |
 
-## MC_ReadActualTorque_1
+## fbReadActualTorque
 
-![MC_ReadActualTorque_1](MC_ReadActualTorque_1.PNG)
+![fbReadActualTorque](fbReadActualTorque.PNG)
 
 | Pin | Direction | Wired to | Note |
 |---|---|---|---|
@@ -195,11 +201,11 @@ keep the table to what the picture shows.
 
 `PRG_Main` sets `G_cmdPower.EnablePositive` and `G_cmdPower.EnableNegative`
 TRUE together with `Enable` (and FALSE with it), but the `Enable_Positive`
-and `Enable_Negative` pins of `MC_Power_1` are not wired, so the two fields
+and `Enable_Negative` pins of `fbPower` are not wired, so the two fields
 reach nothing and the pins take the block's unconnected default. In
 MotionWorks, wire `Enable_Positive` to `G_cmdPower.EnablePositive` and
 `Enable_Negative` to `G_cmdPower.EnableNegative`, and replace
-`MC_Power_1.PNG` and the table above.
+`fbPower.PNG` and the table above.
 
 ## To change: drive `G_sysDriveFault`
 

@@ -249,7 +249,7 @@ wall2 = Ch2 - 29.24 / (rk1.K_Pa / 1e6)               % and after
 ```
 
 A mL/MPa is 1e-12 m^3/Pa: the compliance beyond the liquid goes to
-`G_cfgPressureSchedHoseCompliance` (a lower bound, so the smaller of the
+`G_cfgPressureSchedHoseCompl` (a lower bound, so the smaller of the
 two) and to the model's `C_hose`; 0.24 mL/MPa was the 26 October value
 with the hose unpurged.
 

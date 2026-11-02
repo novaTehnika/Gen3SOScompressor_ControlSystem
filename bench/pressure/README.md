@@ -35,7 +35,7 @@ and `FB_Probe` in the project. The probe's registers are
 in `bench/common/benchConfig.m` (`probe`).
 
 A window is a probe capture of one second of consecutive records (250 at
-the 4 ms scan). The probe's ring holds 8192 records, 33 s, and the master
+the 4 ms scan). The probe's ring holds 4096 records, 16 s, and the master
 reads a capture out of it at best one 13-record window per 50 ms gap, so
 the readout of 250 records takes about as long as the second it records.
 The scripts arm the captures one at a time, the next once the one before

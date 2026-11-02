@@ -26,7 +26,7 @@ The MotionWorks IEC project is organized into several key folders, following sta
 
 ### ST ↔ LD POU Interface
 
-Because `G_sysAxis` and the built-in motion FBs live in the LD POU, `PRG_Main` never calls `MC_Power`, `MC_Stop`, `Y_DirectControl`, etc. directly. The LD POU is not in this repository; its wiring is recorded block by block, with screenshots, in `docs/slave/ld/`, and a change to a `G_cmd*` or `G_sta*` field is complete only when that record and the LD agree. Instead it writes command fields into the `G_cmd*` structured globals and reads state from the matching `G_sta*` globals each scan:
+Because `G_sysAxis` and the built-in motion FBs live in the LD POU, `PRG_Main` never calls `MC_Power`, `MC_Stop`, `Y_DirectControl`, etc. directly. The LD POU (`PRG_LD`) has no text form; `slave-src/PRG/PRG_LD.st` specifies it in the form of the ST headers (the instances to declare and the wiring of each pin, network by network) and the screenshots in `docs/slave/ld/` record the project's wiring, and a change to a `G_cmd*` or `G_sta*` field is complete only when the specification, the screenshots and the LD agree. Instead it writes command fields into the `G_cmd*` structured globals and reads state from the matching `G_sta*` globals each scan:
 
 | ST writes (command) | LD owns (FB instance) | LD writes back (status) |
 |---------------------|------------------------|--------------------------|
@@ -109,6 +109,15 @@ END_CASE;
 
 **Note:** All state machines in this project (both `PRG_Main` with enums and internal FB state machines with INT constants) use the IF-ELSIF pattern for MWiec Express compatibility.
 
+**No Initial Value on Enum Variables:**
+
+MotionWorks IEC Express does not accept an initial value on a variable of a user-defined enum type, in the global variable worksheet or in a POU's variables. Declare it without one; it starts at the enum's first member (the implicit 0), so order an enum's members with the starting state first (`ST_INIT`, `FAULT_NONE`, `PROBE_OFF`, `XFER_IDLE`). The translator rejects an enum declared with an initial value.
+
+```structuredtext
+eState : E_HomeLimitState;                          (* ✓ starts at the first member *)
+eState : E_HomeLimitState := E_HomeLimitState#IDLE; (* ✗ will not compile *)
+```
+
 **Function Output Limitation:**
 
 Functions can only have one output. For multiple outputs, use a function block instead.
@@ -169,12 +178,14 @@ bounds its own cost:
   `G_sysProbeStage` per scan, and a request is served over several scans
   (`XFER_FILLING`) instead of in one;
 - the mapped window is written only in the scan a fill completes
-  (`G_sysProbePublish`), by one 104-word copy in `PRG_Output`, with StartTail
-  made different from Start before the copy and set equal to it last;
+  (`G_sysProbePublish`), by two 104-word copies: `PRG_Main` copies the
+  block's `Stage` to `G_sysProbeStage`, and `PRG_Output` copies that into
+  the mapped window with StartTail made different from Start before the
+  copy and set equal to it last;
 - everything else is a few comparisons and assignments.
 
 The worst scan therefore adds 8 + 8 x `G_cfgProbeFillPerScan` word moves from the
-block plus, in the completing scan, the 104-word copy. Do not replace the
+block plus, in the completing scan, the two 104-word copies. Do not replace the
 fill loop by a copy of the whole window in one scan, and keep any new probe
 channel inside the record, whose layout is defined only in `FB_Probe.st`
 (the master decoder is `benchProbe.m`).
@@ -188,7 +199,7 @@ in the slave: it did not work out on this controller. It uses `MOD`, `SHR`, the 
 `DWORD_TO_WORD` / `DINT_TO_DWORD` conversions (which wrap modulo 2^16 and 2^32,
 as on the controller) and IF/ELSIF chains, no CASE. MotionWorks setup for it:
 the `FB_Probe` block, the `E_ProbeState` / `E_ProbeXferState` enumerations and
-the `ARRAY104WORD` / `ARRAY65536WORD` types from `DataTypes.st`; the `G_cfgProbe*`,
+the `ARRAY104WORD` / `ARRAY32768WORD` types from `DataTypes.st`; the `G_cfgProbe*`,
 `G_mbProbe*` and `G_sysProbe*` globals of `GlobalVariables_Reference.st` with the
 Modbus holding group extended to HR114 and the input group to IR524; and an
 `fbProbe : FB_Probe` instance in `PRG_Main`.

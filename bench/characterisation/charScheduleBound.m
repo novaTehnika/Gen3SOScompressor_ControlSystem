@@ -37,7 +37,7 @@ Patm = g.G_cfgPressureSchedPatm;                                % [Pa]
 A = g.G_cfgPressureSchedPistonArea / 1e6;                       % [mm^2 -> m^2]
 if fill.hoseOpen
     Vhose = g.G_cfgPressureSchedHoseVolume;                     % [mL]
-    Chose = g.G_cfgPressureSchedHoseCompliance;                 % [m^3/Pa]
+    Chose = g.G_cfgPressureSchedHoseCompl;                 % [m^3/Pa]
 else
     Vhose = 0;
     Chose = 0;
@@ -47,7 +47,7 @@ Vl = fill.saline_mL / 1e6;                                      % [mL -> m^3]
 % Chamber volume at the position: the swept volume to the end of travel
 % plus the volume left there
 Vch = max(A * (g.G_cfgPressureSchedEndOfTravel - x) / 1e3, 0) ...
-    + (g.G_cfgPressureSchedPassagesVolume + Vhose) / 1e6;       % [mm -> m, mL -> m^3]
+    + (g.G_cfgPressureSchedPassagesVol + Vhose) / 1e6;       % [mm -> m, mL -> m^3]
 Vl = min(Vl, Vch);                                              % saline held by the chamber
 % Oxygen charge, and what the saline holds at the highest absolute
 % pressure seen (Henry); the rest is free gas
@@ -66,5 +66,5 @@ else
     medScans = 1;
 end
 lag = g.G_cfgAnalogFilterTimeConst + (medScans + 3) * g.G_cfgScanTime ...
-    + g.G_cfgPressureSchedDriveDeadTime + g.G_cfgPressureSchedDriveLag;
+    + g.G_cfgPressureSchedDeadTime + g.G_cfgPressureSchedDriveLag;
 end

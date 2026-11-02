@@ -47,6 +47,14 @@
 
 
      (* ========================================================================
+        ANALOG INPUTS (1 Available)
+        Range: -10V to +10V (LREAL, volts)
+        ======================================================================== *)
+
+     G_aiPressure          AT %IW0   : LREAL  (* Pressure transducer: voltage across the 4-20 mA loop shunt *)
+
+
+     (* ========================================================================
         DIGITAL OUTPUTS (8 Available)
         ======================================================================== *)
 
@@ -56,14 +64,6 @@
      (* Brake Control *)
      (* Spring-engaged, electrically released: HIGH = brake disengaged (motion allowed) *)
      G_doBrakeDisengage    AT %QX0.7 : BOOL   (* Brake release command *)
-
-
-     (* ========================================================================
-        ANALOG INPUTS (1 Available)
-        Range: -10V to +10V (LREAL, volts)
-        ======================================================================== *)
-
-     G_aiPressure          AT %IW0   : LREAL  (* Pressure transducer: voltage across the 4-20 mA loop shunt *)
 
 
      (* ========================================================================
@@ -85,6 +85,19 @@
      G_mbCommandedPosition AT %QD73824 : REAL  (* IR17-18: mm *)
      G_mbActualPressure    AT %QD73828 : REAL  (* IR19-20: MPa gauge *)
 
+     G_mbProbeWritten      AT %QD74592 : UDINT  (* IR401-402: records written so far *)
+     G_mbProbeMark         AT %QD74596 : UDINT  (* IR403-404: index of the record written in the scan of the last arm *)
+     G_mbProbeStart        AT %QD74600 : UDINT  (* IR405-406: index of the first record in the window *)
+     G_mbProbeArmEcho      AT %QW74604 : UINT   (* IR407: arm value last acted on *)
+     G_mbProbeCount        AT %QW74606 : UINT   (* IR408: records in the window (0..13) *)
+     G_mbProbeDepth        AT %QW74608 : UINT   (* IR409: ring depth in records (4096) *)
+     G_mbProbeWords        AT %QW74610 : UINT   (* IR410: words per record (8) *)
+     G_mbProbeWindow       AT %QW74612 : ARRAY104WORD  (* IR411-514: 13 records of 8 words; IR515-518 are not used *)
+     G_mbProbeStartTail    AT %QD74828 : UDINT  (* IR519-520: copy of Start, assigned after the window *)
+     G_mbProbeState        AT %QW74832 : UINT   (* IR521: E_ProbeState code *)
+     G_mbProbeXfer         AT %QW74834 : UINT   (* IR522: E_ProbeXferState code *)
+     G_mbProbeFaultMark    AT %QD74836 : UDINT  (* IR523-524: index of the record written in the scan PRG_Main entered ST_FAULT *)
+
 
      (* ========================================================================
         MODBUS HOLDING REGISTERS (master -> slave), group FC#03,06,16
@@ -102,38 +115,11 @@
      G_mbPositionSpeed     AT %MD3.483340 : REAL  (* HR7-8: position-move speed, mm/s (0 holds position) *)
      G_mbSalineVolume      AT %MD3.483344 : REAL  (* HR9-10: saline volume of the fill, mL (gain schedule) *)
      G_mbOxygenRatio       AT %MD3.483348 : REAL  (* HR11-12: oxygen charge as STP volume per saline volume (gain schedule) *)
-   END_VAR
 
-
-   VAR_GLOBAL
-     (* ========================================================================
-        STEP PROBE REGISTERS (FB_Probe), an optional side channel beside the
-        protocol: nothing in the master/slave protocol depends on them.
-        Holding group FC#03,06,16 extends to HR114 (HR101-110 are left to
-        the bench program in bench/modbus). Input group FC#04 extends to
-        IR524 (IR101-108 are left to the same bench program, IR109-400 are
-        free). See docs/master/ModbusRegisterMap.md.
-        ======================================================================== *)
-
-     (* Holding registers, master -> slave *)
      G_mbProbeArm          AT %MW3.483548 : UINT   (* HR111: a changed value is an arm *)
      G_mbProbeReqLo        AT %MW3.483550 : UINT   (* HR112: low word of the first record index wanted in the window *)
      G_mbProbeReqHi        AT %MW3.483552 : UINT   (* HR113: high word *)
      G_mbProbeLength       AT %MW3.483554 : UINT   (* HR114: records the next arm wants, 0 = open ended *)
-
-     (* Input registers, slave -> master. Every 32-bit value is on a 4-byte boundary. *)
-     G_mbProbeWritten      AT %QD74592 : UDINT  (* IR401-402: records written so far *)
-     G_mbProbeMark         AT %QD74596 : UDINT  (* IR403-404: index of the record written in the scan of the last arm *)
-     G_mbProbeStart        AT %QD74600 : UDINT  (* IR405-406: index of the first record in the window *)
-     G_mbProbeArmEcho      AT %QW74604 : UINT   (* IR407: arm value last acted on *)
-     G_mbProbeCount        AT %QW74606 : UINT   (* IR408: records in the window (0..13) *)
-     G_mbProbeDepth        AT %QW74608 : UINT   (* IR409: ring depth in records (8192) *)
-     G_mbProbeWords        AT %QW74610 : UINT   (* IR410: words per record (8) *)
-     G_mbProbeWindow       AT %QW74612 : ARRAY104WORD  (* IR411-514: 13 records of 8 words; IR515-518 are not used *)
-     G_mbProbeStartTail    AT %QD74828 : UDINT  (* IR519-520: copy of Start, assigned after the window *)
-     G_mbProbeState        AT %QW74832 : UINT   (* IR521: E_ProbeState code *)
-     G_mbProbeXfer         AT %QW74834 : UINT   (* IR522: E_ProbeXferState code *)
-     G_mbProbeFaultMark    AT %QD74836 : UDINT  (* IR523-524: index of the record written in the scan PRG_Main entered ST_FAULT *)
    END_VAR
 
 
@@ -178,7 +164,7 @@
         VELOCITY LIMITS (mm/s)
         ======================================================================== *)
 
-     G_cfgVelLimitMax          : LREAL := 6.0         (* The one axis speed ceiling, VelMax in every mode. The mode
+     G_cfgVelLimitMax          : LREAL := 7.0         (* The one axis speed ceiling, VelMax in every mode. The mode
                                                           speeds below (Go Home, homing, pressure) are passed through
                                                           MIN(.., G_cfgVelLimitMax). In position mode the master sets the
                                                           move speed (G_mbPositionSpeed), clamped to this ceiling, as
@@ -200,7 +186,7 @@
      G_cfgDirectCtrlAccel      : LREAL := 10.0         (* Accel for Y_DirectControl operating modes (mm/s^2). A
                                                           velocity step on the machine was not slewed at this
                                                           value in VelocityTLMode (bench/characterisation) *)
-     G_cfgDirectCtrlFilterTime : LREAL := 0.05        (* Y_DirectControl FilterTimeConstant (s): the block's own
+     G_cfgDirectCtrlFilterTime : LREAL := 0.02        (* Y_DirectControl FilterTimeConstant (s): the block's own
                                                           filter on the command it sends the drive. Wired from
                                                           G_cmdDirectControl.FilterTimeConstant in the LD POU. A
                                                           lag inside the pressure loop; tune on the bench with
@@ -294,16 +280,16 @@
      G_cfgPressureSchedKpMax         : LREAL := 5.0        (* Upper bound on the scheduled Kp (mm/s per MPa) *)
      G_cfgPressureSchedPistonArea    : LREAL := 3431.0     (* Piston area (mm^2), 2.602 in bore *)
      G_cfgPressureSchedEndOfTravel   : LREAL := 367.0      (* Position at the end of travel, where the chamber is down to the passages (mm) *)
-     G_cfgPressureSchedPassagesVolume: LREAL := 57.0       (* Cylinder passages, chamber volume at the end of travel without the hose (mL), measured with the present fittings *)
+     G_cfgPressureSchedPassagesVol   : LREAL := 57.0       (* Cylinder passages, chamber volume at the end of travel without the hose (mL), measured with the present fittings *)
      G_cfgPressureSchedHoseVolume    : LREAL := 29.0       (* Hose between the cylinder head and the outlet (mL), measured; used when the hose is open *)
-     G_cfgPressureSchedHoseCompliance: LREAL := 1.2E-13    (* Hose compliance beyond its liquid (m^3/Pa), a lower bound on the measured value; used when the hose is open *)
+     G_cfgPressureSchedHoseCompl     : LREAL := 1.2E-13    (* Hose compliance beyond its liquid (m^3/Pa), a lower bound on the measured value; used when the hose is open *)
      G_cfgPressureSchedHoseOpen      : BOOL := FALSE       (* The proximal valve is open during the compression, so the hose is part of the chamber; FALSE when it opens after mixing *)
      G_cfgPressureSchedBulkModulus   : LREAL := 1.0E9      (* Saline bulk modulus (Pa), an upper bound *)
      G_cfgPressureSchedHenry         : LREAL := 1.22E-5    (* Henry constant of oxygen in 0.9 % saline (mol/(m^3 Pa)) *)
      G_cfgPressureSchedGasTemp       : LREAL := 293.0      (* Gas temperature (K) *)
      G_cfgPressureSchedPatm          : LREAL := 101325.0   (* Atmospheric pressure (Pa) *)
      G_cfgPressureSchedArriveBand    : LREAL := 0.5        (* |error| that first releases the integrator (MPa) *)
-     G_cfgPressureSchedDriveDeadTime : LREAL := 0.0228     (* Drive dead time, command to response (s), measured *)
+     G_cfgPressureSchedDeadTime      : LREAL := 0.0228     (* Drive dead time, command to response (s), measured *)
      G_cfgPressureSchedDriveLag      : LREAL := 0.0182     (* Drive velocity-loop time constant (s), measured *)
 
 
@@ -365,7 +351,7 @@
 
 
      (* ========================================================================
-        STEP PROBE (FB_Probe)
+        PROBE (FB_Probe)
         ======================================================================== *)
 
      G_cfgProbeEnable          : BOOL := TRUE         (* FALSE: the probe records nothing and publishes PROBE_OFF *)
@@ -425,9 +411,9 @@
         STATE MACHINE
         ======================================================================== *)
 
-     G_sysCurrentState         : E_SystemState := ST_INIT     (* Current state *)
-     G_sysPreviousState        : E_SystemState := ST_INIT     (* Previous state *)
-     G_sysRequestedMode        : E_OperatingMode := MODE_IDLE (* Mode from master *)
+     G_sysCurrentState         : E_SystemState    (* Current state *)
+     G_sysPreviousState        : E_SystemState    (* Previous state *)
+     G_sysRequestedMode        : E_OperatingMode  (* Mode from master *)
      G_sysReference            : LREAL := 0.0     (* Reference from master: mm, mm/s or % by mode *)
      G_sysPositionSpeed        : LREAL := 0.0     (* Position-move speed from master (mm/s), the shaper's speed limit once clamped to [0, G_cfgVelLimitMax] *)
      G_sysSalineVolume         : LREAL := 0.0     (* Saline volume from master (mL); 0 until written *)
@@ -435,8 +421,8 @@
      G_sysScanCounter          : UINT := UINT#0   (* Incremented every scan, published in G_mbSlaveCounter *)
      G_sysActiveFaultCode      : UINT := UINT#0   (* G_sysActiveFault as an integer, published in G_mbFaultCode *)
      G_sysConfirmedModeCode    : UINT := UINT#0   (* Handshake confirmed mode as an integer, published in G_mbConfCode *)
-     G_sysConfirmedMode        : E_OperatingMode := MODE_IDLE (* Mode confirmed to master *)
-     G_sysActiveFault          : E_FaultCode := FAULT_NONE    (* Active fault code *)
+     G_sysConfirmedMode        : E_OperatingMode  (* Mode confirmed to master *)
+     G_sysActiveFault          : E_FaultCode      (* Active fault code *)
 
 
      (* ========================================================================
@@ -497,13 +483,13 @@
         DIAGNOSTICS
         ======================================================================== *)
 
-     G_sysLastFaultCode        : E_FaultCode := FAULT_NONE    (* Last fault that occurred *)
-     G_sysLastFaultState       : E_SystemState := ST_INIT     (* State when last fault occurred *)
+     G_sysLastFaultCode        : E_FaultCode      (* Last fault that occurred *)
+     G_sysLastFaultState       : E_SystemState    (* State when last fault occurred *)
      G_sysFaultCount           : UDINT := 0       (* Total number of faults since power-up *)
 
 
      (* ========================================================================
-        STEP PROBE (FB_Probe outputs, published by PRG_Output)
+        PROBE (FB_Probe outputs, published by PRG_Output)
         ======================================================================== *)
 
      G_sysProbeStage           : ARRAY104WORD     (* Window being filled; copied to G_mbProbeWindow when a fill completes *)

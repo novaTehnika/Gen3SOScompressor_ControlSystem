@@ -190,7 +190,7 @@ TRUE for up to `V/A` after the drop (0.6 s at `V` = 6 mm/s, `A` = 10 mm/s²) plu
 
 Durations follow from the `FB_HomeLimit` phases and the GVL defaults
 (fast 6 mm/s, slow 1 mm/s, backoff/retract 5 mm/s, accel 5 mm/s², decel
-50 mm/s²). The velocities are limited to `G_cfgVelLimitMax` (6 mm/s). The
+50 mm/s²). The velocities are limited to `G_cfgVelLimitMax` (7 mm/s). The
 switch's hysteresis is not measured; the backoff and slow approach are
 timed for a couple of millimetres of it.
 

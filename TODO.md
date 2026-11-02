@@ -15,13 +15,14 @@ to confirm in it:
 
 - [ ] LD POU: delete the `MC_MoveVelocity` instance, then delete
       `docs/slave/ld/MC_MoveVelocity_1.PNG`.
-- [ ] LD POU, from the pin tables in `docs/slave/ld/README.md` ("To
-      change" sections): wire `MC_Power_1`'s `Enable_Positive` and
-      `Enable_Negative` to `G_cmdPower.EnablePositive` and
-      `.EnableNegative`, which `PRG_Main` writes and nothing reads; and
-      find or add the block that drives `G_sysDriveFault` (the
-      `MC_ReadActual*` blocks leave `Error` unwired and no screenshot
-      shows an axis-error block), then replace the screenshots.
+- [ ] LD POU, against `slave-src/PRG/PRG_LD.txt` and the recaptured
+      screenshots in `docs/slave/ld/`: confirm `fbPower`'s
+      `Enable_Positive` and `Enable_Negative` are wired to
+      `G_cmdPower.EnablePositive` and `.EnableNegative`, that
+      `fbReadStatus` (`MC_ReadStatus`, `ErrorStop`) drives
+      `G_sysDriveFault`, and whether the axis is `G_sysAxis` or still
+      `AXIS1`; the pin tables in `docs/slave/ld/README.md` say what each
+      screenshot shows.
 - [ ] Enable the cyclic task's watchdog, at the 4 ms interval. The 2 ms
       task overran for weeks (about 2.5 ms of work a scan) and ran on
       every second motion cycle with nothing reported.
@@ -121,7 +122,7 @@ to confirm in it:
         are both 367 mm and the switch sits just past them, so a jog the
         master stops at `posMax` can overshoot into `FAULT_POSITION` or
         the switch. Leave room for the arrival tolerance (0.5 mm) and one
-        exchange of travel at full speed (0.3 mm at 6 mm/s), then set
+        exchange of travel at full speed (0.35 mm at 7 mm/s), then set
         `posMax` < `G_cfgPosSoftLimitMax` < the switch.
 - [ ] Measure what the models still assume (`design/pressure-loop/README.md`,
       "Open questions"): the dissolution time constant `tauDiss`, the lag
