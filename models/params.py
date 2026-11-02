@@ -20,12 +20,13 @@ a comment states otherwise.
 The parameters describe five parts of the model:
 
   Chamber     A piston of area A compresses a chamber that holds saline
-              of effective bulk modulus K and oxygen gas. The gas is
-              isothermal and dissolves into the saline according to
-              Henry's law with time constant tauDiss. The chamber
-              stiffness dP/dx therefore rises from about 0.02 MPa/mm at
-              the start of a run to 10 to 25 MPa/mm once the gas has
-              dissolved.
+              of bulk modulus K and oxygen gas. The gas is isothermal
+              and dissolves into the saline according to Henry's law
+              with time constant tauDiss. A pocket of air V_air in the
+              passage to the pressure transducer is a second isothermal
+              gas that never dissolves. The chamber stiffness dP/dx
+              therefore rises from about 0.02 MPa/mm at the start of a
+              run to 10 to 25 MPa/mm once the gas has dissolved.
   Charge      The oxygen charge is given as the ratio of its STP volume
               to the saline volume, and is admitted at the supply
               pressure, where the run starts. The saturation pressure of
@@ -93,6 +94,10 @@ class Params:
     # alone is 2.2 GPa; the seals, hoses and residual gas lower it.
     # Measured 0.72 GPa (0.67 to 0.78 over the segments, 0.81 with the
     # gas-like curvature removed) on 2026-10-26, bench/characterisation.
+    # It is the effective value of those runs, whose x(P) curved as a
+    # gas would (the fits' gas-law term); the liquid-only term of the
+    # fits, 0.81 GPa, is the value once the origin of the curvature is
+    # known (the runs at two fill levels of the measurement plan).
     K: float = 0.72e9
     # [m^3] Saline volume at the start of a run, including the dead
     # volume: the fill at the 280 mm start position of the bench runs
@@ -104,6 +109,19 @@ class Params:
     tauDiss: float = 30.0
     # [kg/m^3] Saline density
     rho: float = 1000.0
+    # [m^3] Air trapped in the passage to the pressure transducer (about
+    # 2 cm long) and in the transducer's cavity, at atmospheric
+    # pressure. It cannot be purged, so it is present in every run, and
+    # it dissolves only very slowly through the narrow passage, so the
+    # model holds it as a fixed amount of isothermal gas that never
+    # dissolves, eq. (46). The default is an estimate from the geometry:
+    # the passage (1 to 2 mm bore) holds 0.02 to 0.06 mL and the cavity
+    # about as much. It is far too small to be the gas-law term of the
+    # bulk-modulus fits (0.65 mL at the ramps' mean pressure, which as
+    # isothermal gas would be about 40 mL at atmosphere, more air than
+    # the machine holds), so that curvature has another origin; the
+    # fits at two fill levels settle both.
+    V_air: float = 0.1e-6
 
     # ----- Oxygen charge -------------------------------------------------
     # [-] Oxygen charge as the ratio of its volume at STP (0 degC, 1 atm)
@@ -248,8 +266,17 @@ class Params:
     # addition to the Coulomb and viscous terms, so the efficiency
     # pushing against the load is 1 / (1 + mu). Measured 0.45.
     mu: float = 0.45
-    # [kg] Motor and gearbox inertia reflected to the piston
-    mr: float = 5e4
+    # [kg] Motor and gearbox inertia reflected to the piston. Measured
+    # 4.6e5 (0.42 % rated torque per mm/s^2 of piston acceleration, the
+    # torque excess of 74 open-chamber velocity steps against the
+    # motor's acceleration) through the lossless torque constant Fcap:
+    # the drivetrain's efficiency is not applied, and a torque that is
+    # partly lost in the gearbox would lower it by that factor. The
+    # model carries no compliance between the motor and the piston: the
+    # drive path's stiffness is above 4.7 kN/um (an up/down offset of the
+    # motor position at the same pressure within 5 um of a 25 kN
+    # friction reversal), 200 times the chamber's.
+    mr: float = 4.6e5
     # [N s/m] Viscous friction coefficient. Measured 2.3e6 (11 kN at
     # 5 mm/s).
     b: float = 2.3e6
@@ -345,9 +372,10 @@ class Params:
 
     def legacy(self):
         """Return a copy with the earlier model: a fixed liquid volume, a
-        single slew limit on the command, and no dead time."""
+        single slew limit on the command, no dead time and no air pocket
+        at the transducer."""
         return replace(self, liquid_depletes=False, slew_asym=False,
-                       slew_limited=True, t_dead=0.0)
+                       slew_limited=True, t_dead=0.0, V_air=0.0)
 
     @classmethod
     def from_overrides(cls, items, base=None):

@@ -68,7 +68,7 @@ Global variables defined in a `GVL` use a prefix to indicate their scope.
 |--------|-------|---------|-------------|
 | `cfg` | Configuration | `G_cfgDebounceTimeMode` | A static configuration parameter used for tuning. |
 | `sys` | System | `G_sysCurrentState` | A dynamic system status variable. |
-| `di` / `do` | I/O | `G_diOvertravelNeg` | A digital input (`di`) or output (`do`): the overtravel switches, the brake and the status outputs. |
+| `di` / `do` | I/O | `G_diOvertravelNeg` | A digital input (`di`) or output (`do`): the overtravel switches and the brake. |
 | `ai` / `ao` | I/O | `G_aiPressure` | An analog input (`ai`) or output (`ao`). The pressure transducer is the only analog input; no `G_ao*` globals exist. |
 | `mb` | Modbus | `G_mbModeCode` | A Modbus holding register (master → slave) or input register (slave → master), see `docs/master/ModbusRegisterMap.md`. |
 
@@ -161,12 +161,26 @@ The core logic resides in a state machine within `PRG_Main.st`. Understanding th
 - **Activation (`ST_DRIVE_ENABLE`, `ST_BRAKE_RELEASE`)**: A transitional sequence to power on the drive and release the brake before entering an operational mode.
 - **Operational States (`ST_POSITION_CTRL`, `ST_VELOCITY_CTRL`, etc.)**: The active motion or control states. Each state writes setpoints into `G_cmdDirectControl` (read by the LD POU's `Y_DirectControl` instance each scan) and checks for a MotionEnable drop (`G_mbMotionEnable`, debounced) to exit. The position states (`ST_POSITION_CTRL`, `ST_RECOVERY_POSITION`) feed their target through `fbPosShaper` (`FB_PositionPathShaper`), and on a MotionEnable drop they first ramp the command to rest under `G_cfgPosShaperAccelMax` (`bPosStopping`) before leaving the state.
 - **Homing State (`ST_HOME_LIMIT`)**: This state executes the encapsulated logic inside `FB_HomeLimit`. The FB emits `Cmd*` `VAR_OUTPUT` structs (`CmdJog`, `CmdMoveAbsolute`, `CmdSetPosition`) which `PRG_Main` copies into the matching `G_cmd*` globals so the LD POU's motion FBs act on them; status comes back through `G_sta*` globals wired into the FB's `Sta*` `VAR_INPUT` structs.
-- **State properties**: `G_sysCurrentState` is classified in one place, the State Properties section of `PRG_Main` after the state machine. It computes the BOOLs the rest of the scan reads (`bPowerOn`, `bHandshakeState`, `bCommandedMotion`, `bMotionWatched`, `bInHoming`, `bInRecovery`, `bInFault`, `bPositionMode`, `bVelocityMode`, and the brake and drive-wait flags), so a state list is written once. The flags hold the state the scan's state machine ended in; the safety block at the end of the file can still move the state to `ST_FAULT`, and the outputs that must follow that move (`G_doFaultActive`) read `G_sysCurrentState` again. A new state is added to each list it belongs to there. `FB_SafetyMonitor` takes the flags it needs as inputs (`InCommandedMotion`, `InMotionWatched`, `InHoming`, `InRecovery`, `InFault`) and compares `CurrentState` itself only for `ST_HOME_LIMIT` and `ST_PRESSURE_CTRL`.
+- **State properties**: `G_sysCurrentState` is classified in one place, the State Properties section of `PRG_Main` after the state machine. It computes the BOOLs the rest of the scan reads (`bPowerOn`, `bHandshakeState`, `bCommandedMotion`, `bMotionWatched`, `bInHoming`, `bInRecovery`, `bInFault`, `bPositionMode`, `bVelocityMode`, and the brake and drive-wait flags), so a state list is written once. The flags hold the state the scan's state machine ended in; the safety block at the end of the file can still move the state to `ST_FAULT`, and the outputs that must follow that move (`G_sysFaultActive`) read `G_sysCurrentState` again. A new state is added to each list it belongs to there. `FB_SafetyMonitor` takes the flags it needs as inputs (`InCommandedMotion`, `InMotionWatched`, `InHoming`, `InRecovery`, `InFault`) and compares `CurrentState` itself only for `ST_HOME_LIMIT` and `ST_PRESSURE_CTRL`.
 - **Transition (`ST_HOLD_POSITION`)**: A critical intermediate state entered when MotionEnable (`G_mbMotionEnable`) drops. It brings the axis to a controlled halt (`MC_Stop`) and waits for a new mode handshake from the master. While `MC_Stop` executes, `Y_DirectControl` is held enabled in its last `ControlMode` with a zero command (`bKeepDirectControl` / `eKeepDirectMode`) until `MC_Stop` reports Busy and `Y_DirectControl.Active` drops; only an *aborted* `Y_DirectControl` returns the SERVOPACK to position control, and mode transitions wait for that hand-off. The same hand-off runs in `ST_FAULT` and `ST_RECOVERY`.
 - **Deactivation (`ST_BRAKE_ENGAGE`, `ST_DRIVE_DISABLE`)**: A transitional sequence to engage the brake and disable the drive before returning to `ST_IDLE`.
 - **Fault Handling (`ST_FAULT`, `ST_FAULT_IDLE`)**:
     - `ST_FAULT`: The active fault state. It performs a controlled `MC_Stop` and waits for a fault reset handshake. It includes logic for a "fast recovery" (to `ST_BRAKE_HOLD`) or a "slow recovery" timeout to `ST_FAULT_IDLE`.
     - `ST_FAULT_IDLE`: The safe, powered-down fault state. The brake is engaged and the drive is off. It waits for a fault reset handshake to return to `ST_IDLE`.
+
+---
+
+### Input, Handshake and Safety Blocks
+
+These blocks sit between the Modbus registers and the state machine. Each is called once per scan at the end of `PRG_Main`, and the states read their outputs on the next scan.
+
+- **`FB_AnalogInputFilter`** filters the transducer voltage in two stages: a median of 3 or 5 samples (`G_cfgAnalogMedianSize`), then a first-order low pass whose coefficient the caller computes (`alpha = dt / (tau + dt)` from `G_cfgAnalogFilterTimeConst`). The first enabled scan fills the median buffer and the filter state with the input. While disabled it passes the raw input through and keeps its state, so a re-enable resumes from the stored samples rather than from a fresh start.
+- **`FB_DigitalInputFilter`** debounces a BOOL: the first scan accepts the input as it is, and afterwards the output follows the input only once it has held the new value for `DebounceTime`. `PRG_Main` filters MotionEnable, FaultReset and the two overtravel inputs with it; the edge outputs are not read.
+- **`FB_ModeDecoder`** debounces the mode register (`G_cfgDebounceTimeMode`) the same way and decodes it with `FB_IntToMode`. A code above 7, such as the fault code the master mirrors during a reset, decodes to `MODE_IDLE` with value 0. `ModeStable` is FALSE while a new code is being debounced.
+- **`FB_HandshakeManager`** runs the mode handshake only (request, confirmation, MotionEnable, verification, timeout). Its `ConfirmedMode` is an `E_OperatingMode`; `PRG_Main` converts it to `G_sysConfirmedModeCode`, which `PRG_Output` publishes as `G_mbConfCode`.
+- **`FB_FaultResetHandler`** is a combinational check with no state or timer. A reset is valid when FaultReset is high, MotionEnable is low, the system is in a fault state, the decoded mode code is stable and the fault code the master mirrored in `G_mbModeCode` equals the active fault. `PRG_Main` decodes the mirrored code with `FB_IntToFaultCode` and passes it in as `MasterFaultCode`, so it is compared as an `E_FaultCode` and not as a mode.
+- **`FB_PistonExitGuard`** only detects; it never modifies a command. Positive is into the cylinder, so the pressure pushes the piston out and the motor holds it with positive torque. Within `G_cfgPosExitGuardMargin` of `G_cfgPosCylinderEntry` (the boundary is their sum), positive torque above `G_cfgTorqueStallThreshold` together with a velocity below minus `G_cfgInMotionVelThreshold` means the pressure is winning, and `FaultTriggered` goes to `FB_SafetyMonitor`. It does not depend on the mode.
+- **`FB_SafetyMonitor`** holds every fault condition in one block and latches the highest-priority one (the order is in its header). It has no encoder input and no warning outputs: the Sigma-7 detects encoder alarms itself and they arrive as `DriveFault`, so they raise `FAULT_DRIVE`; there is no encoder-manager block.
 
 ---
 
@@ -258,15 +272,15 @@ Let's say you want to add `FAULT_NEW_CONDITION` with a value of `5` (currently `
 
 3.  **Update Master Docs:** Add the new fault to the tables in `docs/master/FaultCodeReference.md` and other relevant guides.
 
-4.  **Add Detection Logic:** In `slave-src/FB/FB_SafetyMonitor.st`, add the logic that detects the new fault condition.
+4.  **Add Detection Logic:** In `slave-src/FB/FB_SafetyMonitor.st`, declare a local flag (`bFaultNewCondition : BOOL`, in the `VAR` section of the header comment) and add the logic that detects the new fault condition.
     ```structuredtext
     (* --------------------------------------------------------------------------
        NEW FAULT MONITORING
        -------------------------------------------------------------------------- *)
     IF (some_new_dangerous_condition) THEN
-        FaultNewCondition := TRUE;
+        bFaultNewCondition := TRUE;
     ELSE
-        FaultNewCondition := FALSE;
+        bFaultNewCondition := FALSE;
     END_IF;
     ```
 
@@ -274,15 +288,15 @@ Let's say you want to add `FAULT_NEW_CONDITION` with a value of `5` (currently `
     ```structuredtext
     // Example: Giving it a higher priority than FAULT_POSITION
     ...
-    ELSIF FaultLimitSwitch THEN
+    ELSIF bFaultLimitSwitch THEN
         FaultDetected := TRUE;
         FaultCode := FAULT_LIMIT_SWITCH;
 
-    ELSIF FaultNewCondition THEN
+    ELSIF bFaultNewCondition THEN
         FaultDetected := TRUE;
         FaultCode := FAULT_NEW_CONDITION;
 
-    ELSIF FaultPosition THEN
+    ELSIF bFaultPosition THEN
         FaultDetected := TRUE;
         FaultCode := FAULT_POSITION;
     ...

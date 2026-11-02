@@ -30,35 +30,31 @@
        FaultTime       : TIME             (* Out-of-range must persist this long
      VAR_OUTPUT:
        PressureMPa     : LREAL            (* Scaled pressure (MPa gauge)
-       LoopMa          : LREAL            (* Loop current (mA), for diagnostics
-       OutOfRange      : BOOL             (* Loop current outside [MinMa, MaxMa] this scan
-       SensorFault     : BOOL             (* OutOfRange sustained for FaultTime
-       ParamError      : BOOL             (* ShuntOhms or SpanMa not positive
+       SensorFault     : BOOL             (* Loop current outside [MinMa, MaxMa] sustained for FaultTime
      VAR:
+       rLoopMa         : LREAL            (* Loop current (mA)
+       bOutOfRange     : BOOL             (* Loop current outside [MinMa, MaxMa] this scan
+       bParamError     : BOOL             (* ShuntOhms or SpanMa not positive
        tonOutOfRange   : TON              (* Out-of-range persistence timer
    ============================================================================ *)
 
 IF NOT Enable THEN
     PressureMPa := LREAL#0.0;
-    LoopMa := LREAL#0.0;
-    OutOfRange := FALSE;
     SensorFault := FALSE;
-    ParamError := FALSE;
     tonOutOfRange(IN := FALSE, PT := FaultTime);
     RETURN;
 END_IF;
 
-ParamError := (ShuntOhms <= LREAL#0.0) OR (SpanMa <= LREAL#0.0);
-IF ParamError THEN
+bParamError := (ShuntOhms <= LREAL#0.0) OR (SpanMa <= LREAL#0.0);
+IF bParamError THEN
     (* Fail to "sensor broken", never to a plausible pressure *)
     PressureMPa := LREAL#0.0;
-    LoopMa := LREAL#0.0;
-    OutOfRange := TRUE;
+    bOutOfRange := TRUE;
 ELSE
-    LoopMa := Volts / ShuntOhms * LREAL#1000.0;
-    PressureMPa := RangeMin + (LoopMa - ZeroMa) / SpanMa * (RangeMax - RangeMin);
-    OutOfRange := (LoopMa < MinMa) OR (LoopMa > MaxMa);
+    rLoopMa := Volts / ShuntOhms * LREAL#1000.0;
+    PressureMPa := RangeMin + (rLoopMa - ZeroMa) / SpanMa * (RangeMax - RangeMin);
+    bOutOfRange := (rLoopMa < MinMa) OR (rLoopMa > MaxMa);
 END_IF;
 
-tonOutOfRange(IN := OutOfRange, PT := FaultTime);
+tonOutOfRange(IN := bOutOfRange, PT := FaultTime);
 SensorFault := tonOutOfRange.Q;

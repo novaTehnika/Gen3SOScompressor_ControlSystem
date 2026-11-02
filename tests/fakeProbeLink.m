@@ -1,9 +1,8 @@
 function out = fakeProbeLink(cmd, varargin)
 %FAKEPROBELINK Stand-in for the bench runs' Modbus link and clock: the
 %   simulated slave's own registers behind the protocol registers (IR1-20,
-%   HR1-12), an emulation of PRG_PressureProbe behind the noise registers
-%   (HR101, IR101-113, IR121-370) and, behind the step probe registers
-%   (HR111-114, IR401-524), the slave's own FB_Probe. The slave's
+%   HR1-12) and, behind the step probe registers (HR111-114, IR401-524),
+%   the slave's own FB_Probe. The slave's
 %   registers are packed and unpacked by its register map (the GVL's AT
 %   addresses, readInputRegisters / writeHoldingRegisters), so the ring,
 %   the arm latch, the recording and transfer state machines, the window
@@ -22,6 +21,11 @@ function out = fakeProbeLink(cmd, varargin)
 %                                       find the window changed under them
 %   fakeProbeLink('ringDepth', n)       use a ring of n records (see below)
 %   fakeProbeLink('torqueModel', p)     report a friction torque (below)
+%   fakeProbeLink('inputNoise', v)      white noise of v volts rms on the
+%                                       slave's analog input (the transducer
+%                                       model plus noise, through the
+%                                       pressureVolt hook); 0, the default,
+%                                       leaves the model's own voltage
 %   fakeProbeLink('valveAt', t, Cd)     outlet valve opens at t seconds: the
 %                                       plant's orifice bank (32 of 40 um,
 %                                       discharge coefficient Cd) drains the
@@ -39,7 +43,8 @@ function out = fakeProbeLink(cmd, varargin)
 %   one per slave tick around the scans (reads before a scan, writes after
 %   it) and returns after the client delay, with the slave running all the
 %   while. S.calls logs every call as [t called, t returned, requests,
-%   registers, is a read].
+%   registers, is a read]. The bench scripts call from MATLAB, so the link
+%   is used alone, without modbusLink's Simulink model commands.
 %   S    = fakeProbeLink('state')       S.collectLog is [t, mm^3 collected at
 %                                       the orifices, mol of free gas in the
 %                                       chamber] while the valve is open;
@@ -62,7 +67,12 @@ function out = fakeProbeLink(cmd, varargin)
 %   velocity (mm/s), P the chamber pressure (MPa) and A the piston area
 %   (mm^2). A nonzero tStick holds the axis still for that long after each
 %   command from rest while the torque ramps to F0 + sign (Fc + dFs) + P A,
-%   which is what breakaway looks like in the log.
+%   which is what breakaway looks like in the log. An optional field mr
+%   (kg) is the reflected mass of the drive path, which the plant model
+%   carries (par.mr) in torque mode only: it is set as sl.hook.mass, and
+%   the simulated axis adds the force mr a to the reported torque, a the
+%   change of the axis velocity over the scan, in step with the velocity
+%   feedback.
 
 persistent S R
 out = [];
@@ -90,10 +100,7 @@ switch cmd
         S.calls = zeros(0, 5);
         S.nT = 0;
         R = zeros(4096, 7);
-        S.noise = 0.001;        % V rms added to the sampled input
-        S.p = struct('window', 0, 'state', 0, 'echo', 0, 'arm', 0, 'lastArm', 0, ...
-            'idx', 0, 'samples', zeros(1, 250), 'sum', 0, 'sumSq', 0, ...
-            'min', Inf, 'max', -Inf, 'n', 0, 'stats', zeros(1, 4), 'live', 0);
+        S.noise = 0;            % V rms added to the analog input
     case 'faultAt'
         S.faultAt = varargin{1};
         S.faultUntil = Inf;
@@ -102,8 +109,17 @@ switch cmd
         end
     case 'slave'
         S.sl = varargin{1}(S.sl);
+    case 'inputNoise'
+        S.noise = varargin{1};
+        if S.noise == 0
+            S.sl.hook.pressureVolt = NaN;
+        end
     case 'torqueModel'
         S.torque = varargin{1};
+        S.sl.hook.mass = 0;
+        if ~isempty(S.torque) && isfield(S.torque, 'mr')
+            S.sl.hook.mass = S.torque.mr;
+        end
     case 'dropArm'
         S.hook.dropArm = varargin{1};
     case 'tearRead'
@@ -146,7 +162,7 @@ switch cmd
         end
         [S, R] = call(S, R, 'write', first, w);
     case 'writeOne'
-        assert(any(varargin{1} == [101 111 112 113 114]), 'single write is not HR101 or HR111-114');
+        assert(any(varargin{1} == [111 112 113 114]), 'single write is not HR111-114');
         [S, R] = call(S, R, 'write', varargin{1}, varargin{2});
     case 'state'
         out = S;
@@ -219,8 +235,10 @@ while isempty(id) && S.tick / 1000 < tEnd || ~isempty(id)
         end
         pre = [S.sl.G.G_sysActualVelocity, S.sl.G.G_sysActualTorque, ...
                S.sl.G.G_sysActualPosition];     % what the probe is given
+        if S.noise > 0
+            S = inputScan(S);
+        end
         S.y = scan(S.sl);
-        S = probeScan(S);
         [S, R] = logScan(S, R, pre);
         if ~isempty(S.linkCfg)
             [S.link, reqs] = modbusLink('due', S.link, k, 'write');
@@ -243,19 +261,12 @@ end
 
 function [S, words] = serveRead(S, start, n)
 % The registers start..start+n-1 as the controller answers a read now: the
-% slave's own (protocol and step probe) and PRG_PressureProbe's emulation.
+% slave's own (protocol and step probe).
 regs = zeros(1, 524);
 regs(1:S.map.nRead) = readInputRegisters(S.sl, 1, S.map.nRead);
-regs(101:102) = modbusPack(S.p.stats(1));
-regs(103:104) = modbusPack(S.p.stats(2));
-regs(105:106) = modbusPack(S.p.stats(3));
-regs(107:108) = modbusPack(S.p.stats(4));
-regs(109) = S.p.window;
-regs(110) = S.p.state;
-regs(111:112) = modbusPack(S.p.live);
-regs(113) = S.p.echo;
-regs(121:370) = S.p.samples;
-regs(401:524) = readInputRegisters(S.sl, 401, 124);
+if start + n - 1 >= 401
+    regs(401:524) = readInputRegisters(S.sl, 401, 124);
+end
 if start <= 519 && start + n - 1 >= 520 && S.hook.tear > 0
     tail = regs(519) + 65536 * regs(520) + 1;       % a window that changed under the read
     regs(519:520) = [mod(tail, 65536), floor(tail / 65536)];
@@ -266,13 +277,8 @@ end
 
 
 function S = serveWrite(S, start, words)
-% A write as the controller takes it: HR101 to PRG_PressureProbe's
-% emulation, the rest to the slave's registers; a lost arm write (the
-% dropArm hook) never arrives.
-if start == 101
-    S.p.arm = words(1);
-    return;
-end
+% A write as the controller takes it, to the slave's registers; a lost arm
+% write (the dropArm hook) never arrives.
 if start <= 111 && start + numel(words) - 1 >= 111 && S.hook.dropArm > 0
     S.hook.dropArm = S.hook.dropArm - 1;
     return;
@@ -346,16 +352,17 @@ w = S.sl.s.fbProbe.Written;
 if w <= S.nT
     return;
 end
-G = S.sl.G;
+% Single-field reads: a read of S.sl.G builds a snapshot of every global.
 lim = @(x, lo, hi) min(max(round(x), lo), hi);
-status = G.G_doInMotion + 2 * G.G_doPerformanceStatus + 4 * G.G_doFaultActive ...
-    + 8 * G.G_doHomingComplete + 256 * min(G.G_sysConfirmedModeCode, 255);
-row = [lim(G.G_sysCommandedVelocity * 1000, -32767, 32767), ...
+status = S.sl.G.G_sysInMotion + 2 * S.sl.G.G_sysPerformanceStatus ...
+    + 4 * S.sl.G.G_sysFaultActive + 8 * S.sl.G.G_sysHomingComplete ...
+    + 256 * min(S.sl.G.G_sysConfirmedModeCode, 255);
+row = [lim(S.sl.G.G_sysCommandedVelocity * 1000, -32767, 32767), ...
        lim(pre(1) * 1000, -32767, 32767), ...
        lim(pre(2) * 100, -32767, 32767), ...
        round(pre(3) * 1e5), ...
-       lim(G.G_sysActualPressure * 1000, -32767, 32767), ...
-       lim(G.G_aiPressure * 5000, 0, 65535), double(status)];
+       lim(S.sl.G.G_sysActualPressure * 1000, -32767, 32767), ...
+       lim(S.sl.G.G_aiPressure * 5000, 0, 65535), double(status)];
 while w > size(R, 1)
     R(end + size(R, 1), 1) = 0;                 % twice the rows
 end
@@ -370,34 +377,9 @@ w = mod(x, 65536);
 end
 
 
-function S = probeScan(S)
-% One scan of PRG_PressureProbe on the slave's analog input.
-p = S.p;
-v = S.sl.IO.MO1_AI_01 + S.noise * randn();
-p.live = v;
-p.sum = p.sum + v;
-p.sumSq = p.sumSq + v * v;
-p.min = min(p.min, v);
-p.max = max(p.max, v);
-p.n = p.n + 1;
-if p.n >= round(1 / S.sl.G.G_cfgScanTime)     % one second, as PRG_PressureProbe
-    m = p.sum / p.n;
-    p.stats = [m sqrt(max(p.sumSq / p.n - m * m, 0)) p.min p.max];
-    p.window = mod(p.window + 1, 65536);
-    p.sum = 0; p.sumSq = 0; p.min = Inf; p.max = -Inf; p.n = 0;
-end
-if p.arm ~= p.lastArm && p.state ~= 1
-    p.lastArm = p.arm;
-    p.idx = 0;
-    p.state = 1;
-end
-if p.state == 1
-    p.idx = p.idx + 1;
-    p.samples(p.idx) = min(max(round(v * 5000), 0), 65535);
-    if p.idx >= 250
-        p.echo = p.lastArm;
-        p.state = 2;
-    end
-end
-S.p = p;
+function S = inputScan(S)
+% The transducer model's voltage plus white noise, on the analog input of
+% the scan about to run (the pressureVolt hook replaces the model's value).
+mA = S.sl.sim.sensorZeroMa + S.sl.sim.sensorSpanMa * S.sl.ax.P / S.sl.sim.sensorRangeMPa;
+S.sl.hook.pressureVolt = mA * S.sl.sim.sensorShuntOhm / 1000 + S.noise * randn();
 end

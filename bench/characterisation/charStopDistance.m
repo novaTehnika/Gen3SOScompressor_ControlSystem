@@ -76,9 +76,8 @@ function r = charStopDistance(files, opts)
 %                that differs from it rescales every time in them
 %   r.pass, r.checks
 
-if ischar(files)
-    files = {files};
-end
+addpath(fullfile(fileparts(mfilename('fullpath')), '..', 'common'));
+files = benchFiles(files);
 if nargin < 2
     opts = struct();
 end

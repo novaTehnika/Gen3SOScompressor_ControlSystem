@@ -86,7 +86,7 @@ symbols in the equations match the variable names in the code.
 
 The plant and the sensor chain the studies run on are the machine's
 models, in `models/`; `models/README.md` describes them, gives their
-equations (1) to (18), (34) to (38) and (42) to (45) and the measured
+equations (1) to (18), (34) to (38) and (42) to (46) and the measured
 values of their parameters. This section and the next cover what the
 studies add: the controllers, the scenarios and the linear model.
 
@@ -313,8 +313,14 @@ The ranges are the bench measurements of 2026-10-26 with their spread
 (`bench/characterisation/README.md` section 8, `bench/friction`,
 `bench/pressure`). `mr`, `b`, `Fc` and `mu` act only in torque mode and
 the stall, so they are not varied; the dead time is fixed at its
-measured 22.8 ms. Each
-sample runs compress and deliver and checks these requirements:
+measured 22.8 ms. The air pocket at the pressure transducer, `V_air`,
+is explicit in the model (eq. (46) of `models/README.md`) and is held at
+its default, 0.1 mL; it is not sampled, since its compliance is below
+0.1 % of the liquid's above 1 MPa. The K range above is the effective
+value of runs whose compliance curved with pressure; the liquid K the
+fits give (0.81 GPa with the curvature removed, 2026-10-26) replaces it
+once the runs at two fill levels have settled what the curvature is.
+Each sample runs compress and deliver and checks these requirements:
 
 - The pressure never exceeds the ceiling, 12 MPa (`StudyParams.P_ceiling`).
   The machine's mechanical limit is to be confirmed; 15 MPa may break
@@ -601,9 +607,13 @@ in the slowest third of the drive lags to 41 % in the fastest, and are
 more frequent at low hose compliance (94 % against 41 %).
 
 **What this means for the machine.**
-- Open the proximal valve before the compression. Opened at pressure,
-  the hose drops the chamber 3.6 MPa in one scan, which no controller
-  can prevent and which degasses any charge above about 1.8:1.
+- The proximal valve stays shut during the compression and opens
+  after mixing (the settled procedure). Opened at pressure, the hose
+  drops the chamber 3.6 MPa in one scan, which no controller can
+  prevent and which degasses any charge above about 1.8:1. Opening it
+  before the compression avoids the drop, and so does a bypass orifice
+  of 0.3 mm or less opened ahead of the ball valve; neither is fitted
+  (the bypass is deferred, see the open questions).
 - `G_cfgPressureStopVelMin` is now 2 mm/s. That alone removes the
   steady error the bench saw (8.1 MPa for a 10 MPa target).
 - The GVL gains let the purge closing carry the pressure to 12.3 MPa,
@@ -612,12 +622,14 @@ more frequent at low hose compliance (94 % against 41 %).
   the mechanical ceiling allows 12.5 MPa.
 - The scheduled controller cuts the opening dip to under half (0.9 MPa
   at wc = 11 against 2.0), holds the closing peak to 11.1 MPa and
-  compresses twice as fast with no overshoot; it delivers 2:1 at 10 MPa
-  in every plausible case. Its margin is the same at every point of the
-  run, but with 44 ms of loop delay it is 37° at wc = 11 and 19° at
-  wc = 16: wc = 11 is the crossover to take, and 2.5:1 at 11 MPa is out
-  of reach (wc = 16 delivers it in a third of the plausible cases, with
-  the closing peak at the ceiling).
+  compresses twice as fast with no overshoot; with the hose in the
+  chamber from the start it delivers 2:1 at 10 MPa in every plausible
+  case (opened after mixing, the equalisation drop limits the charge
+  to below about 1.8:1 whatever the controller). Its margin is the
+  same at every point of the run, but with 44 ms of loop delay it is
+  37° at wc = 11 and 19° at wc = 16: wc = 11 is the crossover to take,
+  and 2.5:1 at 11 MPa is out of reach (wc = 16 delivers it in a third
+  of the plausible cases, with the closing peak at the ceiling).
 - 3:1 is saturated at 10.9 MPa and cannot be delivered without bubbles
   below the 12 MPa ceiling by any controller.
 - The drive does not apply the accel and decel settings, so they are not
@@ -654,8 +666,6 @@ Kp = wc/k holds 37° at wc = 11 everywhere.
   fitted.
 
 **Open questions:**
-- The calibration's reference: a hand-held meter's mA range. A loop
-  calibrator would tighten it.
 - The lag at the piston (not resolved) and the dissolution time constant
   are the two unmeasured plant parameters; the robustness study covers
   the first, and the second sets only the hold time.
@@ -677,15 +687,15 @@ Kp = wc/k holds 37° at wc = 11 everywhere.
 entry to pressure mode by `G_cfgPressureScheduleEnable`; its settings
 are the `G_cfgPressureSched*` values of the GVL, except the saline volume and
 the oxygen charge of the fill, which the master writes in holding registers
-HR7-10 and the slave latches on entry to pressure mode. `FB_PressureController`
+HR9-12 and the slave latches on entry to pressure mode. `FB_PressureController`
 gains an `IntegScale` input, because PRG_Main cannot write the block's
 stored integral.
 
 The reference's arguments map to the settings as follows: `wc` to
-`Crossover`, `K_cfg` to `BulkModulus`, `V_l_cfg` to `SalineVolume` (HR7-8),
+`Crossover`, `K_cfg` to `BulkModulus`, `V_l_cfg` to `SalineVolume` (HR9-10),
 `V_dead_cfg` to `PassagesVolume` plus `HoseVolume` and `C_hose_cfg` to
 `HoseCompliance`, both hose terms counted only when `HoseOpen` is set,
-`ratio_cfg` to `OxygenRatio` (HR9-10), `ki_ratio` to `KiRatio`, `kp_min` and
+`ratio_cfg` to `OxygenRatio` (HR11-12), `ki_ratio` to `KiRatio`, `kp_min` and
 `kp_max` to `KpMin` and `KpMax`, and `e_int` to `ArriveBand`. The lag of
 eq. (41) is built from the pressure input filter's time constant, the
 median window, the scan time and the drive's dead time and lag

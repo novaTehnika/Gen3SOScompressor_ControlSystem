@@ -9,7 +9,10 @@ function slavePressureMode()
 %   following the stiffness bound.
 %   Run from the repository root after  addpath slave-sim; buildSlaveSim
 %     addpath slave-sim slave-sim/generated tests
-%   Depends on: slave-src slave-sim tools models
+%   Depends on: slave-src slave-sim tools models bench/characterisation
+
+here = fileparts(mfilename('fullpath'));
+addpath(fullfile(here, '..', 'bench', 'characterisation'));
 
 MODE_PRESSURE = 7;
 FAULT_PRESSURE_SENSOR = 8;
@@ -160,8 +163,19 @@ assert(h.sl.s.bPressureSchedActive && h.sl.s.fbPressureSched.IntegHold);
 assert(h.sl.s.rSchedSaline == 343 && h.sl.s.rSchedOxygenRatio == 1);
 h.pMax = 0;
 t0 = h.t;
-h = runUntil(h, 30, settled);
+% The bench's copy of the bound (bench/characterisation/charScheduleBound,
+% which charScheduleCheck compares with a log) is held equal to the block's
+% KEst and KEstTarget, sampled every 100 ms through the compression
+gSched = h.sl.G;
+fillSched = struct('saline_mL', 343, 'oxygenRatio', 1, 'hoseOpen', logical(gSched.G_cfgPressureSchedHoseOpen));
+trackBound([], [], [], true);
+h = runUntil(h, 30, @(h) trackBound(h, gSched, fillSched, false) || settled(h));
 assert(settled(h), 'scheduled loop did not settle in the target band');
+[~, boundGap, boundSamples] = trackBound([], [], [], false);
+assert(boundSamples > 20 && boundGap < 1e-9, 'the bench''s bound differs from the block''s by %.2g (%d samples)', ...
+    boundGap, boundSamples);
+fprintf('ok  bench stiffness bound equals the block''s KEst and KEstTarget (%d samples, relative difference %.1e)\n', ...
+    boundSamples, boundGap);
 t1 = h.t - t0;
 h = runFor(h, 3);
 sc = h.sl.s.fbPressureSched;
@@ -264,4 +278,31 @@ for k = 1:round(T / dt)
         return;
     end
 end
+end
+
+
+function [done, worst, count] = trackBound(h, g, fill, reset)
+% Compare charScheduleBound with the block's KEst and KEstTarget on the
+% scan just run, one scan in 25; returns the largest relative difference
+% and the number of scans compared so far. Never ends a run (done false).
+persistent w n k
+done = false;
+if reset
+    w = 0; n = 0; k = 0;
+elseif ~isempty(h)
+    k = k + 1;
+    if mod(k, 25) == 0
+        sc = h.sl.s.fbPressureSched;
+        if ~sc.ParamError && sc.KEst > 0
+            % The block's own inputs of the scan: the formula is held equal,
+            % not the signals that feed it
+            pRef = (sc.rPRef - g.G_cfgPressureSchedPatm) / 1e6;     % [Pa -> MPa]
+            [kEst, kEstTarget] = charScheduleBound(sc.Actual, sc.Position, pRef, sc.Target, fill, g);
+            w = max([w, abs(kEst - sc.KEst) / sc.KEst, abs(kEstTarget - sc.KEstTarget) / sc.KEstTarget]);
+            n = n + 1;
+        end
+    end
+end
+worst = w;
+count = n;
 end

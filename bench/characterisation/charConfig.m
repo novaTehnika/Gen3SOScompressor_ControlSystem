@@ -19,6 +19,19 @@ cfg.posEOT          = m.posEOT;                          % mm, piston at the end
 cfg.deadVolume_mL   = m.deadVolume;                      % mL left at the end of travel (measured, masterConfig)
 cfg.rho             = 1000;                              % kg/m^3 saline
 cfg.Patm_MPa        = 0.101325;
+% mL at atmosphere: air in the passage (about 2 cm) to the pressure
+% transducer and in its cavity, which cannot be purged and dissolves only
+% very slowly, so it is a fixed isothermal gas pocket in every run. It is
+% params.py V_air (0.1e-6 m^3, an estimate from the geometry until the
+% fits at two fill levels settle it), the same number; charRunSim checks it.
+cfg.airVolume_mL    = 0.1;
+
+% --- Drive ------------------------------------------------------------------------
+% Reflected inertia of the motor and gearbox as the torque it takes, in
+% percent of rated torque per mm/s^2 of piston acceleration: the October
+% steps (README section 10), which charDrivePath uses to take the inertial
+% torque out of a reversal when the same call has no step captures.
+cfg.driveInertia_pct_per_mm_s2 = 0.42;
 
 % --- Outlet: ball valve, tube, orifice plate -----------------------------------
 cfg.nOrifice        = 32;

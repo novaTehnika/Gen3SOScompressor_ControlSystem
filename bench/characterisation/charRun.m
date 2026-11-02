@@ -71,7 +71,7 @@ function r = charRun(label, path, opts)
 %                      command change in a velocity session; 'stops' to
 %                      arm it only for commands to zero; false for no
 %                      probe (default). The captures are read out in the
-%                      gaps between exchanges, 18 records a gap, and the
+%                      gaps between exchanges, 13 records a gap, and the
 %                      rest after the last step, before the files are
 %                      written
 %   opts.safetyModel   model that holds the safety relay ('SafetyHold';

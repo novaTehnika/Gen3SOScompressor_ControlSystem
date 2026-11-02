@@ -18,7 +18,7 @@ measured by the bench test in `bench/modbus`.
 
 Each exchange is one **Write Multiple Registers (FC16)** of holding registers
 1–12 followed at once by one **Read Input Registers (FC04)** of input registers
-1–18, so both land in the same controller service tick. The exchange period is
+1–20, so both land in the same controller service tick. The exchange period is
 up to 50 ms, a multiple of the master step; see
 [EthernetCommsReference.md](EthernetCommsReference.md).
 
@@ -58,7 +58,8 @@ bidirectional Holding Registers** checked, **Set all outputs off when PLC
 stops**, and the four Modbus groups assigned to the cyclic task that runs
 `PRG_Main` (MotionWorks IEC 3 Express has only that one task), so the
 registers update once per scan. Every register in the groups is copied
-every scan, so the groups are sized to the registers in use (the step probe of section 6 extends them to IR524 and HR114). The controller services the
+every scan, so the groups are sized to the registers in use (the step
+probe of section 6 extends them to IR524 and HR114). The controller services the
 connection on a 4 ms tick, so a transaction takes 1 to 8 ms regardless of the
 task interval.
 
@@ -77,7 +78,7 @@ task interval.
 | 9–10 | `%MD3.483344` | REAL | `G_mbSalineVolume` | Saline volume of the fill, mL, for the pressure gain schedule. Latched by the slave on entry to pressure mode; 0 (never written) makes the schedule fall back to the configured gains |
 | 11–12 | `%MD3.483348` | REAL | `G_mbOxygenRatio` | Oxygen charge as STP volume per saline volume (1.0 for 1:1), for the pressure gain schedule. Latched on entry to pressure mode |
 | 13–20 | | | | Reserved |
-| 101–110 | | | | Bench areas (`bench/modbus`, `bench/pressure`): not loaded with the main program in service |
+| 101–110 | | | | Bench area (`bench/modbus`): not loaded with the main program in service |
 | 111 | `%MW3.483548` | UINT | `G_mbProbeArm` | Step probe (section 6): a changed value is an arm |
 | 112–113 | `%MW3.483550` | UINT ×2 | `G_mbProbeReqLo`, `G_mbProbeReqHi` | Step probe: index of the first record wanted in the window (low word first) |
 | 114 | `%MW3.483554` | UINT | `G_mbProbeLength` | Step probe: records the next arm wants, 0 = open ended |
@@ -92,17 +93,18 @@ task interval.
 | 2 | `%QW73794` | UINT | `G_mbSlaveCounter` | Incremented every scan, wraps 65535 → 0 |
 | 3 | `%QW73796` | UINT | `G_mbConfCode` | Mode confirmation: the mode the handshake manager has confirmed, 0 outside the handshake (and so while a fault is active) |
 | 4 | `%QW73798` | UINT | `G_mbFaultCode` | `G_sysActiveFault` as its full integer value, 0 when no fault. May exceed 7 |
-| 5 | `%QW73800` | UINT | `G_mbFaultActive` | 1 = fault active (`G_doFaultActive`, also on DO4) |
-| 6 | `%QW73802` | UINT | `G_mbInMotion` | 1 = axis moving (`G_doInMotion`, also on DO6) |
-| 7 | `%QW73804` | UINT | `G_mbPerformanceStatus` | `G_doPerformanceStatus` (also on DO3) |
-| 8 | `%QW73806` | UINT | `G_mbHomingComplete` | `G_doHomingComplete` (also on DO5) |
+| 5 | `%QW73800` | UINT | `G_mbFaultActive` | 1 = fault active (`G_sysFaultActive`) |
+| 6 | `%QW73802` | UINT | `G_mbInMotion` | 1 = axis moving (`G_sysInMotion`) |
+| 7 | `%QW73804` | UINT | `G_mbPerformanceStatus` | `G_sysPerformanceStatus` |
+| 8 | `%QW73806` | UINT | `G_mbHomingComplete` | `G_sysHomingComplete` |
 | 9–10 | `%QW73808` | UINT | | Reserved |
 | 11–12 | `%QD73812` | REAL | `G_mbActualPosition` | `G_sysActualPosition` (mm) |
 | 13–14 | `%QD73816` | REAL | `G_mbActualVelocity` | `G_sysActualVelocity` (mm/s) |
 | 15–16 | `%QD73820` | REAL | `G_mbActualTorque` | `G_sysActualTorque` (% of rated) |
 | 17–18 | `%QD73824` | REAL | `G_mbCommandedPosition` | `G_sysCommandedPosition` (mm) |
 | 19–20 | `%QD73828` | REAL | `G_mbActualPressure` | `G_sysActualPressure` (MPa gauge): the transducer on the slave's analog input, scaled by `FB_PressureInput`. Valid in every mode; below zero or above range when the loop current is out of range |
-| 101–370 | | | | Bench areas (`bench/modbus`, `bench/pressure`): not loaded with the main program in service |
+| 101–108 | | | | Bench area (`bench/modbus`): not loaded with the main program in service |
+| 109–400 | | | | Free |
 | 401–524 | | | | Step probe, the next table (section 6) |
 
 ---
@@ -135,10 +137,10 @@ reads as a counter frozen at 0.
   directly. `FB_ModeDecoder` debounces the mode code
   (`G_cfgDebounceTimeMode`) and decodes it with `FB_IntToMode`;
   MotionEnable and FaultReset pass through `FB_DigitalInputFilter`
-  (`G_cfgDebounceTimeMotion`, `G_cfgDebounceTimeFault`). The full value of
+  (`G_cfgDebounceTimeCommand` for both). The full value of
   `G_mbModeCode` is decoded by `FB_IntToFaultCode` for the fault
   acknowledgement. `PRG_Input` copies `G_mbReference` to `G_sysReference`.
-- `PRG_Output` fills the input registers from the `G_do*` and `G_sys*`
+- `PRG_Output` fills the input registers from the `G_sys*`
   globals. `G_mbConfCode` comes from `G_sysConfirmedModeCode`,
   `G_mbSlaveCounter` from `G_sysScanCounter` and `G_mbFaultCode` from
   `G_sysActiveFaultCode`, all maintained by `PRG_Main`.
@@ -168,9 +170,10 @@ the master and slave behave identically. It is read in its own FC04 read
 between the protocol's exchanges, never in them. The input group must extend
 to IR524 and the holding group to HR114. A group is copied every scan over its
 whole span, so these spans (gaps included) are the probe's standing cost; a
-project that does not use the probe keeps the groups at IR20 and HR6 and
-`G_cfgProbeEnable` FALSE. Every 32-bit value is on a 4-byte boundary except the request at HR112,
-which is two UINT registers, low word first.
+project that does not use the probe keeps the groups at IR20 and HR12 (the
+protocol's registers) and `G_cfgProbeEnable` FALSE. Every 32-bit value is on
+a 4-byte boundary except the request at HR112, which is two UINT registers,
+low word first.
 
 Holding registers:
 

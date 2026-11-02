@@ -11,8 +11,8 @@ slewed reference, the outflow, the hose state and the parcel log. The
 cases cover compression into the stall, dissolution, opening the hose in
 one scan, a delivery through the orifices with the tube's filling flow, a
 throttled proximal valve that logs parcels and joins the hose, torque
-mode against friction, and the legacy options (slew limit, Euler, fixed
-liquid).
+mode against friction, the legacy options (slew limit, Euler, fixed
+liquid) and a large pocket of air at the transducer.
 
 Depends on: models slave-src tools
 """
@@ -137,6 +137,11 @@ def main():
          base.legacy().with_(solver='euler'), 'V',
          lambda t: (0.4e-3 if t < 1.5 else -0.2e-3, 1.0 if t > 2 else 0.0, 0.0, 0.0, False),
          4.0),
+        ({'name': 'a 5 mL air pocket: compress, open the hose, deliver'},
+         base.with_(V_air=5e-6), 'V',
+         lambda t: (2e-3 if t < 8 else 0.0, 1.0 if t >= 10 else 0.0,
+                    base.V_tube / Ts if abs(t - 10) < Ts / 2 else 0.0,
+                    0.0, abs(t - 9) < Ts / 2), 12.0),
     ]
     with tempfile.TemporaryDirectory() as tmp:
         lib, names = build(Path(tmp))

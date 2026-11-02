@@ -28,7 +28,7 @@ assert(h.mcfg.positionSpeed <= h.mcfg.positionSpeedMax, 'masterConfig.positionSp
 
 % Position move from power-up: lands inside tolerance, no overshoot,
 % velocity limited. No homing is needed first. The move is long enough to
-% reach the velocity limit.
+% reach the master's position speed, which the slave's ceiling caps.
 target = h.sl.ax.x + 15;
 h.in.targetPosition = target;
 h.vMax = 0;  h.xMax = -inf;
@@ -37,7 +37,7 @@ h = runUntil(h, 15, @(h) h.out.statusCode == 3);
 assert(h.out.statusCode == 3, 'position move did not reach target');
 assert(abs(h.sl.ax.x - target) <= h.mcfg.posTolerance);
 assert(h.xMax <= target + 0.05 && h.vMax <= vLimit + 0.01);
-assert(h.vMax >= vLimit - 0.05, 'move did not reach the velocity limit');
+assert(h.vMax >= min(h.mcfg.positionSpeed, vLimit) - 0.05, 'move did not reach the position speed');
 fprintf('ok  position move (peak %.2f mm/s, overshoot %.3f mm)\n', h.vMax, h.xMax - target);
 
 % Position speed: the master sets the speed of the move through HR7-8.
