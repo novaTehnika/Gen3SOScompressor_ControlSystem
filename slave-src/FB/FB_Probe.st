@@ -128,8 +128,8 @@
        nStep           : UDINT := 0       (* Records to copy this scan
        nSrc            : UDINT := 0       (* First ring word of the records being copied
        nDst            : UDINT := 0       (* First Stage word they go to
-       nWords          : DINT := 0        (* Words to copy this scan
-       nI              : DINT := 0
+       nWords          : INT := 0         (* Words to copy this scan, at most cWindow * cWords = 104
+       nI              : INT := 0         (* Word counter of the copy: INT, the type of the FOR literals and step
        nRingIx         : INT := 0         (* aRing index (the compiler takes only a variable as an index)
        nStageIx        : INT := 0         (* Stage index
        bOverrun        : BOOL := FALSE    (* The target (or the rest of a fill) was overwritten
@@ -271,10 +271,10 @@ IF (NOT bOverrun) AND (nFilled < nPlanned) THEN
     nStep := MIN(nPlanned - nFilled, INT_TO_UDINT(MAX(FillPerScan, INT#1)));
     nSrc := ((nTarget + nFilled) MOD cDepth) * cWords;
     nDst := nFilled * cWords;
-    nWords := UDINT_TO_DINT(nStep * cWords);
+    nWords := UDINT_TO_INT(nStep * cWords);
     FOR nI := 0 TO nWords - 1 DO
-        nStageIx := UDINT_TO_INT(nDst + DINT_TO_UDINT(nI));
-        nRingIx := UDINT_TO_INT((nSrc + DINT_TO_UDINT(nI)) MOD (cDepth * cWords));
+        nStageIx := UDINT_TO_INT(nDst + INT_TO_UDINT(nI));
+        nRingIx := UDINT_TO_INT((nSrc + INT_TO_UDINT(nI)) MOD (cDepth * cWords));
         Stage[nStageIx] := aRing[nRingIx];
     END_FOR;
     nFilled := nFilled + nStep;
