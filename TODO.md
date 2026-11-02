@@ -13,8 +13,38 @@ holding registers.
 The project is built from `slave-src` and runs on the controller. Left
 to confirm in it:
 
-- [ ] LD POU: delete the `MC_MoveVelocity` instance, then delete
-      `docs/slave/ld/MC_MoveVelocity_1.PNG`.
+- [ ] LD POU: delete the `MC_MoveVelocity` instance if it is still
+      there (no recaptured screenshot shows it), with `G_cmdMoveVelocity`,
+      `G_staMoveVelocity`, their two types and `G_sysCycleCount`.
+- [ ] Declarations this branch changed after the project was built from
+      `main`; mirror them (the `.st` headers and the GVL reference are
+      the reference for each):
+  - [ ] `G_cfgMoveAccel : LREAL := 5.0` replaces `G_cfgGoHomeAccel` and
+        `G_cfgHomeLimAccel` (on `main` `G_cfgGoHomeAccel` reads 510.0,
+        which looks like a slip for 5.0).
+  - [ ] `G_cfgDebounceTimeCommand : TIME := T#20MS` replaces
+        `G_cfgDebounceTimeMotion` and `G_cfgDebounceTimeFault`;
+        `G_cfgDebounceTimeOvertravel : TIME := T#10MS` replaces the
+        `...OvertravelNeg` and `...OvertravelPos` pair.
+  - [ ] `G_sysPerformanceStatus`, `G_sysFaultActive`,
+        `G_sysHomingComplete` and `G_sysInMotion` (`BOOL := FALSE`, no
+        address) replace `G_doPerformanceStatus`, `G_doFaultActive`,
+        `G_doHomingComplete` and `G_doInMotion`; `MO1_DO_03`-`06` are no
+        longer written.
+  - [ ] Block outputs removed, or turned into `VAR` locals, as the
+        headers now declare: `FB_DigitalInputFilter` (`RisingEdge`,
+        `FallingEdge`, `Stable`, `RawPassthrough`), `FB_GoHome` (`Active`,
+        `AtPosition`), `FB_HomeLimit` (`Active`), `FB_HandshakeManager`
+        (`HandshakeActive`, `HandshakeTimeout_Q`), `FB_ModeDecoder`
+        (`ModeChanged`; `ModeValue` local), `FB_PistonExitGuard`
+        (`ApproachingLimit`), `FB_PositionPathShaper` (`RateLimiting`,
+        `TetherHold`; `ParamError` local), `FB_PressureController` and
+        `FB_PressureInput` (their `Error`/`VelLimit`/`Saturated`/
+        `LoopMa`/`OutOfRange`/`ParamError` as locals),
+        `FB_PressureSchedule` (`Lag` local), `FB_SafetyMonitor` (the six
+        `Fault*`; three as locals).
+  - [ ] `G_cfgGearRatio` and `G_cfgLeadScrewPitch` keep their values;
+        only their comments changed.
 - [ ] Enable the cyclic task's watchdog, at the 4 ms interval. The 2 ms
       task overran for weeks (about 2.5 ms of work a scan) and ran on
       every second motion cycle with nothing reported.
