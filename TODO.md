@@ -15,14 +15,6 @@ to confirm in it:
 
 - [ ] LD POU: delete the `MC_MoveVelocity` instance, then delete
       `docs/slave/ld/MC_MoveVelocity_1.PNG`.
-- [ ] LD POU, against `slave-src/PRG/PRG_LD.txt` and the recaptured
-      screenshots in `docs/slave/ld/`: confirm `fbPower`'s
-      `Enable_Positive` and `Enable_Negative` are wired to
-      `G_cmdPower.EnablePositive` and `.EnableNegative`, that
-      `fbReadStatus` (`MC_ReadStatus`, `ErrorStop`) drives
-      `G_sysDriveFault`, and whether the axis is `G_sysAxis` or still
-      `AXIS1`; the pin tables in `docs/slave/ld/README.md` say what each
-      screenshot shows.
 - [ ] Enable the cyclic task's watchdog, at the 4 ms interval. The 2 ms
       task overran for weeks (about 2.5 ms of work a scan) and ran on
       every second motion cycle with nothing reported.

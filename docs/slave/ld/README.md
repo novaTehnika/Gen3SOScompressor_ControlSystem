@@ -6,10 +6,11 @@ text. `slave-src/PRG/PRG_LD.txt` is its specification, in the form of the
 ST headers: the instances to declare and, network by network, what is
 wired to each pin. This directory records the wiring as it is in the
 project: a screenshot of each block, and a table of what is wired to each
-pin. The screenshots are named after the instances of the specification
-(`fbPower` and so on); the tables below were written from the earlier
-screenshots, whose instances were named `MC_Power_1` and so on, and the
-axis `AXIS1`.
+pin. The screenshots and the tables are named after the instances of the
+specification (`fbPower`, `fbStop` and so on). The axis wired to every
+block's `Axis` pins is `AXIS1`, as in the specification; no screenshot
+shows `G_sysAxis`. A pin shown with a green dot on an output or a blue dot on
+an input is not wired.
 The Structured Text writes the `G_cmd*` structs and reads the `G_sta*`
 structs (`slave-src/DUT/DataTypes.st`), so this record is the contract
 between the two halves. When a field is added to one of those structs,
@@ -39,7 +40,7 @@ keep the table to what the picture shows.
 | Busy | out | not wired | |
 | Active | out | `G_staDirectControl.Active` | |
 | CommandAborted | out | not wired | |
-| Error | out | `G_staDirectControl.Error` | Read by `PRG_Main` in the hand-off to `MC_Stop`. |
+| Error | out | `G_staDirectControl.Error` | Read by `PRG_Main` in the hand-off to `fbStop`. |
 | ErrorID | out | not wired | |
 
 ## fbPower
@@ -50,8 +51,8 @@ keep the table to what the picture shows.
 |---|---|---|---|
 | Axis | in | `AXIS1` | |
 | Enable | in | `G_cmdPower.Enable` | |
-| Enable_Positive | in | not wired | `PRG_Main` writes `G_cmdPower.EnablePositive`; see "To change: wire `MC_Power`'s direction enables". |
-| Enable_Negative | in | not wired | `PRG_Main` writes `G_cmdPower.EnableNegative`; same. |
+| Enable_Positive | in | `G_cmdPower.EnablePositive` | `PRG_Main` sets it TRUE with `Enable`. |
+| Enable_Negative | in | `G_cmdPower.EnableNegative` | `PRG_Main` sets it TRUE with `Enable`. |
 | BufferMode | in | not wired | |
 | Axis | out | `AXIS1` | |
 | Status | out | `G_staPower.Status` | Read by `PRG_Main` in `ST_DRIVE_ENABLE` and as the drive-dropped check in the deactivation states. |
@@ -197,34 +198,37 @@ keep the table to what the picture shows.
 | ErrorID | out | not wired | |
 | ActualTorque | out | `G_sysActualTorque` | % of rated; the exit guard and the probe read it, published in IR15-16. |
 
-## To change: wire `MC_Power`'s direction enables
+## fbReadStatus
 
-`PRG_Main` sets `G_cmdPower.EnablePositive` and `G_cmdPower.EnableNegative`
-TRUE together with `Enable` (and FALSE with it), but the `Enable_Positive`
-and `Enable_Negative` pins of `fbPower` are not wired, so the two fields
-reach nothing and the pins take the block's unconnected default. In
-MotionWorks, wire `Enable_Positive` to `G_cmdPower.EnablePositive` and
-`Enable_Negative` to `G_cmdPower.EnableNegative`, and replace
-`fbPower.PNG` and the table above.
+![fbReadStatus](fbReadStatus.PNG)
 
-## To change: drive `G_sysDriveFault`
-
-`FB_SafetyMonitor` takes `G_sysDriveFault` as its `DriveFault` input and
-raises `FAULT_DRIVE` from it (`docs/master/FaultCodeReference.md`), and the
-simulated slave sets it from `sl.hook.driveFault`. Nothing in the
-Structured Text writes it, and no block in this record drives it: the
-`MC_ReadActual*` blocks leave `Error` unwired and there is no screenshot
-of a block that reports the axis error state. In MotionWorks, either add
-the block that drives it (one that reports the axis error state, such as
-`MC_ReadAxisError` or `MC_ReadStatus`) with its screenshot and table here,
-or, if such a block already exists in the LD POU, add its screenshot and
-table.
+| Pin | Direction | Wired to | Note |
+|---|---|---|---|
+| Axis | in | `AXIS1` | |
+| Enable | in | left power rail (network 004) | Always TRUE. |
+| Axis | out | `AXIS1` | |
+| Valid | out | not wired | |
+| Busy | out | not wired | |
+| Error | out | not wired | |
+| ErrorID | out | not wired | |
+| Disabled | out | not wired | |
+| ErrorStop | out | `G_sysDriveFault` | The `DriveFault` input of `FB_SafetyMonitor` (`FAULT_DRIVE`); nothing else writes it. The axis is in ErrorStop while the SERVOPACK holds an alarm and leaves it on `fbReset`. |
+| Stopping | out | not wired | |
+| StandStill | out | not wired | |
+| DiscreteMotion | out | not wired | |
+| ContinuousMotion | out | not wired | |
+| SynchronizedMotion | out | not wired | |
+| Homing | out | not wired | |
+| ConstantVelocity | out | not wired | |
+| Accelerating | out | not wired | |
+| Decelerating | out | not wired | |
 
 ## To change: remove `MC_MoveVelocity`
 
 `G_cmdMoveVelocity` and `G_staMoveVelocity` (types `ST_CmdMoveVelocity`
 and `ST_StaMoveVelocity`) no longer exist in the Structured Text, and
-nothing writes or reads them. In MotionWorks, delete the `MC_MoveVelocity`
-instance from the LD POU together with the two globals and the two types,
-and delete `MC_MoveVelocity_1.PNG`. Also delete the global `G_sysCycleCount`,
-which `PRG_Main` no longer increments.
+nothing writes or reads them. No screenshot in this directory shows an
+`MC_MoveVelocity` block, so the record cannot say whether the instance is
+still in the LD POU. If it is, delete it together with the two globals and
+the two types. Also delete the global `G_sysCycleCount`, which `PRG_Main`
+no longer increments, if the project still declares it.
