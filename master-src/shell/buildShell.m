@@ -4,7 +4,11 @@ function buildShell()
 %   The shell holds no logic: the Modbus Client blocks, the DAQ blocks for
 %   the safety relay and the stir bar motor, one MATLAB
 %   Function block that calls masterStep (master-src/logic), the Constant
-%   blocks the app writes and named Gain blocks the app reads. Run in MATLAB
+%   blocks the app writes and named Gain blocks the app reads. A second
+%   MATLAB Function block, TraceStep, calls traceStep (master-src/logic) with
+%   the link vectors, masterStep's status outputs and the app's Constant
+%   blocks; it outputs the trace ring, which the TraceRing Gain block (a
+%   test point) exposes to the app. Run in MATLAB
 %   with Simulink, Simulink Desktop Real-Time and Industrial Communication
 %   Toolbox (R2024b or later), from any folder:
 %
@@ -138,6 +142,22 @@ chart.Script = sprintf([ ...
     '    targetVelocity, jogDirection, targetPressure, estop, mixer, ...\n' ...
     '    positionSpeed, salineVolume, oxygenRatio);\n']);
 
+% --- Trace recorder ----------------------------------------------------------
+% Inputs 1..13: the read vector, the write vector as sent, masterStep's
+% doSafety, statusCode, faultCode, state and linkOk, and the app's
+% RequestedMode, CommandSeq, TargetPosition, TargetPressure, ESTOP, Mixer.
+add_block('simulink/User-Defined Functions/MATLAB Function', [mdl '/TraceStep']);
+chart = find(sfroot, '-isa', 'Stateflow.EMChart', 'Path', [mdl '/TraceStep']);
+chart.Script = sprintf([ ...
+    'function traceRing = fcn(mbRead, mbWrite, doSafety, statusCode, faultCode, ...\n' ...
+    '          state, linkOk, op, cmdSeq, targetPosition, targetPressure, estop, mixer)\n' ...
+    '%% All logic lives in master-src/logic/traceStep.m.\n' ...
+    'traceRing = traceStep(double(mbRead(:)''), mbWrite, doSafety, statusCode, ...\n' ...
+    '    faultCode, state, linkOk, op, cmdSeq, targetPosition, targetPressure, ...\n' ...
+    '    estop, mixer);\n']);
+add_block('simulink/Math Operations/Gain', [mdl '/TraceRing'], 'Gain', '1');
+add_block('simulink/Sinks/Terminator', [mdl '/TraceRing Term']);
+
 % --- Wiring -----------------------------------------------------------------
 % The Modbus blocks have ports only once their register rows exist.
 if hasPort(mdl, 'Modbus Read', 'Outport')
@@ -157,6 +177,25 @@ else
 end
 add_line(mdl, 'MasterStep/2', 'DO Safety/1');
 add_line(mdl, 'MasterStep/3', 'DO Mixer/1');
+
+% TraceStep branches off the sources above.
+add_line(mdl, 'RT Read/1',    'TraceStep/1');
+add_line(mdl, 'MasterStep/1', 'TraceStep/2');
+add_line(mdl, 'MasterStep/2', 'TraceStep/3');
+for k = 7:10                                 % statusCode, faultCode, state, linkOk
+    add_line(mdl, sprintf('MasterStep/%d', k), sprintf('TraceStep/%d', k - 3));
+end
+traceInputs = {'RequestedMode', 'CommandSeq', 'TargetPosition', 'TargetPressure', ...
+               'ESTOP', 'Mixer'};
+for k = 1:numel(traceInputs)
+    add_line(mdl, [traceInputs{k} '/1'], sprintf('TraceStep/%d', k + 7));
+end
+add_line(mdl, 'TraceStep/1', 'TraceRing/1');
+add_line(mdl, 'TraceRing/1', 'TraceRing Term/1');
+% A test point keeps the signal's buffer, which the app reads through
+% get_param(..., 'RuntimeObject') while the model runs.
+ph = get_param([mdl '/TraceRing'], 'PortHandles');
+set_param(ph.Outport(1), 'TestPoint', 'on');
 
 % Values read by the app through get_param(..., 'RuntimeObject').
 appOutputs = {'Position', 'Velocity', 'Pressure', 'StatusCode', 'FaultCode', ...

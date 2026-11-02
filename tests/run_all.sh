@@ -36,6 +36,8 @@ tests/stTargetParity.py
 tests/plantParity.py
 design/pressure-loop/test_linear.py
 tests/modbusLinkTiming.m
+tests/traceRecorder.m
+tests/traceCsvPlot.m
 tests/smokeMasterStateMachine.m
 "
 CACHE=.test-cache
@@ -135,7 +137,7 @@ printf '%s\n' $torun | xargs -P "$jobs" -I {} sh -c '
     t=$1; c=$2; mrunner=$3
     key=$(echo "$t" | tr / _)
     b=${t##*/}; name=${b%.*}
-    paths="addpath(\"master-src/logic\", \"slave-sim\", \"slave-sim/generated\", \"tests\")"
+    paths="addpath(\"master-src/logic\", \"master-src/trace\", \"slave-sim\", \"slave-sim/generated\", \"tests\")"
     start=$(date +%s)
     case $t in
         *.py) set -- python3 "$t" ;;

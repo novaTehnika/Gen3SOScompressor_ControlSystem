@@ -3,6 +3,10 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
     % Properties that correspond to app components
     properties (Access = public)
         UIFigure                        matlab.ui.Figure
+        TracePanel                      matlab.ui.container.Panel
+        PlotTraceButton                 matlab.ui.control.Button
+        TraceStatusLabel                matlab.ui.control.Label
+        RecordButton                    matlab.ui.control.StateButton
         FaultActiveLamp                 matlab.ui.control.Lamp
         FaultActiveLampLabel            matlab.ui.control.Label
         MixerOnLamp                     matlab.ui.control.Lamp
@@ -110,6 +114,12 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         activeTarget = NaN      % position or pressure sent with activeOp
         opConfirmed = false     % the model has reported activeOp running
         opSentAt = uint64(0)    % tic of the last request
+
+        % Trace recording: the buffer traceDrain fills from the model's
+        % TraceRing block while traceRecording is set.
+        traceRecording = false
+        trace = []              % traceStart / traceDrain buffer
+        traceStartedAt = ''     % wall-clock start, for the file's metadata
     end
 
     properties (Access = private, Constant)
@@ -170,11 +180,103 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                     end
                     pause(0.05);
                 end
+                drainTrace(app);        % the records since the last poll, while the ring is readable
                 stop(app.Simulation);
                 app.wasRunning = false;     % not an unexpected stop
+                finishRecording(app, false);
                 app.StatusLabel.Text = "Disconnected";
             catch ME
                 app.StatusLabel.Text = append("Disconnect failed: ", ME.message);
+            end
+            updateButtons(app);
+        end
+
+        % Folder the traces are saved in, created when missing
+        function folder = capturesFolder(~)
+            folder = fullfile(fileparts(mfilename("fullpath")), "captures");
+            if ~isfolder(folder)
+                mkdir(folder);
+            end
+        end
+
+        % Show the recording's progress; the label turns red once the
+        % ring has overwritten records the app did not read in time.
+        function showTraceProgress(app)
+            elapsed = (app.trace.n + app.trace.missed) * app.cfg.exchangePeriod;
+            if app.trace.missed > 0
+                app.TraceStatusLabel.Text = sprintf("%d samples, %.0f s, %d missed", ...
+                    app.trace.n, elapsed, app.trace.missed);
+                app.TraceStatusLabel.FontColor = [1 0 0];
+            else
+                app.TraceStatusLabel.Text = sprintf("%d samples, %.0f s", ...
+                    app.trace.n, elapsed);
+                app.TraceStatusLabel.FontColor = [0 0 0];
+            end
+        end
+
+        function startRecording(app)
+            app.trace = traceStart(readBlock(app, "TraceRing"));
+            app.traceStartedAt = datestr(now, "yyyy-mm-ddTHH:MM:SS");
+            app.traceRecording = true;
+            app.TraceStatusLabel.Tooltip = "";
+            showTraceProgress(app);
+        end
+
+        % Take the records written since the last read from the ring
+        function drainTrace(app)
+            if ~app.traceRecording || ~isRunning(app)
+                return
+            end
+            try
+                app.trace = traceDrain(app.trace, readBlock(app, "TraceRing"));
+                showTraceProgress(app);
+            catch ME
+                app.TraceStatusLabel.Text = append("Trace read failed: ", ME.message);
+                app.TraceStatusLabel.FontColor = [1 0 0];
+            end
+        end
+
+        % End the recording and save it. The file is written to the
+        % captures folder first; an interactive stop then offers to move
+        % it, and cancelling keeps it where it is.
+        function finishRecording(app, interactive)
+            if ~app.traceRecording
+                return
+            end
+            drainTrace(app);
+            app.traceRecording = false;     % before any file I/O or dialog
+            app.TraceStatusLabel.Tooltip = "";
+            app.TraceStatusLabel.FontColor = [0 0 0];
+            if app.trace.n == 0
+                app.TraceStatusLabel.Text = "Nothing recorded";
+                updateButtons(app);
+                return
+            end
+            try
+                file = char(fullfile(capturesFolder(app), append("trace_", ...
+                    datestr(now, "yyyymmdd_HHMMSS"), ".csv")));
+                traceWriteCsv(file, app.trace.data(1:app.trace.n, :), ...
+                    traceMeta(app.trace, app.cfg, app.traceStartedAt));
+                if interactive
+                    [name, folder] = uiputfile("*.csv", "Save trace", file);
+                    figure(app.UIFigure);
+                    if ~isequal(name, 0) && ~strcmp(fullfile(folder, name), file)
+                        chosen = fullfile(folder, name);
+                        movefile(file, chosen);
+                        file = chosen;
+                    end
+                end
+                [~, base, ext] = fileparts(file);
+                app.TraceStatusLabel.Text = append("Saved ", base, ext);
+                app.TraceStatusLabel.Tooltip = string(file);
+                if app.trace.missed > 0
+                    app.TraceStatusLabel.Text = append(app.TraceStatusLabel.Text, ...
+                        sprintf(" (%d missed)", app.trace.missed));
+                    app.TraceStatusLabel.FontColor = [1 0 0];
+                end
+            catch ME
+                app.TraceStatusLabel.Text = append("Trace not saved: ", ME.message);
+                app.TraceStatusLabel.FontColor = [1 0 0];
             end
             updateButtons(app);
         end
@@ -332,6 +434,20 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.JogUpButton.Value = jogUp;
             app.JogDownButton.Value = jogDown;
 
+            % Record is available while connected, and while recording so
+            % a recording can always be ended.
+            app.RecordButton.Enable = connected || app.traceRecording;
+            app.RecordButton.Value = app.traceRecording;
+            if app.traceRecording
+                app.RecordButton.BackgroundColor = app.COLOR_STOP;
+                app.RecordButton.FontColor = [1 1 1];
+                app.RecordButton.Text = "Stop recording";
+            else
+                app.RecordButton.BackgroundColor = app.COLOR_IDLE;
+                app.RecordButton.FontColor = [0 0 0];
+                app.RecordButton.Text = "Record";
+            end
+
             % STOP shows the master's E-STOP state, and a request the
             % master has not yet acted on (or cannot, while disconnected).
             if app.estopActive
@@ -374,6 +490,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 app.estopActive = false;
                 app.linkReady = false;
                 clearOp(app);
+                finishRecording(app, false);
                 updateButtons(app);
                 return
             end
@@ -385,6 +502,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 statusCode ~= app.STATUS_LINK_WAIT;
             trackOp(app, statusCode);
             updateButtons(app);
+            drainTrace(app);
             position = readBlock(app, "Position");
             app.VolumeValue.Text = sprintf("%.1f", x2mL(position, app.cfg));
             app.PressureValue.Text = sprintf("%.2f", readBlock(app, "Pressure"));
@@ -442,6 +560,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 addpath(fullfile(here, "logic"));
             end
             app.cfg = masterConfig();
+            if exist("traceDrain", "file") ~= 2
+                addpath(fullfile(here, "trace"));
+            end
 
             % Manual targets are distances from the end of travel, within
             % the master's soft limits and not past the end of travel. The
@@ -635,6 +756,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 end
                 disconnect(app);
             end
+            finishRecording(app, false);
 
             if ~isempty(app.updateTimer) && isvalid(app.updateTimer)
                 stop(app.updateTimer);
@@ -746,6 +868,46 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 clearOp(app);
             end
             updateButtons(app);
+        end
+
+        % Value changed function: RecordButton
+        function RecordButtonChanged(app, event)
+            if app.RecordButton.Value
+                if ~isRunning(app)
+                    app.RecordButton.Value = false;
+                    app.TraceStatusLabel.Text = "Not connected";
+                    app.TraceStatusLabel.FontColor = [0 0 0];
+                    return
+                end
+                try
+                    startRecording(app);
+                catch ME
+                    app.traceRecording = false;
+                    app.TraceStatusLabel.Text = append("Recording not started: ", ME.message);
+                    app.TraceStatusLabel.FontColor = [1 0 0];
+                end
+            else
+                finishRecording(app, true);
+            end
+            updateButtons(app);
+        end
+
+        % Button pushed function: PlotTraceButton
+        function PlotTraceButtonPushed(app, event)
+            [name, folder] = uigetfile("*.csv", "Plot a trace", ...
+                append(capturesFolder(app), filesep));
+            figure(app.UIFigure);
+            if isequal(name, 0)
+                return
+            end
+            try
+                tracePlot(fullfile(folder, name));
+                app.TraceStatusLabel.Text = append("Plotted ", name);
+                app.TraceStatusLabel.FontColor = [0 0 0];
+            catch ME
+                app.TraceStatusLabel.Text = append("Plot failed: ", ME.message);
+                app.TraceStatusLabel.FontColor = [1 0 0];
+            end
         end
     end
 
@@ -1211,6 +1373,33 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.FaultActiveLamp = uilamp(app.UIFigure);
             app.FaultActiveLamp.Position = [464 162 20 20];
             app.FaultActiveLamp.Color = [0.6 0.6 0.6];
+
+            % Create TracePanel
+            app.TracePanel = uipanel(app.UIFigure);
+            app.TracePanel.Title = 'Trace';
+            app.TracePanel.FontWeight = 'bold';
+            app.TracePanel.Position = [1015 290 185 125];
+
+            % Create RecordButton
+            app.RecordButton = uibutton(app.TracePanel, 'state');
+            app.RecordButton.ValueChangedFcn = createCallbackFcn(app, @RecordButtonChanged, true);
+            app.RecordButton.Tooltip = {'Record the link and the commands to a CSV file'};
+            app.RecordButton.Enable = 'off';
+            app.RecordButton.Text = 'Record';
+            app.RecordButton.Position = [10 65 165 30];
+
+            % Create TraceStatusLabel
+            app.TraceStatusLabel = uilabel(app.TracePanel);
+            app.TraceStatusLabel.WordWrap = 'on';
+            app.TraceStatusLabel.VerticalAlignment = 'top';
+            app.TraceStatusLabel.Position = [10 32 165 30];
+            app.TraceStatusLabel.Text = 'Not recording';
+
+            % Create PlotTraceButton
+            app.PlotTraceButton = uibutton(app.TracePanel, 'push');
+            app.PlotTraceButton.ButtonPushedFcn = createCallbackFcn(app, @PlotTraceButtonPushed, true);
+            app.PlotTraceButton.Position = [10 5 165 23];
+            app.PlotTraceButton.Text = 'Plot a trace...';
 
             % Show the figure after all components are created
             app.UIFigure.Visible = 'on';
