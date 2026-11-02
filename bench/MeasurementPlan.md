@@ -35,10 +35,11 @@ sequences them and says what each run is for.
 
 ## Before the first session
 
-- The controller project matches `slave-src` (TODO.md, "MotionWorks
-  project"): the step probe, the Modbus groups to HR114 and IR524, the
-  4 ms task with its watchdog, `G_cfgPressureShuntOhms` 421.4. Every
-  capture below needs the probe.
+- The controller runs the project built from `slave-src`: the step
+  probe, the Modbus groups to HR114 and IR524, the 4 ms task,
+  `G_cfgPressureShuntOhms` 421.4. Every capture below needs the probe.
+  Still to confirm in the project: the task watchdog, the two LD wiring
+  gaps and the GVL diff (TODO.md, "MotionWorks project").
 - `tests\run_all.bat` passes under MATLAB on the lab PC, so the fits run
   there.
 - The pressure chain is calibrated (`bench/pressure/README.md` section

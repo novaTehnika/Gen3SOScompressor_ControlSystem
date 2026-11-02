@@ -10,9 +10,8 @@ holding registers.
 
 ## MotionWorks project
 
-Bring the controller project in line with `slave-src`. The headers of the
-`.st` files and `slave-src/GVL/GlobalVariables_Reference.st` are the
-reference for every declaration.
+The project is built from `slave-src` and runs on the controller. Left
+to confirm in it:
 
 - [ ] LD POU: delete the `MC_MoveVelocity` instance, then delete
       `docs/slave/ld/MC_MoveVelocity_1.PNG`.
@@ -23,107 +22,6 @@ reference for every declaration.
       find or add the block that drives `G_sysDriveFault` (the
       `MC_ReadActual*` blocks leave `Error` unwired and no screenshot
       shows an axis-error block), then replace the screenshots.
-- [ ] Data types:
-  - [ ] Remove the `ST_HOME_LIM_*` members from `E_SystemState`.
-  - [ ] Remove `ST_CmdMoveVelocity`, `ST_StaMoveVelocity` and the
-        `Deceleration` field of `ST_CmdDirectControl`.
-  - [ ] Add `E_ProbeState`, `E_ProbeXferState`, `ARRAY104WORD` and
-        `ARRAY65536WORD`.
-- [ ] Function blocks:
-  - [ ] Mode and confirmation path read from the Modbus registers
-        (PR #14), if not already done: add `FB_IntToMode`; delete
-        `FB_BitsToMode`, `FB_ModeToBits`, `FB_FaultToBits` and
-        `FB_OutputMux`; rename the `FB_FaultResetHandler` input
-        `BitsStable` to `CodeStable`.
-  - [ ] Rename `FB_PositionCommandGate` to `FB_PositionPathShaper`.
-  - [ ] Add `FB_Probe` (`Stage` is a `VAR_OUTPUT`).
-  - [ ] Update the declarations of `FB_GoHome` (`StopDeceleration`
-        input), `FB_SafetyMonitor` (state-property inputs),
-        `FB_AnalogInputFilter` and `FB_ModeDecoder`.
-  - [ ] Remove the `VAR_OUTPUT` members nothing reads, and declare the
-        ones the block still uses as `VAR` locals (types and initial values
-        as in the block's header):
-    - [ ] `FB_DigitalInputFilter`: `RisingEdge`, `FallingEdge`, `Stable`,
-          `RawPassthrough`; delete the local `bLastFiltered`.
-    - [ ] `FB_GoHome`: `Active`, `AtPosition`. `FB_HomeLimit`: `Active`.
-    - [ ] `FB_HandshakeManager`: `HandshakeActive`, `HandshakeTimeout_Q`.
-    - [ ] `FB_ModeDecoder`: `ModeChanged`; `ModeValue` becomes the local
-          `nModeValue : INT`.
-    - [ ] `FB_PistonExitGuard`: `ApproachingLimit`.
-    - [ ] `FB_PositionPathShaper`: `RateLimiting`, `TetherHold`;
-          `ParamError` becomes the local `bParamError : BOOL`.
-    - [ ] `FB_PressureController`: `Error`, `VelLimit`, `Saturated`,
-          `ParamError` become the locals `rError : LREAL`,
-          `rVelLimit : LREAL`, `bSaturated : BOOL`, `bParamError : BOOL`.
-    - [ ] `FB_PressureInput`: `LoopMa`, `OutOfRange`, `ParamError` become
-          the locals `rLoopMa : LREAL`, `bOutOfRange : BOOL`,
-          `bParamError : BOOL`.
-    - [ ] `FB_PressureSchedule`: `Lag` becomes the local `rLag : LREAL`.
-    - [ ] `FB_Probe`: `StartTail` and `Xfer`; `State` becomes the local
-          `eState : E_ProbeState := PROBE_RECORDING`.
-    - [ ] `FB_SafetyMonitor`: `FaultDrive`, `FaultComm` and
-          `FaultPistonExit` (used as the inputs directly); `FaultLimitSwitch`,
-          `FaultPosition` and `FaultPressureSensor` become the locals
-          `bFaultLimitSwitch`, `bFaultPosition` and `bFaultPressureSensor`
-          (BOOL).
-- [ ] `PRG_Main` locals:
-  - [ ] PR #14, if not already done: remove `fbFilterModeBit0`-`2`,
-        `bFilteredModeBit0`-`2` and `fbOutputMux`; add
-        `fbConfModeToInt : FB_ModeToInt`.
-  - [ ] Add the state-property BOOLs, `rPosShaperVelMax`, `fbProbe` and
-        `nProbeWord`.
-  - [ ] Rename `fbPosGate` to `fbPosShaper` and `bPosGateActive` to
-        `bPosShaperActive`.
-- [ ] Delete `PRG_PressureProbe` from the project and the task.
-- [ ] Pressure gain schedule:
-  - [ ] Add `FB_PressureSchedule`, and `IntegScale` (initial value 1.0) to
-        `FB_PressureController`.
-  - [ ] `PRG_Main` locals: `fbPressureSched`, `rAnalogFilterTime`,
-        `rSchedSaline`, `rSchedOxygenRatio`, `bPressureSchedActive`,
-        `bPressureSchedUsed`, `rPressureKp`, `rPressureKi`,
-        `rPressureVelMax`, `rPressureStiffness` and `rPressureIntegScale`
-        (initial value 1.0).
-  - [ ] Globals: `G_mbSalineVolume`, `G_mbOxygenRatio`,
-        `G_sysSalineVolume`, `G_sysOxygenRatio` and the
-        `G_cfgPressureSched*` settings with `G_cfgPressureScheduleEnable`.
-- [ ] Globals:
-  - [ ] PR #14, if not already done: add `G_sysConfirmedModeCode : UINT`.
-        First confirm the LD POU reads none of `G_diModeBit0`-`2`,
-        `G_diMotionEnable`, `G_diFaultReset` and `G_doModeConfBit0`-`2`
-        (`%IX0.0`-`0.4`, `%QX0.0`-`0.2`), then remove them.
-  - [ ] Remove `G_cmdMoveVelocity`, `G_staMoveVelocity`,
-        `G_sysCycleCount`, `G_posModeEntryPosition`,
-        `G_posExitGuardBoundary`, `G_sysMotionActive`, `G_sysInPosition`,
-        `G_sysAtVelocity`, `G_sysAtPosLimitHigh`, `G_sysAtPosLimitLow`,
-        `G_sysStateEntryTime`, `G_sysTimeInState`, `G_cfgVelLimitNormal`,
-        `G_cfgDirectCtrlDecel` and `G_cfgGoHomeStopDecel`.
-  - [ ] Rename `G_cfgPosGateAccelMax` to `G_cfgPosShaperAccelMax` and
-        `G_cfgPosGateMaxDeviation` to `G_cfgPosShaperMaxDeviation`.
-  - [ ] Set `G_cfgVelLimitMax` to 6.0.
-  - [ ] Replace `G_cfgGoHomeAccel` and `G_cfgHomeLimAccel` by one
-        `G_cfgMoveAccel : LREAL := 5.0`.
-  - [ ] Replace `G_cfgDebounceTimeMotion` and `G_cfgDebounceTimeFault` by
-        `G_cfgDebounceTimeCommand : TIME := T#20MS`, and
-        `G_cfgDebounceTimeOvertravelNeg` and
-        `G_cfgDebounceTimeOvertravelPos` by
-        `G_cfgDebounceTimeOvertravel : TIME := T#10MS`.
-  - [ ] Delete `G_doPerformanceStatus`, `G_doFaultActive`,
-        `G_doHomingComplete` and `G_doInMotion` (`%QX0.3`-`%QX0.6`) and
-        add `G_sysPerformanceStatus`, `G_sysFaultActive`,
-        `G_sysHomingComplete` and `G_sysInMotion` as `BOOL := FALSE` with no
-        address; the output points `MO1_DO_03`-`MO1_DO_06` are no longer
-        written. Check the LD POU does not use the old four.
-  - [ ] `G_cfgGearRatio` and `G_cfgLeadScrewPitch` stay; their comments now
-        call them reference copies of the Hardware Configuration scaling.
-  - [ ] Add `G_cfgStopDecel`, `G_cfgProbeEnable`, `G_cfgProbeFillPerScan`,
-        `G_mbPositionSpeed`, `G_sysPositionSpeed`, the `G_mbProbe*`
-        globals and the `G_sysProbe*` globals.
-- [ ] Modbus groups in Hardware Configuration: holding registers to
-      HR114 (the protocol uses HR1-12), input registers to IR524. Keep the
-      groups to what is used: a 3410-register input group (the old step
-      probe's) made the protocol
-      exchange 50 ms (p99 70) instead of 20 (p99 30), programs loaded or
-      not, and tripped the slave's 300 ms watchdog during motion.
 - [ ] Enable the cyclic task's watchdog, at the 4 ms interval. The 2 ms
       task overran for weeks (about 2.5 ms of work a scan) and ran on
       every second motion cycle with nothing reported.
@@ -158,15 +56,6 @@ reference for every declaration.
 
 ## Checks on the machine
 
-- [ ] Compile in MotionWorks and confirm it accepts:
-  - [ ] the 128 KB ring array inside `FB_Probe`;
-  - [ ] array indexing with UDINT expressions;
-  - [ ] `SHR` on a `DWORD`;
-  - [ ] `INT_TO_WORD`, `DINT_TO_DWORD` and `DWORD_TO_WORD` wrapping on
-        negative values.
-
-  If the ring array is refused, shrink `cDepth` and its array type
-  together.
 - [ ] Confirm `Y_DirectControl` accepts a Velocity of 0 in PositionMode,
       which it gets when the master sets a position speed of 0.
 - [ ] Measure the protocol exchange time with the enlarged Modbus groups
