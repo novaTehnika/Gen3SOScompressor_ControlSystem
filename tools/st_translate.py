@@ -124,6 +124,10 @@ def parse_header_decls(text, known_types, aliases=None):
         if m:
             section = m.group(1)
             continue
+        m = re.match(r'^(VAR\w*(?:\s+\w+)?)\s*:', s)
+        if m:
+            # VAR_IN_OUT and other sections the controller does not take.
+            raise STError(f'unsupported declaration section {m.group(1)}')
         if section is None or s.startswith('(*'):
             continue
         m = DECL_RE.match(line)
