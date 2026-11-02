@@ -444,7 +444,7 @@ rs = stepResponseFit(files, struct('accel', 1e4, 'decel', 1e4));
 
 Repeat the open-chamber steps now that `Y_DirectControl`'s
 `FilterTimeConstant` is wired from `G_cfgDirectCtrlFilterTime` (`PRG_Main`;
-0.05 s in the reference: record the loaded value with the results). With
+0.02 s in the reference: record the loaded value with the results). With
 the piston in the bore and the chamber open, the probe armed (the `'steps'`
 set turns it on), at two piston positions as on 26 October:
 
