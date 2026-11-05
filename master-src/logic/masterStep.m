@@ -14,7 +14,10 @@ function [mbWrite, doSafety, doMixer, position, velocity, pressure, ...
 %   targetPressure, estop, mixer, positionSpeed
 %                 values of the Constant blocks the app writes;
 %                 targetPressure in atm absolute, as the app shows pressure;
-%                 positionSpeed in mm/s, the speed of a position move
+%                 positionSpeed in mm/s, the operator speed (position
+%                 moves, Go Home and homing), sent in HR7-8; targetVelocity
+%                 is the jog speed, and the app writes the same value to
+%                 both
 %   salineVolume, oxygenRatio
 %                 the fill description for the slave's pressure gain
 %                 schedule: saline volume (mL) and oxygen charge as STP

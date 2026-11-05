@@ -71,7 +71,7 @@ values below are the ones at the time of writing.
 
 | Setting | Value | Effect on the bench |
 |---------|-------|---------------------|
-| `G_cfgVelLimitMax`, `masterConfig.jogVelMax` | 7 and 6 mm/s | The highest speed point (5 mm/s) is below both. 7 mm/s needs `jogVelMax` raised to the slave's ceiling, which this bench does not do |
+| `G_cfgVelLimitMax`, `masterConfig.speedMax` | 7 and 6 mm/s | The highest speed point (5 mm/s) is below both. 7 mm/s needs `speedMax` raised to the slave's ceiling, which this bench does not do |
 | `G_cfgDirectCtrlAccel` | 10 mm/s² | `Y_DirectControl`'s `Acceleration` (the block has no deceleration input). The drive does not slew the command at this value (steps complete in about 60 ms whatever their size, `bench/characterisation/README.md` section 8); the run's step durations still allow `v / 10 mm/s²` for the ramp, 0.5 s at 5 mm/s |
 | `G_cfgTorqueLimitNormal`, `G_cfgPressureTorqueLimit` | 100 % | The axis stalls there, which is 29 MPa on a sealed chamber; the run stops the axis at 90 % (`torqueAbort`) |
 | `G_cfgPosSoftLimitMax` / `Min` | 367 / -2.5 mm | `FAULT_POSITION` beyond them. Keep every step, with its slew, inside |
@@ -426,7 +426,7 @@ deliveries should lie on one line in `F - P A` against `P A`.
 
 ## 7. Not covered
 
-- 7 mm/s: `G_cfgVelLimitMax` is 7 mm/s but `masterConfig.jogVelMax` is 6. The
+- 7 mm/s: `G_cfgVelLimitMax` is 7 mm/s but `masterConfig.speedMax` is 6. The
   pressure loop's own clamp is 5 mm/s, so the model's operating range is
   covered.
 - The rate at which the drive follows a step. It follows at the rate the

@@ -35,7 +35,7 @@ cfg.etaAssumed    = 0.85;   % efficiency the design model's Fcap assumes, replac
 cfg.accel        = gvl.G_cfgDirectCtrlAccel;   % mm/s^2, velocity-mode slew on the slave (GVL)
 cfg.velMax       = gvl.G_cfgVelLimitMax;       % mm/s, velocity-mode clamp on the slave (GVL)
 cfg.speeds       = [0.1 0.3 1 3 5];     % mm/s; the fastest point, below cfg.velMax
-assert(all(cfg.speeds <= min(cfg.velMax, master.jogVelMax)), ...
+assert(all(cfg.speeds <= min(cfg.velMax, master.speedMax)), ...
     'a speed point exceeds G_cfgVelLimitMax or the master''s jog limit');
 cfg.tSteady      = [60 40 20 10 10];    % s at speed, unloaded
 cfg.gasStrokeMax = 20;                  % mm per step under a gas charge: bounds the pressure excursion

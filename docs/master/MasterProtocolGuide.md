@@ -342,8 +342,8 @@ In `ST_POSITION_CTRL` and `ST_RECOVERY_POSITION` the slave evaluates
 the command at `G_cfgPosShaperAccelMax`, a higher one speeds it up. A speed of 0
 decelerates the command to rest at `G_cfgPosShaperAccelMax` and holds position;
 restoring the speed resumes the move. Other modes ignore it. The master limits it
-to `0` to `cfg.positionSpeedMax` (not above `G_cfgVelLimitMax`); the operator app
-sets it in its move-speed field.
+to `0` to `cfg.speedMax` (not above `G_cfgVelLimitMax`); the operator app
+sets it with its speed control.
 
 ### Fill description (Master to Slave): HR9-12
 

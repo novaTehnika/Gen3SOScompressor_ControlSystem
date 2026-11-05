@@ -13,7 +13,7 @@ reading over the link.
 | `shell/buildShell.m` | Generates `shell/SOS_Gen3_Master_Shell.slx`: Modbus Client blocks at the 50 ms exchange, DAQ blocks, one MATLAB Function block calling `masterStep`, the Constant blocks the app writes and the Gain blocks it reads. The model holds no logic and is rebuilt from this script, not edited by hand. |
 | `shell/modbusShellDiscover.m` | Prints the Modbus block and client settings of a hand-configured shell so they can be pasted into `buildShell.m`. |
 | `shell/addDaq.m` | Creates one Simulink Desktop Real-Time DAQ block. Holds the board setup (PCI-6221, driver options, missed-tick limit) and the digital channel numbering. |
-| `SOS_Gen3_Compressor_Interface.m` | Operator app (programmatic App Designer export). Starts the shell model, writes operator requests to its Constant blocks and polls its outputs. Takes its position target range, jog speed presets and cylinder geometry from `masterConfig.m` at startup. |
+| `SOS_Gen3_Compressor_Interface.m` | Operator app (programmatic App Designer export). Starts the shell model, writes operator requests to its Constant blocks and polls its outputs. Takes its position target range, speed presets and cylinder geometry from `masterConfig.m` at startup. |
 | `legacy/`, `SOS_Gen3_Compressor_Master.slx` | Earlier Stateflow-based app model and its `.mlapp`, and the hand-built `SimulinkMaster.slx` bench model with manual mode control, kept for reference. |
 
 ## Running on the lab PC
@@ -51,10 +51,10 @@ The app writes `RequestedMode` (0 stop, 1 home to the limit switch, 2 position,
 3 jog, 4 pressure, 5 reset fault, 6 go home) and then increments `CommandSeq`; the model acts on an operation
 only when `CommandSeq` changes, except that `RequestedMode = 0` always stops.
 `TargetPosition`, `TargetVelocity`, `JogDirection` and `TargetPressure` are read
-continuously while their operation is active. `PositionSpeed` (mm/s, the app's
-"Move speed" field, default `cfg.positionSpeed`, limited to `0..cfg.positionSpeedMax`) is the
-speed of position moves; it is sent to the slave in HR7-8 every exchange, takes
-effect mid-move, and 0 holds position. `TargetPressure` is in atm absolute;
+continuously while their operation is active. `PositionSpeed` and `TargetVelocity`
+both carry the one operator speed, set from the app's speed control in percent of
+`cfg.speedMax` (presets `cfg.speedPresets`, default `cfg.speedDefault`, converted by
+`speedFromPercent`). It is sent in HR7-8 every exchange, acts mid-move, and 0 holds. `TargetPressure` is in atm absolute;
 the model sends it to the slave in MPa gauge, and the slave closes the loop on its
 own transducer. `ESTOP` and `Mixer` act at once.
 
@@ -83,9 +83,34 @@ The app shows volume (mL), absolute pressure (atm), position (mm from the end
 of travel) and flow (mL/s, positive toward the end of travel). Position targets
 in manual control are also mm from the end of travel, and pressure targets are
 atm absolute. `masterConfig` holds the end of travel (`posEOT`), bore and dead
-volume, and the atmosphere added to the slave's gauge pressure (`atmAmbient`);
-`x2mL` and `mLPerMm` convert position and velocity. The transducer's 4-20 mA
-range and shunt resistance are slave settings (`G_cfgPressure*`).
+volume, and the atmosphere added to the slave's gauge pressure (`atmAmbient`).
+`mLPerMm` converts position and velocity to volume and flow; `sweptVolume`,
+`mixingVolume` and `readoutText` give the volume views and the readout text.
+The transducer's 4-20 mA range and shunt resistance are slave settings
+(`G_cfgPressure*`).
+
+The volume panel has three views, chosen with the buttons under the value:
+
+- Swept: the bore area times the travel left to the end of travel, without
+  the dead volume (the saline still deliverable).
+- Mix: the swept volume plus `mixingDeadVolume`, the part of `deadVolume` that
+  takes part in mixing (at most `deadVolume`).
+- Incr: the swept volume delivered since the operator pressed Zero, positive
+  as the piston advances toward the end of travel, like the flow. It reads
+  `--` until zeroed, and starting Home clears the zero because homing changes
+  the position frame.
+
+Readouts are rounded to their display resolution before the sign is chosen, so
+a zero never reads `-0.00`, and a flow smaller than `flowDeadband` reads 0.00.
+
+Display rate: the display timer runs at `displayPeriod` (`fixedRate`, a tick
+that is still busy when the next is due is dropped). Each poll reads the
+status, position, velocity and pressure blocks once through cached
+`RuntimeObject` handles, and the fault code only while faulted; a label is
+rewritten only when its text changed. The app measures its own poll: in a
+MATLAB session, `app = SOS_Gen3_Compressor_Interface;`, connect, run for a
+while and read `app.PollStats` (`n` polls, `mean`, `max` and `last` in
+seconds, `overruns` the polls longer than `displayPeriod`).
 
 ## Operator app buttons
 
@@ -96,8 +121,10 @@ being entered and green once its running status appears, and returns to normal
 when that status goes (stopped, finished, faulted, E-STOP or not confirmed by
 the slave). While position or pressure control runs, changing the target turns
 its button back to Go, which sends the new target without leaving the mode; the
-other jog button reverses a running jog. Jog speed is picked from `masterConfig`'s
-`jogSpeeds` (the fastest is the default), and a change applies to a running jog. STOP turns dark red while E-STOP is
+other jog button reverses a running jog. The speed control (a percentage
+field and a button per `masterConfig` `speedPresets` entry, `speedDefault` at start)
+sets the one speed of jog, position moves, Go Home and homing, and a change applies
+to a running operation; 0 holds, and the status line then reads "held: speed 0". STOP turns dark red while E-STOP is
 requested but not yet reported by the model, and yellow while the model reports
 E-STOP (`StatusCode` 20); pressing it then releases E-STOP.
 

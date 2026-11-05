@@ -34,7 +34,7 @@ h.cfg = cfg;
 
 h.app = struct('op', 0, 'cmdSeq', 0, 'targetPosition', 100, 'targetVelocity', 0, ...
     'jogDirection', 0, 'targetPressure', 0, 'estop', 0, 'mixer', 0, ...
-    'positionSpeed', cfg.positionSpeed);
+    'positionSpeed', cfg.speedMax);
 h.y = scan(h.sl);
 h.mbRead = zeros(1, map.nRead);
 % The Modbus link with the bench's timing (modbusLinkConfig)
@@ -123,7 +123,7 @@ fprintf('ok  position move, displayed position %.3f mm\n', h.m.position);
 % Position speed through HR7-8: the packed value reaches the slave, a move
 % runs at it, 0 mid-move holds position and the speed above the ceiling is
 % limited.
-assert(abs(h.sl.G.G_mbPositionSpeed - cfg.positionSpeed) < 1e-6);
+assert(abs(h.sl.G.G_mbPositionSpeed - cfg.speedMax) < 1e-6);
 h.app.positionSpeed = 2;
 h.app.targetPosition = 25;
 h = command(h, 2);
@@ -140,8 +140,8 @@ assert(h.sl.G.G_mbPositionSpeed == 0 && abs(h.sl.ax.v) < 0.01 && abs(h.sl.ax.x -
 assert(h.y.faultActive == 0 && h.m.statusCode == 2 && xHold < 24);
 h.app.positionSpeed = 100;
 h = runUntil(h, 30, @(h) h.m.statusCode == 3);
-assert(h.m.statusCode == 3 && abs(h.sl.G.G_mbPositionSpeed - cfg.positionSpeedMax) < 1e-6);
-h.app.positionSpeed = cfg.positionSpeed;
+assert(h.m.statusCode == 3 && abs(h.sl.G.G_mbPositionSpeed - cfg.speedMax) < 1e-6);
+h.app.positionSpeed = cfg.speedMax;
 fprintf('ok  position speed through HR7-8: 2 mm/s, 0 holds at %.2f mm, 100 limited to %g mm/s\n', ...
     xHold, h.sl.G.G_mbPositionSpeed);
 
@@ -341,9 +341,9 @@ h = runUntil(h, 0.5, []);
 assert(h.m.doSafety == 1 && h.m.state == 1);
 fprintf('ok  e-stop\n');
 
-% Displayed volume: dead volume at the end of travel, bore area per mm.
-assert(abs(x2mL(cfg.posEOT, cfg) - cfg.deadVolume) < 1e-9);
-assert(abs(x2mL(cfg.posEOT - 100, cfg) - cfg.deadVolume ...
+% Swept volume: none at the end of travel, bore area per mm.
+assert(abs(sweptVolume(cfg.posEOT, cfg)) < 1e-9);
+assert(abs(sweptVolume(cfg.posEOT - 100, cfg) ...
            - 100 * pi / 4 * (2.602 * 25.4)^2 / 1000) < 1e-6);
 fprintf('ok  volume scaling (%.3f mL/mm)\n', mLPerMm(cfg));
 

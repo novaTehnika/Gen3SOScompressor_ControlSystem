@@ -171,7 +171,7 @@
                                                           FB_PositionPathShaper's VelMax; Y_DirectControl does no path
                                                           shaping in PositionMode (the command reaches the drive as
                                                           given), so its Velocity input sets no limit there.
-                                                          masterConfig.jogVelMax and positionSpeed must not exceed it *)
+                                                          masterConfig.speedMax must not exceed it *)
      G_cfgStopDecel            : LREAL := 10.0        (* The one MC_Stop deceleration (mm/s^2): hold, fault,
                                                           recovery and Go Home abort *)
 
