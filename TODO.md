@@ -50,6 +50,15 @@ the reference for each) and confirm:
         only their comments changed.
 - [ ] Declaration for the operator speed (the header is the reference):
       `PRG_Main`: add `rOperatorSpeed` (`LREAL`).
+- [ ] Declarations for the pressure ceiling, the end stop and the recovery
+      fix: GVL `G_cfgPressureCeiling : LREAL := 12.0`,
+      `G_cfgPressureCeilingHyst : LREAL := 0.5`,
+      `G_cfgPressureEndMargin : LREAL := 1.0`,
+      `G_sysPressureBlock : BOOL := FALSE`,
+      `G_sysAtEndOfTravel : BOOL := FALSE`,
+      `G_mbPressureBlock AT %QW73808 : UINT`,
+      `G_mbAtEndOfTravel AT %QW73810 : UINT`; `PRG_Main` locals
+      `bPosBlockReset` and `bPressureCmdBlocked` (`BOOL`).
 - [ ] Enable the cyclic task's watchdog, at the 4 ms interval. The 2 ms
       task overran for weeks (about 2.5 ms of work a scan) and ran on
       every second motion cycle with nothing reported.
@@ -193,18 +202,18 @@ specified here; the implementation plan decides the files.
     - [ ] Instructions quote the pressure in the unit the pressure
           readout shows; a unit switch (psi, atm, MPa) shared by the
           readout and the procedure panel.
-    - [ ] A purge as a position move through the outlet reached 170 atm:
+    - [x] A purge as a position move through the outlet reached 170 atm:
           the slave has no overpressure rule outside the pressure target
           cap. Add an overpressure block (motion in the pressurising
           direction zeroed above `G_cfgPressureCeiling`, reported in a
           status bit, no fault); moves that push fluid through the outlet
           run slowly or under pressure control; the engine guards each
           step with a pressure maximum.
-    - [ ] A delivery runs to the soft limit and faults: pressure mode
+    - [x] A delivery runs to the soft limit and faults: pressure mode
           stops a margin before `G_cfgPosSoftLimitMax` and reports the
           end of travel; the discharge step ends on the operator's confirm
           or the end of travel, whichever first.
-    - [ ] After `FAULT_POSITION` the reset looped back into the fault
+    - [x] After `FAULT_POSITION` the reset looped back into the fault
           until the slave was power cycled: the reset from the drive-off
           fault state re-powers through the activation states, where the
           position check is not suppressed (`InRecovery` is false until
@@ -215,6 +224,11 @@ specified here; the implementation plan decides the files.
 
 ## Checks on the machine
 
+- [ ] Measure the stop distance at the end margin (pressure mode at
+      `G_cfgPressureVelMax` toward the end of travel; the model gives
+      about 0.45 mm against the 1.0 mm `G_cfgPressureEndMargin`), and the
+      overshoot past `G_cfgPressureCeiling` in a position move at full
+      speed against a closed outlet.
 - [ ] Measure the operator app's display poll on the lab PC: connect,
       run, and read `app.PollStats` at `cfg.displayPeriod` 0.1 s and
       0.05 s. If the mean cost exceeds 30 % of the period, add one Mux

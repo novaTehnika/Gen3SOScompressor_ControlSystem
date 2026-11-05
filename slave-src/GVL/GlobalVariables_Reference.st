@@ -269,7 +269,21 @@
                                                           stiffness*v^2/(2*decel) *)
      G_cfgPressureTorqueLimit    : LREAL := 100.0      (* Torque limit in pressure mode (% of rated). Caps the piston
                                                           force if the sensor reads low *)
-     G_cfgPressureTargetMax      : LREAL := 15.0       (* Highest target accepted from the master (MPa gauge) *)
+     G_cfgPressureTargetMax      : LREAL := 15.0       (* Highest target accepted from the master (MPa gauge); the effective
+                                                          limit is MIN(this, G_cfgPressureCeiling - G_cfgPressureCeilingHyst) *)
+     G_cfgPressureCeiling        : LREAL := 12.0       (* Mechanical pressure ceiling (MPa gauge). Above it PRG_Main zeroes
+                                                          every command in the pressurising (positive) direction in every
+                                                          state (G_sysPressureBlock, IR9). No fault. Also caps the pressure
+                                                          target at Ceiling - CeilingHyst *)
+     G_cfgPressureCeilingHyst    : LREAL := 0.5        (* The block releases below Ceiling - Hyst (MPa). Well above the
+                                                          filtered transducer noise and the PI ripple, so the block does
+                                                          not chatter, and small against the headroom to the transducer range *)
+     G_cfgPressureEndMargin      : LREAL := 1.0        (* Pressure mode stops positive motion at G_cfgPosSoftLimitMax minus
+                                                          this (mm), so a delivery ends at the end of travel without
+                                                          FAULT_POSITION (G_sysAtEndOfTravel, IR10). Stopping from
+                                                          G_cfgPressureVelMax takes about 0.45 mm (0.25 mm at
+                                                          G_cfgPressureAccel, 0.11 mm in the drive dead time, 0.09 mm in
+                                                          the lag), so 1.0 mm leaves at least 0.5 mm to the soft limit *)
      G_cfgPressureInBand         : LREAL := 0.1        (* |actual - target| for the in-band status output (MPa) *)
 
      (* Gain schedule (FB_PressureSchedule). When enabled, latched on entry to
@@ -464,11 +478,13 @@
      (* Motion status *)
      G_sysHalted               : BOOL := FALSE    (* Halt is active (ST_HOLD_POSITION) *)
 
-     (* Status bits published in the Modbus input registers IR5-IR8 *)
+     (* Status bits published in the Modbus input registers IR5-IR10 *)
      G_sysPerformanceStatus    : BOOL := FALSE    (* Mode-dependent status: in band in pressure mode *)
      G_sysFaultActive          : BOOL := FALSE    (* Fault active (ST_FAULT, ST_FAULT_IDLE) *)
      G_sysHomingComplete       : BOOL := FALSE    (* Homing sequence complete *)
      G_sysInMotion             : BOOL := FALSE    (* Axis in motion *)
+     G_sysPressureBlock        : BOOL := FALSE    (* Pressure above G_cfgPressureCeiling: pressurising motion zeroed (hysteresis G_cfgPressureCeilingHyst) *)
+     G_sysAtEndOfTravel        : BOOL := FALSE    (* ActualPosition >= G_cfgPosSoftLimitMax - G_cfgPressureEndMargin *)
 
      (* Limit status *)
      G_sysOvertravelNegActive  : BOOL := FALSE    (* Negative overtravel switch triggered *)

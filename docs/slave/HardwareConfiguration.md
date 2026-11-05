@@ -103,7 +103,7 @@ The mode code, MotionEnable and FaultReset arrive in Modbus holding registers HR
 | DO0-DO6 | %QX0.0-%QX0.6 | unused | Not driven (not connected) |
 | DO7 | %QX0.7 | G_doBrakeDisengage | Brake Relay |
 
-The mode confirmation and fault code are published in input registers IR3 and IR4 (`G_mbConfCode`, `G_mbFaultCode`); the status bits (`G_sysFaultActive`, `G_sysInMotion`, `G_sysPerformanceStatus`, `G_sysHomingComplete`) are published only in IR5-IR8. DO3-DO6 are no longer driven.
+The mode confirmation and fault code are published in input registers IR3 and IR4 (`G_mbConfCode`, `G_mbFaultCode`); the status bits (`G_sysFaultActive`, `G_sysInMotion`, `G_sysPerformanceStatus`, `G_sysHomingComplete`, plus `G_sysPressureBlock` and `G_sysAtEndOfTravel`) are published only in IR5-IR10. DO3-DO6 are no longer driven.
 
 ### 4.3 Overtravel Switch Wiring (PNP, Normally Closed)
 

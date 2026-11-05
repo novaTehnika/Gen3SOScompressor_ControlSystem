@@ -14,6 +14,16 @@
    the PLCopen Toolbox Jog FB are instantiated in the LD POU and communicate
    via G_cmd*/G_sta* structured globals. Homing (ST_HOME_LIMIT) uses Jog.
 
+   Pressure ceiling and end of travel: above G_cfgPressureCeiling every
+   command in the pressurising (positive) direction is zeroed in every
+   motion state (G_sysPressureBlock, IR9; no fault; released below
+   Ceiling - Hyst). Pressure mode also stops positive motion within
+   G_cfgPressureEndMargin of the soft limit (G_sysAtEndOfTravel, IR10) and
+   holds the pressure loop's integrator at zero while its command is zeroed.
+   ST_GO_HOME and ST_HOME_LIMIT are not blocked: G_cfgGoHomePosition and the
+   homing moves lie below G_cfgPosCylinderEntry, so a positive move there
+   happens only with the chamber open and at ambient pressure.
+
    Every user-defined FB is called exactly once at the end of this file.
    The step probe (fbProbe) is called last, after the state of the scan is
    final, so its record and its fault mark see the scan's end state.
@@ -28,7 +38,8 @@
    - Transition (Deactivation): ST_BRAKE_ENGAGE, ST_DRIVE_DISABLE
    - Fault: ST_FAULT, ST_FAULT_IDLE
    - Recovery: ST_RECOVERY (hub), ST_RECOVERY_POSITION, ST_RECOVERY_VELOCITY
-               (jog off a still-active limit; entered from ST_FAULT, drive stays on)
+               (jog off a still-active limit; entered from ST_FAULT, or through the
+               activation states when the brake was applied (bRecoveryPending))
 
    Variables (define in MWiec GUI):
      VAR:
@@ -98,9 +109,11 @@
        rPosTarget          : LREAL            (* Soft-limit-clamped position target from the master, input to fbPosShaper
        bPosShaperActive    : BOOL             (* Set by a position state body this scan; gates fbPosShaper.Enable
        bPosStopping        : BOOL             (* Motion enable dropped; braking under the shaper before ST_HOLD_POSITION
+       bPosBlockReset      : BOOL             (* The pressure block re-seeds fbPosShaper at actual so a positive command stops at once
        (* Pressure loop (ST_PRESSURE_CTRL)
        rPressureTarget     : LREAL            (* Clamped target from the master, input to fbPressureCtrl
        bPressureCtrlActive : BOOL             (* Set by the pressure state body this scan; gates fbPressureCtrl.Enable
+       bPressureCmdBlocked : BOOL             (* A positive pressure-loop command was zeroed this scan (ceiling or end stop); holds fbPressureCtrl's integrator at zero
        (* State properties (computed once per scan after the state machine, see State Properties)
        bPowerOn            : BOOL             (* Drive energised: MC_Power enabled (ST_FAULT_IDLE handled separately)
        bDriveStartup       : BOOL             (* ST_DRIVE_RESET / ST_DRIVE_ENABLE: waiting on the drive
@@ -147,6 +160,8 @@ IF bFirstScan THEN
     G_sysPerformanceStatus := FALSE;
     G_sysHomingComplete := FALSE;
     G_sysInMotion := FALSE;
+    G_sysPressureBlock := FALSE;
+    G_sysAtEndOfTravel := FALSE;
 
     bRecoveryPending := FALSE;
 
@@ -197,6 +212,22 @@ bLimitConditionActive := bBlockNeg OR bBlockPos;
 
 
 (* --------------------------------------------------------------------------
+   Pressure Ceiling and End of Travel
+   Above G_cfgPressureCeiling every command in the pressurising (positive)
+   direction is zeroed, in every motion state, the way bBlockPos zeroes
+   motion toward an active limit; released below Ceiling - Hyst. Not a
+   fault: reported in IR9. G_sysActualPressure is this scan's value.
+   -------------------------------------------------------------------------- *)
+
+IF G_sysActualPressure > G_cfgPressureCeiling THEN
+    G_sysPressureBlock := TRUE;
+ELSIF G_sysActualPressure < G_cfgPressureCeiling - G_cfgPressureCeilingHyst THEN
+    G_sysPressureBlock := FALSE;
+END_IF;
+G_sysAtEndOfTravel := G_sysActualPosition >= G_cfgPosSoftLimitMax - G_cfgPressureEndMargin;
+
+
+(* --------------------------------------------------------------------------
    State Machine
    No inline FB calls. Uses G_sta* for built-in FB status and
    previous-scan outputs for user FB status.
@@ -211,6 +242,7 @@ bPosShaperActive := FALSE;
 (* Likewise for the pressure loop. The in-band status output is only
    meaningful in pressure mode and is recomputed there. *)
 bPressureCtrlActive := FALSE;
+bPressureCmdBlocked := FALSE;
 G_sysPerformanceStatus := FALSE;
 
 bEnterState := (G_sysCurrentState <> G_sysPreviousState);
@@ -362,6 +394,11 @@ ELSIF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
             rPosTarget := LIMIT(stCurrentLimits.PosMin,
                                 G_sysReference,
                                 stCurrentLimits.PosMax);
+
+            (* Block a target that would compress further; a retract target passes *)
+            IF G_sysPressureBlock AND (rPosTarget > fbPosShaper.CommandedPosition) THEN
+                rPosTarget := fbPosShaper.CommandedPosition;
+            END_IF;
         END_IF;
         (* Position-move speed from the master (HR7-8), re-read every scan so
            a change acts mid-move. 0 decelerates the command to rest at
@@ -388,6 +425,11 @@ ELSIF G_sysCurrentState = E_SystemState#ST_VELOCITY_CTRL THEN
                                         G_sysReference,
                                         stCurrentLimits.VelMax);
 
+        (* Above the pressure ceiling a pressurising command is zeroed *)
+        IF G_sysPressureBlock AND (G_sysCommandedVelocity > LREAL#0.0) THEN
+            G_sysCommandedVelocity := LREAL#0.0;
+        END_IF;
+
         G_sysInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
         IF NOT bFilteredMotionEnable THEN
@@ -407,6 +449,12 @@ ELSIF G_sysCurrentState = E_SystemState#ST_TORQUE_CTRL THEN
                                       G_sysReference,
                                       stCurrentLimits.TorqueMax);
 
+        (* The master never requests torque mode; a pressurising torque is
+           zeroed above the pressure ceiling all the same. *)
+        IF G_sysPressureBlock AND (G_sysCommandedTorque > LREAL#0.0) THEN
+            G_sysCommandedTorque := LREAL#0.0;
+        END_IF;
+
         G_sysInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
 
         IF NOT bFilteredMotionEnable THEN
@@ -420,7 +468,9 @@ ELSIF G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL THEN
            command comes from the pressure loop (fbPressureCtrl) and the
            reference is the target pressure in MPa gauge. The pressure-mode
            velocity clamp and torque limit apply; a command toward an active
-           limit is zeroed, as in recovery.
+           limit is zeroed, as in recovery, and so is a pressurising command
+           above the pressure ceiling or within the end margin of the soft
+           limit.
            ---------------------------------------------------------------- *)
         IF bEnterState THEN
             G_sysConfirmedMode := E_OperatingMode#MODE_PRESSURE;
@@ -434,7 +484,9 @@ ELSIF G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL THEN
             rSchedOxygenRatio := G_sysOxygenRatio;
         END_IF;
 
-        rPressureTarget := LIMIT(LREAL#0.0, G_sysReference, G_cfgPressureTargetMax);
+        rPressureTarget := LIMIT(LREAL#0.0, G_sysReference,
+                                 MIN(G_cfgPressureTargetMax,
+                                     G_cfgPressureCeiling - G_cfgPressureCeilingHyst));
         bPressureCtrlActive := TRUE;
 
         (* fbPressureCtrl ran at the end of the previous scan. On the entry
@@ -448,6 +500,15 @@ ELSIF G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL THEN
         END_IF;
         IF bBlockPos AND (G_sysCommandedVelocity > LREAL#0.0) THEN
             G_sysCommandedVelocity := LREAL#0.0;
+        END_IF;
+
+        (* Ceiling and end stop: no pressurising command above the ceiling or
+           within G_cfgPressureEndMargin of the soft limit, so a delivery ends
+           at the end of travel without FAULT_POSITION. The integrator is held
+           at zero while the command is zeroed (no windup). *)
+        IF (G_sysPressureBlock OR G_sysAtEndOfTravel) AND (G_sysCommandedVelocity > LREAL#0.0) THEN
+            G_sysCommandedVelocity := LREAL#0.0;
+            bPressureCmdBlocked := TRUE;
         END_IF;
 
         G_sysInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
@@ -621,9 +682,19 @@ ELSIF G_sysCurrentState = E_SystemState#ST_FAULT THEN
             IF ((G_sysLastFaultCode = E_FaultCode#FAULT_LIMIT_SWITCH) OR
                 (G_sysLastFaultCode = E_FaultCode#FAULT_POSITION)) AND
                bLimitConditionActive THEN
-                (* Limit still active - enter recovery to jog off it.
-                   Drive stays energized and the brake stays released. *)
-                G_sysCurrentState := E_SystemState#ST_RECOVERY;
+                IF G_sysBrakeEngaged OR NOT G_doBrakeDisengage THEN
+                    (* The fault was latched with the brake applied (from
+                       idle, at power-up, or during activation or
+                       deactivation): re-power through the activation
+                       sequence and divert at brake release, as from
+                       ST_FAULT_IDLE. *)
+                    bRecoveryPending := TRUE;
+                    G_sysCurrentState := E_SystemState#ST_DRIVE_RESET;
+                ELSE
+                    (* Limit still active, brake released - enter recovery
+                       to jog off it. The drive stays energized. *)
+                    G_sysCurrentState := E_SystemState#ST_RECOVERY;
+                END_IF;
             ELSE
                 G_sysCurrentState := E_SystemState#ST_BRAKE_HOLD;
             END_IF;
@@ -742,6 +813,11 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
             IF bBlockPos AND (rPosTarget > G_sysActualPosition) THEN
                 rPosTarget := G_sysActualPosition;
             END_IF;
+
+            (* Block a target that would compress further; a retract target passes *)
+            IF G_sysPressureBlock AND (rPosTarget > fbPosShaper.CommandedPosition) THEN
+                rPosTarget := fbPosShaper.CommandedPosition;
+            END_IF;
         END_IF;
         (* Position-move speed from the master (HR7-8), re-read every scan so
            a change acts mid-move. 0 decelerates the command to rest at
@@ -780,6 +856,9 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_VELOCITY THEN
             G_sysCommandedVelocity := LREAL#0.0;
         END_IF;
         IF bBlockPos AND (G_sysCommandedVelocity > LREAL#0.0) THEN
+            G_sysCommandedVelocity := LREAL#0.0;
+        END_IF;
+        IF G_sysPressureBlock AND (G_sysCommandedVelocity > LREAL#0.0) THEN
             G_sysCommandedVelocity := LREAL#0.0;
         END_IF;
 
@@ -1193,7 +1272,9 @@ fbSafetyMonitor(
     InCommandedMotion := bCommandedMotion,
     InMotionWatched := bMotionWatched,
     InHoming := bInHoming,
-    InRecovery := bInRecovery,
+    (* the activation states on the way to recovery are recovery too: the
+       axis is still outside the limit *)
+    InRecovery := bInRecovery OR bRecoveryPending,
     InFault := bInFault,
     ExitGuardTriggered := fbPistonExitGuard.FaultTriggered,
     CommLost := fbCommWatchdog.Lost,
@@ -1204,9 +1285,15 @@ fbSafetyMonitor(
    Enable is bPosShaperActive (set only by a position state body that ran this
    scan), not the state itself, so the transition scan commands actual position.
    While disabled it seeds from actual, so every entry is bumpless. *)
+(* A positive command stops at once when the block engages. Pinning the
+   target alone would brake at G_cfgPosShaperAccelMax over v^2/(2*A), which in
+   a liquid-stiff chamber is many MPa. Re-seeding at actual removes the lead
+   and the rate. *)
+bPosBlockReset := G_sysPressureBlock AND bPosShaperActive AND
+                  (fbPosShaper.CommandedRate > LREAL#0.0);
 fbPosShaper(
     Enable := bPosShaperActive,
-    Reset := bEnterState AND bPosShaperActive,
+    Reset := (bEnterState AND bPosShaperActive) OR bPosBlockReset,
     Target := rPosTarget,
     ActualPosition := G_sysActualPosition,
     VelMax := rPosShaperVelMax,
@@ -1274,7 +1361,8 @@ END_IF;
 fbPressureCtrl(
     Enable := bPressureCtrlActive,
     Reset := (bEnterState AND bPressureCtrlActive) OR
-             (bPressureSchedUsed AND fbPressureSched.IntegHold),
+             (bPressureSchedUsed AND fbPressureSched.IntegHold) OR
+             bPressureCmdBlocked,
     Target := rPressureTarget,
     Actual := G_sysActualPressure,
     Kp := rPressureKp,

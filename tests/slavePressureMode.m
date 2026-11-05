@@ -77,14 +77,21 @@ h = runFor(h, 2);
 assert(abs(h.sl.ax.P - 11) <= G.G_cfgPressureInBand, 'at %.3f MPa', h.sl.ax.P);
 fprintf('ok  outflow disturbance (dip to %.3f MPa)\n', h.pMin);
 
-% A target above the configured maximum is clamped to it.
+% A target above the effective maximum, the lower of the configured
+% maximum and the pressure ceiling less its hysteresis, is clamped to it.
+% The ceiling's block never engages.
+tMax = min(G.G_cfgPressureTargetMax, ...
+    G.G_cfgPressureCeiling - G.G_cfgPressureCeilingHyst);
 h.u.reference = 20;
+h.pMax = 0;
 h = runFor(h, 0.5);
 h = runUntil(h, 20, settled);
 h = runFor(h, 2);
-assert(abs(h.sl.ax.P - G.G_cfgPressureTargetMax) <= G.G_cfgPressureInBand, 'at %.3f MPa', h.sl.ax.P);
-assert(h.sl.ax.P < 16, 'pressure beyond the transducer range');
-fprintf('ok  target clamped to %.0f MPa\n', G.G_cfgPressureTargetMax);
+assert(abs(h.sl.ax.P - tMax) <= G.G_cfgPressureInBand, 'at %.3f MPa', h.sl.ax.P);
+assert(h.pMax < G.G_cfgPressureCeiling && h.y.pressureBlock == 0, ...
+    'peak %.3f MPa, block %d', h.pMax, h.y.pressureBlock);
+fprintf('ok  target clamped to %.1f MPa (ceiling %.0f MPa not reached)\n', ...
+    tMax, G.G_cfgPressureCeiling);
 
 % Dropping MotionEnable holds, then mode 0 goes to idle with no fault.
 h.u.motionEnable = 0;

@@ -7,7 +7,7 @@
    Description:
    Connect project specific variables to the default IO variables and to
    the Modbus input registers read by the master. Only the brake output
-   (DO7) is driven; the status bits reach the master through IR5-IR8.
+   (DO7) is driven; the status bits reach the master through IR5-IR10.
 
    ============================================================================ *)
 
@@ -23,6 +23,8 @@ G_mbFaultActive := BOOL_TO_UINT(G_sysFaultActive);
 G_mbInMotion := BOOL_TO_UINT(G_sysInMotion);
 G_mbPerformanceStatus := BOOL_TO_UINT(G_sysPerformanceStatus);
 G_mbHomingComplete := BOOL_TO_UINT(G_sysHomingComplete);
+G_mbPressureBlock := BOOL_TO_UINT(G_sysPressureBlock);
+G_mbAtEndOfTravel := BOOL_TO_UINT(G_sysAtEndOfTravel);
 G_mbActualPosition := LREAL_TO_REAL(G_sysActualPosition);
 G_mbActualVelocity := LREAL_TO_REAL(G_sysActualVelocity);
 G_mbActualTorque := LREAL_TO_REAL(G_sysActualTorque);

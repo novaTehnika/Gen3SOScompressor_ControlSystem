@@ -266,7 +266,8 @@ is still active at reset (switch held or position beyond a soft limit), the rese
 routes into the recovery sub-machine instead of the normal targets above:
 
 ```
-   ST_FAULT --reset, limit still active--------------------> ST_RECOVERY
+   ST_FAULT --reset, limit still active, brake released----> ST_RECOVERY
+   ST_FAULT --reset, limit active, brake applied--> ST_DRIVE_RESET (bRecoveryPending)
    ST_FAULT_IDLE --reset, limit still active--> (DRIVE_RESET
                               -> DRIVE_ENABLE -> BRAKE_RELEASE) -> ST_RECOVERY
             (re-enable sequence; carried by bRecoveryPending)
