@@ -175,6 +175,126 @@ assert(h.out.statusCode == 3, 'position move after Go Home did not reach target'
 h = stopToIdle(h);
 fprintf('ok  go home, then position move\n');
 
+% Homing runs at the operator speed: the fast approach is capped by it.
+speedMax = h.mcfg.speedMax;
+timeout0 = h.sl.G.G_cfgHomingTimeout;
+assert(timeout0 == 90, 'G_cfgHomingTimeout reads %g, expected seconds', timeout0);
+h.in.positionSpeed = 2;
+h.sl.ax.x = 10;
+h.sl.ax.offset = 12.3;
+h.vMax = 0;
+h.sl.G.G_flagHomingComplete = false;      % set by the previous homing
+h = command(h, 1);
+h = runUntil(h, 60, @(h) h.sl.G.G_flagHomingComplete && h.out.state == 1);
+assert(h.sl.G.G_flagHomingComplete && h.out.state == 1, 'homing at 2 mm/s did not complete');
+assert(h.vMax <= 2.01 && h.vMax >= 1.95, 'homing peak %.3f mm/s at a 2 mm/s speed', h.vMax);
+assert(abs(h.sl.ax.x) < 0.05 && h.faultSeen == 0);
+h = stopToIdle(h);
+h.in.positionSpeed = speedMax;
+fprintf('ok  homing at the operator speed (peak %.2f mm/s)\n', h.vMax);
+
+% The timeout clock runs at the speed fraction: 8 s of raw timeout would
+% fault a homing that takes longer at 1 mm/s, and does fault the same
+% homing at full speed once the timeout is shorter than its travel time.
+h.sl.G.G_cfgHomingTimeout = 8;
+h.in.positionSpeed = 1;
+h.sl.ax.x = 10;
+h.sl.ax.offset = 12.3;
+t0 = h.t;
+h.sl.G.G_flagHomingComplete = false;      % set by the previous homing
+h = command(h, 1);
+h = runUntil(h, 60, @(h) h.sl.G.G_flagHomingComplete && h.out.state == 1);
+assert(h.sl.G.G_flagHomingComplete && h.out.state == 1 && h.faultSeen == 0, ...
+    'homing at 1 mm/s did not complete under a scaled timeout');
+assert(h.t - t0 > 8, 'homing took %.1f s, not longer than the raw timeout', h.t - t0);
+tSlow = h.t - t0;
+h = stopToIdle(h);
+h.sl.G.G_cfgHomingTimeout = 1;
+h.in.positionSpeed = speedMax;
+h.sl.ax.x = 10;
+h.sl.ax.offset = 12.3;
+h.sl.G.G_flagHomingComplete = false;      % set by the previous homing
+h = command(h, 1);
+h = runUntil(h, 5, @(h) h.out.statusCode == 10);
+h = runFor(h, 0.5);
+assert(h.out.statusCode == 10 && h.out.faultCode == 6, 'homing timeout: status %d, fault %d', h.out.statusCode, h.out.faultCode);
+h = command(h, 5);
+h = runFor(h, 1.5);
+assert(h.y.faultActive == 0 && h.out.state == 1);
+h.sl.G.G_cfgHomingTimeout = timeout0;
+h.faultSeen = 0;
+fprintf('ok  homing timeout counted at the speed fraction (%.1f s at 1 mm/s)\n', tSlow);
+
+% Speed 0 holds homing: the axis stops, and neither the timeout nor a fault
+% follows; the homing completes when the speed returns.
+h.in.positionSpeed = 2;
+h.sl.ax.x = 10;
+h.sl.ax.offset = 12.3;
+h.sl.G.G_flagHomingComplete = false;      % set by the previous homing
+h = command(h, 1);
+h = runUntil(h, 20, @(h) abs(h.sl.ax.v) > 1.9);
+assert(abs(h.sl.ax.v) > 1.9, 'homing did not reach 2 mm/s');
+h.sl.G.G_cfgHomingTimeout = 2;
+h.in.positionSpeed = 0;
+h = runFor(h, 3);
+assert(abs(h.sl.ax.v) < 0.01, 'homing not held at speed 0');
+assert(h.faultSeen == 0 && h.sl.G.G_sysCurrentState == E.E_SystemState.ST_HOME_LIMIT);
+assert(h.out.statusCode == 1 || h.out.statusCode == 6 || h.out.statusCode == 7);
+h.sl.G.G_cfgHomingTimeout = timeout0;
+h.in.positionSpeed = 2;
+h = runUntil(h, 60, @(h) h.sl.G.G_flagHomingComplete && h.out.state == 1);
+assert(h.sl.G.G_flagHomingComplete && h.out.state == 1 && h.faultSeen == 0, 'homing did not resume');
+assert(abs(h.sl.ax.x) < 0.05);
+h = stopToIdle(h);
+h.in.positionSpeed = speedMax;
+fprintf('ok  homing held at speed 0 and resumed\n');
+
+% Go Home runs at the operator speed, re-issues the move on a change, holds
+% with MC_Stop at speed 0 and resumes.
+h.in.targetPosition = 40;
+h = command(h, 2);
+h = runUntil(h, 40, @(h) h.out.statusCode == 3);
+assert(h.out.statusCode == 3);
+h.in.positionSpeed = 2;
+h.vMax = 0;
+h = command(h, 6);
+h = runUntil(h, 10, @(h) h.sl.ax.v < -1.9);
+assert(h.sl.ax.v < -1.9, 'Go Home did not reach 2 mm/s');
+h = runFor(h, 1);
+assert(abs(h.sl.ax.v) <= 2.01, 'Go Home speed %.3f mm/s at a 2 mm/s speed', abs(h.sl.ax.v));
+h.in.positionSpeed = 4;
+h = runUntil(h, 5, @(h) h.sl.ax.v < -3.9);
+assert(h.sl.ax.v < -3.9, 'Go Home did not take the new speed');
+h.in.positionSpeed = 0;
+h = runFor(h, h.mcfg.tGoHomeStartMax + h.mcfg.tGoHomeDone + 1);
+xHeld = h.sl.ax.x;
+assert(abs(h.sl.ax.v) < 0.01 && h.out.statusCode == 8, 'Go Home not held at speed 0');
+assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_GO_HOME && h.faultSeen == 0);
+assert(abs(xHeld - h.sl.G.G_cfgGoHomePosition) > 5, 'Go Home held at the target');
+h.in.positionSpeed = 3;
+h = runUntil(h, 30, @(h) h.out.state == 1 && h.out.statusCode == 0);
+assert(h.out.state == 1 && abs(h.sl.ax.x - h.sl.G.G_cfgGoHomePosition) < 0.1, 'Go Home did not resume to the target');
+h = stopToIdle(h);
+fprintf('ok  go home at the operator speed, held at 0 mm/s and resumed\n');
+
+% Go Home started at speed 0 does not move and does not end.
+h.in.positionSpeed = speedMax;
+h.in.targetPosition = 20;
+h = command(h, 2);
+h = runUntil(h, 40, @(h) h.out.statusCode == 3);
+h = stopToIdle(h);
+x0 = h.sl.ax.x;
+h.in.positionSpeed = 0;
+h = command(h, 6);
+h = runFor(h, h.mcfg.tGoHomeStartMax + 1);
+assert(h.out.state == 4 && h.out.statusCode == 8, 'Go Home at speed 0 ended');
+assert(abs(h.sl.ax.x - x0) < 0.05 && h.faultSeen == 0, 'x %.3f from %.3f, fault %d', h.sl.ax.x, x0, h.faultSeen);
+h.in.positionSpeed = speedMax;
+h = runUntil(h, 30, @(h) h.out.state == 1 && h.out.statusCode == 0);
+assert(h.out.state == 1 && abs(h.sl.ax.x - h.sl.G.G_cfgGoHomePosition) < 0.1, 'Go Home did not start when the speed returned');
+h = stopToIdle(h);
+fprintf('ok  go home started at speed 0 waits for the speed\n');
+
 % Stop while the slave is still starting the mode (drive reset, enable,
 % brake release): the slave must not run the mode with MotionEnable low,
 % and must take the next request.
@@ -353,3 +473,4 @@ for k = 1:round(T * 1000)
     end
 end
 end
+

@@ -8,7 +8,13 @@
    Handles Mode 101 (Go Home) which moves the axis to the home position.
 
    Behavior:
-   - Command MC_MoveAbsolute via CmdMoveAbsolute output
+   - Command MC_MoveAbsolute via CmdMoveAbsolute output at HomeVelocity
+   - HomeVelocity <= 0 holds: the move is not started, or a running one is
+     stopped with MC_Stop (StopDeceleration); a positive HomeVelocity
+     resumes the move once the stop is complete
+   - A change of HomeVelocity beyond rVelTolerance during a move re-issues
+     it: Execute is held low for one scan and raised again with the new
+     velocity
    - After reaching position: Hold there until mode change
 
    Integration:
@@ -22,7 +28,7 @@
        Enable              : BOOL                  (* Enable the function block
        Execute             : BOOL                  (* Start go home sequence
        HomePosition        : LREAL                 (* Target home position (mm)
-       HomeVelocity        : LREAL                 (* Movement velocity (mm/s)
+       HomeVelocity        : LREAL                 (* Movement velocity (mm/s); 0 holds, a change mid-move re-issues the move
        Acceleration        : LREAL                 (* Move acceleration (mm/s²)
        Deceleration        : LREAL                 (* Move deceleration (mm/s²)
        StopDeceleration    : LREAL                 (* MC_Stop deceleration on abort (mm/s²)
@@ -39,12 +45,16 @@
        eState              : INT := 0         (* State machine
        rTrigExecute        : R_TRIG
        rPosTolerance       : LREAL := 0.1     (* mm
+       rMoveVelocity       : LREAL := 0.0     (* Velocity of the move last issued (mm/s)
+       rVelTolerance       : LREAL := 0.01    (* mm/s; a larger change of HomeVelocity re-issues the move
      VAR CONSTANT:
        GOH_IDLE            : INT := 0
        GOH_MOVING          : INT := 3
        GOH_AT_POSITION     : INT := 4
        GOH_ABORTING        : INT := 5
        GOH_ERROR           : INT := 6
+       GOH_HOLDING         : INT := 7
+       GOH_RESTART         : INT := 8
    ============================================================================ *)
 
 (* ============================================================================
@@ -84,7 +94,7 @@ IF eState = GOH_IDLE THEN
         CmdMoveAbsolute.Execute := FALSE;
         CmdStop.Execute := FALSE;
 
-        IF rTrigExecute.Q OR Execute THEN
+        IF (rTrigExecute.Q OR Execute) AND (HomeVelocity > LREAL#0.0) THEN
             eState := GOH_MOVING;
         END_IF;
 
@@ -92,9 +102,15 @@ IF eState = GOH_IDLE THEN
 ELSIF eState = GOH_MOVING THEN
 
     (* GOH_MOVING - Command move to home position *)
+        (* The rising edge of Execute latches the velocity *)
+        IF NOT CmdMoveAbsolute.Execute THEN
+            rMoveVelocity := HomeVelocity;
+        END_IF;
+
+        CmdStop.Execute := FALSE;
         CmdMoveAbsolute.Execute := TRUE;
         CmdMoveAbsolute.Position := HomePosition;
-        CmdMoveAbsolute.Velocity := HomeVelocity;
+        CmdMoveAbsolute.Velocity := rMoveVelocity;
         CmdMoveAbsolute.Acceleration := Acceleration;
         CmdMoveAbsolute.Deceleration := Deceleration;
         CmdMoveAbsolute.Direction := MC_Direction#Current_Direction;
@@ -115,7 +131,43 @@ ELSIF eState = GOH_MOVING THEN
         ELSIF StaMoveAbsolute.CommandAborted THEN
             CmdMoveAbsolute.Execute := FALSE;
             eState := GOH_ABORTING;
+
+        ELSIF HomeVelocity <= LREAL#0.0 THEN
+            CmdMoveAbsolute.Execute := FALSE;
+            eState := GOH_HOLDING;
+
+        ELSIF ABS(HomeVelocity - rMoveVelocity) > rVelTolerance THEN
+            CmdMoveAbsolute.Execute := FALSE;
+            eState := GOH_RESTART;
         END_IF;
+
+
+ELSIF eState = GOH_HOLDING THEN
+
+    (* GOH_HOLDING - Speed 0: MC_Stop holds the axis; a positive speed
+       resumes the move once the stop is complete *)
+        CmdMoveAbsolute.Execute := FALSE;
+        CmdStop.Deceleration := StopDeceleration;
+        CmdStop.Execute := TRUE;
+        InMotion := StaStop.Busy;
+
+        IF StaStop.Done AND (HomeVelocity > LREAL#0.0) THEN
+            CmdStop.Execute := FALSE;
+            eState := GOH_MOVING;
+
+        ELSIF StaStop.Error THEN
+            CmdStop.Execute := FALSE;
+            eState := GOH_ERROR;
+        END_IF;
+
+
+ELSIF eState = GOH_RESTART THEN
+
+    (* GOH_RESTART - Execute stays low for this scan so that the next scan
+       raises it again with the new velocity *)
+        CmdMoveAbsolute.Execute := FALSE;
+        InMotion := TRUE;
+        eState := GOH_MOVING;
 
 
 ELSIF eState = GOH_AT_POSITION THEN

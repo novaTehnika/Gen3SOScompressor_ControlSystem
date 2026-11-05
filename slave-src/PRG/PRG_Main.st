@@ -93,7 +93,10 @@
        bLimitConditionActive : BOOL           (* Either direction blocked - a limit is currently active
        bRecoveryPending    : BOOL             (* Latched at ST_FAULT_IDLE reset; routes activation to ST_RECOVERY at brake release
        (* Position path shaper (ST_POSITION_CTRL / ST_RECOVERY_POSITION)
-       rPosShaperVelMax    : LREAL            (* Shaper speed limit (mm/s): the master's position speed clamped to [0, G_cfgVelLimitMax], set every scan by a position state body
+       rOperatorSpeed      : LREAL            (* Master's speed (HR7-8) limited to [0, G_cfgVelLimitMax] (mm/s): VelMax of the position shaper and the cap of the Go Home and homing speeds; 0 holds
+       rHomeFastCap        : LREAL            (* Homing fast-approach ceiling, MIN(G_cfgHomeLimFastApproachVel, G_cfgVelLimitMax) (mm/s)
+       rHomeSpeedFraction  : LREAL            (* rOperatorSpeed over rHomeFastCap, [0, 1]: rate of FB_HomeLimit's timeout clock; 0 holds homing
+       rPosShaperVelMax    : LREAL            (* Shaper speed limit (mm/s): rOperatorSpeed, set every scan by a position state body
        rPosTarget          : LREAL            (* Soft-limit-clamped position target from the master, input to fbPosShaper
        bPosShaperActive    : BOOL             (* Set by a position state body this scan; gates fbPosShaper.Enable
        bPosStopping        : BOOL             (* Motion enable dropped; braking under the shaper before ST_HOLD_POSITION
@@ -178,6 +181,16 @@ rTrigMotionEnable(CLK := bFilteredMotionEnable);
 
 G_sysOvertravelNegActive := NOT bFilteredOvertravelNeg;
 G_sysOvertravelPosActive := NOT bFilteredOvertravelPos;
+
+(* Operator speed (HR7-8, set by PRG_Input) and the fraction of the homing
+   fast-approach ceiling it allows. *)
+rOperatorSpeed := LIMIT(LREAL#0.0, G_sysPositionSpeed, G_cfgVelLimitMax);
+rHomeFastCap := MIN(G_cfgHomeLimFastApproachVel, G_cfgVelLimitMax);
+IF rHomeFastCap > LREAL#0.0 THEN
+    rHomeSpeedFraction := MIN(rOperatorSpeed / rHomeFastCap, LREAL#1.0);
+ELSE
+    rHomeSpeedFraction := LREAL#0.0;
+END_IF;
 
 
 (* --------------------------------------------------------------------------
@@ -362,7 +375,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_POSITION_CTRL THEN
         (* Position-move speed from the master (HR7-8), re-read every scan so
            a change acts mid-move. 0 decelerates the command to rest at
            G_cfgPosShaperAccelMax and holds. *)
-        rPosShaperVelMax := LIMIT(LREAL#0.0, G_sysPositionSpeed, G_cfgVelLimitMax);
+        rPosShaperVelMax := rOperatorSpeed;
         bPosShaperActive := TRUE;
 
         G_sysInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
@@ -742,7 +755,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_RECOVERY_POSITION THEN
         (* Position-move speed from the master (HR7-8), re-read every scan so
            a change acts mid-move. 0 decelerates the command to rest at
            G_cfgPosShaperAccelMax and holds. *)
-        rPosShaperVelMax := LIMIT(LREAL#0.0, G_sysPositionSpeed, G_cfgVelLimitMax);
+        rPosShaperVelMax := rOperatorSpeed;
         bPosShaperActive := TRUE;
 
         G_sysInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
@@ -1132,7 +1145,7 @@ fbGoHome(
     Enable := bInGoHome,
     Execute := bInGoHome,
     HomePosition := G_cfgGoHomePosition,
-    HomeVelocity := MIN(G_cfgGoHomeVelocity, G_cfgVelLimitMax),
+    HomeVelocity := MIN(rOperatorSpeed, G_cfgGoHomeVelocity),
     Acceleration := G_cfgMoveAccel,
     Deceleration := G_cfgGoHomeDecel,
     StopDeceleration := G_cfgStopDecel,
@@ -1145,14 +1158,16 @@ fbGoHome(
 fbHomeLimit(
     Enable := bInHomeLimit,
     Execute := bInHomeLimit,
-    FastApproachVelocity := MIN(G_cfgHomeLimFastApproachVel, G_cfgVelLimitMax),
+    FastApproachVelocity := MIN(rOperatorSpeed, G_cfgHomeLimFastApproachVel),
     SlowApproachVelocity := MIN(G_cfgHomeLimSlowApproachVel, G_cfgVelLimitMax),
-    BackoffVelocity := MIN(G_cfgHomeLimBackoffVel, G_cfgVelLimitMax),
+    BackoffVelocity := MIN(rOperatorSpeed, G_cfgHomeLimBackoffVel),
     RetractDist := G_cfgHomeLimRetractDist,
     Acceleration := G_cfgMoveAccel,
     Deceleration := G_cfgHomeLimDecel,
     SetPosition := G_cfgHomeLimSetPosition,
     Timeout := G_cfgHomingTimeout,
+    SpeedFraction := rHomeSpeedFraction,
+    CycleTime := G_cfgScanTime,
     OvertravelNegActive := G_sysOvertravelNegActive,
     OvertravelPosActive := G_sysOvertravelPosActive,
     Abort := NOT bFilteredMotionEnable,

@@ -48,6 +48,16 @@ the reference for each) and confirm:
         `Fault*`; three as locals).
   - [ ] `G_cfgGearRatio` and `G_cfgLeadScrewPitch` keep their values;
         only their comments changed.
+- [ ] Declarations for the operator speed in Go Home and homing (the
+      headers are the reference):
+  - [ ] `PRG_Main`: add `rOperatorSpeed`, `rHomeFastCap` and
+        `rHomeSpeedFraction` (`LREAL`).
+  - [ ] `FB_GoHome`: add `VAR` `rMoveVelocity : LREAL := 0.0` and
+        `rVelTolerance : LREAL := 0.01`, and `VAR CONSTANT`
+        `GOH_HOLDING : INT := 7` and `GOH_RESTART : INT := 8`.
+  - [ ] `FB_HomeLimit`: add `VAR_INPUT` `SpeedFraction` and `CycleTime`
+        (`LREAL`) and `VAR` `rTimeoutElapsed : LREAL` and `bHold : BOOL`;
+        remove the `TON` instance `tTimeout`.
 - [ ] Enable the cyclic task's watchdog, at the 4 ms interval. The 2 ms
       task overran for weeks (about 2.5 ms of work a scan) and ran on
       every second motion cycle with nothing reported.
@@ -86,11 +96,10 @@ Changes to `master-src/SOS_Gen3_Compressor_Interface.m`, `masterConfig.m`
 and, where the slave must follow, the protocol and the ST. Each is
 specified here; the implementation plan decides the files.
 
-- [x] One operator speed for every move (app and master half done: the
-      speed control, `cfg.speedMax`/`speedPresets`/`speedDefault`, the
-      one value in `TargetVelocity` and `PositionSpeed`; the slave-side
-      cap of Go Home and homing by HR7-8 and the speed-0 hold are
-      pending). Today jog takes the
+- [x] One operator speed for every move (the speed control,
+      `cfg.speedMax`/`speedPresets`/`speedDefault`, the one value in
+      `TargetVelocity` and `PositionSpeed`; the slave caps Go Home and
+      homing with HR7-8, and speed 0 holds them). Today jog takes the
       `JogSpeedDropDown` preset (`TargetVelocity`, limited by
       `jogVelMax`), position moves take `PositionSpeedField` (HR7-8,
       clamped by `positionSpeedMax` and `G_cfgVelLimitMax`), and Go Home
@@ -170,6 +179,17 @@ specified here; the implementation plan decides the files.
 - [ ] Relaunch the app and check the speed row (percent field, mm/s label,
       preset buttons) fits the controls panel, and that the preset
       buttons, the field and the status line ("held: speed 0") behave.
+- [ ] `MC_MoveAbsolute` re-triggered while busy with a new Velocity
+      (BufferMode aborting, as `FB_GoHome` does when the operator speed
+      changes) takes the new speed without raising `CommandAborted` on
+      itself. If `CommandAborted` is raised, `FB_GoHome` stops and
+      restarts the move, which is also safe.
+- [ ] The Toolbox `Jog` follows a changed Velocity while Forward/Reverse
+      stay TRUE (homing at a changed operator speed).
+- [ ] Go Home held at operator speed 0 stops through `MC_Stop` at
+      `G_cfgStopDecel`, and resumes at a positive speed; homing held at 0
+      stops the jog at `G_cfgHomeLimDecel`, does not start the retract,
+      and does not time out.
 - [ ] Confirm `Y_DirectControl` accepts a Velocity of 0 in PositionMode,
       which it gets when the master sets a position speed of 0.
 - [ ] Measure the protocol exchange time with the enlarged Modbus groups
