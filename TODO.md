@@ -10,15 +10,18 @@ holding registers.
 
 ## MotionWorks project
 
-The project is built from `slave-src` and runs on the controller. Left
-to confirm in it:
+The project is built from `slave-src` and runs on the controller. The
+build predates the step probe's 4096-record ring and the declarations
+below, so rebuild with them (the `.st` headers and the GVL reference are
+the reference for each) and confirm:
 
+- [ ] Rebuild with the current `FB_Probe` (the 4096-record ring, 16 s;
+      HR111-114, IR401-524) and `G_cfgProbeEnable`,
+      `G_cfgProbeFillPerScan`.
 - [ ] LD POU: delete the `MC_MoveVelocity` instance if it is still
       there (no recaptured screenshot shows it), with `G_cmdMoveVelocity`,
       `G_staMoveVelocity`, their two types and `G_sysCycleCount`.
-- [ ] Declarations this branch changed after the project was built from
-      `main`; mirror them (the `.st` headers and the GVL reference are
-      the reference for each):
+- [ ] Declarations changed after the project was built from `main`:
   - [ ] `G_cfgMoveAccel : LREAL := 5.0` replaces `G_cfgGoHomeAccel` and
         `G_cfgHomeLimAccel` (on `main` `G_cfgGoHomeAccel` reads 510.0,
         which looks like a slip for 5.0).
@@ -45,6 +48,16 @@ to confirm in it:
         `Fault*`; three as locals).
   - [ ] `G_cfgGearRatio` and `G_cfgLeadScrewPitch` keep their values;
         only their comments changed.
+- [ ] Declarations for the operator speed in Go Home and homing (the
+      headers are the reference):
+  - [ ] `PRG_Main`: add `rOperatorSpeed`, `rHomeFastCap` and
+        `rHomeSpeedFraction` (`LREAL`).
+  - [ ] `FB_GoHome`: add `VAR` `rMoveVelocity : LREAL := 0.0` and
+        `rVelTolerance : LREAL := 0.01`, and `VAR CONSTANT`
+        `GOH_HOLDING : INT := 7` and `GOH_RESTART : INT := 8`.
+  - [ ] `FB_HomeLimit`: add `VAR_INPUT` `SpeedFraction` and `CycleTime`
+        (`LREAL`) and `VAR` `rTimeoutElapsed : LREAL` and `bHold : BOOL`;
+        remove the `TON` instance `tTimeout`.
 - [ ] Enable the cyclic task's watchdog, at the 4 ms interval. The 2 ms
       task overran for weeks (about 2.5 ms of work a scan) and ran on
       every second motion cycle with nothing reported.
@@ -55,10 +68,26 @@ to confirm in it:
 
 ## Lab PC
 
+- [ ] Relaunch the operator app and check the procedure panel (it replaces
+      the old tabs): it fits the figure beside the readouts; the step
+      list, heading, instruction, checklist and the parameter fields (two
+      columns, labels on two lines) are legible; Start Procedure is
+      enabled only connected, out of manual control, idle and with the
+      slave link up; Manual Control is disabled while a procedure is
+      active or paused; Confirm, Repeat, Pause/Resume and Abort act at
+      once; a refused action (an unticked check, an out-of-range
+      parameter) shows its reason; the step list scrolls to the current
+      step (`ProcStepList` has no scroll call) and cannot be changed by
+      clicking. Walk the seed procedure on the machine: the position,
+      pressure and stop steps, the timer, the volume discharged and the
+      held pressure readouts, E-STOP and a pulled cable pausing it
+      (Resume refused until cleared), a slave fault ending it (the reset
+      dialog opens and Start begins again at step 1), Abort mid-move,
+      and Disconnect during a procedure.
 - [ ] Rerun `buildShell`. The Modbus Client Write block becomes 12
       registers (HR1-12) and the `PositionSpeed`, `SalineVolume` and
       `OxygenRatio` Constant blocks are added.
-- [ ] Relaunch the operator app and check the new "Move speed" field.
+- [ ] Relaunch the operator app and check the new speed control (percent field and presets).
       The app does not write `SalineVolume` or `OxygenRatio`; HR9-12 stay
       at the `buildShell` defaults (`masterConfig.m`: 343 mL, 1.0) until
       the app's oxygen:saline field is wired to the shell.
@@ -77,8 +106,110 @@ to confirm in it:
       link model (`slave-sim/modbusLinkConfig.m` `lostLinkErrorDelay`)
       uses the bench figure, 0; correct whichever is wrong.
 
+## Operator app features
+
+Changes to `master-src/SOS_Gen3_Compressor_Interface.m`, `masterConfig.m`
+and, where the slave must follow, the protocol and the ST. Each is
+specified here; the implementation plan decides the files.
+
+- [x] One operator speed for every move (the speed control,
+      `cfg.speedMax`/`speedPresets`/`speedDefault`, the one value in
+      `TargetVelocity` and `PositionSpeed`; the slave caps Go Home and
+      homing with HR7-8, and speed 0 holds them). Today jog takes the
+      `JogSpeedDropDown` preset (`TargetVelocity`, limited by
+      `jogVelMax`), position moves take `PositionSpeedField` (HR7-8,
+      clamped by `positionSpeedMax` and `G_cfgVelLimitMax`), and Go Home
+      and homing run at the slave's own `G_cfgGoHomeVelocity`,
+      `G_cfgHomeLimFastApproachVel` and `G_cfgHomeLimBackoffVel`. Replace
+      the drop-down and the field with one speed control: a row of
+      preset buttons plus a field for a typed value, labelled in percent
+      of the maximum (one master ceiling for jog and position moves, the
+      `jogVelMax`/`positionSpeedMax` pair collapsed to one), the mm/s
+      equivalent shown beside it. The one speed sets the jog velocity
+      and HR7-8. For Go Home and homing the slave takes HR7-8 as well:
+      `FB_GoHome`'s `HomeVelocity` and `FB_HomeLimit`'s fast approach
+      and backoff become `MIN(G_sysPositionSpeed, G_cfg...)`, so the
+      operator's speed caps them and the GVL values stay the ceilings;
+      the slow approach (`G_cfgHomeLimSlowApproachVel`, 1 mm/s, the
+      switch-detect precision) stays fixed. A speed of 0 holds position
+      moves today (`G_mbPositionSpeed` 0); decide what Go Home and homing
+      do at 0 (hold, as position moves do, is the consistent choice).
+      Update `MasterProtocolGuide.md` (HR7-8), `ConfigurationGuide.md`,
+      `HomingSequenceGuide.md`, `master-src/README.md`, the simulator and
+      `closedLoopMasterSlave`.
+- [x] Volume readout with three views, switched on the panel: swept
+      volume (bore area times the travel left to the end of travel,
+      without the dead volume: the saline still deliverable), mixing
+      volume (the swept volume plus the part of the dead volume that
+      takes part in mixing, a new `masterConfig` constant beside
+      `deadVolume`, for the in-situ ratio) and an incremental volume
+      (swept volume since the operator zeroed it, with a Zero button).
+      Today `VolumeValue` shows swept volume plus the whole dead volume
+      (`x2mL`). Keep the mL/mm scaling in `mLPerMm`.
+- [x] Flow readout: the velocity feedback dithers about zero and the
+      sign flickers (`-0.00`). Show a zero without a sign (round first,
+      then drop the sign of a zero) and consider a deadband at the
+      display resolution.
+- [x] Faster display updates. The app polls the model on a 0.2 s timer
+      (`updateTimer`, `pollModel`) through `get_param(...,
+      'RuntimeObject')` per block; the exchange runs every 50 ms. Raise
+      the rate (50 to 100 ms), measure the poll's cost on the lab PC and
+      keep the readouts from lagging the timer (coalesce reads; skip a
+      tick that overruns).
+- [ ] Non-manual mode: the operator walk-through and the machine
+      automation behind "Start Procedure". The tabs (Process
+      Parameters, Saline Purge/Fill, Oxygen Fill, Pressurize/Discharge)
+      are a checkbox stub; `StartProcedureButtonPushed` only enables
+      them. A graduate student's standard operating procedure will set
+      the steps; the backend comes first:
+  - [x] A procedure engine in the app: an ordered list of steps, each an
+        operator step (instruction, confirmed by a checkbox or a button)
+        or a machine step (one of the existing operations with its
+        target, run through `requestOp`/`trackOp`, complete on the
+        model's status), with pause, abort (stop the axis) and the
+        fault path (a fault aborts the procedure, the reset dialog
+        stays). It runs from the poll timer, never blocks it and never
+        bypasses the manual-mode interlocks (`canMove`).
+  - [x] The procedure as data separate from the engine (a list of step
+        structs from one `.m` file), seeded with the steps the tabs name
+        today, so that the SOP replaces the data and not the code.
+  - [ ] The walk-through panel: the current step, its instruction, the
+        confirm/next, pause and abort controls, and progress; it replaces
+        the tabs. Manual control and the procedure exclude each other.
+        Written (`ProcedurePanel` in the app, the stub tabs removed);
+        awaits the lab PC check (Lab PC, below).
+  - [ ] Pressurize/Discharge needs the pressure target and the volume
+        readouts (above) during delivery; `TimePressurized` and
+        `VolumeDischarged` come from the engine's timing and the
+        incremental volume. The panel shows them (`ProcTimerLabel`,
+        `ProcVolumeLabel`, `ProcPressureTargetLabel`); awaits the lab PC
+        check.
+  - [x] Testable without the lab PC: the engine's sequencing against a
+        stand-in for the model's status (as `smokeMasterStateMachine`
+        does for the state machine), under Octave as well.
+
 ## Checks on the machine
 
+- [ ] Measure the operator app's display poll on the lab PC: connect,
+      run, and read `app.PollStats` at `cfg.displayPeriod` 0.1 s and
+      0.05 s. If the mean cost exceeds 30 % of the period, add one Mux
+      "Display" block in `buildShell` and read a single RuntimeObject.
+- [ ] Measure the share of the dead volume that takes part in mixing and
+      set `cfg.mixingDeadVolume` (it defaults to the whole `deadVolume`).
+- [ ] Relaunch the app and check the speed row (percent field, mm/s label,
+      preset buttons) fits the controls panel, and that the preset
+      buttons, the field and the status line ("held: speed 0") behave.
+- [ ] `MC_MoveAbsolute` re-triggered while busy with a new Velocity
+      (BufferMode aborting, as `FB_GoHome` does when the operator speed
+      changes) takes the new speed without raising `CommandAborted` on
+      itself. If `CommandAborted` is raised, `FB_GoHome` stops and
+      restarts the move, which is also safe.
+- [ ] The Toolbox `Jog` follows a changed Velocity while Forward/Reverse
+      stay TRUE (homing at a changed operator speed).
+- [ ] Go Home held at operator speed 0 stops through `MC_Stop` at
+      `G_cfgStopDecel`, and resumes at a positive speed; homing held at 0
+      stops the jog at `G_cfgHomeLimDecel`, does not start the retract,
+      and does not time out.
 - [ ] Confirm `Y_DirectControl` accepts a Velocity of 0 in PositionMode,
       which it gets when the master sets a position speed of 0.
 - [ ] Measure the protocol exchange time with the enlarged Modbus groups

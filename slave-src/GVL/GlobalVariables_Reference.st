@@ -112,7 +112,7 @@
      G_mbMotionEnable      AT %MW3.483332 : UINT  (* HR3: 1 = MotionEnable *)
      G_mbFaultReset        AT %MW3.483334 : UINT  (* HR4: 1 = FaultReset *)
      G_mbReference         AT %MD3.483336 : REAL  (* HR5-6: reference, mm / mm/s / % by mode *)
-     G_mbPositionSpeed     AT %MD3.483340 : REAL  (* HR7-8: position-move speed, mm/s (0 holds position) *)
+     G_mbPositionSpeed     AT %MD3.483340 : REAL  (* HR7-8: operator speed, mm/s: position moves, Go Home, homing approach/backoff/retract (0 holds) *)
      G_mbSalineVolume      AT %MD3.483344 : REAL  (* HR9-10: saline volume of the fill, mL (gain schedule) *)
      G_mbOxygenRatio       AT %MD3.483348 : REAL  (* HR11-12: oxygen charge as STP volume per saline volume (gain schedule) *)
 
@@ -165,13 +165,14 @@
         ======================================================================== *)
 
      G_cfgVelLimitMax          : LREAL := 7.0         (* The one axis speed ceiling, VelMax in every mode. The mode
-                                                          speeds below (Go Home, homing, pressure) are passed through
-                                                          MIN(.., G_cfgVelLimitMax). In position mode the master sets the
-                                                          move speed (G_mbPositionSpeed), clamped to this ceiling, as
-                                                          FB_PositionPathShaper's VelMax; Y_DirectControl does no path
+                                                          speeds below (pressure) are passed through
+                                                          MIN(.., G_cfgVelLimitMax); the Go Home and homing speeds are
+                                                          MIN(operator speed, ..), the operator speed (G_mbPositionSpeed)
+                                                          being clamped to this ceiling. In position mode the operator
+                                                          speed is FB_PositionPathShaper's VelMax; Y_DirectControl does no path
                                                           shaping in PositionMode (the command reaches the drive as
                                                           given), so its Velocity input sets no limit there.
-                                                          masterConfig.jogVelMax and positionSpeed must not exceed it *)
+                                                          masterConfig.speedMax must not exceed it *)
      G_cfgStopDecel            : LREAL := 10.0        (* The one MC_Stop deceleration (mm/s^2): hold, fault,
                                                           recovery and Go Home abort *)
 
@@ -197,7 +198,7 @@
         POSITION PATH SHAPER (FB_PositionPathShaper, position modes only)
         Y_DirectControl does no path shaping in PositionMode, so the shaper
         turns the master's setpoint into a command the axis can follow: rate
-        limited to the master's position speed (clamped to G_cfgVelLimitMax),
+        limited to the operator speed (clamped to G_cfgVelLimitMax),
         accel limited to G_cfgPosShaperAccelMax, and tethered to within
         G_cfgPosShaperMaxDeviation of actual position.
         ======================================================================== *)
@@ -281,7 +282,7 @@
      G_cfgPressureSchedPistonArea    : LREAL := 3431.0     (* Piston area (mm^2), 2.602 in bore *)
      G_cfgPressureSchedEndOfTravel   : LREAL := 367.0      (* Position at the end of travel, where the chamber is down to the passages (mm) *)
      G_cfgPressureSchedPassagesVol   : LREAL := 57.0       (* Cylinder passages, chamber volume at the end of travel without the hose (mL), measured with the present fittings *)
-     G_cfgPressureSchedHoseVolume    : LREAL := 29.0       (* Hose between the cylinder head and the outlet (mL), measured; used when the hose is open *)
+     G_cfgPressureSchedHoseVol       : LREAL := 29.0       (* Hose between the cylinder head and the outlet (mL), measured; used when the hose is open *)
      G_cfgPressureSchedHoseCompl     : LREAL := 1.2E-13    (* Hose compliance beyond its liquid (m^3/Pa), a lower bound on the measured value; used when the hose is open *)
      G_cfgPressureSchedHoseOpen      : BOOL := FALSE       (* The proximal valve is open during the compression, so the hose is part of the chamber; FALSE when it opens after mixing *)
      G_cfgPressureSchedBulkModulus   : LREAL := 1.0E9      (* Saline bulk modulus (Pa), an upper bound *)
@@ -302,7 +303,7 @@
      G_cfgHoldPositionTimeout  : TIME := T#2M         (* Hold-position inactivity watchdog: if no handshake completes within this window after motion halts, gracefully shut down to idle (no fault) *)
      G_cfgBrakeEngageDelay     : TIME := T#500MS      (* Wait after brake engage command *)
      G_cfgBrakeDisengageDelay  : TIME := T#500MS      (* Wait after brake disengage command *)
-     G_cfgHomingTimeout        : TIME := T#90S        (* Overall homing sequence timeout *)
+     G_cfgHomingTimeout        : TIME := T#90S        (* Homing sequence timeout, counted at the operator speed's fraction of the fast-approach ceiling (time at full speed); stops while held *)
      G_cfgDriveReadyTimeout    : TIME := T#5S         (* Timeout waiting for drive ready *)
      G_cfgFaultIdleTimeout     : TIME := T#30S        (* Timeout in fault before going to idle *)
 
@@ -336,9 +337,9 @@
      G_cfgMoveAccel              : LREAL := 5.0       (* Acceleration of the homing and Go Home moves (mm/s²) *)
 
      (* Mode 110 - Home to Negative Overtravel Switch (two-stage approach + fixed retract) *)
-     G_cfgHomeLimFastApproachVel : LREAL := 6.0       (* Coarse approach toward switch (mm/s) *)
-     G_cfgHomeLimSlowApproachVel : LREAL := 1.0       (* Slow re-approach for precise switch detect (mm/s) *)
-     G_cfgHomeLimBackoffVel      : LREAL := 5.0       (* Inter-approach backoff AND final retract velocity (mm/s) *)
+     G_cfgHomeLimFastApproachVel : LREAL := 6.0       (* Ceiling of the coarse approach toward switch (mm/s); the operator speed (HR7-8) caps it *)
+     G_cfgHomeLimSlowApproachVel : LREAL := 1.0       (* Slow re-approach for precise switch detect (mm/s); fixed, held at operator speed 0 *)
+     G_cfgHomeLimBackoffVel      : LREAL := 5.0       (* Ceiling of the inter-approach backoff AND final retract velocity (mm/s); the operator speed (HR7-8) caps it *)
      G_cfgHomeLimRetractDist     : LREAL := 5.0       (* Retract distance from precise switch to position 0 (mm).
                                                           Switch lands at -G_cfgHomeLimRetractDist in the homed frame. *)
      G_cfgHomeLimSetPosition     : LREAL := 0.0       (* Position value at the retract endpoint (becomes coord-frame zero) *)
@@ -346,7 +347,7 @@
 
      (* Mode 101 - Go Home *)
      G_cfgGoHomePosition       : LREAL := 0.0         (* Target position for Go Home *)
-     G_cfgGoHomeVelocity       : LREAL := 6.0         (* Velocity for Go Home move *)
+     G_cfgGoHomeVelocity       : LREAL := 6.0         (* Ceiling of the Go Home velocity (mm/s); the operator speed (HR7-8) caps it *)
      G_cfgGoHomeDecel          : LREAL := 10.0         (* Deceleration for Go Home move (mm/s²) *)
 
 
@@ -415,7 +416,7 @@
      G_sysPreviousState        : E_SystemState    (* Previous state *)
      G_sysRequestedMode        : E_OperatingMode  (* Mode from master *)
      G_sysReference            : LREAL := 0.0     (* Reference from master: mm, mm/s or % by mode *)
-     G_sysPositionSpeed        : LREAL := 0.0     (* Position-move speed from master (mm/s), the shaper's speed limit once clamped to [0, G_cfgVelLimitMax] *)
+     G_sysPositionSpeed        : LREAL := 0.0     (* Operator speed from master (mm/s): position moves, Go Home, homing approach/backoff/retract (0 holds); limited to [0, G_cfgVelLimitMax] in PRG_Main *)
      G_sysSalineVolume         : LREAL := 0.0     (* Saline volume from master (mL); 0 until written *)
      G_sysOxygenRatio          : LREAL := 0.0     (* Oxygen charge per saline volume from master (STP volume ratio) *)
      G_sysScanCounter          : UINT := UINT#0   (* Incremented every scan, published in G_mbSlaveCounter *)

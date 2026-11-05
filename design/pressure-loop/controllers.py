@@ -603,7 +603,7 @@ class ScheduledSlaveControllerST(SlaveController):
         else:
             s.SalineVolume = self.saline_ml                     # [mL]
         s.PassagesVolume = c['G_cfgPressureSchedPassagesVol']
-        s.HoseVolume = c['G_cfgPressureSchedHoseVolume']
+        s.HoseVolume = c['G_cfgPressureSchedHoseVol']
         s.HoseCompliance = c['G_cfgPressureSchedHoseCompl']
         s.HoseOpen = c['G_cfgPressureSchedHoseOpen']
         s.BulkModulus = c['G_cfgPressureSchedBulkModulus']

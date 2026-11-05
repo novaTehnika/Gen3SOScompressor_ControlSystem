@@ -36,7 +36,7 @@ function [kEst, kEstTarget, lag] = charScheduleBound(P, x, pRef, target, fill, g
 Patm = g.G_cfgPressureSchedPatm;                                % [Pa]
 A = g.G_cfgPressureSchedPistonArea / 1e6;                       % [mm^2 -> m^2]
 if fill.hoseOpen
-    Vhose = g.G_cfgPressureSchedHoseVolume;                     % [mL]
+    Vhose = g.G_cfgPressureSchedHoseVol;                     % [mL]
     Chose = g.G_cfgPressureSchedHoseCompl;                 % [m^3/Pa]
 else
     Vhose = 0;

@@ -42,8 +42,8 @@ Step 1: FAST APPROACH                Step 2: FAST AWAIT
 | State: FAST_APPROACH             |  | State: FAST_AWAIT               |
 | Action: CmdJog.Reverse := TRUE   |  | Action: CmdJog.Reverse := FALSE |
 | Velocity: FastApproachVelocity   |  |  (Jog auto-decels using         |
-|   (= G_cfgHomeLimFastApproachVel)|  |   Deceleration input)           |
-|   default 6.0 mm/s               |  | Exit: StaJog.Done               |
+|   (= MIN(operator speed,         |  |   Deceleration input)           |
+|   G_cfgHomeLimFastApproachVel))  |  | Exit: StaJog.Done               |
 | Exit: OvertravelNegActive = TRUE |  +---------------------------------+
 +----------------------------------+               |
         |                                          v
@@ -54,8 +54,8 @@ Step 3: INTER BACKOFF              Step 4: INTER AWAIT
 | State: INTER_BACKOFF             |  | State: INTER_AWAIT              |
 | Action: CmdJog.Forward := TRUE   |  | Action: CmdJog.Forward := FALSE |
 | Velocity: BackoffVelocity        |  | Exit: StaJog.Done               |
-|   (= G_cfgHomeLimBackoffVel)     |  +---------------------------------+
-|   default 5.0 mm/s               |              |
+|   (= MIN(operator speed,         |  +---------------------------------+
+|   G_cfgHomeLimBackoffVel))       |              |
 | Exit: OvertravelNegActive = FALSE|              |
 +----------------------------------+              v
         |                          +---------------------------------+
@@ -66,8 +66,8 @@ Step 5: SLOW APPROACH              Step 6: SLOW AWAIT
 | State: SLOW_APPROACH             |  | State: SLOW_AWAIT               |
 | Action: CmdJog.Reverse := TRUE   |  | Action: CmdJog.Reverse := FALSE |
 | Velocity: SlowApproachVelocity   |  | Exit: StaJog.Done — axis now    |
-|   (= G_cfgHomeLimSlowApproachVel)|  |   precisely at the switch       |
-|   default 1.0 mm/s               |  +---------------------------------+
+|   (= G_cfgHomeLimSlowApproachVel,|  |   precisely at the switch       |
+|   fixed) default 1.0 mm/s        |  +---------------------------------+
 | Exit: OvertravelNegActive = TRUE |              |
 +----------------------------------+              v
         |                          +---------------------------------+
@@ -83,6 +83,8 @@ Step 7: RETRACT                    Step 8: RETRACT AWAIT
 |    at the slow-approach trip, in |              |
 |    the pre-homed frame)          |              v
 |   Velocity := BackoffVelocity    |
+|   (MIN(operator speed,           |
+|   G_cfgHomeLimBackoffVel))       |
 |   Direction := Positive          |
 | Effect: backs off the switch by  |
 |   exactly RetractDist            |
@@ -113,7 +115,10 @@ frame by `RetractDist` from the captured switch position, clear of the switch
 before `MC_SetPosition` relabels the endpoint. The positive overtravel switch,
 a `Jog`, `MC_MoveAbsolute` or `MC_SetPosition` error, or the expiry of
 `G_cfgHomingTimeout` ends the sequence in `ERROR`, which `PRG_Main` raises as
-`FAULT_LIMIT_SWITCH`.
+`FAULT_LIMIT_SWITCH`. The timeout is a clock advanced each scan by the scan time
+times the speed fraction (the operator speed over
+`MIN(G_cfgHomeLimFastApproachVel, G_cfgVelLimitMax)`, at most 1), so it is a
+time at the fast-approach ceiling.
 
 ### Coordinate Frame After Homing
 
@@ -125,9 +130,14 @@ a `Jog`, `MC_MoveAbsolute` or `MC_SetPosition` error, or the expiry of
 
 ### Timing Expectations
 
-The approach speeds are limited to `G_cfgVelLimitMax` (7.0 mm/s); the figures
-use the GVL defaults (fast 6, backoff and retract 5, slow 1 mm/s; acceleration
-5 mm/s², deceleration 50 mm/s²). The switch's hysteresis is not measured, so
+The fast approach, backoff and retract speeds are `MIN(operator speed, G_cfg..Vel)`
+and the operator speed (HR7-8) is limited to `G_cfgVelLimitMax` (7.0 mm/s); the
+figures are at full operator speed with the GVL defaults (fast 6, backoff and
+retract 5, slow 1 mm/s; acceleration 5 mm/s², deceleration 50 mm/s²). At an
+operator speed `V` below a ceiling the fast approach takes distance / `V` and the
+backoff and retract take their distance / `V` (the slow approach is fixed), in real
+time; the timeout clock advances at `V` over the fast-approach ceiling, so the
+fast approach always uses the same share of `G_cfgHomingTimeout`. The switch's hysteresis is not measured, so
 the backoff and slow-approach durations take an allowance of a couple of
 millimetres.
 
@@ -149,6 +159,20 @@ If MotionEnable (`G_mbMotionEnable`, HR3) goes LOW during homing:
    stop) if `Abort` reached it while still enabled.
 2. `ST_HOLD_POSITION` stops the axis with `MC_Stop` at `G_cfgStopDecel`.
 3. Homing must be restarted from the beginning — partial frame is not retained.
+
+### Hold at Operator Speed 0
+
+An operator speed (HR7-8) of 0 holds the sequence:
+- In `FAST_APPROACH`, `INTER_BACKOFF` and `SLOW_APPROACH` the jog direction is
+  released, so the Jog block decelerates the axis at `G_cfgHomeLimDecel` and the
+  state waits. A switch change during the deceleration is still detected, and the
+  sequence moves on to its `*_AWAIT` state.
+- `RETRACT` does not issue the `MC_MoveAbsolute` while held. The hold is in
+  `RETRACT` and not in `SLOW_AWAIT` because `StaJog.Done` is a one-scan pulse. A
+  retract that has been issued completes.
+- The timeout clock counts nothing while held, so a hold neither faults nor
+  shortens the remaining time.
+- A non-zero speed resumes the sequence from the state it holds in.
 
 ### Master Coordination
 
@@ -174,8 +198,16 @@ Move to the home position (`G_cfgGoHomePosition`). Provides convenience for retu
 ### Behavior
 
 1. Execute MC_MoveAbsolute to `G_cfgGoHomePosition` (default: 0.0 mm)
-2. Velocity: `G_cfgGoHomeVelocity`
+2. Velocity: `MIN(operator speed, G_cfgGoHomeVelocity)`; the operator speed is
+   HR7-8, limited to `G_cfgVelLimitMax`
 3. Hold at position until mode change
+
+An operator speed of 0 holds the move: it is not started, or a running move is
+stopped with `MC_Stop` at `G_cfgStopDecel` (`GOH_HOLDING`), and it resumes when
+the speed is positive again. A change of the velocity by more than 0.01 mm/s
+re-issues the move: `FB_GoHome` holds `Execute` of `MC_MoveAbsolute` low for one
+scan (`GOH_RESTART`) and raises it again with the new velocity (BufferMode
+aborting).
 
 ### Master Coordination
 
@@ -183,7 +215,8 @@ Move to the home position (`G_cfgGoHomePosition`). Provides convenience for retu
 MASTER:
 1. Command mode 101 (HR2 G_mbModeCode = 5)
 2. Wait for confirmation (IR3 G_mbConfCode = 5), then set MotionEnable HIGH (HR3 = 1)
-3. Wait for IR6 G_mbInMotion = 0
+3. Wait for IR6 G_mbInMotion = 0 (not while the operator speed is 0: a held Go
+   Home is not finished)
 4. Axis is now at home position
 ```
 
@@ -197,21 +230,21 @@ MASTER:
 
 | Parameter | Default | Units | Description |
 |-----------|---------|-------|-------------|
-| `G_cfgHomeLimFastApproachVel` | 6.0 | mm/s | Coarse approach velocity toward switch |
-| `G_cfgHomeLimSlowApproachVel` | 1.0 | mm/s | Slow re-approach velocity for precise switch detect |
-| `G_cfgHomeLimBackoffVel` | 5.0 | mm/s | Inter-approach backoff AND retract velocity |
+| `G_cfgHomeLimFastApproachVel` | 6.0 | mm/s | Ceiling of the coarse approach velocity toward switch; capped by the operator speed |
+| `G_cfgHomeLimSlowApproachVel` | 1.0 | mm/s | Slow re-approach velocity for precise switch detect; fixed |
+| `G_cfgHomeLimBackoffVel` | 5.0 | mm/s | Ceiling of the inter-approach backoff AND retract velocity; capped by the operator speed |
 | `G_cfgHomeLimRetractDist` | 5.0 | mm | Distance retracted from precise switch to position 0 |
 | `G_cfgHomeLimSetPosition` | 0.0 | mm | Position value at the retract endpoint (becomes coord-frame zero) |
 | `G_cfgMoveAccel` | 5.0 | mm/s² | Acceleration for all homing moves (shared with Go Home) |
 | `G_cfgHomeLimDecel` | 50.0 | mm/s² | Deceleration for all homing moves |
-| `G_cfgHomingTimeout` | T#90S | — | Overall FB timeout for the entire homing sequence |
+| `G_cfgHomingTimeout` | T#90S | — | Timeout of the entire homing sequence, counted at the operator speed's fraction of the fast-approach ceiling (time at full speed); stops while held |
 
 ### Mode 101 Parameters
 
 | Parameter | Default | Units | Description |
 |-----------|---------|-------|-------------|
 | `G_cfgGoHomePosition` | 0.0 | mm | Target home position |
-| `G_cfgGoHomeVelocity` | 6.0 | mm/s | Movement velocity |
+| `G_cfgGoHomeVelocity` | 6.0 | mm/s | Ceiling of the movement velocity; capped by the operator speed |
 | `G_cfgMoveAccel` | 5.0 | mm/s² | Acceleration of the move (shared with Mode 110) |
 
 ---
@@ -257,12 +290,13 @@ G_sysHomingComplete = TRUE (until MotionEnable, HR3, drops)
 - Limit switch not triggering (wiring issue)
 - Mechanical obstruction
 - Velocity too slow
+- Operator speed (HR7-8) 0: the sequence is held, not timed out (the clock stops)
 - Position wrong (switch in unexpected location)
 
 **Resolution**:
 1. Check limit switch wiring and function
 2. Verify mechanical path is clear
-3. Check homing velocity parameters
+3. Check homing velocity parameters and the operator speed
 4. Manually inspect switch position
 
 ### Position Drift After Homing
