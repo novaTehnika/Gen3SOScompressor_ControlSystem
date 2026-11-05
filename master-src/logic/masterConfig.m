@@ -23,6 +23,9 @@ cfg.displayPeriod = 0.1;            % s, the display timer period
 cfg.atmPerMPa   = 9.869;
 cfg.atmAmbient  = 1;        % atm, added to the slave's gauge reading
 cfg.pressureMax = 15;       % MPa gauge, the slave's G_cfgPressureTargetMax
+cfg.pressureCeiling     = 12.0;   % MPa gauge, the slave's G_cfgPressureCeiling: above it pressurising motion is refused (keep equal to the GVL)
+cfg.pressureCeilingHyst = 0.5;    % MPa, the slave's G_cfgPressureCeilingHyst (keep equal to the GVL)
+cfg.psiPerAtm   = 14.696;   % psi per atm, for the pressure display units
 
 % Fill description sent to the slave for its pressure gain schedule. The
 % saline volume and the charge must be at or below the true values (see
@@ -69,6 +72,7 @@ cfg.procedure        = 'sopProcedure';  % function in master-src/procedure retur
 cfg.procStatusDelay  = 0.1;  % s after a request before a status counts toward completion (> model step + exchange)
 cfg.procPressureTol  = 0.2;  % atm, default band for "settled" pressure
 cfg.procSettleTime   = 2.0;  % s inside the band for "settled", default
+cfg.procEndVolume    = 5;    % mL swept: at or below this an alsoWhen 'endOfTravel' step ends (above the slave's end margin of 1.0 mm, 3.4 mL)
 cfg.procMaxChecks    = 6;    % checklist items per step (the panel's checkbox pool)
 cfg.procMaxParams    = 8;    % parameters per procedure (the panel's field pool)
 end
