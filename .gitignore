@@ -18,3 +18,5 @@ octave-workspace
 __pycache__/
 # Test pass records and logs (tests/run_all.sh)
 .test-cache/
+# Trace recordings saved by the operator app (master-src/captures)
+master-src/captures/
