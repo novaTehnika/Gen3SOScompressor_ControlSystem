@@ -176,6 +176,42 @@ specified here; the implementation plan decides the files.
   - [x] Testable without the lab PC: the engine's sequencing against a
         stand-in for the model's status (as `smokeMasterStateMachine`
         does for the state machine), under Octave as well.
+  - [ ] From the first run of the seed procedure on the machine (manual
+        control and the readouts run smoothly; the procedure panel works
+        but the seed's content and two slave rules do not):
+    - [ ] Too many inputs at the start: keep the saline volume, the
+          oxygen ratio, the oxygen loading pressure, the discharge
+          pressure, the purge volume (swept, default 100 mL) and the
+          mixer switch; the Henry's limit and the two ratio fields go.
+    - [ ] The machine computes the oxygen fill position (the chamber
+          volume for the saline plus the charge's gas volume at the
+          loading pressure) and retracts to it before the regulator is
+          opened.
+    - [ ] Purge draws the purge volume and pushes it out to the end of
+          travel; only the final fill draws past the target and purges
+          back to it.
+    - [ ] Instructions quote the pressure in the unit the pressure
+          readout shows; a unit switch (psi, atm, MPa) shared by the
+          readout and the procedure panel.
+    - [ ] A purge as a position move through the outlet reached 170 atm:
+          the slave has no overpressure rule outside the pressure target
+          cap. Add an overpressure block (motion in the pressurising
+          direction zeroed above `G_cfgPressureCeiling`, reported in a
+          status bit, no fault); moves that push fluid through the outlet
+          run slowly or under pressure control; the engine guards each
+          step with a pressure maximum.
+    - [ ] A delivery runs to the soft limit and faults: pressure mode
+          stops a margin before `G_cfgPosSoftLimitMax` and reports the
+          end of travel; the discharge step ends on the operator's confirm
+          or the end of travel, whichever first.
+    - [ ] After `FAULT_POSITION` the reset looped back into the fault
+          until the slave was power cycled: the reset from the drive-off
+          fault state re-powers through the activation states, where the
+          position check is not suppressed (`InRecovery` is false until
+          `ST_RECOVERY`), so the slave refaults on the way. Suppress the
+          check while recovery is pending.
+    - [ ] A slave fault pauses the procedure like E-STOP; after the reset
+          the operator resumes or aborts.
 
 ## Checks on the machine
 
