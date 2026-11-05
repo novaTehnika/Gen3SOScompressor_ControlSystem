@@ -767,7 +767,7 @@ after the first opening and the release delay after the closing):
 
 | Arm | Overshoot MPa | Closing peak MPa | V_ok mL | Error mean / std MPa | Stopped | Detect / release s |
 |---|---|---|---|---|---|---|
-| GVL (fixed 2) | 0.62 | 12.15 | 29 | 0.02 / 0.07 | 0 | — |
+| GVL (fixed 2) | 0.63 | 12.15 | 29 | 0.02 / 0.07 | 0 | — |
 | fixed 0.5 | 0.44 | 10.51 | 22 | 2.07 / 0.00 | 0 | — |
 | switched | 0.44 | 12.12 | 29 | 0.02 / 0.07 | 0 | 0.76 / 0.08 |
 | fixed 2, forward stop | 0.11 | 10.54 | 279 | 0.18 / 0.27 | 19 % | — |

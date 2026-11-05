@@ -223,8 +223,10 @@ class FloorPolicy:
     def step(self, P, x, err, saturated, v_out_prev):
         """Return this scan's floor [mm/s] from the measured pressure P
         [MPa], the piston position x [mm], the error err [MPa], and the
-        block's Saturated output and velocity [mm/s] of the previous
-        scan."""
+        block's saturation flag and velocity [mm/s] of the previous
+        scan. The flag is the block's internal bSaturated, which the
+        translated block exposes; a port to the slave would make it an
+        output again."""
         self.P_hist.append(P)
         self.x_hist.append(x)
         if len(self.P_hist) > self.W + 1:
@@ -346,7 +348,7 @@ class SlaveController:
             err = tgt - P_meas * 1e-6                           # [MPa]
             # [Pa -> MPa], [m -> mm]
             fb.StopVelMin = self.floor.step(P_meas * 1e-6, x * 1e3,
-                                            err, fb.Saturated,
+                                            err, fb.bSaturated,
                                             fb.Velocity)
         self.floor_done = True
         return fb.StopVelMin
@@ -369,7 +371,7 @@ class SlaveController:
         v = min(max(fb.Velocity, -self.vel_max), self.vel_max)  # [mm/s]
         if self.floor is not None:
             # Forward stop above the target, eq. (48)
-            v = self.floor.limit_forward(v, fb.Error)
+            v = self.floor.limit_forward(v, fb.rError)
 
         # Flow feedforward, eq. (20): the piston velocity that displaces
         # the expected outflow. [m^3/s / m^2 -> m/s, * 1e3 -> mm/s]
