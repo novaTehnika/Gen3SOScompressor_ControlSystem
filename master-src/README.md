@@ -114,7 +114,11 @@ seconds, `overruns` the polls longer than `displayPeriod`).
 
 ## Operator app buttons
 
-The mode buttons are enabled only in manual control, and Start Procedure only out of manual control (see Procedure below). Home, Go Home, the two Go buttons and Jog Up/Down start their operation and,
+The mode buttons are enabled only in manual control, connected with the slave
+link up and out of E-STOP. Start Procedure is enabled only out of manual
+control, connected with the link up, out of E-STOP, with no operation active
+and the status idle; Manual Control is disabled while a procedure is active or
+paused (see Procedure below). Home, Go Home, the two Go buttons and Jog Up/Down start their operation and,
 while it runs, stop it again (the model's `RequestedMode = 0`). The app follows
 the operation through `StatusCode`: the button turns amber while the mode is
 being entered and green once its running status appears, and returns to normal
@@ -149,11 +153,24 @@ Manual control and the procedure exclude each other: the mode buttons work only
 in manual control and Start Procedure only out of it, and manual control is not
 available while a procedure is active, paused included.
 
-**Panel.** The step list (done steps marked `[x]`, the current one `>`), the
-step's heading, title and instruction, its checklist or parameter fields,
-Confirm (with the step's label), Repeat where the step has one, Pause/Resume and
-Abort, and the readouts: the procedure timer, the volume discharged, the held
-pressure target and a message line.
+**Panel.** The Procedure panel (`ProcedurePanel`, right of the readouts) holds
+the step list (display only: done steps marked `[x]`, the current one `>`), the
+step's heading, title and instruction, its checklist (a pool of
+`cfg.procMaxChecks` checkboxes) or, in a param step, its parameter fields (a
+pool of `cfg.procMaxParams` fields in two columns, editable only while the step
+waits for the operator), Confirm (with the step's label), Repeat where the step
+has one, Pause/Resume and Abort, and the readouts: the procedure timer, the
+volume discharged, the held pressure target and a message line with the engine's
+state and the reason for a pause or the last refused action. The panel only
+copies what `procView` returns. Every operator action and every poll steps the
+engine at once, so Abort sends its stop immediately; the engine's operations go
+through the app's `requestOp`/`stopOp` and the same `motionAllowed` interlock as
+the manual buttons (the model running, the slave link up and no E-STOP). The
+procedure's volume is the swept volume of the readouts, and `Disconnect`
+during a procedure is left to the engine, which pauses with "Model stopped".
+The volume-zero request also zeroes the Incr view. A procedure that does not
+validate leaves the panel empty, Start Procedure disabled and the reason on the
+status line.
 
 ### Parameters
 
@@ -188,7 +205,7 @@ fields it uses (`procNew` fills the defaults).
 | `params` | param | required | keys entered and confirmed in this step |
 | `op` | machine | required | `home`, `goHome`, `position`, `pressure` or `stop` |
 | `target` | position, pressure | required | a number, or a parameter key |
-| `unit` | position | `'mm'` | `mm` from the end of travel, or `mL` chamber volume (as `x2mL`); a pressure is atm absolute |
+| `unit` | position | `'mm'` | `mm` from the end of travel, or `mL` chamber volume (`deadVolume` plus the swept volume); a pressure is atm absolute |
 | `until` | machine, wait | by op | the completion condition (below) |
 | `keep` | position, pressure | `false` | leave the operation running as the background operation; otherwise the engine stops it once the step completes |
 | `tolerance` | settled | `cfg.procPressureTol` | atm |

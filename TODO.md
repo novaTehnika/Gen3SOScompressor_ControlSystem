@@ -58,6 +58,22 @@ the reference for each) and confirm:
 
 ## Lab PC
 
+- [ ] Relaunch the operator app and check the procedure panel (it replaces
+      the old tabs): it fits the figure beside the readouts; the step
+      list, heading, instruction, checklist and the parameter fields (two
+      columns, labels on two lines) are legible; Start Procedure is
+      enabled only connected, out of manual control, idle and with the
+      slave link up; Manual Control is disabled while a procedure is
+      active or paused; Confirm, Repeat, Pause/Resume and Abort act at
+      once; a refused action (an unticked check, an out-of-range
+      parameter) shows its reason; the step list scrolls to the current
+      step (`ProcStepList` has no scroll call) and cannot be changed by
+      clicking. Walk the seed procedure on the machine: the position,
+      pressure and stop steps, the timer, the volume discharged and the
+      held pressure readouts, E-STOP and a pulled cable pausing it
+      (Resume refused until cleared), a slave fault ending it (the reset
+      dialog opens and Start begins again at step 1), Abort mid-move,
+      and Disconnect during a procedure.
 - [ ] Rerun `buildShell`. The Modbus Client Write block becomes 12
       registers (HR1-12) and the `PositionSpeed`, `SalineVolume` and
       `OxygenRatio` Constant blocks are added.
@@ -137,7 +153,7 @@ specified here; the implementation plan decides the files.
       are a checkbox stub; `StartProcedureButtonPushed` only enables
       them. A graduate student's standard operating procedure will set
       the steps; the backend comes first:
-  - [ ] A procedure engine in the app: an ordered list of steps, each an
+  - [x] A procedure engine in the app: an ordered list of steps, each an
         operator step (instruction, confirmed by a checkbox or a button)
         or a machine step (one of the existing operations with its
         target, run through `requestOp`/`trackOp`, complete on the
@@ -145,17 +161,21 @@ specified here; the implementation plan decides the files.
         fault path (a fault aborts the procedure, the reset dialog
         stays). It runs from the poll timer, never blocks it and never
         bypasses the manual-mode interlocks (`canMove`).
-  - [ ] The procedure as data separate from the engine (a list of step
+  - [x] The procedure as data separate from the engine (a list of step
         structs from one `.m` file), seeded with the steps the tabs name
         today, so that the SOP replaces the data and not the code.
   - [ ] The walk-through panel: the current step, its instruction, the
         confirm/next, pause and abort controls, and progress; it replaces
         the tabs. Manual control and the procedure exclude each other.
+        Written (`ProcedurePanel` in the app, the stub tabs removed);
+        awaits the lab PC check (Lab PC, below).
   - [ ] Pressurize/Discharge needs the pressure target and the volume
         readouts (above) during delivery; `TimePressurized` and
         `VolumeDischarged` come from the engine's timing and the
-        incremental volume.
-  - [ ] Testable without the lab PC: the engine's sequencing against a
+        incremental volume. The panel shows them (`ProcTimerLabel`,
+        `ProcVolumeLabel`, `ProcPressureTargetLabel`); awaits the lab PC
+        check.
+  - [x] Testable without the lab PC: the engine's sequencing against a
         stand-in for the model's status (as `smokeMasterStateMachine`
         does for the state machine), under Octave as well.
 
