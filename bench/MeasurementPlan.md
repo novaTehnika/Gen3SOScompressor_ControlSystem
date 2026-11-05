@@ -203,17 +203,31 @@ no second fill is needed.
    zero and the flat segment shows; at 5 and 9 MPa it does not), the
    windup and the stiffness or its bound.
 5. **Stops under load** at 8 and 10 MPa (section 6), the probe armed for
-   every stop:
+   every stop. `charStopPath` sizes each leg and ramp from the chamber's
+   stiffness, and its default model is the 2:1 air charge of the
+   October runs (4.4 MPa/mm at 8 MPa), well under this liquid-only
+   chamber's 7 to 8 MPa/mm: planned on that model, the first leg at
+   8 MPa reaches the 11 MPa guard. Plan on the stiffest segment of
+   step 2's K ramps instead:
 
    ```matlab
+   kMax = max([rk1.segments.dPdx]);                  % MPa/mm, the stiffest K300 segment
    opts.probe = 'stops';
    [stopPath, plan] = charStopPath(struct('levels_MPa', [8 10], 'speeds', [0.25 0.5], ...
-       'budget_MPa', [2 0.7], 'rampOvershoot_MPa', 0.2, 'minRun_mm', 0.03, ...
-       'minSteady_s', 0, 'pause_s', 3, 'P_start_MPa', 7));
+       'budget_MPa', [2 0.7], 'rampOvershoot_MPa', 0.2, 'minRun_mm', 0.02, ...
+       'minSteady_s', 0, 'pause_s', 3, 'P_start_MPa', 7, 'stiffness', @(P) kMax));
    r = charRun('stops_hp', stopPath, opts);
    rs = charStopDistance([r.capFiles {r.file}]);
    rr = frictionFit({}, r.file, struct('settle', 0.15, 'trim', 0.05, 'accel', 1e4));
    ```
+
+   The plan's first line must not say `charge 2:1`, and its `k MPa/mm`
+   column must read `kMax`. At 10 MPa the 0.7 MPa budget leaves the
+   0.25 mm/s leg 0.035 to 0.015 mm after its stop allowance for 7 to
+   9 MPa/mm, hence
+   `minRun_mm` 0.02; if the plan still skips it, the 10 MPa level gives
+   no stops and the 8 MPa level carries the fit. Start the run with the
+   chamber below 8 MPa: the first ramp is the one that ends at the level.
 
    `rs.T0_s` and `rs.D_mm_s2` set the slave's allowance; `rr` gives
    `mu` and the loaded Coulomb term against session 0's unloaded one.
