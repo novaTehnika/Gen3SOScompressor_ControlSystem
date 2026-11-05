@@ -38,6 +38,7 @@ design/pressure-loop/test_linear.py
 tests/modbusLinkTiming.m
 tests/masterReadouts.m
 tests/smokeMasterStateMachine.m
+tests/smokeProcedureEngine.m
 "
 CACHE=.test-cache
 

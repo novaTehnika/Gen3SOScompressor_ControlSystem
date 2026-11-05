@@ -41,54 +41,22 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         ManualControlButton            matlab.ui.control.StateButton
         StartProcedureButton            matlab.ui.control.Button
         ConnectToCompressorButton       matlab.ui.control.Button
-        TabGroup                        matlab.ui.container.TabGroup
-        ProcessParametersTab            matlab.ui.container.Tab
-        ParameterField2                 matlab.ui.control.NumericEditField
-        ParameterField3Label_2          matlab.ui.control.Label
-        OxygenSalineRatioPanel          matlab.ui.container.Panel
-        EditField                       matlab.ui.control.NumericEditField
-        EditFieldLabel                  matlab.ui.control.Label
-        OxygenSalineMassRatioEditField  matlab.ui.control.NumericEditField
-        EditField2Label                 matlab.ui.control.Label
-        HenrysLimitEditField            matlab.ui.control.NumericEditField
-        HenrysLimitEditFieldLabel       matlab.ui.control.Label
-        ParameterField3                 matlab.ui.control.NumericEditField
-        ParameterField3Label            matlab.ui.control.Label
-        ParameterField1                 matlab.ui.control.NumericEditField
-        ParameterField1Label            matlab.ui.control.Label
-        SalinePurgeFillTab              matlab.ui.container.Tab
-        SalineButton2                   matlab.ui.control.Button
-        SalineCheckBox7                 matlab.ui.control.CheckBox
-        SalineCheckBox6                 matlab.ui.control.CheckBox
-        SalineButton1                   matlab.ui.control.Button
-        SalineButton4                   matlab.ui.control.Button
-        SalineButton3                   matlab.ui.control.Button
-        SalineCheckBox2                 matlab.ui.control.CheckBox
-        SalineCheckBox1                 matlab.ui.control.CheckBox
-        SalineCheckBox5                 matlab.ui.control.CheckBox
-        SalineCheckBox4                 matlab.ui.control.CheckBox
-        SalineCheckBox3                 matlab.ui.control.CheckBox
-        OxygenFillTab                   matlab.ui.container.Tab
-        ContinueButton                  matlab.ui.control.Button
-        CheckBox_2                      matlab.ui.control.CheckBox
-        ClosetheoxygeninletCheckBox     matlab.ui.control.CheckBox
-        OpentheoxCheckBox               matlab.ui.control.CheckBox
-        FillOxygenButton                matlab.ui.control.Button
-        CheckBox                        matlab.ui.control.CheckBox
-        OpentheoxygeninletandCheckBox   matlab.ui.control.CheckBox
-        CloseallvalvesCheckBox          matlab.ui.control.CheckBox
-        PressurizeDischargeTab          matlab.ui.container.Tab
-        UseMixerCheckBox                matlab.ui.control.CheckBox
-        VolumeDischargedmLPanel         matlab.ui.container.Panel
-        mLLabel                         matlab.ui.control.Label
-        OpenthevalveattheneedleLabel    matlab.ui.control.Label
-        Label_2                         matlab.ui.control.Label
-        OpenthemainchambervalveLabel    matlab.ui.control.Label
-        TodischargeLabel                matlab.ui.control.Label
-        TimePressurizedPanel            matlab.ui.container.Panel
-        Label                           matlab.ui.control.Label
-        PressurizeButton                matlab.ui.control.Button
-        CheckBox_3                      matlab.ui.control.CheckBox
+        ProcedurePanel                  matlab.ui.container.Panel
+        ProcStepList                    matlab.ui.control.ListBox
+        ProcHeadingLabel                matlab.ui.control.Label
+        ProcTitleLabel                  matlab.ui.control.Label
+        ProcTextArea                    matlab.ui.control.TextArea
+        ProcChecks                      matlab.ui.control.CheckBox
+        ProcParamLabels                 matlab.ui.control.Label
+        ProcParamFields                 matlab.ui.control.NumericEditField
+        ProcConfirmButton               matlab.ui.control.Button
+        ProcRepeatButton                matlab.ui.control.Button
+        ProcPauseButton                 matlab.ui.control.Button
+        ProcAbortButton                 matlab.ui.control.Button
+        ProcTimerLabel                  matlab.ui.control.Label
+        ProcVolumeLabel                 matlab.ui.control.Label
+        ProcPressureTargetLabel         matlab.ui.control.Label
+        ProcMessageLabel                matlab.ui.control.Label
     end
 
 
@@ -127,6 +95,17 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         activeTarget = NaN      % position or pressure sent with activeOp
         opConfirmed = false     % the model has reported activeOp running
         opSentAt = uint64(0)    % tic of the last request
+
+        % Procedure (non-manual mode): the engine state, the normalized
+        % definition it runs, the inputs of the last poll (for steps taken
+        % from a callback), the tic of the last step and the text of the
+        % last refused operator action.
+        procDef = []
+        proc = []
+        procIn = struct('connected', false, 'statusCode', 0, 'faultCode', 0, ...
+            'estop', false, 'pressure', 0, 'volume', 0)
+        procTick = []
+        procNote = ''
     end
 
     properties (Access = private, Constant)
@@ -139,16 +118,10 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         OP_RESET    = 5
         OP_GO_HOME  = 6
 
-        STATUS_STARTING  = 7
-        STATUS_STOPPING  = 6
         STATUS_FAULT     = 10     % FaultCode block holds the code
         STATUS_ESTOP     = 20
         STATUS_LINK_LOST = 34
         STATUS_LINK_WAIT = 35
-
-        % Time the model gets to act on a request before a status that
-        % does not show it running ends it
-        CONFIRM_WAIT = 0.5
 
         COLOR_IDLE     = [0.96 0.96 0.96]
         COLOR_STARTING = [1 0.8 0.3]
@@ -285,36 +258,25 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.opConfirmed = false;
         end
 
-        % Status codes that show op running
-        function codes = runningStatus(app, op)
-            switch op
-                case app.OP_HOME,     codes = 1;
-                case app.OP_GO_HOME,  codes = 8;
-                case app.OP_POSITION, codes = [2 3];
-                case app.OP_JOG,      codes = 4;
-                case app.OP_PRESSURE, codes = 5;
-                otherwise,            codes = [];
-            end
-        end
-
-        % Follow the active operation through the model's status. It is
-        % confirmed once its running status appears and ends when that
-        % status goes. Before confirmation, starting and stopping (a
-        % switch from another operation) are waited out and any other
-        % status ends it once the model has had time to act.
+% Follow the active operation through the model's status with the
+        % rule the procedure engine shares (opTrack): confirmed once its
+        % running status appears, ended when that status goes.
         function trackOp(app, statusCode)
             if app.activeOp == app.OP_STOP
                 return
             end
-            if any(statusCode == runningStatus(app, app.activeOp))
-                app.opConfirmed = true;
-            elseif app.opConfirmed
-                clearOp(app);
-            elseif statusCode ~= app.STATUS_STARTING && ...
-                    statusCode ~= app.STATUS_STOPPING && ...
-                    toc(app.opSentAt) >= app.CONFIRM_WAIT
+            [app.opConfirmed, ended] = opTrack(app.activeOp, app.opConfirmed, ...
+                statusCode, toc(app.opSentAt), app.cfg);
+            if ended
                 clearOp(app);
             end
+        end
+
+        % The model is running, the slave link is up and E-STOP is not
+        % requested or active: motion may be commanded.
+        function tf = motionAllowed(app)
+            tf = isRunning(app) && app.linkReady && ~app.ESTOP.Value && ...
+                ~app.estopActive;
         end
 
         % Mode button look: background shows the operation's state (idle,
@@ -342,9 +304,17 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
 
             % Mode buttons act only in manual control, connected with the
-            % slave link up and out of E-STOP.
-            canMove = app.ManualControlButton.Value && connected && ...
-                app.linkReady && ~app.ESTOP.Value && ~app.estopActive;
+            % slave link up and out of E-STOP. Manual control and the
+            % procedure exclude each other: manual control is not available
+            % while a procedure is active (paused included), and the
+            % procedure starts only out of manual control, idle.
+            canMove = app.ManualControlButton.Value && motionAllowed(app);
+            procActive = ~isempty(app.proc) && procView(app.proc).active;
+            app.ManualControlButton.Enable = ~procActive;
+            app.StartProcedureButton.Enable = ~isempty(app.proc) && ...
+                ~app.ManualControlButton.Value && motionAllowed(app) && ...
+                ~procActive && app.activeOp == app.OP_STOP && ...
+                app.lastStatusCode == 0;
             buttons = {app.HomeButton, app.GoHomeButton, app.PositionGoButton, ...
                 app.PressureGoButton, app.JogUpButton, app.JogDownButton};
             for k = 1:numel(buttons)
@@ -431,6 +401,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 app.linkReady = false;
                 app.rto = struct();
                 clearOp(app);
+                app.procIn.connected = false;
+                stepProcedure(app);
                 updateButtons(app);
                 return
             end
@@ -442,7 +414,6 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.linkReady = statusCode ~= app.STATUS_LINK_LOST && ...
                 statusCode ~= app.STATUS_LINK_WAIT;
             trackOp(app, statusCode);
-            updateButtons(app);
             app.lastPosition = d.position;
             refreshVolume(app);
             setText(app, app.PressureValue, readoutText(d.pressure, 2, 0));
@@ -464,6 +435,16 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
 
             setText(app, app.StatusLabel, statusText(app, statusCode, d.faultCode));
+
+            % The procedure engine takes the same reads as the readouts. The
+            % buttons follow its state, so they are refreshed after it.
+            app.procIn = struct('connected', true, 'statusCode', statusCode, ...
+                'faultCode', d.faultCode, ...
+                'estop', app.ESTOP.Value || app.estopActive, ...
+                'pressure', d.pressure, ...
+                'volume', sweptVolume(d.position, app.cfg));
+            stepProcedure(app);
+            updateButtons(app);
 
             % Ask the operator before resetting a fault. The dialog opens
             % when a fault is first latched and again after a failed reset.
@@ -500,6 +481,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 addpath(fullfile(here, "logic"));
             end
             app.cfg = masterConfig();
+            if exist(app.cfg.procedure, "file") ~= 2
+                addpath(fullfile(here, "procedure"));
+            end
 
             % Manual targets are distances from the end of travel, within
             % the master's soft limits and not past the end of travel. The
@@ -532,6 +516,78 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                     p, speedFromPercent(p, app.cfg))};
             end
             setSpeedPercent(app, app.cfg.speedDefault);
+
+            createProcPools(app);
+            loadProcedure(app);
+        end
+
+        % The procedure panel's checkbox and parameter-field pools, sized
+        % by the configuration. Each callback finds its index in UserData.
+        function createProcPools(app)
+            panel = app.ProcedurePanel;
+            nChecks = app.cfg.procMaxChecks;
+            app.ProcChecks = matlab.ui.control.CheckBox.empty;
+            for k = 1:nChecks
+                c = uicheckbox(panel);
+                c.ValueChangedFcn = createCallbackFcn(app, @ProcCheckChanged, true);
+                c.Text = '';
+                c.UserData = k;
+                c.Visible = 'off';
+                c.Position = [214, 160 - 21 * (k - 1), 454, 20];
+                app.ProcChecks(k) = c;
+            end
+
+            % Two columns of parameters; each label wraps onto two lines.
+            nParams = app.cfg.procMaxParams;
+            rows = ceil(nParams / 2);
+            pitch = min(32, floor(128 / rows));
+            app.ProcParamLabels = matlab.ui.control.Label.empty;
+            app.ProcParamFields = matlab.ui.control.NumericEditField.empty;
+            for k = 1:nParams
+                col = ceil(k / rows) - 1;
+                row = mod(k - 1, rows);
+                x = 214 + col * 228;
+                y = 150 - pitch * row;
+                l = uilabel(panel);
+                l.HorizontalAlignment = 'right';
+                l.WordWrap = 'on';
+                l.FontSize = 10;
+                l.Text = '';
+                l.Visible = 'off';
+                l.Position = [x, y, 150, 28];
+                app.ProcParamLabels(k) = l;
+                e = uieditfield(panel, 'numeric');
+                e.ValueChangedFcn = createCallbackFcn(app, @ProcParamChanged, true);
+                e.UserData = k;
+                e.Visible = 'off';
+                e.Position = [x + 154, y + 3, 66, 22];
+                app.ProcParamFields(k) = e;
+            end
+        end
+
+        % Read the procedure and build the engine state. A procedure that
+        % does not validate leaves the panel empty and Start disabled.
+        function loadProcedure(app)
+            try
+                p = procNew(feval(app.cfg.procedure), app.cfg);
+            catch ME
+                app.proc = [];
+                app.procDef = [];
+                app.ProcMessageLabel.Text = ['Procedure not loaded: ' ME.message];
+                app.StatusLabel.Text = append("Procedure not loaded: ", ME.message);
+                return
+            end
+            app.procDef = p.def;
+            app.proc = p;
+            for k = 1:numel(app.ProcParamFields)
+                if k <= numel(p.def.params)
+                    try
+                        app.ProcParamFields(k).ValueDisplayFormat = p.def.params(k).format;
+                    catch
+                    end
+                end
+            end
+            renderProcedure(app);
         end
 
         % Set the operator speed (percent of cfg.speedMax). While the
@@ -637,13 +693,6 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
         end
 
-        function salineTabEnableChecks(app)
-            allChecked = app.SalineCheckBox1.Value && app.SalineCheckBox2.Value && ...
-                app.SalineCheckBox3.Value && app.SalineCheckBox4.Value && ...
-                app.SalineCheckBox5.Value;
-            app.SalineButton1.Enable = allChecked;
-        end
-
         % Jog in direction, or stop if already jogging that way. The other
         % direction reverses a running jog without leaving the mode.
         function toggleJog(app, direction)
@@ -657,6 +706,193 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 app.activeJogDir = direction;
             end
             updateButtons(app);
+        end
+
+        % One operator action on the procedure engine. A refused action
+        % leaves the engine as it was and its reason on the panel until the
+        % next accepted action. The engine then steps at once, so an abort
+        % sends its stop now and not at the next poll.
+        function procAct(app, varargin)
+            if isempty(app.proc)
+                return
+            end
+            [app.proc, ok, msg] = procAction(app.proc, varargin{:});
+            if ok
+                app.procNote = '';
+            else
+                app.procNote = msg;
+            end
+            stepProcedure(app);
+            updateButtons(app);
+        end
+
+        % Advance the procedure engine with the inputs of the last poll and
+        % carry out what it asks for. It never blocks: no pause, drawnow or
+        % modal dialog.
+        function stepProcedure(app)
+            if isempty(app.proc)
+                return
+            end
+            if isempty(app.procTick)
+                dt = 0;
+            else
+                dt = toc(app.procTick);
+            end
+            app.procTick = tic;
+            [app.proc, req] = procStep(app.proc, app.procIn, dt);
+            executeProcRequest(app, req);
+            renderProcedure(app);
+        end
+
+        % Turn the engine's requests into commands, in the engine's order:
+        % parameters, mixer, stop, operation, volume zero. The operation
+        % goes through the same interlock as the manual buttons; when it
+        % is not allowed nothing is sent and the engine sees the cause on
+        % its next poll.
+        function executeProcRequest(app, req)
+            if ~isempty(req.params) && isRunning(app)
+                names = fieldnames(req.params);
+                for k = 1:numel(names)
+                    setBlock(app, names{k}, req.params.(names{k}));
+                end
+            end
+            if req.mixer >= 0
+                app.MixerButton.Value = req.mixer == 1;
+                if isRunning(app)
+                    setBlock(app, "Mixer", req.mixer);
+                end
+            end
+            if req.stop
+                if isRunning(app)
+                    stopOp(app);
+                else
+                    clearOp(app);
+                end
+            end
+            if req.op >= 0 && motionAllowed(app) && ~app.ManualControlButton.Value
+                switch req.op
+                    case app.OP_POSITION
+                        if strcmp(req.unit, 'mL')
+                            % Chamber volume: the dead volume plus the swept
+                            % volume, which is the bore area times the
+                            % travel left to the end of travel.
+                            x = app.cfg.posEOT - ...
+                                (req.target - app.cfg.deadVolume) / mLPerMm(app.cfg);
+                        else
+                            x = app.cfg.posEOT - req.target;
+                        end
+                        x = min(max(x, app.cfg.posMin), app.cfg.posMax);
+                        setBlock(app, "TargetPosition", x);
+                        setBlock(app, "PositionSpeed", speedMmPerS(app));
+                        if requestOp(app, app.OP_POSITION)
+                            app.activeTarget = app.cfg.posEOT - x;
+                        end
+                    case app.OP_PRESSURE
+                        setBlock(app, "TargetPressure", req.target);
+                        if requestOp(app, app.OP_PRESSURE)
+                            app.activeTarget = req.target;
+                        end
+                    case app.OP_HOME
+                        % Re-homing changes the position frame, so the zero
+                        % of the incremental volume no longer holds.
+                        if requestOp(app, app.OP_HOME)
+                            app.volumeZeroPosition = NaN;
+                            refreshVolume(app);
+                        end
+                    case app.OP_GO_HOME
+                        requestOp(app, app.OP_GO_HOME);
+                end
+                updateButtons(app);
+            end
+            if req.zeroVolume
+                zeroVolume(app);
+            end
+        end
+
+        % Copy what procView says into the panel's components. A property
+        % is written only when it changed, which saves redraws.
+        function renderProcedure(app)
+            if isempty(app.proc)
+                return
+            end
+            v = procView(app.proc);
+            def = app.procDef;
+
+            items = v.list(:)';
+            if ~isequal(app.ProcStepList.Items, items)
+                app.ProcStepList.Items = items;
+                app.ProcStepList.ItemsData = 1:numel(items);
+            end
+            if isempty(app.ProcStepList.Value) || app.ProcStepList.Value ~= v.listIndex
+                app.ProcStepList.Value = v.listIndex;
+            end
+            setText(app, app.ProcHeadingLabel, v.heading);
+            setText(app, app.ProcTitleLabel, v.title);
+            if ~isequal(app.ProcTextArea.Value, {v.text})
+                app.ProcTextArea.Value = {v.text};
+            end
+
+            for k = 1:numel(app.ProcChecks)
+                box = app.ProcChecks(k);
+                if k <= numel(v.checks.labels)
+                    setText(app, box, v.checks.labels{k});
+                    box.Value = v.checks.values(k);
+                    box.Enable = v.checks.enable;
+                    box.Visible = true;
+                else
+                    box.Visible = false;
+                end
+            end
+
+            % The parameters show during a param step, editable only while
+            % it waits for the operator.
+            showParams = false;
+            if v.active && app.proc.k >= 1
+                showParams = strcmp(def.steps(app.proc.k).type, 'param');
+            end
+            for k = 1:numel(app.ProcParamFields)
+                if k <= numel(v.params.keys)
+                    setText(app, app.ProcParamLabels(k), v.params.labels{k});
+                    if app.ProcParamFields(k).Value ~= v.params.values(k)
+                        app.ProcParamFields(k).Value = v.params.values(k);
+                    end
+                    app.ProcParamFields(k).Enable = v.params.editable(k);
+                    app.ProcParamLabels(k).Enable = v.params.editable(k);
+                    app.ProcParamFields(k).Visible = showParams;
+                    app.ProcParamLabels(k).Visible = showParams;
+                else
+                    app.ProcParamFields(k).Visible = false;
+                    app.ProcParamLabels(k).Visible = false;
+                end
+            end
+
+            app.ProcConfirmButton.Visible = v.confirm.visible;
+            app.ProcConfirmButton.Enable = v.confirm.enable;
+            setText(app, app.ProcConfirmButton, v.confirm.label);
+            app.ProcRepeatButton.Visible = v.repeat.visible;
+            setText(app, app.ProcRepeatButton, v.repeat.label);
+            app.ProcPauseButton.Enable = v.pause.enable;
+            setText(app, app.ProcPauseButton, v.pause.label);
+            app.ProcAbortButton.Enable = v.abortEnable;
+
+            setText(app, app.ProcTimerLabel, [def.timerLabel ': ' v.timerText]);
+            setText(app, app.ProcVolumeLabel, [def.volumeLabel ': ' v.volumeText]);
+            if isnan(v.pressureTarget)
+                setText(app, app.ProcPressureTargetLabel, 'Held pressure: --');
+            else
+                setText(app, app.ProcPressureTargetLabel, ...
+                    sprintf('Held pressure: %.2f atm', v.pressureTarget));
+            end
+            text = v.stateText;
+            note = v.message;
+            if ~isempty(app.procNote)
+                note = app.procNote;
+            end
+            if ~isempty(note)
+                text = [text '. ' note];
+            end
+            setText(app, app.ProcMessageLabel, text);
+            app.ProcMessageLabel.Tooltip = {text};
         end
     end
 
@@ -781,20 +1017,55 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         % Button pushed function: StartProcedureButton
         function StartProcedureButtonPushed(app, event)
-            % Disable the parameter fields
-            app.ParameterField1.Enable = false;
-            app.ParameterField1Label.Enable = false;
-            app.ParameterField2.Enable = false;
-            app.ParameterField3Label_2.Enable = false;
-            app.ParameterField3.Enable = false;
-            app.ParameterField3Label.Enable = false;
+            if isempty(app.procDef)
+                return
+            end
+            % A fresh run; the parameter values entered before are kept.
+            app.proc = procNew(app.procDef, app.cfg, app.proc.values);
+            app.procNote = '';
+            procAct(app, 'start');
+        end
 
-            % Enable the checkboxes in the saline fill tab
-            app.SalineCheckBox1.Enable = true;
-            app.SalineCheckBox2.Enable = true;
-            app.SalineCheckBox3.Enable = true;
-            app.SalineCheckBox4.Enable = true;
-            app.SalineCheckBox5.Enable = true;
+        % Button pushed function: ProcConfirmButton
+        function ProcConfirmButtonPushed(app, event)
+            procAct(app, 'confirm');
+        end
+
+        % Button pushed function: ProcRepeatButton
+        function ProcRepeatButtonPushed(app, event)
+            procAct(app, 'repeat');
+        end
+
+        % Button pushed function: ProcPauseButton
+        function ProcPauseButtonPushed(app, event)
+            if strcmp(app.proc.state, 'paused')
+                procAct(app, 'resume');
+            else
+                procAct(app, 'pause');
+            end
+        end
+
+        % Button pushed function: ProcAbortButton
+        % No confirmation: stopping is never delayed.
+        function ProcAbortButtonPushed(app, event)
+            procAct(app, 'abort');
+        end
+
+        % Value changed function: ProcChecks
+        function ProcCheckChanged(app, event)
+            procAct(app, 'check', event.Source.UserData, event.Source.Value);
+        end
+
+        % Value changed function: ProcParamFields
+        function ProcParamChanged(app, event)
+            key = app.procDef.params(event.Source.UserData).key;
+            procAct(app, 'setParam', key, event.Source.Value);
+        end
+
+        % Value changed function: ProcStepList
+        % The list only shows the procedure: put the selection back.
+        function ProcStepListChanged(app, event)
+            renderProcedure(app);
         end
 
         % Button pushed function: PositionGoButton
@@ -962,271 +1233,77 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.UIFigure.Name = 'SOS Gen3 Compressor';
             app.UIFigure.CloseRequestFcn = createCallbackFcn(app, @UIFigureCloseRequest, true);
 
-            % Create TabGroup
-            app.TabGroup = uitabgroup(app.UIFigure);
-            app.TabGroup.Position = [524 115 484 318];
+            % Create ProcedurePanel: the walk-through of the procedure, in the
+            % place of the old tabs. The checkbox and parameter pools are
+            % created in applyConfig, sized by the configuration.
+            app.ProcedurePanel = uipanel(app.UIFigure);
+            app.ProcedurePanel.Title = 'Procedure';
+            app.ProcedurePanel.FontWeight = 'bold';
+            app.ProcedurePanel.Position = [524 120 676 308];
 
-            % Create ProcessParametersTab
-            app.ProcessParametersTab = uitab(app.TabGroup);
-            app.ProcessParametersTab.Title = 'Process Parameters';
+            app.ProcStepList = uilistbox(app.ProcedurePanel);
+            app.ProcStepList.ValueChangedFcn = createCallbackFcn(app, @ProcStepListChanged, true);
+            app.ProcStepList.FontSize = 10;
+            app.ProcStepList.Position = [8 84 196 190];
 
-            % Create ParameterField1Label
-            app.ParameterField1Label = uilabel(app.ProcessParametersTab);
-            app.ParameterField1Label.HorizontalAlignment = 'right';
-            app.ParameterField1Label.Position = [10 261 148 22];
-            app.ParameterField1Label.Text = 'Total Solution Volume (mL)';
+            app.ProcTimerLabel = uilabel(app.ProcedurePanel);
+            app.ProcTimerLabel.FontSize = 10;
+            app.ProcTimerLabel.Position = [8 56 196 22];
+            app.ProcTimerLabel.Text = '--';
 
-            % Create ParameterField1
-            app.ParameterField1 = uieditfield(app.ProcessParametersTab, 'numeric');
-            app.ParameterField1.Position = [201 261 100 22];
+            app.ProcVolumeLabel = uilabel(app.ProcedurePanel);
+            app.ProcVolumeLabel.FontSize = 10;
+            app.ProcVolumeLabel.Position = [8 32 196 22];
+            app.ProcVolumeLabel.Text = '--';
 
-            % Create ParameterField3Label
-            app.ParameterField3Label = uilabel(app.ProcessParametersTab);
-            app.ParameterField3Label.HorizontalAlignment = 'right';
-            app.ParameterField3Label.Position = [10 228 170 22];
-            app.ParameterField3Label.Text = 'Oxygen Loading Pressure (psi)';
+            app.ProcPressureTargetLabel = uilabel(app.ProcedurePanel);
+            app.ProcPressureTargetLabel.FontSize = 10;
+            app.ProcPressureTargetLabel.Position = [8 8 196 22];
+            app.ProcPressureTargetLabel.Text = 'Held pressure: --';
 
-            % Create ParameterField3
-            app.ParameterField3 = uieditfield(app.ProcessParametersTab, 'numeric');
-            app.ParameterField3.Position = [201 228 100 22];
+            app.ProcHeadingLabel = uilabel(app.ProcedurePanel);
+            app.ProcHeadingLabel.FontWeight = 'bold';
+            app.ProcHeadingLabel.FontSize = 12;
+            app.ProcHeadingLabel.Position = [214 252 454 22];
+            app.ProcHeadingLabel.Text = '';
 
-            % Create OxygenSalineRatioPanel
-            app.OxygenSalineRatioPanel = uipanel(app.ProcessParametersTab);
-            app.OxygenSalineRatioPanel.Title = 'Oxygen-Saline Ratio';
-            app.OxygenSalineRatioPanel.BackgroundColor = [0.8784 0.9922 1];
-            app.OxygenSalineRatioPanel.Position = [10 59 403 122];
+            app.ProcTitleLabel = uilabel(app.ProcedurePanel);
+            app.ProcTitleLabel.FontSize = 12;
+            app.ProcTitleLabel.Position = [214 230 454 22];
+            app.ProcTitleLabel.Text = '';
 
-            % Create HenrysLimitEditFieldLabel
-            app.HenrysLimitEditFieldLabel = uilabel(app.OxygenSalineRatioPanel);
-            app.HenrysLimitEditFieldLabel.HorizontalAlignment = 'right';
-            app.HenrysLimitEditFieldLabel.Position = [5 74 216 22];
-            app.HenrysLimitEditFieldLabel.Text = '% Henry''s Limit (at discharge pressure)';
+            app.ProcTextArea = uitextarea(app.ProcedurePanel);
+            app.ProcTextArea.Editable = 'off';
+            app.ProcTextArea.Position = [214 184 454 44];
 
-            % Create HenrysLimitEditField
-            app.HenrysLimitEditField = uieditfield(app.OxygenSalineRatioPanel, 'numeric');
-            app.HenrysLimitEditField.Position = [290 73 100 22];
+            app.ProcMessageLabel = uilabel(app.ProcedurePanel);
+            app.ProcMessageLabel.FontSize = 10;
+            app.ProcMessageLabel.Position = [214 34 454 18];
+            app.ProcMessageLabel.Text = '';
 
-            % Create EditField2Label
-            app.EditField2Label = uilabel(app.OxygenSalineRatioPanel);
-            app.EditField2Label.HorizontalAlignment = 'right';
-            app.EditField2Label.Position = [5 42 147 22];
-            app.EditField2Label.Text = 'Oxygen-Saline Mass Ratio';
+            app.ProcConfirmButton = uibutton(app.ProcedurePanel, 'push');
+            app.ProcConfirmButton.ButtonPushedFcn = createCallbackFcn(app, @ProcConfirmButtonPushed, true);
+            app.ProcConfirmButton.Visible = 'off';
+            app.ProcConfirmButton.Position = [214 6 110 26];
+            app.ProcConfirmButton.Text = 'Confirm';
 
-            % Create OxygenSalineMassRatioEditField
-            app.OxygenSalineMassRatioEditField = uieditfield(app.OxygenSalineRatioPanel, 'numeric');
-            app.OxygenSalineMassRatioEditField.Position = [290 42 100 22];
+            app.ProcRepeatButton = uibutton(app.ProcedurePanel, 'push');
+            app.ProcRepeatButton.ButtonPushedFcn = createCallbackFcn(app, @ProcRepeatButtonPushed, true);
+            app.ProcRepeatButton.Visible = 'off';
+            app.ProcRepeatButton.Position = [330 6 110 26];
+            app.ProcRepeatButton.Text = 'Repeat';
 
-            % Create EditFieldLabel
-            app.EditFieldLabel = uilabel(app.OxygenSalineRatioPanel);
-            app.EditFieldLabel.HorizontalAlignment = 'right';
-            app.EditFieldLabel.Position = [5 11 275 22];
-            app.EditFieldLabel.Text = 'Oxygen-Saline Volume Ratio (at loading pressure)';
+            app.ProcPauseButton = uibutton(app.ProcedurePanel, 'push');
+            app.ProcPauseButton.ButtonPushedFcn = createCallbackFcn(app, @ProcPauseButtonPushed, true);
+            app.ProcPauseButton.Enable = 'off';
+            app.ProcPauseButton.Position = [446 6 100 26];
+            app.ProcPauseButton.Text = 'Pause';
 
-            % Create EditField
-            app.EditField = uieditfield(app.OxygenSalineRatioPanel, 'numeric');
-            app.EditField.Position = [290 11 100 22];
-
-            % Create ParameterField3Label_2
-            app.ParameterField3Label_2 = uilabel(app.ProcessParametersTab);
-            app.ParameterField3Label_2.HorizontalAlignment = 'right';
-            app.ParameterField3Label_2.Position = [10 195 142 22];
-            app.ParameterField3Label_2.Text = 'Discharge Pressure (atm)';
-
-            % Create ParameterField2
-            app.ParameterField2 = uieditfield(app.ProcessParametersTab, 'numeric');
-            app.ParameterField2.Position = [201 195 100 22];
-
-            % Create SalinePurgeFillTab
-            app.SalinePurgeFillTab = uitab(app.TabGroup);
-            app.SalinePurgeFillTab.Title = 'Saline Purge/Fill';
-
-            % Create SalineCheckBox3
-            app.SalineCheckBox3 = uicheckbox(app.SalinePurgeFillTab);
-            app.SalineCheckBox3.Enable = 'off';
-            app.SalineCheckBox3.Text = 'Close all valves';
-            app.SalineCheckBox3.Position = [10 228 105 22];
-
-            % Create SalineCheckBox4
-            app.SalineCheckBox4 = uicheckbox(app.SalinePurgeFillTab);
-            app.SalineCheckBox4.Enable = 'off';
-            app.SalineCheckBox4.Text = 'Open the saline valve';
-            app.SalineCheckBox4.Position = [10 207 137 22];
-
-            % Create SalineCheckBox5
-            app.SalineCheckBox5 = uicheckbox(app.SalinePurgeFillTab);
-            app.SalineCheckBox5.Enable = 'off';
-            app.SalineCheckBox5.Text = 'Open the main chamber valve';
-            app.SalineCheckBox5.Position = [10 186 182 22];
-
-            % Create SalineCheckBox1
-            app.SalineCheckBox1 = uicheckbox(app.SalinePurgeFillTab);
-            app.SalineCheckBox1.Enable = 'off';
-            app.SalineCheckBox1.Text = 'Insert the saline line into the saline bag';
-            app.SalineCheckBox1.Position = [10 270 231 22];
-
-            % Create SalineCheckBox2
-            app.SalineCheckBox2 = uicheckbox(app.SalinePurgeFillTab);
-            app.SalineCheckBox2.Enable = 'off';
-            app.SalineCheckBox2.Text = 'Insert the discharge line into an empty saline bag';
-            app.SalineCheckBox2.Position = [10 249 286 22];
-
-            % Create SalineButton3
-            app.SalineButton3 = uibutton(app.SalinePurgeFillTab, 'push');
-            app.SalineButton3.Enable = 'off';
-            app.SalineButton3.Position = [10 50 100 23];
-            app.SalineButton3.Text = 'Repeat Purge';
-
-            % Create SalineButton4
-            app.SalineButton4 = uibutton(app.SalinePurgeFillTab, 'push');
-            app.SalineButton4.Enable = 'off';
-            app.SalineButton4.Position = [10 20 100 23];
-            app.SalineButton4.Text = 'Fill Saline';
-
-            % Create SalineButton1
-            app.SalineButton1 = uibutton(app.SalinePurgeFillTab, 'push');
-            app.SalineButton1.Enable = 'off';
-            app.SalineButton1.Position = [10 158 100 23];
-            app.SalineButton1.Text = 'Continue';
-
-            % Create SalineCheckBox6
-            app.SalineCheckBox6 = uicheckbox(app.SalinePurgeFillTab);
-            app.SalineCheckBox6.Enable = 'off';
-            app.SalineCheckBox6.Text = 'Close the saline valve';
-            app.SalineCheckBox6.Position = [10 132 139 22];
-
-            % Create SalineCheckBox7
-            app.SalineCheckBox7 = uicheckbox(app.SalinePurgeFillTab);
-            app.SalineCheckBox7.Enable = 'off';
-            app.SalineCheckBox7.Text = 'Open the discharge valve';
-            app.SalineCheckBox7.Position = [10 111 158 22];
-
-            % Create SalineButton2
-            app.SalineButton2 = uibutton(app.SalinePurgeFillTab, 'push');
-            app.SalineButton2.Enable = 'off';
-            app.SalineButton2.Position = [10 81 100 23];
-            app.SalineButton2.Text = 'Continue';
-
-            % Create OxygenFillTab
-            app.OxygenFillTab = uitab(app.TabGroup);
-            app.OxygenFillTab.Title = 'Oxygen Fill';
-
-            % Create CloseallvalvesCheckBox
-            app.CloseallvalvesCheckBox = uicheckbox(app.OxygenFillTab);
-            app.CloseallvalvesCheckBox.Enable = 'off';
-            app.CloseallvalvesCheckBox.Text = 'Close all valves';
-            app.CloseallvalvesCheckBox.Position = [10 270 105 22];
-
-            % Create OpentheoxygeninletandCheckBox
-            app.OpentheoxygeninletandCheckBox = uicheckbox(app.OxygenFillTab);
-            app.OpentheoxygeninletandCheckBox.Enable = 'off';
-            app.OpentheoxygeninletandCheckBox.Text = 'Open the oxygen inlet and main chamber valve';
-            app.OpentheoxygeninletandCheckBox.Position = [10 249 276 22];
-
-            % Create CheckBox
-            app.CheckBox = uicheckbox(app.OxygenFillTab);
-            app.CheckBox.Enable = 'off';
-            app.CheckBox.Text = 'Open the oxygen regulator until the pressure reaches 50 psi';
-            app.CheckBox.Position = [10 228 346 22];
-
-            % Create FillOxygenButton
-            app.FillOxygenButton = uibutton(app.OxygenFillTab, 'push');
-            app.FillOxygenButton.Enable = 'off';
-            app.FillOxygenButton.Position = [10 195 100 23];
-            app.FillOxygenButton.Text = 'Fill Oxygen';
-
-            % Create OpentheoxCheckBox
-            app.OpentheoxCheckBox = uicheckbox(app.OxygenFillTab);
-            app.OpentheoxCheckBox.Enable = 'off';
-            app.OpentheoxCheckBox.Text = 'Open the oxygen regulator until the pressure reaches 100 psi';
-            app.OpentheoxCheckBox.Position = [10 158 353 22];
-
-            % Create ClosetheoxygeninletCheckBox
-            app.ClosetheoxygeninletCheckBox = uicheckbox(app.OxygenFillTab);
-            app.ClosetheoxygeninletCheckBox.Enable = 'off';
-            app.ClosetheoxygeninletCheckBox.Text = 'Close the oxygen inlet and main chamber valve';
-            app.ClosetheoxygeninletCheckBox.Position = [10 137 277 22];
-
-            % Create CheckBox_2
-            app.CheckBox_2 = uicheckbox(app.OxygenFillTab);
-            app.CheckBox_2.Enable = 'off';
-            app.CheckBox_2.Text = 'Close the oxygen regulator';
-            app.CheckBox_2.Position = [10 116 165 22];
-
-            % Create ContinueButton
-            app.ContinueButton = uibutton(app.OxygenFillTab, 'push');
-            app.ContinueButton.Enable = 'off';
-            app.ContinueButton.Position = [10 89 100 23];
-            app.ContinueButton.Text = 'Continue';
-
-            % Create PressurizeDischargeTab
-            app.PressurizeDischargeTab = uitab(app.TabGroup);
-            app.PressurizeDischargeTab.Title = 'Pressurize/Discharge';
-
-            % Create CheckBox_3
-            app.CheckBox_3 = uicheckbox(app.PressurizeDischargeTab);
-            app.CheckBox_3.Enable = 'off';
-            app.CheckBox_3.Text = 'Ensure all valves are closed';
-            app.CheckBox_3.Position = [10 270 171 22];
-
-            % Create PressurizeButton
-            app.PressurizeButton = uibutton(app.PressurizeDischargeTab, 'push');
-            app.PressurizeButton.Enable = 'off';
-            app.PressurizeButton.Position = [10 240 100 23];
-            app.PressurizeButton.Text = 'Pressurize';
-
-            % Create TimePressurizedPanel
-            app.TimePressurizedPanel = uipanel(app.PressurizeDischargeTab);
-            app.TimePressurizedPanel.Enable = 'off';
-            app.TimePressurizedPanel.Title = 'Time Pressurized';
-            app.TimePressurizedPanel.Position = [218 251 105 41];
-
-            % Create Label
-            app.Label = uilabel(app.TimePressurizedPanel);
-            app.Label.Enable = 'off';
-            app.Label.Position = [4 1 28 22];
-            app.Label.Text = '0:00';
-
-            % Create TodischargeLabel
-            app.TodischargeLabel = uilabel(app.PressurizeDischargeTab);
-            app.TodischargeLabel.Enable = 'off';
-            app.TodischargeLabel.Position = [10 207 76 22];
-            app.TodischargeLabel.Text = 'To discharge:';
-
-            % Create OpenthemainchambervalveLabel
-            app.OpenthemainchambervalveLabel = uilabel(app.PressurizeDischargeTab);
-            app.OpenthemainchambervalveLabel.Enable = 'off';
-            app.OpenthemainchambervalveLabel.Position = [10 186 359 22];
-            app.OpenthemainchambervalveLabel.Text = '1. Open the main chamber valve and wait for pressure to stabilize';
-
-            % Create Label_2
-            app.Label_2 = uilabel(app.PressurizeDischargeTab);
-            app.Label_2.Enable = 'off';
-            app.Label_2.Position = [10 165 335 22];
-            app.Label_2.Text = '2. Open the discharge valve and wait for pressure to stabilize';
-
-            % Create OpenthevalveattheneedleLabel
-            app.OpenthevalveattheneedleLabel = uilabel(app.PressurizeDischargeTab);
-            app.OpenthevalveattheneedleLabel.Enable = 'off';
-            app.OpenthevalveattheneedleLabel.Position = [10 144 172 22];
-            app.OpenthevalveattheneedleLabel.Text = '3. Open the valve at the needle';
-
-            % Create VolumeDischargedmLPanel
-            app.VolumeDischargedmLPanel = uipanel(app.PressurizeDischargeTab);
-            app.VolumeDischargedmLPanel.Enable = 'off';
-            app.VolumeDischargedmLPanel.Title = 'Volume Discharged (mL)';
-            app.VolumeDischargedmLPanel.Position = [10 100 142 41];
-
-            % Create mLLabel
-            app.mLLabel = uilabel(app.VolumeDischargedmLPanel);
-            app.mLLabel.Enable = 'off';
-            app.mLLabel.Position = [4 1 42 22];
-            app.mLLabel.Text = '0.0 mL';
-
-            % Create UseMixerCheckBox
-            app.UseMixerCheckBox = uicheckbox(app.PressurizeDischargeTab);
-            app.UseMixerCheckBox.Enable = 'off';
-            app.UseMixerCheckBox.Text = 'Use Mixer';
-            app.UseMixerCheckBox.Position = [218 225 76 22];
+            app.ProcAbortButton = uibutton(app.ProcedurePanel, 'push');
+            app.ProcAbortButton.ButtonPushedFcn = createCallbackFcn(app, @ProcAbortButtonPushed, true);
+            app.ProcAbortButton.Enable = 'off';
+            app.ProcAbortButton.Position = [552 6 100 26];
+            app.ProcAbortButton.Text = 'Abort';
 
             % Create ControlsPanel
             app.ControlsPanel = uipanel(app.UIFigure);
