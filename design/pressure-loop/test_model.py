@@ -554,7 +554,7 @@ def check_scheduled_st():
             K_cfg=cfg['G_cfgPressureSchedBulkModulus'],
             V_l_cfg=par.Vl0,
             V_dead_cfg=(cfg['G_cfgPressureSchedPassagesVol']
-                         + cfg['G_cfgPressureSchedHoseVolume']) * 1e-6,
+                         + cfg['G_cfgPressureSchedHoseVol']) * 1e-6,
             C_hose_cfg=cfg['G_cfgPressureSchedHoseCompl'],
             ratio_cfg=None,
             ki_ratio=cfg['G_cfgPressureSchedKiRatio'],

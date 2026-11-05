@@ -1251,7 +1251,7 @@ fbPressureSched(
     PistonArea := G_cfgPressureSchedPistonArea,
     SalineVolume := rSchedSaline,
     PassagesVolume := G_cfgPressureSchedPassagesVol,
-    HoseVolume := G_cfgPressureSchedHoseVolume,
+    HoseVolume := G_cfgPressureSchedHoseVol,
     HoseCompliance := G_cfgPressureSchedHoseCompl,
     HoseOpen := G_cfgPressureSchedHoseOpen,
     BulkModulus := G_cfgPressureSchedBulkModulus,
