@@ -71,7 +71,7 @@ function r = charRun(label, path, opts)
 %                      command change in a velocity session; 'stops' to
 %                      arm it only for commands to zero; false for no
 %                      probe (default). The captures are read out in the
-%                      gaps between exchanges, 18 records a gap, and the
+%                      gaps between exchanges, 13 records a gap, and the
 %                      rest after the last step, before the files are
 %                      written
 %   opts.safetyModel   model that holds the safety relay ('SafetyHold';
@@ -145,7 +145,7 @@ cleanup = onCleanup(@() shutdown(link, map, safety));
 % --- Run state --------------------------------------------------------------
 app = struct('op', C.OP_STOP, 'cmdSeq', 0, 'targetPosition', 0, ...
     'targetVelocity', 0, 'jogDirection', 0, 'targetPressure', 0, 'estop', 0, 'mixer', 0, ...
-    'positionSpeed', masterConfig().positionSpeed);
+    'positionSpeed', masterConfig().speedMax);
 mbWrite = zeros(1, map.nWrite);
 mbRead = zeros(1, map.nRead);
 m = struct('statusCode', C.STATUS_LINK_WAIT, 'state', 0, 'position', 0, ...

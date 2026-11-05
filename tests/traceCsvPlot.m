@@ -53,7 +53,7 @@ assert(isequal(size(e.seq), [0 1]) && isequal(size(e.mixer), [0 1]));
 assert(isequal(size(e.data), [0 L.nCol]));
 assert(e.meta.records == buf.n);
 e = traceDerive(e);
-assert(isempty(e.gap) && isempty(e.tRel_s) && isempty(e.volume_mL));
+assert(isempty(e.gap) && isempty(e.tRel_s) && isempty(e.sweptVolume_mL));
 fprintf('ok  header-only file reads back empty\n');
 
 % The writer refuses data it cannot store faithfully.
@@ -96,7 +96,8 @@ traceWriteCsv(gapFile, data, meta);
 d = traceDerive(traceReadCsv(gapFile));
 n = size(data, 1);
 pos = data(:, L.col.position_mm);
-assert(max(abs(d.volume_mL - x2mL(pos, cfg))) < 1e-6);
+assert(max(abs(d.sweptVolume_mL - sweptVolume(pos, cfg))) < 1e-6);
+assert(max(abs(d.mixingVolume_mL - mixingVolume(pos, cfg))) < 1e-6);
 assert(max(abs(d.flow_mL_s - mLPerMm(cfg) * data(:, L.col.velocity_mm_s))) < 1e-6);
 assert(max(abs(d.pressureAbs_atm - (data(:, L.col.pressureGauge_MPa) * cfg.atmPerMPa ...
     + cfg.atmAmbient))) < 1e-6);
@@ -110,15 +111,16 @@ assert(isequal(d.gap, expectGap));
 % The file's geometry wins over masterConfig.
 meta300 = meta;
 meta300.posEOT_mm = 300;
-meta300.deadVolume_mL = 40;
+meta300.mixingDeadVolume_mL = 40;
 meta300.atmAmbient_atm = 1.5;
 traceWriteCsv(gapFile, data, meta300);
 d3 = traceDerive(traceReadCsv(gapFile));
 assert(max(abs(d3.posFromEOT_mm - (300 - pos))) < 1e-9);
 c3 = cfg;
 c3.posEOT = 300;
-c3.deadVolume = 40;
-assert(max(abs(d3.volume_mL - x2mL(pos, c3))) < 1e-6);
+c3.mixingDeadVolume = 40;
+assert(max(abs(d3.sweptVolume_mL - sweptVolume(pos, c3))) < 1e-6);
+assert(max(abs(d3.mixingVolume_mL - mixingVolume(pos, c3))) < 1e-6);
 assert(max(abs(d3.pressureAbs_atm - (data(:, L.col.pressureGauge_MPa) * cfg.atmPerMPa + 1.5))) < 1e-6);
 % A key missing from the file falls back to masterConfig.
 d4 = traceDerive(rmfield(traceReadCsv(gapFile), 'meta'));
@@ -283,7 +285,7 @@ for step = 0:nSteps - 1
         mbRead(map.ir.pressure:map.ir.pressure + 1) = modbusPack(2 + sin(t));
     end
     [mbWrite, doSafety, ~, ~, ~, ~, statusCode, faultCode, state, linkOk] = ...
-        masterStep(mbRead, 0, 0, 250, 0, 0, 20, 0, 0, cfg.positionSpeed);
+        masterStep(mbRead, 0, 0, 250, 0, 0, 20, 0, 0, speedFromPercent(cfg.speedDefault, cfg));
     ring = traceStep(mbRead, mbWrite, doSafety, statusCode, faultCode, state, ...
         linkOk, 0, 0, 250, 20, 0, 0);
     if step == startStep

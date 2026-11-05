@@ -25,6 +25,13 @@
    (one RetractDist positive of the switch) rather than at whatever spot
    the backoff happened to clear the switch.
 
+   Speed hold: SpeedFraction <= 0 (the operator speed is 0) holds the
+   sequence. The jog phases release their direction and the Jog FB
+   decelerates the axis to rest; the retract is not started while held, and
+   one that has started completes. The sequence timeout is a clock advanced
+   by CycleTime * SpeedFraction, so it counts no time while held and, at a
+   reduced speed, allows the same travel as at the ceiling.
+
    Uses the PLCopen Toolbox Jog FB (level-sensitive Forward/Reverse) for
    all approach and inter-approach moves; the explicit MC_Stop wait is
    absorbed by waiting on Jog.Done.
@@ -70,7 +77,9 @@
        Acceleration         : LREAL                  (* Move acceleration (mm/s²)
        Deceleration         : LREAL                  (* Move/stop deceleration (mm/s²)
        SetPosition          : LREAL                  (* Position value at the retract endpoint (mm)
-       Timeout              : TIME                   (* Overall sequence timeout
+       Timeout              : TIME                   (* Sequence timeout, counted at the speed fraction (time at the fast-approach ceiling)
+       SpeedFraction        : LREAL                  (* Operator speed as a fraction of the fast-approach ceiling [0..1]; 0 holds the sequence; the timeout clock runs at this rate
+       CycleTime            : LREAL                  (* Scan time (s)
        OvertravelNegActive  : BOOL                   (* Negative overtravel / home switch triggered
        OvertravelPosActive  : BOOL                   (* Positive overtravel switch triggered (fault)
        Abort                : BOOL                   (* Abort the sequence
@@ -79,7 +88,6 @@
        StaMoveAbsolute      : ST_StaMoveAbsolute     (* Status from MC_MoveAbsolute
        StaSetPosition       : ST_StaSetPosition      (* Status from MC_SetPosition
      VAR_OUTPUT:
-       Active               : BOOL                   (* Sequence is running
        Done                 : BOOL                   (* Homing complete
        InMotion             : BOOL                   (* Currently moving
        Error                : BOOL                   (* Error occurred
@@ -89,8 +97,9 @@
      VAR:
        eState               : E_HomeLimitState  (* State machine - default IDLE
        rTrigExecute         : R_TRIG
-       tTimeout             : TON               (* Single call site - see end of body
-       bTimeoutIN           : BOOL              (* Latched IN for tTimeout
+       rTimeoutElapsed      : LREAL             (* Timeout clock (s), advanced by CycleTime * SpeedFraction while the sequence runs
+       bTimeoutIN           : BOOL              (* Sequence running: the timeout clock advances
+       bHold                : BOOL              (* SpeedFraction <= 0
        rSwitchPos           : LREAL             (* ActualPosition captured at SLOW_APPROACH switch trip
    ============================================================================ *)
 
@@ -99,7 +108,6 @@
    ============================================================================ *)
 
 IF NOT Enable THEN
-    Active := FALSE;
     Done := FALSE;
     InMotion := FALSE;
     Error := FALSE;
@@ -114,6 +122,8 @@ IF NOT Enable THEN
 ELSE
     (* Detect rising edge on Execute *)
     rTrigExecute(CLK := Execute);
+
+    bHold := SpeedFraction <= LREAL#0.0;
 
     (* Handle abort in most states *)
     IF Abort AND (eState <> E_HomeLimitState#IDLE) AND (eState <> E_HomeLimitState#ERROR) AND (eState <> E_HomeLimitState#DONE) THEN
@@ -135,11 +145,11 @@ ELSE
         eState := E_HomeLimitState#ERROR;
     END_IF;
 
-    (* Default timer IN; overall timeout check uses last-scan Q *)
+    (* Timeout clock runs while the sequence does; the check uses last scan's clock *)
     bTimeoutIN := (eState <> E_HomeLimitState#IDLE) AND (eState <> E_HomeLimitState#DONE) AND
                   (eState <> E_HomeLimitState#ERROR) AND (eState <> E_HomeLimitState#ABORTING);
 
-    IF tTimeout.Q THEN
+    IF rTimeoutElapsed >= DINT_TO_LREAL(TIME_TO_DINT(Timeout)) / LREAL#1000.0 THEN
         CmdJog.Forward := FALSE;
         CmdJog.Reverse := FALSE;
         CmdMoveAbsolute.Execute := FALSE;
@@ -156,7 +166,6 @@ ELSE
 IF eState = E_HomeLimitState#IDLE THEN
 
     (* IDLE - Waiting for execute command *)
-        Active := FALSE;
         Done := FALSE;
         InMotion := FALSE;
         Error := FALSE;
@@ -167,7 +176,6 @@ IF eState = E_HomeLimitState#IDLE THEN
         CmdSetPosition.Execute := FALSE;
 
         IF rTrigExecute.Q OR Execute THEN
-            Active := TRUE;
             eState := E_HomeLimitState#FAST_APPROACH;
         END_IF;
 
@@ -175,7 +183,7 @@ IF eState = E_HomeLimitState#IDLE THEN
 ELSIF eState = E_HomeLimitState#FAST_APPROACH THEN
 
     (* FAST_APPROACH - Jog negative at fast velocity toward switch *)
-        CmdJog.Reverse := TRUE;
+        CmdJog.Reverse := NOT bHold;
         CmdJog.Forward := FALSE;
         CmdJog.Velocity := FastApproachVelocity;
         CmdJog.Acceleration := Acceleration;
@@ -213,7 +221,7 @@ ELSIF eState = E_HomeLimitState#FAST_AWAIT THEN
 ELSIF eState = E_HomeLimitState#INTER_BACKOFF THEN
 
     (* INTER_BACKOFF - Jog positive until switch clears, ready for slow re-approach *)
-        CmdJog.Forward := TRUE;
+        CmdJog.Forward := NOT bHold;
         CmdJog.Reverse := FALSE;
         CmdJog.Velocity := BackoffVelocity;
         CmdJog.Acceleration := Acceleration;
@@ -253,7 +261,7 @@ ELSIF eState = E_HomeLimitState#SLOW_APPROACH THEN
     (* SLOW_APPROACH - Jog negative at slow velocity for precise switch detect.
        Capture ActualPosition on the rising edge of OvertravelNegActive — this
        is the precise reference point for the subsequent retract. *)
-        CmdJog.Reverse := TRUE;
+        CmdJog.Reverse := NOT bHold;
         CmdJog.Forward := FALSE;
         CmdJog.Velocity := SlowApproachVelocity;
         CmdJog.Acceleration := Acceleration;
@@ -294,16 +302,23 @@ ELSIF eState = E_HomeLimitState#RETRACT THEN
     (* RETRACT - MoveAbsolute to (rSwitchPos + RetractDist), backing the axis
        off the limit switch by exactly RetractDist measured from the captured
        precise switch position. This runs in the pre-homed frame; SETREF
-       relabels the resulting endpoint as SetPosition (= 0) afterwards. *)
-        CmdMoveAbsolute.Execute := TRUE;
-        CmdMoveAbsolute.Position := rSwitchPos + RetractDist;
-        CmdMoveAbsolute.Velocity := BackoffVelocity;
-        CmdMoveAbsolute.Acceleration := Acceleration;
-        CmdMoveAbsolute.Deceleration := Deceleration;
-        CmdMoveAbsolute.Direction := MC_Direction#Positive_Direction;
+       relabels the resulting endpoint as SetPosition (= 0) afterwards.
+       While held the move is not started; this state is held here, not in
+       SLOW_AWAIT, because Jog.Done is a one-scan pulse. *)
+        IF NOT bHold THEN
+            CmdMoveAbsolute.Execute := TRUE;
+            CmdMoveAbsolute.Position := rSwitchPos + RetractDist;
+            CmdMoveAbsolute.Velocity := BackoffVelocity;
+            CmdMoveAbsolute.Acceleration := Acceleration;
+            CmdMoveAbsolute.Deceleration := Deceleration;
+            CmdMoveAbsolute.Direction := MC_Direction#Positive_Direction;
 
-        InMotion := StaMoveAbsolute.Busy;
-        eState := E_HomeLimitState#RETRACT_AWAIT;
+            InMotion := StaMoveAbsolute.Busy;
+            eState := E_HomeLimitState#RETRACT_AWAIT;
+        ELSE
+            CmdMoveAbsolute.Execute := FALSE;
+            InMotion := FALSE;
+        END_IF;
 
 
 ELSIF eState = E_HomeLimitState#RETRACT_AWAIT THEN
@@ -350,7 +365,6 @@ ELSIF eState = E_HomeLimitState#DONE THEN
 
     (* DONE - Homing sequence complete *)
         Done := TRUE;
-        Active := TRUE;
         InMotion := FALSE;
 
         IF NOT Execute THEN
@@ -369,7 +383,6 @@ ELSIF eState = E_HomeLimitState#ABORTING THEN
         InMotion := StaJog.Busy OR StaMoveAbsolute.Busy;
 
         IF (StaJog.Done OR NOT StaJog.Busy) AND (NOT StaMoveAbsolute.Busy) THEN
-            Active := FALSE;
             InMotion := FALSE;
             eState := E_HomeLimitState#IDLE;
 
@@ -381,7 +394,6 @@ ELSIF eState = E_HomeLimitState#ABORTING THEN
 ELSIF eState = E_HomeLimitState#ERROR THEN
 
     (* ERROR *)
-        Active := FALSE;
         InMotion := FALSE;
         Done := FALSE;
 
@@ -394,6 +406,10 @@ ELSIF eState = E_HomeLimitState#ERROR THEN
 END_IF;  (* Enable gate *)
 
 (* --------------------------------------------------------------------------
-   Timer calls - exactly one site per instance per scan
+   Timeout clock - advances at the speed fraction while the sequence runs
    -------------------------------------------------------------------------- *)
-tTimeout(IN := bTimeoutIN, PT := Timeout);
+IF bTimeoutIN THEN
+    rTimeoutElapsed := rTimeoutElapsed + CycleTime * LIMIT(LREAL#0.0, SpeedFraction, LREAL#1.0);
+ELSE
+    rTimeoutElapsed := LREAL#0.0;
+END_IF;

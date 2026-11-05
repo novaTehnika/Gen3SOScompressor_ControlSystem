@@ -19,7 +19,7 @@ function figs = tracePlot(src, varargin)
 %               is in pressure mode, position from the end of travel with
 %               the command and the target while in position mode,
 %               velocity, torque, on one time axis
-%     delivery  chamber volume, flow, and pressure against volume
+%     delivery  swept volume, flow, and pressure against swept volume
 %     status    status code and master state, mode request and
 %               confirmation, motion flags, link and safety lines, and
 %               the link health: slave counter step per record and
@@ -106,8 +106,8 @@ linkaxes(ax, 'x');
 f2 = newFigure('delivery', opts.visible);
 ax = zeros(1, 2);
 ax(1) = subplot(3, 1, 1);
-drawSeries(t, {d.volume_mL}, d.gap, {cLine}, {'-'}, bands, @plot);
-ylabel('volume [mL]');
+drawSeries(t, {d.sweptVolume_mL}, d.gap, {cLine}, {'-'}, bands, @plot);
+ylabel('swept volume [mL]');
 title('Delivery');
 ax(2) = subplot(3, 1, 2);
 drawSeries(t, {d.flow_mL_s}, d.gap, {cLine}, {'-'}, bands, @plot);
@@ -115,10 +115,10 @@ ylabel('flow [mL/s]');
 xlabel('time [s]');
 linkaxes(ax, 'x');
 subplot(3, 1, 3);
-drawSeries(d.volume_mL, {d.pressureAbs_atm}, d.gap, {cLine}, {'-'}, ...
+drawSeries(d.sweptVolume_mL, {d.pressureAbs_atm}, d.gap, {cLine}, {'-'}, ...
     struct('x0', {}, 'x1', {}, 'color', {}), @plot, false);
 ylabel('pressure [atm abs]');
-xlabel('volume [mL]');
+xlabel('swept volume [mL]');
 
 % ----- Status -----
 f3 = newFigure('status', opts.visible);

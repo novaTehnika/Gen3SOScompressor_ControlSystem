@@ -1,18 +1,20 @@
 function charRunSim()
 %CHARRUNSIM Run bench/characterisation/charRun against the simulated slave
-%   through fakeProbeLink (the friction bench's stand-in, with its step
-%   probe emulation and an outlet valve), then the three fits on what it
+%   through fakeProbeLink (the friction bench's stand-in: the slave's own
+%   step probe behind the link, and an outlet valve), then the three fits on what it
 %   logged: pressure-ended ramps, a dwell, velocity steps and a hold in one
 %   velocity session with captures; the one-pass stopping-distance path of
 %   test 4 (charStopPath) and its fit (charStopDistance); a delivery
-%   through the orifice bank in pressure mode; the pressure and position
-%   guards and a slave fault.
+%   through the orifice bank in pressure mode; the two recipes of test 5
+%   (charDriveRecipe: reversals in the open chamber, a dither in the closed
+%   one) and the drive-path fit (charDrivePath) on what they log; the
+%   pressure and position guards and a slave fault.
 %   Run from the repository root after  addpath slave-sim; buildSlaveSim
 %     addpath master-src/logic slave-sim slave-sim/generated tests
-%   Depends on: master-src/logic slave-src slave-sim tools models bench/characterisation bench/common tests/fakeProbeLink.m
+%   Depends on: master-src/logic slave-src slave-sim tools models bench/characterisation bench/common bench/friction tests/fakeProbeLink.m
 
 here = fileparts(mfilename('fullpath'));
-addpath(fullfile(here, '..', 'bench', 'characterisation'), fullfile(here, '..', 'bench', 'common'));
+addpath(fullfile(here, '..', 'bench', 'characterisation'), fullfile(here, '..', 'bench', 'common'), fullfile(here, '..', 'bench', 'friction'));
 saveDir = tempname();
 ccfg = charConfig();
 T = 1; STEP = 2; STATUS = 3; MODE = 4; REF = 5; POS = 6; P = 9;    % log columns
@@ -69,6 +71,10 @@ fprintf('ok  velocity session: two ramps, dwell, steps, hold; five captures\n');
 S = fakeProbeLink('state');
 tauV = S.sl.plant.par.tauV;                                         % [s]
 Td = double(S.sl.plant.n_dead) * S.sl.plant.par.Ts;                % [s]
+% The bench's pocket volume (charConfig) is the plant's (params.py V_air)
+assert(abs(S.sl.plant.par.nRT_air / S.sl.plant.par.Patm * 1e6 - ccfg.airVolume_mL) < 1e-9, ...
+    'charConfig airVolume_mL %.4f mL, the plant holds %.4f mL', ccfg.airVolume_mL, ...
+    S.sl.plant.par.nRT_air / S.sl.plant.par.Patm * 1e6);   % [m^3 -> mL]
 lag = charDriveLag([r.capFiles {r.file}], struct('quiet', true, 'accel', 1e6, 'decel', 1e6));
 assert(all(abs([lag.captures.tauV] - tauV) < 0.003), 'lag %s s, plant %.4f', mat2str([lag.captures.tauV], 3), tauV);
 assert(all(abs([lag.captures.Td] - Td) <= ccfg.scanTime + 1e-3), 'dead time %s s, plant %.3f', ...
@@ -92,13 +98,14 @@ fprintf('ok  drive lag fit: captures %.1f ms and %.1f ms dead (plant %.1f, %.1f)
 
 % The charge is gas, not liquid: the bulk modulus fit must reject it and
 % attribute the compliance to gas. Its gas stands for all of the chamber's
-% compliance, eqs. (4) and (42): the free gas (as it was before the
-% ramps; it dissolves as the session runs), the saline and the hose, as
-% the gas volume with that compliance at 2.5 MPa.
+% compliance, eqs. (4), (42) and (46): the free gas (as it was before the
+% ramps; it dissolves as the session runs), the air pocket at the
+% transducer, the saline and the hose, as the gas volume with that
+% compliance at 2.5 MPa.
 bk = charBulkModulus(r.file, struct('quiet', true, 'deadVolume_mL', 10, 'pressureRange', [2.0 3.1]));
 Pabs = 2.5e6 + pl0.par.Patm;                                        % [Pa]
-C = (pl0.n_tot - pl0.n_dis) * pl0.par.RT / Pabs^2 + (pl0.V_l + pl0.V_vir) / pl0.par.K ...
-    + pl0.par.C_hose;                                               % [m^3/Pa]
+C = (pl0.n_tot - pl0.n_dis) * pl0.par.RT / Pabs^2 + pl0.par.nRT_air / Pabs^2 ...
+    + (pl0.V_l + pl0.V_vir) / pl0.par.K + pl0.par.C_hose;           % [m^3/Pa]
 vGas = C * Pabs * 1e6;                                              % [m^3 -> mL]
 assert(~bk.pass && bk.K_lin_GPa < 0.5, 'gas charge accepted as a liquid (K %.3f GPa)', bk.K_lin_GPa);
 assert(abs(bk.Vg_mL - vGas) / vGas < 0.3, 'gas volume %.2f mL, chamber holds about %.2f mL', bk.Vg_mL, vGas);
@@ -114,6 +121,7 @@ opts.probe = 'stops';
 S = fakeProbeLink('state');
 pl = S.sl.plant;
 kPlant = @(Pq) pl.par.A ./ ((pl.n_tot - pl.n_dis) * pl.par.RT ./ (Pq * 1e6 + pl.par.Patm).^2 ...
+    + pl.par.nRT_air ./ (Pq * 1e6 + pl.par.Patm).^2 ...
     + pl.V_l / pl.par.K) * 1e-9;                                    % [Pa/m -> MPa/mm]
 [path, plan] = charStopPath(struct('levels_MPa', [2 3], 'speeds', [0.5 2], 'budget_MPa', 1.0, ...
     'rampSpeed', 0.5, 'stiffness', kPlant, 'T0_s', tauV + Td, 'latency_s', 0.05, 'D_mm_s2', ccfg.velDecel, ...
@@ -123,49 +131,39 @@ types = cellfun(@(s) s{1}, path, 'UniformOutput', false);
 assert(nStops >= 6 && sum(strcmp(types, 'move')) == nStops && sum(strcmp(types, 'settle')) == nStops / 2, ...
     'plan: %d stops, %d steps', nStops, numel(path));
 r = charRun('simstop', path, opts);
-assert(isempty(r.abort), r.abort);
-L = r.runLog;
-% Every excursion stays within its budget (plus the stop beyond the leg)
-% and each pair of legs returns the piston to where the first began
-level = 0;
-for s = 1:numel(path)
-    rows = L(L(:, STEP) == s, :);
-    switch path{s}{1}
-        case 'ramp'
-            level = level + (path{s}{2} > 0);
-        case 'move'
-            if path{s}{2} > 0
-                xPair = rows(1, POS);
-                Plevel = plan(min(level, numel(plan))).P_MPa;
-                assert(max(rows(:, P)) < Plevel + 1.0 + 0.6, ...
-                    'step %d reached %.2f MPa at a %.0f MPa level', s, max(rows(:, P)), Plevel);
-            else
-                after = L(L(:, STEP) == s + 1, :);
-                assert(abs(after(end, POS) - xPair) < 0.15, ...
-                    'pair ending at step %d returned to %.3f mm from %.3f', s, after(end, POS), xPair);
-            end
-    end
-end
-rs = charStopDistance([r.capFiles {r.file}], struct('quiet', true, 'D_cfg', ccfg.velDecel, 'lag_s', 0.06));
-assert(numel(rs.stops) >= nStops, 'only %d stops found', numel(rs.stops));
-assert(sum(strcmp({rs.stops.source}, 'capture')) >= nStops - 1, 'only %d stops in the captures', ...
-    sum(strcmp({rs.stops.source}, 'capture')));
-for f = {rs.fit.comp, rs.fit.ret}
-    % The plant's drive does not slew: a stop is the dead time and the lag,
-    % a distance linear in the speed, so the fit's deceleration term goes
-    % large and its delay is the drive's: the lag plus the dead time less
-    % the scan by which the logged command leads the drive, plus the scan
-    % by which the probe's velocity feedback is older than its command (the
-    % probe runs in PRG_Main, before the axis updates the feedback), less the
-    % half scan the log's sum of v*Ts loses.
-    T0 = tauV + Td - 0.5 * ccfg.scanTime;                           % [s]
-    assert(abs(f{1}.T0_s - T0) < 0.003 && f{1}.D_mm_s2 > 5 * ccfg.velDecel, ...
-        'fit D %.1f mm/s^2, T0 %.4f s; the drive stops in %.4f s, unslewed', f{1}.D_mm_s2, f{1}.T0_s, T0);
-end
-assert(rs.pass, 'stopping-distance checks failed');
+rs = checkOnePass(r, path, plan, nStops, tauV + Td, ccfg, 0.6, 0.003);
 fprintf('ok  one-pass path: %d steps, %d stops, D %.0f / %.0f mm/s^2 (unslewed), T0 %.1f ms (drive %.1f)\n', ...
     numel(path), numel(rs.stops), rs.fit.comp.D_mm_s2, rs.fit.ret.D_mm_s2, 1000 * rs.T0_s, ...
     1000 * (tauV + Td - 0.5 * ccfg.scanTime));
+
+% --- The same at 8 and 10 MPa and 0.25 and 0.5 mm/s (README section 6) ----------
+% The chamber starts liquid-only (its charge dissolved at 7.5 MPa) with the
+% hose open: 4.8 MPa/mm at the fill, the stiff chamber the bench meets at
+% these pressures. The options are the README's command; only the
+% stiffness (the plant's own) and the pause (the simulated readout needs
+% 3 s) differ from it.
+opts = linkOpts(saveDir, @(sl) dissolvedAt(sl, 7.5));
+opts.probe = 'stops';
+S = fakeProbeLink('state');
+pl = S.sl.plant;
+kPlant = @(Pq) pl.par.A ./ ((pl.n_tot - pl.n_dis) * pl.par.RT ./ (Pq * 1e6 + pl.par.Patm).^2 ...
+    + pl.par.nRT_air ./ (Pq * 1e6 + pl.par.Patm).^2 ...
+    + (pl.V_l / pl.par.K + pl.par.C_hose)) * 1e-9;                  % [Pa/m -> MPa/mm]
+[path, plan] = charStopPath(struct('levels_MPa', [8 10], 'speeds', [0.25 0.5], 'budget_MPa', [2 0.7], ...
+    'rampOvershoot_MPa', 0.2, 'minRun_mm', 0.03, 'minSteady_s', 0, 'P_start_MPa', 7.5, 'pause_s', 3, ...
+    'stiffness', kPlant, 'D_mm_s2', ccfg.velDecel, 'quiet', true));
+nStops = plan(1).nStops;
+% Both speeds at 8 MPa; at 10 MPa the 0.5 mm/s leg leaves no budget under the guard
+assert(nStops == 6 && isequal(plan(1).speeds, [0.25 0.5]) && isequal(plan(2).speeds, 0.25), ...
+    'plan: %d stops, speeds %s / %s', nStops, mat2str(plan(1).speeds), mat2str(plan(2).speeds));
+r = charRun('simstophp', path, opts);
+% The legs are 0.03 to 0.35 mm, so the drive has not reached speed when a
+% stop begins and the fitted delay falls a little short of the plant's
+rs = checkOnePass(r, path, plan, nStops, tauV + Td, ccfg, 0.3, 0.006);
+assert(max(r.runLog(:, P)) < ccfg.pressureStop, 'the run reached the guard');
+assert(abs(rs.scan_s - ccfg.scanTime) < 0.1 * ccfg.scanTime, 'scan period %.2f ms', 1000 * rs.scan_s);
+fprintf('ok  stops at 8 and 10 MPa, 0.25 and 0.5 mm/s: %d stops in the captures, T0 %.1f ms, r.D_mm_s2 %.3g\n', ...
+    sum(strcmp({rs.stops.source}, 'capture')), 1000 * rs.T0_s, rs.D_mm_s2);
 
 % --- Delivery: pressure mode, valve opens, the loop balances the outflow --------
 % A delivery follows the hold that dissolves the charge, so the saline
@@ -187,7 +185,7 @@ pl = S.sl.plant;
 tEnd = max(L(inStep, T));
 collected = interp1(S.collectLog(:, 1), S.collectLog(:, 2), tEnd) / 1000;
 nFree = @(tq) interp1(S.collectLog(:, 1), S.collectLog(:, 3), tq, 'linear', 'extrap');   % [mol]
-vGasAt = @(Pq, tq) nFree(tq) * pl.par.RT ./ (Pq * 1e6 + pl.par.Patm) * 1e6;          % [m^3 -> mL]
+vGasAt = @(Pq, tq) (nFree(tq) * pl.par.RT + pl.par.nRT_air) ./ (Pq * 1e6 + pl.par.Patm) * 1e6;   % [m^3 -> mL]
 fl = charOrificeFlow(r.file, struct('quiet', true, 'tOpen', 12, 'collected_mL', collected));
 assert(abs(fl.Cd - 0.68) / 0.68 < 0.06, 'Cd %.3f, valve set to 0.68', fl.Cd);
 % The loop pulls the pressure back up during the window, so the piston also
@@ -196,8 +194,8 @@ assert(abs(fl.Cd - 0.68) / 0.68 < 0.06, 'Cd %.3f, valve set to 0.68', fl.Cd);
 % that and Cd comes back within 2 %.
 late = inStep & L(:, T) > 15;
 Pm = mean(L(late, P)); xm = mean(L(late, POS)); tm = mean(L(late, T));
-Cm = nFree(tm) * pl.par.RT / (Pm * 1e6 + pl.par.Patm)^2 + (pl.V_l + pl.V_vir) / pl.par.K ...
-    + pl.par.C_hose;                                                       % [m^3/Pa]
+Cm = (nFree(tm) * pl.par.RT + pl.par.nRT_air) / (Pm * 1e6 + pl.par.Patm)^2 ...
+    + (pl.V_l + pl.V_vir) / pl.par.K + pl.par.C_hose;                      % [m^3/Pa]
 Kgas = (ccfg.pistonArea_mm2 * (ccfg.posEOT - xm) + ccfg.deadVolume_mL * 1000) * 1e-9 ...
     / Cm * 1e-6;                                                           % [mm^3 -> m^3, Pa -> MPa]
 flk = charOrificeFlow(r.file, struct('quiet', true, 'tOpen', 12, 'K_Pa', Kgas * 1e6));
@@ -212,6 +210,72 @@ fl2 = charOrificeFlow(r.file, struct('quiet', true));
 assert(abs(fl2.windows(1).t1 - fl.windows(1).t1) < 2, 'valve opening detected at %.1f s, set at 12 s', fl2.windows(1).t1);
 fprintf('ok  delivery: Cd %.3f (%.3f with the gas correction), collected %.1f %% of swept (%.1f expected), opening found at %.1f s\n', ...
     fl.Cd, flk.Cd, 100 * fl.gravimetric.ratio, 100 * expected, fl2.windows(1).t1);
+
+% --- Test 5: the drive path (README section 10) ----------------------------------
+% The torque feedback of the simulated slave is the friction law of the
+% test (fakeProbeLink's torque model) plus the plant's reflected mass times
+% the axis acceleration. The plant has no drive-path spring and no
+% backlash, so the fit must report a bound on the stiffness and no
+% backlash, and find the mass.
+fcfg = frictionBenchConfig();
+S = fakeProbeLink('state');
+mrPlant = S.sl.plant.par.mr;                                        % [kg]
+truth = struct('F0', 0, 'Fc', 2000, 'dFs', 0, 'vs', 0.3, 'b', 150, 'mu', 0.12, 'noisePct', 0.3, ...
+    'tStick', 0, 'newtonPerPct', fcfg.newtonPerPct, 'mr', mrPlant);
+randn('seed', 5);
+
+% Reversals in the open chamber at 0.3 and 1 mm/s
+opts = linkOpts(saveDir, 240);
+opts.probe = true;
+fakeProbeLink('torqueModel', truth);
+[path, info] = charDriveRecipe('reversal', struct('speeds', [0.3 1], 'nReversals', 3, 'hold_s', 2));
+assert(numel(path) == 1 && strcmp(path{1}{1}, 'velstep') && info.nCaptures == 10 && info.travel_mm <= 2.1, ...
+    'reversal recipe: %d captures, travel %.1f mm', info.nCaptures, info.travel_mm);
+r = charRun('simrev', path, opts);
+assert(isempty(r.abort), r.abort);
+assert(numel(r.capFiles) == info.nCaptures && r.probeFailures == 0, '%d captures of %d', numel(r.capFiles), info.nCaptures);
+dp = charDrivePath(r.capFiles, struct('quiet', true));
+assert(numel(dp.reversal.rec) == 6 && all([dp.reversal.rec.ok]), '%d of 6 reversals analysed', sum([dp.reversal.rec.ok]));
+assert(isnan(dp.reversal.backlash_um) && sum([dp.reversal.rec.plateau]) <= 1, ...
+    'backlash %.1f um reported by a drive with none (%d plateaus)', dp.reversal.backlash_um, sum([dp.reversal.rec.plateau]));
+assert(all(isnan([dp.reversal.groups.ks_N_per_um])), 'a stiffness value from a drive with no spring');
+% The inertia: the plant's own drive has an acceleration that jumps at the
+% end of its dead time, which the fit's central difference smooths over a
+% row and reads a little high
+assert(dp.inertia.n == 4, '%d steps', dp.inertia.n);
+massErr = dp.inertia.mass_kg / mrPlant - 1;
+assert(abs(massErr) < 0.15, 'reflected mass %.3g kg, the plant''s %.3g', dp.inertia.mass_kg, mrPlant);
+% The torque reversal is the friction law's: twice (Fc + the viscous term at the speed)
+dTlaw = 2 * (truth.Fc + truth.b * [0.3 1]) / fcfg.newtonPerPct;     % [%]
+dTfit = [dp.reversal.groups.dT_pct];
+assert(all(abs(dTfit ./ dTlaw - 1) < 0.15), 'torque reversal %s %%, the law gives %s', mat2str(dTfit, 3), mat2str(dTlaw, 3));
+fprintf('ok  reversal recipe: no backlash (bound %.1f um), reflected mass %.3g kg (plant %.3g, %+.0f %%), torque reversal %s %%\n', ...
+    dp.reversal.backlashBound_um, dp.inertia.mass_kg, mrPlant, 100 * massErr, mat2str(dTfit, 3));
+
+% Dither in the closed liquid chamber (4.8 MPa/mm, the charge dissolved) at 5 and 9 MPa
+opts = linkOpts(saveDir, @(sl) dissolvedAt(sl, 7.5));
+opts.probe = true;
+fakeProbeLink('torqueModel', truth);
+[path, info] = charDriveRecipe('dither', struct('levels_MPa', [5 9], 'P_start_MPa', 7.5, 'cycles', 3, ...
+    'stiffness_MPa_mm', 4.8));
+assert(info.maxPressure_MPa < ccfg.pressureStop - 0.5 && strcmp(path{1}{1}, 'ramp') && path{1}{2} < 0 && path{4}{2} > 0, ...
+    'dither recipe');
+r = charRun('simdither', path, opts);
+assert(isempty(r.abort), r.abort);
+assert(max(r.runLog(:, P)) < ccfg.pressureStop, 'the dither reached the guard');
+dd = charDrivePath(r.capFiles, struct('quiet', true));
+nRev = sum([dd.dither.rec.ok]);
+assert(numel(dd.dither.rec) >= 8 && nRev >= 0.8 * numel(dd.dither.rec), '%d of %d reversals analysed', nRev, numel(dd.dither.rec));
+assert(isnan(dd.dither.backlash_um) && all([dd.dither.groups.b_um] == 0), 'backlash reported by a drive with none');
+assert(all(isnan([dd.dither.groups.ks_N_per_um])) && all([dd.dither.groups.ksBound_N_per_um] >= 0), ...
+    'a stiffness value from a drive with no spring');
+% The reversal of the friction law at the turn's pressure: 2 (Fc + mu P A + b v) over newtonPerPct
+Pg = [dd.dither.groups.P_MPa];
+dTlaw = 2 * (truth.Fc + truth.mu * Pg * ccfg.pistonArea_mm2 + truth.b * 0.2) / fcfg.newtonPerPct;   % [%]
+assert(all(abs([dd.dither.groups.dT_pct] ./ dTlaw - 1) < 0.2), 'torque reversal %s %% against the law %s', ...
+    mat2str([dd.dither.groups.dT_pct], 3), mat2str(dTlaw, 3));
+fprintf('ok  dither recipe: %d reversals at %s MPa, no backlash, k_s > %s N/um (no spring in the plant)\n', ...
+    nRev, mat2str(Pg, 3), mat2str(round([dd.dither.groups.ksBound_N_per_um])));
 
 % --- Guards ----------------------------------------------------------------------
 % From 9 MPa, ramping at 0.3 mm/s: the undersaturated charge dissolves
@@ -286,3 +350,50 @@ sl.plant.n_dis = min(pl.par.kH * (P * 1e6 + pl.par.Patm) * pl.V_l, pl.n_tot);   
 x = chamberPosition(sl, P);
 end
 
+
+function rs = checkOnePass(r, path, plan, nStops, driveLag, ccfg, slack, tol)
+% The checks of a one-pass run: no abort, every excursion within its
+% budget plus slack [MPa], each pair of legs back where it began, every
+% stop in a capture, and the fit recovering the plant's delay to within
+% tol [s] with a deceleration too large to resolve (the drive does not
+% slew).
+T = 1; STEP = 2; POS = 6; P = 9;                                    % log columns
+assert(isempty(r.abort), r.abort);
+L = r.runLog;
+level = 0;
+for s = 1:numel(path)
+    rows = L(L(:, STEP) == s, :);
+    switch path{s}{1}
+        case 'ramp'
+            level = level + (path{s}{2} > 0);
+        case 'move'
+            if path{s}{2} > 0
+                xPair = rows(1, POS);
+                q = plan(min(max(level, 1), numel(plan)));
+                assert(max(rows(:, P)) < q.P_MPa + q.budget_MPa + slack, ...
+                    'step %d reached %.2f MPa at a %.0f MPa level', s, max(rows(:, P)), q.P_MPa);
+            else
+                after = L(L(:, STEP) == s + 1, :);
+                assert(abs(after(end, POS) - xPair) < 0.15, ...
+                    'pair ending at step %d returned to %.3f mm from %.3f', s, after(end, POS), xPair);
+            end
+    end
+end
+rs = charStopDistance([r.capFiles {r.file}], struct('quiet', true, 'D_cfg', ccfg.velDecel, 'lag_s', 0.06));
+assert(numel(rs.stops) >= nStops, 'only %d stops found', numel(rs.stops));
+assert(sum(strcmp({rs.stops.source}, 'capture')) >= nStops - 1, 'only %d stops in the captures', ...
+    sum(strcmp({rs.stops.source}, 'capture')));
+for f = {rs.fit.comp, rs.fit.ret}
+    % The plant's drive does not slew: a stop is the dead time and the lag,
+    % a distance linear in the speed, so the fit's deceleration term goes
+    % large and its delay is the drive's: the lag plus the dead time less
+    % the scan by which the logged command leads the drive, plus the scan
+    % by which the probe's velocity feedback is older than its command (the
+    % probe runs in PRG_Main, before the axis updates the feedback), less the
+    % half scan the log's sum of v*Ts loses.
+    T0 = driveLag - 0.5 * ccfg.scanTime;                            % [s]
+    assert(abs(f{1}.T0_s - T0) < tol && f{1}.D_mm_s2 > 5 * ccfg.velDecel, ...
+        'fit D %.1f mm/s^2, T0 %.4f s; the drive stops in %.4f s, unslewed', f{1}.D_mm_s2, f{1}.T0_s, T0);
+end
+assert(rs.pass, 'stopping-distance checks failed');
+end

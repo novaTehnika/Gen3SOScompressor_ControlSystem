@@ -38,7 +38,8 @@ enum { SIM_ROOT_AX = 3, SIM_ROOT_SIM, SIM_ROOT_HOOK, SIM_ROOT_TOP };
     X(bool, ST_BOOL, jogBusy)       \
     X(double, ST_F64, P)            /* chamber pressure read (MPa gauge), 0 out of the cylinder */ \
     X(double, ST_F64, vOut)         /* saline delivered through the outlet (mm^3) */ \
-    X(double, ST_F64, xSync)        /* x the plant was last placed at (mm) */
+    X(double, ST_F64, xSync)        /* x the plant was last placed at (mm) */ \
+    X(double, ST_F64, vTorque)      /* v at the last scan, for the inertial torque (mm/s) */
 
 /* Physical parameters (slaveSimConfig.m sets every one at creation). */
 #define SIM_FIELDS(X) \
@@ -59,7 +60,8 @@ enum { SIM_ROOT_AX = 3, SIM_ROOT_SIM, SIM_ROOT_HOOK, SIM_ROOT_TOP };
 #define HOOK_FIELDS(X) \
     X(bool, ST_BOOL, driveFault)     \
     X(bool, ST_BOOL, blocked)        \
-    X(double, ST_F64, torque)        \
+    X(double, ST_F64, torque)        /* reported actual torque (% rated) */ \
+    X(double, ST_F64, mass)          /* reflected mass (kg): its inertial force adds to the reported torque */ \
     X(double, ST_F64, outflow)       /* extra outflow (mm^3/s) */ \
     X(double, ST_F64, valve)         /* outlet valve area fraction (orifice bank) */ \
     X(double, ST_F64, pressureVolt)  /* NaN: the transducer model */

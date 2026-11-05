@@ -15,6 +15,17 @@ function r = frictionFit(unloaded, loaded, opts)
 %   opts.logShuntOhms G_cfgPressureShuntOhms the logs were recorded with;
 %                     their pressure is rescaled to the present setting
 %                     (benchPressureRescale; default: present)
+%   opts.settle, opts.trim
+%                     s after the command has reached speed before samples
+%                     count, and s dropped before the stop (default
+%                     frictionBenchConfig: 1.0 and 0.2). Legs of the
+%                     characterisation bench's one-pass path last 0.4 to 3 s,
+%                     so fit them with 0.15 and 0.05.
+%   opts.accel        mm/s^2, the slew allowed for the command to reach
+%                     speed (default frictionBenchConfig: G_cfgDirectCtrlAccel).
+%                     The drive follows a step in about 60 ms whatever its
+%                     size (bench/characterisation/README.md section 8), so
+%                     pass a large value (1e4) with a short settle.
 %
 %   Every torque sample is converted to the force the motor would exert at
 %   the piston through a lossless drivetrain, F = T * newtonPerPct
@@ -71,6 +82,11 @@ end
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', '..', 'master-src', 'logic'));
 cfg = frictionBenchConfig();
+for name = {'settle', 'trim', 'accel'}
+    if isfield(opts, name{1}) && ~isempty(opts.(name{1}))
+        cfg.(name{1}) = opts.(name{1});
+    end
+end
 say = @(varargin) printUnless(opts.quiet, varargin{:});
 
 filesU = expandFiles(unloaded);

@@ -4,13 +4,16 @@ function d = traceDerive(d)
 %   d = traceDerive(d)
 %
 %   The geometry and pressure scaling come from d.meta (posEOT_mm,
-%   boreDiameter_mm, deadVolume_mL, atmPerMPa, atmAmbient_atm), the
+%   boreDiameter_mm, mixingDeadVolume_mL, atmPerMPa, atmAmbient_atm), the
 %   values in force when the trace was recorded; a key the file lacks
 %   falls back to masterConfig(). Added columns:
 %     posFromEOT_mm        posEOT - position, distance to the end of travel
 %     commandedFromEOT_mm  the same for the slave's commanded position
 %     targetFromEOT_mm     the same for the app's target position
-%     volume_mL            chamber volume at the position (x2mL)
+%     sweptVolume_mL       saline still deliverable at the position
+%                          (sweptVolume, without the dead volume)
+%     mixingVolume_mL      swept volume plus the dead volume that takes
+%                          part in mixing (mixingVolume)
 %     flow_mL_s            mL/mm * velocity, positive toward the end of
 %                          travel as the app shows it
 %     pressureAbs_atm      gauge MPa * atmPerMPa + atmAmbient
@@ -24,14 +27,15 @@ if isfield(d, 'meta') && isstruct(d.meta)
 end
 cfg = fromMeta(cfg, meta, 'posEOT', 'posEOT_mm');
 cfg = fromMeta(cfg, meta, 'boreDiameter', 'boreDiameter_mm');
-cfg = fromMeta(cfg, meta, 'deadVolume', 'deadVolume_mL');
+cfg = fromMeta(cfg, meta, 'mixingDeadVolume', 'mixingDeadVolume_mL');
 cfg = fromMeta(cfg, meta, 'atmPerMPa', 'atmPerMPa');
 cfg = fromMeta(cfg, meta, 'atmAmbient', 'atmAmbient_atm');
 
 d.posFromEOT_mm       = cfg.posEOT - d.position_mm;
 d.commandedFromEOT_mm = cfg.posEOT - d.commandedPosition_mm;
 d.targetFromEOT_mm    = cfg.posEOT - d.targetPosition_mm;
-d.volume_mL           = x2mL(d.position_mm, cfg);
+d.sweptVolume_mL      = sweptVolume(d.position_mm, cfg);
+d.mixingVolume_mL     = mixingVolume(d.position_mm, cfg);
 d.flow_mL_s           = mLPerMm(cfg) * d.velocity_mm_s;
 d.pressureAbs_atm     = d.pressureGauge_MPa * cfg.atmPerMPa + cfg.atmAmbient;
 if isempty(d.seq)

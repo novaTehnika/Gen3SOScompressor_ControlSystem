@@ -169,7 +169,8 @@ TYPE
       E_ProbeXferState - FB_Probe Transfer State
 
       State of the window the master reads. The code published in the input
-      register G_mbProbeXfer is the member's position below (0-3).
+      register G_mbProbeXfer is the member's position below (0-3); FB_Probe
+      computes the code directly and holds no variable of this type.
       ============================================================================ *)
 
    (* IMPORTANT: Member order defines the published code. Do not reorder. *)

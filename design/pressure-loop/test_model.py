@@ -29,6 +29,9 @@ The checks cover:
     integrator continuity and stop law;
   - reference values of the legacy model, and closed-loop runs of the
     slave controller;
+  - the stop-law floor policies: the fixed policy reproduces the
+    configured floor, the switched latch on synthetic signals, and the
+    switched floor with the forward stop on a delivery;
   - the parallel runner against serial runs.
 
 Usage:
@@ -554,7 +557,7 @@ def check_scheduled_st():
             K_cfg=cfg['G_cfgPressureSchedBulkModulus'],
             V_l_cfg=par.Vl0,
             V_dead_cfg=(cfg['G_cfgPressureSchedPassagesVol']
-                         + cfg['G_cfgPressureSchedHoseVolume']) * 1e-6,
+                         + cfg['G_cfgPressureSchedHoseVol']) * 1e-6,
             C_hose_cfg=cfg['G_cfgPressureSchedHoseCompl'],
             ratio_cfg=None,
             ki_ratio=cfg['G_cfgPressureSchedKiRatio'],
@@ -707,6 +710,90 @@ def check_closed_loop():
        f'(scheduled)')
 
 
+# %% ===== STOP-LAW FLOOR POLICIES =======================================
+def check_floor_policy():
+    """FloorPolicy, eqs. (46) to (48)."""
+    par = StudyParams().with_(hose_before=True)
+    c = par.cfg()
+
+    # The fixed policy at the configured floor, without the forward
+    # stop, is the configured StopVelMin: identical runs.
+    s = scenarios.compress(par, T=8.0)
+    r0 = sim.run(par, s, ctl.SlaveController('gvl'))
+    fixed = ctl.FloorPolicy('fixed', v_hi=c['G_cfgPressureStopVelMin'])
+    r1 = sim.run(par, s, ctl.SlaveController('fixed', floor=fixed))
+    assert np.array_equal(r0.u, r1.u) and np.array_equal(r0.P, r1.P)
+
+    # Synthetic signals, one scan of Ts at a time: the piston moves at
+    # 1.4 mm/s with the block clamped forward and the error 1 MPa.
+    Ts = c['G_cfgScanTime']                                     # [s]
+    f = ctl.FloorPolicy()
+    f.reset(c)
+    n_lag = f.W + f.d                       # [-] scans to fill history
+
+    def feed(n, P0, rate, err, x0, v=1.4):
+        """Feed n scans with the pressure rising at rate [MPa/s] from
+        P0 [MPa] and the piston at v [mm/s] from x0 [mm]; return the
+        last pressure and position."""
+        P, x = P0, x0
+        for _ in range(n):
+            f.step(P, x, err, True, v)
+            P += rate * Ts
+            x += v * Ts
+        return P, x
+    # Sealed: the pressure rises at k v = 4.8 * 1.4 MPa/s, no latch.
+    P, x = feed(n_lag + 200, 9.0, 4.8 * 1.4, 1.0, 0.0)
+    assert not any(f.trace_latched) and f.floor == f.v_lo
+    # Outflow balances the piston: the pressure is flat. The latch sets
+    # once the flat window has passed the lag and held for t_on.
+    i0 = len(f.trace_latched)
+    P, x = feed(n_lag + f.n_on + 5, P, 0.0, 1.0, x)
+    i_on = f.trace_latched.index(True, i0) - i0
+    assert f.floor == f.v_hi
+    assert f.W <= i_on <= n_lag + f.n_on + 1, i_on
+    # Recovery from below the target with the pressure rising: held.
+    P, x = feed(100, P, 2.0, 0.5, x)
+    assert f.latched
+    # The outlet shuts above the target: released.
+    P, x = feed(f.W, P, 6.7, -0.05, x)
+    assert not f.latched and f.floor == f.v_lo
+    # The forward stop holds the piston only while unlatched and above
+    # the target.
+    g = ctl.FloorPolicy(forward_stop=True)
+    g.reset(c)
+    assert g.limit_forward(1.4, -0.01) == 0.0
+    assert g.limit_forward(-1.0, -0.01) == -1.0
+    assert g.limit_forward(1.4, 0.01) == 1.4
+    g.latched = True
+    assert g.limit_forward(1.4, -0.01) == 1.4
+
+    # Closed loop, 1:1 with the hose open before the compression: the
+    # switched floor with the forward stop sets no latch during the
+    # compression, leaves no steady error in the delivery, and stops
+    # the piston when the purge shuts the valve, so the pressure stays
+    # below the ceiling where the fixed floor of the GVL does not.
+    pol = dict(mode='switched', forward_stop=True)
+    sw = ctl.SlaveController('sw', floor=ctl.FloorPolicy(**pol))
+    rc = sim.run(par, scenarios.compress(par), sw)
+    assert not any(sw.floor.trace_latched)
+    assert rc['overshoot'] < 0.2, rc['overshoot']
+    sw = ctl.SlaveController('sw', floor=ctl.FloorPolicy(**pol))
+    rd = sim.run(par, scenarios.deliver(par), sw)
+    rg = sim.run(par, scenarios.deliver(par), ctl.SlaveController('g'))
+    late = (rd.t > rd.events[-1] + 5) & (rd.t < rd.t[-1] - 1)
+    e = (rd.target[late] - rd.P_meas[late]) / 1e6               # [MPa]
+    assert abs(np.mean(e)) < 0.05 and np.std(e) < 0.1, (e.mean(),
+                                                         e.std())
+    assert rg['P_max'] > par.P_ceiling / 1e6 > rd['P_max'] + 1.0
+    assert rd['V_ok'] == rd['V_delivered']
+    ok(f'floor policies: fixed = configured StopVelMin; switched '
+       f'latch sets {i_on} scans into a flat window, holds through a '
+       f'recovery, releases on a rise above the target; with the '
+       f'forward stop, compression overshoot {rc["overshoot"]:.2f} MPa '
+       f'and the purge closing peaks at {rd["P_max"]:.2f} MPa '
+       f'(GVL {rg["P_max"]:.2f})')
+
+
 def check_runner():
     par = StudyParams()
     cases = [Case(par, scenarios.stiffstep(par), ctl.SlaveController(Kp=k))
@@ -734,4 +821,5 @@ if __name__ == '__main__':
     check_scheduled_st()
     check_legacy_reference()
     check_closed_loop()
+    check_floor_policy()
     check_runner()

@@ -21,6 +21,7 @@ pip install -r design/requirements.txt           # numpy, scipy, matplotlib
 python3 design/pressure-loop/test_model.py       # model checks, a few seconds
 python3 design/pressure-loop/study_compare.py    # three scenarios, seven controllers, a few seconds
 python3 design/pressure-loop/study_delivery.py   # deliverable volume against oxygen charge
+python3 design/pressure-loop/study_floor.py      # stop-law floors that follow the outflow, about 1 min; --mc 100 adds 3 min
 python3 design/pressure-loop/study_linear.py     # margins against chamber stiffness, about 30 s
 python3 design/pressure-loop/study_robust.py     # Monte Carlo over the uncertain parameters, about 5 min on 4 CPUs
 python3 design/pressure-loop/study_convergence.py # integration error against the time step, about 1 min
@@ -52,7 +53,7 @@ The plant, the sensor chain and their parameters are in `models/`
 | `study_convergence.py` | Measures the integration error against the time step for both methods. |
 | `studyparams.py` | Defines `StudyParams`: the models' `Params` (`models/params.py`) and the studies' own settings, the valve timings and procedure, the legacy controller's filter, the target and the requirement limits. A study overrides a model default by redeclaring the field. |
 | `modelpath.py` | Puts `models/` on the import path for the studies. |
-| `controllers.py` | Defines `SlaveController` (the slave's block, with a flow feedforward option kept only as a bound), `ScheduledSlaveController` (the same block with its gains and stop law scheduled on an estimate of the chamber stiffness, equations (39) to (41)), `ScheduledSlaveControllerST` (the ported Structured Text blocks, wired as PRG_Main wires them) and `LegacyController` (PID with a stiffness-estimating stop law and a torque mode). All share the `reset` and `step` interface. |
+| `controllers.py` | Defines `SlaveController` (the slave's block, with a flow feedforward option kept only as a bound), `ScheduledSlaveController` (the same block with its gains and stop law scheduled on an estimate of the chamber stiffness, equations (39) to (41)), `ScheduledSlaveControllerST` (the ported Structured Text blocks, wired as PRG_Main wires them) and `LegacyController` (PID with a stiffness-estimating stop law and a torque mode). All share the `reset` and `step` interface. `FloorPolicy` sets the stop-law floor of the slave controllers from the detected outflow, equations (46) to (48). |
 | `scenarios.py` | Defines the operating cases `compress`, `deliver`, `cycle` and the `stiffstep` probe, with the hose procedure and the valve timings (proximal opening, purge, pause, delivery). |
 | `sim.py` | Runs one closed-loop simulation: `run(params, scenario, controller)` returns a `Result` with traces, the valve event times and metrics. It sequences the valves: the hose opening, the purge, its closing and the reopening. |
 | `metrics.py` | Computes the loop metrics (overshoot, settling time, ripple, stroke) and the process metrics (pressure ceiling, saturation margin, the deepest dip at a valve event, volume delivered before a violation, solution delivered). |
@@ -60,6 +61,7 @@ The plant, the sensor chain and their parameters are in `models/`
 | `study_compare.py` | Compares velocity and torque command and the slave controller over three scenarios. |
 | `study_hose_opening.py` | Studies the proximal valve opened at pressure: the chamber floor, the solution admitted into the hose, the part of it that degassed and where it lies, against the valve bore (ball valve to needle valve), per charge and controller. |
 | `study_delivery.py` | Runs the delivery to the empty chamber over a range of oxygen charges and reports the deliverable volume. |
+| `study_floor.py` | Compares stop-law floors that follow the outflow, with and without the forward stop, against the fixed `StopVelMin`: nominal cases, a sweep of the policy settings and a Monte Carlo over the measured ranges. |
 | `linear.py`, `study_linear.py` | Build the discrete-time linear model of the velocity-command loop, equations (26) to (33), and use it to find the margins, the stability boundary and the frequency and disturbance responses. |
 | `robust.py`, `study_robust.py` | Define the uncertain parameters, requirement limits and sampler, and run the tornado, corner and Monte Carlo studies for each controller configuration. |
 | `studyutil.py` | Holds command-line, CSV and plotting helpers for the studies. |
@@ -86,7 +88,7 @@ symbols in the equations match the variable names in the code.
 
 The plant and the sensor chain the studies run on are the machine's
 models, in `models/`; `models/README.md` describes them, gives their
-equations (1) to (18), (34) to (38) and (42) to (45) and the measured
+equations (1) to (18), (34) to (38) and (42) to (46) and the measured
 values of their parameters. This section and the next cover what the
 studies add: the controllers, the scenarios and the linear model.
 
@@ -106,6 +108,20 @@ valve at 1 s and runs until the saline is gone (about 80 s). `cycle`
 does both in one run with a 60 s hold. `stiffstep` (a liquid-only
 10 → 12 MPa step) is kept as a stiff-regime margin probe; it is not a
 process case.
+
+**Valve event times.** In a delivery the proximal opening and the first
+opening of the distal valve are at fixed times, but the purge ends on
+volume: the distal valve closes once the purge volume (the hose's
+virgin saline plus any solution that degassed entering it) has left,
+and reopens a fixed `Tclose + t_pause` later. The orifice flow rises
+with the chamber pressure, eq. (36), so a controller that holds a
+higher pressure through the purge closes the valve sooner, and the
+closing and reopening fall at a different time in each run: about
+12.3 s for the GVL at 1:1, 12.1 s for the scheduled controller, whose
+dip is smaller, and 12.7 s for a StopVelMin of 0.5 mm/s, which sits
+2 MPa low. The degassed volume also depends on the controller when the
+hose is opened at pressure. Each run records its own event times
+(`Result.events`), and the metrics use them.
 
 **Scheduled slave controller.** The candidate for the slave. It runs
 `FB_PressureController` with Kp, Ki and the stop law set every scan from
@@ -132,6 +148,24 @@ within 0.5 MPa of the target, because the low scheduled gain would
 otherwise let it wind up on the approach. The block multiplies its
 stored integral by Ki, so the integral is rescaled when Ki changes; the
 Structured Text port must do the same.
+
+**Stop-law floor policies.** The stop law clamps the velocity to zero
+at zero error, which suits a sealed chamber; with the outlet open the
+piston must keep moving at the outflow speed to hold the pressure, and
+`StopVelMin` is the floor that lets it. `FloorPolicy` replaces the fixed
+floor with one set every scan from what the slave measures, and can add
+a forward stop. It applies to `SlaveController` and
+`ScheduledSlaveController` through their `floor` argument. The
+`switched` policy, eq. (46), detects the outflow without a stiffness
+value: in a sealed chamber a piston moving forward raises the pressure,
+so a forward-moving piston under a clamped command with the pressure
+not rising is displacing outflow. It then raises the floor from `v_lo`
+to `v_hi`, and drops it when the pressure rises above the target. The
+`estimated` policy, eq. (47), sets the floor from the outflow speed
+estimated with an assumed stiffness. The forward stop, eq. (48), holds
+a forward command at zero above the target while no outflow is
+detected. The `fixed` policy holds `v_hi` with no detection, to isolate
+the forward stop.
 
 **Legacy controller.** This is a PID controller with a filtered
 derivative, an output clamp and conditional anti-windup: the integrator
@@ -224,6 +258,34 @@ estimated stiffness, v lag + v^2 / (2 D) <= |e| / k_sched, so
 The block's own stop law, eq. (19), is this with lag = Ts and a fixed
 stiffness.
 
+### Stop-law floor policies
+
+The floor policies of `FloorPolicy` replace the constant StopVelMin of
+eqs. (19) and (41) with v_min[n]. Over a window of W scans, with the
+piston position x [mm] delayed by the measurement lag of d scans so that
+it and the measured pressure P_meas [MPa] describe the same interval,
+the pressure rise rate r [MPa/s] and the piston speed s [mm/s] are
+
+    (46) r = (P_meas[n] - P_meas[n-W]) / (W Ts)
+         s = (x[n-d] - x[n-d-W]) / (W Ts)
+
+In a sealed chamber r = k s with k > 0. The switched floor latches L
+when, for t_on, the block's previous output was clamped and forward,
+e > e_on, s >= v_on and r < r_on; it releases L when r > r_off and
+e <= e_off; and
+
+    (46a) v_min = v_hi if L else v_lo
+
+The estimated floor, with an assumed stiffness k_lo [MPa/mm], is
+
+    (47) v_out = s - r / k_lo
+         v_min = clamp(v_out + margin, v_lo, v_hi)
+
+with L taken as v_min > v_lo. The forward stop limits the command u
+after the block:
+
+    (48) u <- min(u, 0)   if e < 0 and not L
+
 ### Linear model
 
 Plant, the zero-order-hold discretization of k / (s (tauV s + 1)), with
@@ -313,8 +375,14 @@ The ranges are the bench measurements of 2026-10-26 with their spread
 (`bench/characterisation/README.md` section 8, `bench/friction`,
 `bench/pressure`). `mr`, `b`, `Fc` and `mu` act only in torque mode and
 the stall, so they are not varied; the dead time is fixed at its
-measured 22.8 ms. Each
-sample runs compress and deliver and checks these requirements:
+measured 22.8 ms. The air pocket at the pressure transducer, `V_air`,
+is explicit in the model (eq. (46) of `models/README.md`) and is held at
+its default, 0.1 mL; it is not sampled, since its compliance is below
+0.1 % of the liquid's above 1 MPa. The K range above is the effective
+value of runs whose compliance curved with pressure; the liquid K the
+fits give (0.81 GPa with the curvature removed, 2026-10-26) replaces it
+once the runs at two fill levels have settled what the curvature is.
+Each sample runs compress and deliver and checks these requirements:
 
 - The pressure never exceeds the ceiling, 12 MPa (`StudyParams.P_ceiling`).
   The machine's mechanical limit is to be confirmed; 15 MPa may break
@@ -601,23 +669,32 @@ in the slowest third of the drive lags to 41 % in the fastest, and are
 more frequent at low hose compliance (94 % against 41 %).
 
 **What this means for the machine.**
-- Open the proximal valve before the compression. Opened at pressure,
-  the hose drops the chamber 3.6 MPa in one scan, which no controller
-  can prevent and which degasses any charge above about 1.8:1.
+- The proximal valve stays shut during the compression and opens
+  after mixing (the settled procedure). Opened at pressure, the hose
+  drops the chamber 3.6 MPa in one scan, which no controller can
+  prevent and which degasses any charge above about 1.8:1. Opening it
+  before the compression avoids the drop, and so does a bypass orifice
+  of 0.3 mm or less opened ahead of the ball valve; neither is fitted
+  (the bypass is deferred, see the open questions).
 - `G_cfgPressureStopVelMin` is now 2 mm/s. That alone removes the
   steady error the bench saw (8.1 MPa for a 10 MPa target).
+- A floor that switches on detected outflow, with a forward stop above
+  the target, keeps that and also removes the purge closing peak
+  (see the stop-law floor study below).
 - The GVL gains let the purge closing carry the pressure to 12.3 MPa,
   through the 12 MPa ceiling, in every case; until the gain is raised,
   stop the piston before shutting the distal valve, or confirm that
   the mechanical ceiling allows 12.5 MPa.
 - The scheduled controller cuts the opening dip to under half (0.9 MPa
   at wc = 11 against 2.0), holds the closing peak to 11.1 MPa and
-  compresses twice as fast with no overshoot; it delivers 2:1 at 10 MPa
-  in every plausible case. Its margin is the same at every point of the
-  run, but with 44 ms of loop delay it is 37° at wc = 11 and 19° at
-  wc = 16: wc = 11 is the crossover to take, and 2.5:1 at 11 MPa is out
-  of reach (wc = 16 delivers it in a third of the plausible cases, with
-  the closing peak at the ceiling).
+  compresses twice as fast with no overshoot; with the hose in the
+  chamber from the start it delivers 2:1 at 10 MPa in every plausible
+  case (opened after mixing, the equalisation drop limits the charge
+  to below about 1.8:1 whatever the controller). Its margin is the
+  same at every point of the run, but with 44 ms of loop delay it is
+  37° at wc = 11 and 19° at wc = 16: wc = 11 is the crossover to take,
+  and 2.5:1 at 11 MPa is out of reach (wc = 16 delivers it in a third
+  of the plausible cases, with the closing peak at the ceiling).
 - 3:1 is saturated at 10.9 MPa and cannot be delivered without bubbles
   below the 12 MPa ceiling by any controller.
 - The drive does not apply the accel and decel settings, so they are not
@@ -654,8 +731,6 @@ Kp = wc/k holds 37° at wc = 11 everywhere.
   fitted.
 
 **Open questions:**
-- The calibration's reference: a hand-held meter's mA range. A loop
-  calibrator would tighten it.
 - The lag at the piston (not resolved) and the dissolution time constant
   are the two unmeasured plant parameters; the robustness study covers
   the first, and the second sets only the hold time.
@@ -670,6 +745,127 @@ Kp = wc/k holds 37° at wc = 11 everywhere.
   of the ball valve at pressure, is worth fitting later
   (`study_hose_opening.py`).
 
+## Stop-law floor study
+
+`study_floor.py` tests floors that follow the outflow, eqs. (46) to
+(48), against the fixed StopVelMin of the GVL (2 mm/s). The arms are the
+GVL; the earlier fixed 0.5 mm/s; the switched floor (0.5 to 2 mm/s)
+alone; a fixed 2 mm/s floor with the forward stop; the switched and the
+estimated floors with the forward stop; and the scheduled controller at
+wc = 11 (the measured bounds of `study_delivery.py`) alone and with the
+switched floor and the forward stop. The policy defaults are a 0.1 s
+window, the position delayed by the measurement lag (9 scans), the
+trigger at v_on 0.2 mm/s, r_on 0.1 MPa/s, e_on 0.05 MPa held for
+40 ms, the release at r_off 1 MPa/s with e_off 0, and for the estimate
+k_lo 4 MPa/mm and a 0.3 mm/s margin.
+
+**Nominal, 1:1 at 10 MPa, hose opened before the compression**
+(compression overshoot; the peak after the purge closes the valve; the
+error's mean and standard deviation and the share of time the forward
+stop holds the piston over the delivery stage; the detection delay
+after the first opening and the release delay after the closing):
+
+| Arm | Overshoot MPa | Closing peak MPa | V_ok mL | Error mean / std MPa | Stopped | Detect / release s |
+|---|---|---|---|---|---|---|
+| GVL (fixed 2) | 0.63 | 12.15 | 29 | 0.02 / 0.07 | 0 | — |
+| fixed 0.5 | 0.44 | 10.51 | 22 | 2.07 / 0.00 | 0 | — |
+| switched | 0.44 | 12.12 | 29 | 0.02 / 0.07 | 0 | 0.76 / 0.08 |
+| fixed 2, forward stop | 0.11 | 10.54 | 279 | 0.18 / 0.27 | 19 % | — |
+| switched, forward stop | 0.07 | 10.53 | 279 | 0.02 / 0.06 | 0 | 0.76 / 0.08 |
+| estimated, forward stop | 0.07 | 10.67 | 279 | 0.02 / 0.06 | 0 | 0.02 / 0.11 |
+| sched wc 11 | 0.00 | 10.98 | 278 | 0.01 / 0.02 | 0 | — |
+| sched wc 11, switched, forward stop | 0.01 | 10.54 | 278 | 0.01 / 0.02 | 0 | 0.18 / 0.05 |
+
+**Switching the floor alone does not stop the closing peak.** The
+switched floor releases 80 ms after the valve shuts, yet the pressure
+peaks at 12.12 MPa against the GVL's 12.15. The stop law limits the
+speed in either direction, and with the error just below zero the
+integrator still holds about 1.4 mm/s forward; once the error grows,
+the stop-law clamp grows with it and lets that velocity through. What
+it does do is keep the stop law in the sealed compression, where the
+overshoot falls to that of the 0.5 mm/s floor.
+
+**The forward stop removes the peak, and needs the detection.** With
+the forward stop the closing peaks at 10.5 MPa and the compression
+overshoots by 0.07 to 0.11 MPa, for every floor. Without detection
+(fixed 2 mm/s with the forward stop) the delivery chatters: every
+excursion of the noisy reading above the target stops the piston, so
+it is stopped 19 % of the time and the error's standard deviation
+rises from 0.07 to 0.27 MPa, with a mean error of 0.18 MPa. The latch
+lets the piston run through those excursions while the outlet is open,
+which removes the chatter.
+
+The closing peak, the delivery-stage window and the detection and
+release delays are measured from each run's own valve events. The trace
+plot, `floor_traces.png`, shows every arm on the GVL run's time axis
+around its purge closing, so the other arms' closings and reopenings
+fall a little earlier or later in it (see Valve event times).
+
+**Monte Carlo** (100 Latin hypercube samples over the ranges of
+`robust.py`, hose opened before the compression unless stated; pass
+rate for every requirement, in percent; the closing peak at p50 / max):
+
+| Case | GVL | switched, fs | estimated, fs | sched wc 11 | sched wc 11, switched, fs |
+|---|---|---|---|---|---|
+| 1:1 at 10 MPa | 0 | **100** | **100** | **100** | **100** |
+| 1:1 at 10 MPa, hose after mixing | 0 | **100** | **100** | **100** | **100** |
+| 2:1 at 10 MPa | 0 | 94 | 94 | **100** | **100** |
+| 2.5:1 at 11 MPa | 0 | 0 | 0 | 18 | **93** |
+| closing peak, 1:1, MPa | 12.2 / 12.5 | 10.6 / 11.1 | 10.8 / 11.2 | 11.1 / 11.5 | 10.6 / 11.0 |
+| closing peak, 2.5:1 at 11 MPa, MPa | 13.3 / 13.6 | 11.7 / 12.2 | 11.8 / 12.2 | 12.1 / 12.5 | 11.6 / 12.1 |
+
+The GVL fails every sample on the ceiling at the purge closing. The
+switched floor with the forward stop clears the ceiling everywhere at
+10 MPa, and its 2:1 failures (6 %) are the degassing at the opening
+dip, which it shares with the GVL: they are set by the GVL gain, not
+the floor. With the scheduled controller the forward stop takes 2.5:1 at
+11 MPa from 18 % to 93 %: the scheduled loop fails there on the closing
+peak (p50 12.1 MPa), which the forward stop brings to 11.6. Its
+remaining failures are degassing in samples with a slow drive (tauV
+29 to 49 ms) and a stiff saline (K above 0.8 GPa), where the dip at
+the reopening is about 0.1 MPa deeper than without the floor policy:
+until the outflow is detected the floor is low and the piston is held
+back. No arm latches in the sealed hold after the compression, except
+the estimated floor (up to 8 latches at 2:1 and 7 at 2.5:1), whose
+k_lo reads the dissolution as outflow. The switched floor latches once
+during the compression in most samples at 2.5:1 and a few at 1:1 and
+2:1, where the gas-rich chamber rises slowly, and releases on the
+approach.
+
+**Policy settings** (the sweep, on the 1:1 delivery for both procedures
+and with the valve shut over 1 s):
+- The latch needs a hold time: with t_on = 0 it chatters (more than 200
+  transitions in a delivery and 16 latches in the sealed hold), and the
+  closing peak returns to 11.9 MPa.
+- r_off must stay below the slowest closing's rise rate: at 4 MPa/s the
+  1 s closing never releases the latch and peaks at 12.1 MPa; 0.25 to
+  1 MPa/s all work.
+- r_on above about 0.5 MPa/s lets the latch set during the compression,
+  where the soft chamber rises slowly; 0.02 to 0.1 MPa/s do not.
+- The window works from 0.04 to 0.2 s; at 0.4 s the release is late and
+  the peak rises by 0.1 MPa (0.7 MPa with the 1 s closing).
+- e_off from 0 to 0.1 MPa and e_on from 0 to 0.2 MPa change the peak
+  by at most 0.2 MPa; e_off = −0.1 MPa delays the release.
+- With the forward stop the floors themselves matter little: v_hi from
+  1.6 to 3 mm/s changes nothing, and v_lo from 0 to 1 mm/s only the
+  compression overshoot (0.00 MPa at v_lo = 0, 0.08 MPa at 1 mm/s).
+- The estimated floor follows a slow closing poorly: with the 1 s
+  closing it releases after 0.88 s and peaks at 11.3 MPa, against
+  0.31 s and 10.3 MPa for the switched floor.
+
+**What this means for the machine.** The switched floor with the
+forward stop is the candidate: it needs no stiffness value, keeps the
+stop law in a sealed chamber, passes the outflow in a delivery and
+stops the piston when the outlet shuts. On the GVL gains it removes the
+closing peak that makes the GVL fail every sample; on the scheduled
+controller it extends delivery to 2.5:1 at 11 MPa in 93 % of the
+plausible cases. The floor switching on its own is not enough; the
+forward stop is what acts at the closing, and the latch is what lets
+the forward stop run in a delivery. In the slave this would be a latch
+and a direction test in `FB_PressureController` (or a block ahead of
+it), with the windowed position and pressure it already receives;
+it is not yet ported.
+
 ## Porting the schedule
 
 `FB_PressureSchedule` (`slave-src/FB/`) is the port of
@@ -677,15 +873,15 @@ Kp = wc/k holds 37° at wc = 11 everywhere.
 entry to pressure mode by `G_cfgPressureScheduleEnable`; its settings
 are the `G_cfgPressureSched*` values of the GVL, except the saline volume and
 the oxygen charge of the fill, which the master writes in holding registers
-HR7-10 and the slave latches on entry to pressure mode. `FB_PressureController`
+HR9-12 and the slave latches on entry to pressure mode. `FB_PressureController`
 gains an `IntegScale` input, because PRG_Main cannot write the block's
 stored integral.
 
 The reference's arguments map to the settings as follows: `wc` to
-`Crossover`, `K_cfg` to `BulkModulus`, `V_l_cfg` to `SalineVolume` (HR7-8),
+`Crossover`, `K_cfg` to `BulkModulus`, `V_l_cfg` to `SalineVolume` (HR9-10),
 `V_dead_cfg` to `PassagesVolume` plus `HoseVolume` and `C_hose_cfg` to
 `HoseCompliance`, both hose terms counted only when `HoseOpen` is set,
-`ratio_cfg` to `OxygenRatio` (HR9-10), `ki_ratio` to `KiRatio`, `kp_min` and
+`ratio_cfg` to `OxygenRatio` (HR11-12), `ki_ratio` to `KiRatio`, `kp_min` and
 `kp_max` to `KpMin` and `KpMax`, and `e_int` to `ArriveBand`. The lag of
 eq. (41) is built from the pressure input filter's time constant, the
 median window, the scan time and the drive's dead time and lag

@@ -58,14 +58,8 @@
         DIGITAL OUTPUTS (8 Available)
         ======================================================================== *)
 
-     (* DO0-DO2 are not used: the mode confirmation and fault code are
-        published in the Modbus input registers below. *)
-
-     (* Status Outputs, also published in the Modbus input registers *)
-     G_doPerformanceStatus AT %QX0.3 : BOOL   (* Mode-dependent status indicator *)
-     G_doFaultActive       AT %QX0.4 : BOOL   (* Fault indicator: HIGH = fault active *)
-     G_doHomingComplete    AT %QX0.5 : BOOL   (* Homing sequence complete *)
-     G_doInMotion          AT %QX0.6 : BOOL   (* Axis in motion indicator *)
+     (* DO0-DO6 are not driven: the mode confirmation, fault code and status
+        bits are published in the Modbus input registers below. *)
 
      (* Brake Control *)
      (* Spring-engaged, electrically released: HIGH = brake disengaged (motion allowed) *)
@@ -81,10 +75,10 @@
      G_mbSlaveCounter      AT %QW73794 : UINT  (* IR2: scan counter *)
      G_mbConfCode          AT %QW73796 : UINT  (* IR3: confirmed mode code, 0 outside the handshake *)
      G_mbFaultCode         AT %QW73798 : UINT  (* IR4: G_sysActiveFault, full value *)
-     G_mbFaultActive       AT %QW73800 : UINT  (* IR5: G_doFaultActive *)
-     G_mbInMotion          AT %QW73802 : UINT  (* IR6: G_doInMotion *)
-     G_mbPerformanceStatus AT %QW73804 : UINT  (* IR7: G_doPerformanceStatus *)
-     G_mbHomingComplete    AT %QW73806 : UINT  (* IR8: G_doHomingComplete *)
+     G_mbFaultActive       AT %QW73800 : UINT  (* IR5: G_sysFaultActive *)
+     G_mbInMotion          AT %QW73802 : UINT  (* IR6: G_sysInMotion *)
+     G_mbPerformanceStatus AT %QW73804 : UINT  (* IR7: G_sysPerformanceStatus *)
+     G_mbHomingComplete    AT %QW73806 : UINT  (* IR8: G_sysHomingComplete *)
      G_mbActualPosition    AT %QD73812 : REAL  (* IR11-12: mm *)
      G_mbActualVelocity    AT %QD73816 : REAL  (* IR13-14: mm/s *)
      G_mbActualTorque      AT %QD73820 : REAL  (* IR15-16: % of rated *)
@@ -118,7 +112,7 @@
      G_mbMotionEnable      AT %MW3.483332 : UINT  (* HR3: 1 = MotionEnable *)
      G_mbFaultReset        AT %MW3.483334 : UINT  (* HR4: 1 = FaultReset *)
      G_mbReference         AT %MD3.483336 : REAL  (* HR5-6: reference, mm / mm/s / % by mode *)
-     G_mbPositionSpeed     AT %MD3.483340 : REAL  (* HR7-8: position-move speed, mm/s (0 holds position) *)
+     G_mbPositionSpeed     AT %MD3.483340 : REAL  (* HR7-8: operator speed, mm/s: position moves, Go Home, homing approach/backoff/retract (0 holds) *)
      G_mbSalineVolume      AT %MD3.483344 : REAL  (* HR9-10: saline volume of the fill, mL (gain schedule) *)
      G_mbOxygenRatio       AT %MD3.483348 : REAL  (* HR11-12: oxygen charge as STP volume per saline volume (gain schedule) *)
 
@@ -140,8 +134,11 @@
         Motor: Yaskawa Sigma-7 400W (SGM7J-04A6A6C)
         ======================================================================== *)
 
-     G_cfgGearRatio            : LREAL := 70.0        (* Motor turns per lead screw turn *)
-     G_cfgLeadScrewPitch       : LREAL := 5.08        (* mm per lead screw turn (0.2 inch) *)
+     (* Bench reference copies of the Hardware Configuration scaling, which
+        sets the unit conversion in the controller. Nothing in slave-src reads
+        them; the benches (bench/common/benchGvl.m) take them as fallbacks. *)
+     G_cfgGearRatio            : LREAL := 70.0        (* Motor turns per lead screw turn (reference copy) *)
+     G_cfgLeadScrewPitch       : LREAL := 5.08        (* mm per lead screw turn, 0.2 inch (reference copy) *)
 
 
      (* ========================================================================
@@ -168,13 +165,14 @@
         ======================================================================== *)
 
      G_cfgVelLimitMax          : LREAL := 7.0         (* The one axis speed ceiling, VelMax in every mode. The mode
-                                                          speeds below (Go Home, homing, pressure) are passed through
-                                                          MIN(.., G_cfgVelLimitMax). In position mode the master sets the
-                                                          move speed (G_mbPositionSpeed), clamped to this ceiling, as
-                                                          FB_PositionPathShaper's VelMax; Y_DirectControl does no path
+                                                          speeds below (pressure) are passed through
+                                                          MIN(.., G_cfgVelLimitMax); the Go Home and homing speeds are
+                                                          MIN(operator speed, ..), the operator speed (G_mbPositionSpeed)
+                                                          being clamped to this ceiling. In position mode the operator
+                                                          speed is FB_PositionPathShaper's VelMax; Y_DirectControl does no path
                                                           shaping in PositionMode (the command reaches the drive as
                                                           given), so its Velocity input sets no limit there.
-                                                          masterConfig.jogVelMax and positionSpeed must not exceed it *)
+                                                          masterConfig.speedMax must not exceed it *)
      G_cfgStopDecel            : LREAL := 10.0        (* The one MC_Stop deceleration (mm/s^2): hold, fault,
                                                           recovery and Go Home abort *)
 
@@ -200,7 +198,7 @@
         POSITION PATH SHAPER (FB_PositionPathShaper, position modes only)
         Y_DirectControl does no path shaping in PositionMode, so the shaper
         turns the master's setpoint into a command the axis can follow: rate
-        limited to the master's position speed (clamped to G_cfgVelLimitMax),
+        limited to the operator speed (clamped to G_cfgVelLimitMax),
         accel limited to G_cfgPosShaperAccelMax, and tethered to within
         G_cfgPosShaperMaxDeviation of actual position.
         ======================================================================== *)
@@ -284,7 +282,7 @@
      G_cfgPressureSchedPistonArea    : LREAL := 3431.0     (* Piston area (mm^2), 2.602 in bore *)
      G_cfgPressureSchedEndOfTravel   : LREAL := 367.0      (* Position at the end of travel, where the chamber is down to the passages (mm) *)
      G_cfgPressureSchedPassagesVol   : LREAL := 57.0       (* Cylinder passages, chamber volume at the end of travel without the hose (mL), measured with the present fittings *)
-     G_cfgPressureSchedHoseVolume    : LREAL := 29.0       (* Hose between the cylinder head and the outlet (mL), measured; used when the hose is open *)
+     G_cfgPressureSchedHoseVol       : LREAL := 29.0       (* Hose between the cylinder head and the outlet (mL), measured; used when the hose is open *)
      G_cfgPressureSchedHoseCompl     : LREAL := 1.2E-13    (* Hose compliance beyond its liquid (m^3/Pa), a lower bound on the measured value; used when the hose is open *)
      G_cfgPressureSchedHoseOpen      : BOOL := FALSE       (* The proximal valve is open during the compression, so the hose is part of the chamber; FALSE when it opens after mixing *)
      G_cfgPressureSchedBulkModulus   : LREAL := 1.0E9      (* Saline bulk modulus (Pa), an upper bound *)
@@ -305,7 +303,7 @@
      G_cfgHoldPositionTimeout  : TIME := T#2M         (* Hold-position inactivity watchdog: if no handshake completes within this window after motion halts, gracefully shut down to idle (no fault) *)
      G_cfgBrakeEngageDelay     : TIME := T#500MS      (* Wait after brake engage command *)
      G_cfgBrakeDisengageDelay  : TIME := T#500MS      (* Wait after brake disengage command *)
-     G_cfgHomingTimeout        : TIME := T#90S        (* Overall homing sequence timeout *)
+     G_cfgHomingTimeout        : TIME := T#90S        (* Homing sequence timeout, counted at the operator speed's fraction of the fast-approach ceiling (time at full speed); stops while held *)
      G_cfgDriveReadyTimeout    : TIME := T#5S         (* Timeout waiting for drive ready *)
      G_cfgFaultIdleTimeout     : TIME := T#30S        (* Timeout in fault before going to idle *)
 
@@ -316,10 +314,8 @@
 
      (* Debounce times: Modbus command registers and the overtravel inputs *)
      G_cfgDebounceTimeMode         : TIME := T#50MS   (* Mode code (G_mbModeCode) debounce *)
-     G_cfgDebounceTimeMotion       : TIME := T#20MS   (* Motion enable (G_mbMotionEnable) debounce *)
-     G_cfgDebounceTimeFault        : TIME := T#20MS   (* Fault reset (G_mbFaultReset) debounce *)
-     G_cfgDebounceTimeOvertravelNeg: TIME := T#10MS   (* Negative overtravel / home reference (short for homing precision) *)
-     G_cfgDebounceTimeOvertravelPos: TIME := T#10MS   (* Positive overtravel standard debounce *)
+     G_cfgDebounceTimeCommand      : TIME := T#20MS   (* Motion enable (G_mbMotionEnable) and fault reset (G_mbFaultReset) debounce *)
+     G_cfgDebounceTimeOvertravel   : TIME := T#10MS   (* Both overtravel inputs; short for the negative switch's homing precision *)
 
      (* Analog input filter parameters (pressure channel) *)
      G_cfgAnalogFilterTimeConst: TIME := T#20MS       (* Low-pass filter time constant *)
@@ -337,20 +333,21 @@
         HOMING PARAMETERS
         ======================================================================== *)
 
+     (* Acceleration of every move the homing modes make (Mode 110's approaches, backoff and retract; Mode 101's Go Home) *)
+     G_cfgMoveAccel              : LREAL := 5.0       (* Acceleration of the homing and Go Home moves (mm/s²) *)
+
      (* Mode 110 - Home to Negative Overtravel Switch (two-stage approach + fixed retract) *)
-     G_cfgHomeLimFastApproachVel : LREAL := 6.0       (* Coarse approach toward switch (mm/s) *)
-     G_cfgHomeLimSlowApproachVel : LREAL := 1.0       (* Slow re-approach for precise switch detect (mm/s) *)
-     G_cfgHomeLimBackoffVel      : LREAL := 5.0       (* Inter-approach backoff AND final retract velocity (mm/s) *)
+     G_cfgHomeLimFastApproachVel : LREAL := 6.0       (* Ceiling of the coarse approach toward switch (mm/s); the operator speed (HR7-8) caps it *)
+     G_cfgHomeLimSlowApproachVel : LREAL := 1.0       (* Slow re-approach for precise switch detect (mm/s); fixed, held at operator speed 0 *)
+     G_cfgHomeLimBackoffVel      : LREAL := 5.0       (* Ceiling of the inter-approach backoff AND final retract velocity (mm/s); the operator speed (HR7-8) caps it *)
      G_cfgHomeLimRetractDist     : LREAL := 5.0       (* Retract distance from precise switch to position 0 (mm).
                                                           Switch lands at -G_cfgHomeLimRetractDist in the homed frame. *)
      G_cfgHomeLimSetPosition     : LREAL := 0.0       (* Position value at the retract endpoint (becomes coord-frame zero) *)
-     G_cfgHomeLimAccel           : LREAL := 5.0       (* Acceleration for all homing moves (mm/s²) *)
      G_cfgHomeLimDecel           : LREAL := 50.0       (* Deceleration for all homing moves (mm/s²) *)
 
      (* Mode 101 - Go Home *)
      G_cfgGoHomePosition       : LREAL := 0.0         (* Target position for Go Home *)
-     G_cfgGoHomeVelocity       : LREAL := 6.0         (* Velocity for Go Home move *)
-     G_cfgGoHomeAccel          : LREAL := 510.0         (* Acceleration for Go Home move (mm/s²) *)
+     G_cfgGoHomeVelocity       : LREAL := 6.0         (* Ceiling of the Go Home velocity (mm/s); the operator speed (HR7-8) caps it *)
      G_cfgGoHomeDecel          : LREAL := 10.0         (* Deceleration for Go Home move (mm/s²) *)
 
 
@@ -419,7 +416,7 @@
      G_sysPreviousState        : E_SystemState    (* Previous state *)
      G_sysRequestedMode        : E_OperatingMode  (* Mode from master *)
      G_sysReference            : LREAL := 0.0     (* Reference from master: mm, mm/s or % by mode *)
-     G_sysPositionSpeed        : LREAL := 0.0     (* Position-move speed from master (mm/s), the shaper's speed limit once clamped to [0, G_cfgVelLimitMax] *)
+     G_sysPositionSpeed        : LREAL := 0.0     (* Operator speed from master (mm/s): position moves, Go Home, homing approach/backoff/retract (0 holds); limited to [0, G_cfgVelLimitMax] in PRG_Main *)
      G_sysSalineVolume         : LREAL := 0.0     (* Saline volume from master (mL); 0 until written *)
      G_sysOxygenRatio          : LREAL := 0.0     (* Oxygen charge per saline volume from master (STP volume ratio) *)
      G_sysScanCounter          : UINT := UINT#0   (* Incremented every scan, published in G_mbSlaveCounter *)
@@ -464,6 +461,12 @@
 
      (* Motion status *)
      G_sysHalted               : BOOL := FALSE    (* Halt is active (ST_HOLD_POSITION) *)
+
+     (* Status bits published in the Modbus input registers IR5-IR8 *)
+     G_sysPerformanceStatus    : BOOL := FALSE    (* Mode-dependent status: in band in pressure mode *)
+     G_sysFaultActive          : BOOL := FALSE    (* Fault active (ST_FAULT, ST_FAULT_IDLE) *)
+     G_sysHomingComplete       : BOOL := FALSE    (* Homing sequence complete *)
+     G_sysInMotion             : BOOL := FALSE    (* Axis in motion *)
 
      (* Limit status *)
      G_sysOvertravelNegActive  : BOOL := FALSE    (* Negative overtravel switch triggered *)

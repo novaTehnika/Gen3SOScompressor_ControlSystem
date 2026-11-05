@@ -25,6 +25,7 @@ meta.exchangePeriod_s  = cfg.exchangePeriod;
 meta.posEOT_mm         = cfg.posEOT;
 meta.boreDiameter_mm   = cfg.boreDiameter;
 meta.deadVolume_mL     = cfg.deadVolume;
+meta.mixingDeadVolume_mL = cfg.mixingDeadVolume;
 meta.atmPerMPa         = cfg.atmPerMPa;
 meta.atmAmbient_atm    = cfg.atmAmbient;
 meta.referenceUnits    = 'mm in position mode, mm/s in jog, MPa gauge in pressure mode';

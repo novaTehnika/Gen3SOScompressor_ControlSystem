@@ -52,6 +52,11 @@ FB_PressureController, both translated from Structured Text, wired as
 PRG_Main wires them, with the schedule's settings read from the GVL. It
 is the port of ScheduledSlaveController and matches it scan for scan.
 
+FloorPolicy sets the stop-law floor (StopVelMin) of either slave
+controller every scan from the detected outflow instead of the fixed
+configured value, eqs. (46) to (48), and can add a forward stop above
+the target. It is prototyped here; the slave does not have it.
+
 LegacyController is a PID controller written for the earlier studies
 (eqs. (21) to (25)). It can estimate the chamber stiffness online for its
 stop law, add a flow feedforward, and command either velocity or force.
@@ -94,6 +99,185 @@ def _cfg_name(key, known):
     raise KeyError(f'no slave configuration matches {key!r}')
 
 
+# %% ===== STOP-LAW FLOOR POLICIES =======================================
+def measurement_lag_scans(c):
+    """[-] Scans by which the measured pressure lags the chamber in the
+    slave configuration c: the filter time constant, the median's
+    half-width and the two pipeline scans. The floor policies delay the
+    piston position by this much so that the two signals they compare
+    describe the same interval."""
+    Ts = c['G_cfgScanTime']                                     # [s]
+    n_med = 5 if c['G_cfgAnalogMedianSize'] >= 5 else 3         # [-]
+    return (round(c['G_cfgAnalogFilterTimeConst'] / Ts)
+            + (n_med - 1) // 2 + 2)
+
+
+class FloorPolicy:
+    """A stop-law floor that follows the outflow instead of a fixed
+    StopVelMin.
+
+    The stop law clamps the velocity to zero at zero error, which is
+    right for a sealed chamber and wrong with the outlet open, where the
+    piston must keep moving to hold the pressure. A fixed floor covers
+    the outflow at the cost of the stop law near the target in every
+    state. A policy sets the floor each scan from what the slave
+    measures: the piston position x [mm], the measured pressure
+    P [MPa] and the pressure error e [MPa]. Both use a window of W
+    scans, with the position delayed by the measurement lag d so that
+    the two describe the same interval:
+
+      dx = x[n - d] - x[n - d - W],   dP = P[n] - P[n - W]
+
+    In a sealed chamber dP = k dx with k > 0, so a piston that moves
+    forward while the pressure does not rise is displacing at least
+    that much outflow.
+
+    mode 'switched', eq. (46): the floor is v_lo until the outflow is
+    detected and v_hi while it is latched. The latch is set when, for
+    t_on, the block was clamped with a forward output, the error
+    exceeded e_on, the piston moved at least v_on and the pressure
+    rose at less than r_on. It is released when the pressure rises at
+    more than r_off with the error at or below e_off (the pressure at
+    or above the target): the outlet has shut under a moving piston.
+    No stiffness value is used.
+
+    mode 'estimated', eq. (47): the floor is the outflow speed estimated
+    with an assumed stiffness k_lo, plus a margin, held within
+    [v_lo, v_hi]:
+
+      v_out = (dx - dP / k_lo) / (W Ts)
+      floor = clamp(v_out + margin, v_lo, v_hi)
+
+    k_lo below the true stiffness overstates the outflow while the
+    pressure falls and understates it while the pressure rises.
+
+    mode 'fixed': the floor is v_hi throughout and never latched, as
+    the configured StopVelMin; it isolates the effect of
+    forward_stop.
+
+    forward_stop, eq. (48): while the floor is not latched (mode
+    'switched') or is at v_lo (mode 'estimated') and the error is
+    negative, the forward command is limited to zero. The stop law
+    limits the speed in either direction, so without it an
+    integrator that holds a forward velocity keeps the piston moving
+    into a chamber already above the target.
+
+    Arguments (slave units: mm, mm/s, MPa, s):
+      mode      'fixed', 'switched' or 'estimated'.
+      v_lo      [mm/s] Floor with no outflow detected.
+      v_hi      [mm/s] Floor while outflow is detected (switched), or
+                the highest floor (estimated).
+      window    [s] Window W Ts over which dx and dP are taken.
+      lag       [s] Delay d Ts of the position; None derives it from
+                the slave configuration, measurement_lag_scans().
+      v_on      [mm/s] Least piston speed over the window for the
+                trigger.
+      r_on      [MPa/s] Pressure rise rate below which the trigger
+                counts.
+      e_on      [MPa] Error above which the trigger counts.
+      t_on      [s] Time the trigger condition must hold.
+      r_off     [MPa/s] Pressure rise rate above which the release
+                counts.
+      e_off     [MPa] Error at or below which the release counts.
+      k_lo      [MPa/mm] Stiffness assumed by the estimate.
+      margin    [mm/s] Added to the estimated outflow speed.
+      forward_stop  Apply eq. (48).
+    """
+
+    def __init__(self, mode='switched', v_lo=0.5, v_hi=2.0, window=0.1,
+                 lag=None, v_on=0.2, r_on=0.1, e_on=0.05, t_on=0.04,
+                 r_off=1.0, e_off=0.0, k_lo=4.0, margin=0.3,
+                 forward_stop=False):
+        if mode not in ('fixed', 'switched', 'estimated'):
+            raise ValueError(f'unknown floor mode {mode!r}')
+        self.mode = mode
+        self.v_lo, self.v_hi = v_lo, v_hi                       # [mm/s]
+        self.window, self.lag = window, lag                     # [s]
+        self.v_on, self.r_on = v_on, r_on              # [mm/s], [MPa/s]
+        self.e_on, self.t_on = e_on, t_on                 # [MPa], [s]
+        self.r_off, self.e_off = r_off, e_off          # [MPa/s], [MPa]
+        self.k_lo, self.margin = k_lo, margin       # [MPa/mm], [mm/s]
+        self.forward_stop = forward_stop
+
+    def reset(self, c):
+        """Prepare a run with the slave configuration c."""
+        self.Ts = c['G_cfgScanTime']                            # [s]
+        self.W = max(1, round(self.window / self.Ts))           # [-]
+        if self.lag is None:
+            self.d = measurement_lag_scans(c)                   # [-]
+        else:
+            self.d = round(self.lag / self.Ts)                  # [-]
+        self.P_hist = []                    # [MPa] last W + 1 readings
+        self.x_hist = []                    # [mm] last W + d + 1
+        self.n_on = round(self.t_on / self.Ts)                  # [-]
+        self.count = 0                      # [-] scans the trigger held
+        self.latched = False
+        if self.mode == 'fixed':
+            self.floor = self.v_hi                              # [mm/s]
+        else:
+            self.floor = self.v_lo                              # [mm/s]
+        # Per-scan record, for the studies
+        self.trace_floor = []                                   # [mm/s]
+        self.trace_latched = []
+
+    def step(self, P, x, err, saturated, v_out_prev):
+        """Return this scan's floor [mm/s] from the measured pressure P
+        [MPa], the piston position x [mm], the error err [MPa], and the
+        block's saturation flag and velocity [mm/s] of the previous
+        scan. The flag is the block's internal bSaturated, which the
+        translated block exposes; a port to the slave would make it an
+        output again."""
+        self.P_hist.append(P)
+        self.x_hist.append(x)
+        if len(self.P_hist) > self.W + 1:
+            del self.P_hist[0]
+        if len(self.x_hist) > self.W + self.d + 1:
+            del self.x_hist[0]
+        full = len(self.x_hist) == self.W + self.d + 1
+        if full:
+            T = self.W * self.Ts                                # [s]
+            dP = self.P_hist[-1] - self.P_hist[0]               # [MPa]
+            dx = (self.x_hist[self.W] - self.x_hist[0])         # [mm]
+            if self.mode == 'fixed':
+                self.floor = self.v_hi
+            elif self.mode == 'switched':
+                self._switch(dP / T, dx / T, err, saturated,
+                             v_out_prev)
+            else:
+                # Outflow speed with the assumed stiffness, eq. (47)
+                # [mm - MPa / (MPa/mm)] / [s] -> [mm/s]
+                v_out = (dx - dP / self.k_lo) / T
+                self.floor = min(max(v_out + self.margin, self.v_lo),
+                                 self.v_hi)
+                self.latched = self.floor > self.v_lo
+        self.trace_floor.append(self.floor)
+        self.trace_latched.append(self.latched)
+        return self.floor
+
+    def _switch(self, rate, speed, err, saturated, v_out_prev):
+        """Update the latch of eq. (46) from the pressure rise rate
+        [MPa/s] and the piston speed [mm/s] over the window."""
+        if self.latched:
+            if rate > self.r_off and err <= self.e_off:
+                self.latched = False
+                self.count = 0
+        else:
+            stuck = (saturated and v_out_prev > 0.0
+                     and err > self.e_on and speed >= self.v_on
+                     and rate < self.r_on)
+            self.count = self.count + 1 if stuck else 0
+            if self.count >= self.n_on:
+                self.latched = True
+        self.floor = self.v_hi if self.latched else self.v_lo
+
+    def limit_forward(self, v, err):
+        """Return the velocity command v [mm/s] with eq. (48) applied
+        at the error err [MPa]."""
+        if self.forward_stop and not self.latched and err < 0.0:
+            return min(v, 0.0)
+        return v
+
+
 class SlaveController:
     """The slave's FB_PressureController wired as PRG_Main wires it.
 
@@ -104,6 +288,8 @@ class SlaveController:
                    The slave has no flow feedforward and the machine
                    cannot supply the flow, so this is a bound for the
                    studies, not a candidate.
+      floor        A FloorPolicy that sets the block's StopVelMin every
+                   scan, or None for the configured StopVelMin.
       **overrides  Slave settings, by full G_cfg* name or by the name
                    without G_cfg and an optional Pressure or Analog
                    prefix, in the units of the GVL. For example Kp=1.0,
@@ -113,10 +299,12 @@ class SlaveController:
 
     mode = 'V'
 
-    def __init__(self, name='slave', flow_ff=False, **overrides):
+    def __init__(self, name='slave', flow_ff=False, floor=None,
+                 **overrides):
         known = slave.slave_config()
         self.name = name
         self.flow_ff = flow_ff
+        self.floor = floor
         self.cfg = {_cfg_name(k, known): v for k, v in overrides.items()}
 
     def reset(self, par, scenario):
@@ -145,13 +333,33 @@ class SlaveController:
         fb.CycleTime = c['G_cfgScanTime']       # [s]
         self.fb = fb
         self.first_scan = True
+        if self.floor is not None:
+            self.floor.reset(c)
+        self.floor_done = False     # floor already set for this scan
         return 0.0
+
+    def update_floor(self, P_meas, target, x):
+        """Set the block's StopVelMin for this scan from the floor
+        policy and return it [mm/s]. The configured value stands when
+        there is no policy."""
+        fb = self.fb
+        if self.floor is not None and not self.floor_done:
+            tgt = min(max(target * 1e-6, 0.0), self.target_max) # [MPa]
+            err = tgt - P_meas * 1e-6                           # [MPa]
+            # [Pa -> MPa], [m -> mm]
+            fb.StopVelMin = self.floor.step(P_meas * 1e-6, x * 1e3,
+                                            err, fb.bSaturated,
+                                            fb.Velocity)
+        self.floor_done = True
+        return fb.StopVelMin
 
     def step(self, P_meas, target, t, scenario, x=0.0):
         fb = self.fb
         # PRG_Main resets the block on the scan that enters the mode.
         fb.Reset = self.first_scan
         self.first_scan = False
+        self.update_floor(P_meas, target, x)
+        self.floor_done = False
 
         # PRG_Main limits the target to [0, TargetMax].
         # [Pa -> MPa]
@@ -161,6 +369,9 @@ class SlaveController:
 
         # PRG_Main clamps the block output to VelMax.
         v = min(max(fb.Velocity, -self.vel_max), self.vel_max)  # [mm/s]
+        if self.floor is not None:
+            # Forward stop above the target, eq. (48)
+            v = self.floor.limit_forward(v, fb.rError)
 
         # Flow feedforward, eq. (20): the piston velocity that displaces
         # the expected outflow. [m^3/s / m^2 -> m/s, * 1e3 -> mm/s]
@@ -333,8 +544,11 @@ def limit_position(par, scenario):
     down to the cylinder head's passages (the limit switch)."""
     RT = par.R * par.T                                          # [J/mol]
     P0, ng0, nd0 = scenario.initial(par)
+    # Stressed liquid, free gas and the air pocket at the transducer,
+    # eq. (9) with eq. (46)
     Vch0 = (par.Vl0 * (1 - P0 / par.K)
-            + ng0 * RT / (P0 + par.Patm))                       # [m^3]
+            + ng0 * RT / (P0 + par.Patm)
+            + par.Patm * par.V_air / (P0 + par.Patm))           # [m^3]
     return (Vch0 - par.V_passages) / par.A                      # [m]
 
 
@@ -419,8 +633,9 @@ class ScheduledSlaveController(SlaveController):
     def __init__(self, name='scheduled', wc=6.0, K_cfg=1.0e9, V_l_cfg=None,
                  V_dead_cfg=None, C_hose_cfg=0.0, ratio_cfg=None,
                  ki_ratio=0.4, kp_min=0.001, kp_max=5.0, lag=None,
-                 stop_from_k=True, e_int=0.5, flow_ff=False, **overrides):
-        super().__init__(name, flow_ff, **overrides)
+                 stop_from_k=True, e_int=0.5, flow_ff=False, floor=None,
+                 **overrides):
+        super().__init__(name, flow_ff, floor, **overrides)
         self.V_dead_cfg = V_dead_cfg
         self.C_hose_cfg = C_hose_cfg                            # [m^3/Pa]
         self.e_int = e_int
@@ -531,6 +746,8 @@ class ScheduledSlaveController(SlaveController):
         err = (min(max(target * 1e-6, 0.0), self.target_max)
                - P_meas * 1e-6)                                 # [MPa]
         if self.stop_from_k:
+            # The floor policy, if any, sets the floor of eq. (41).
+            self.v_floor = self.update_floor(P_meas, target, x)
             self.v_lim = min(self.vel_max, self.stop_velocity(err, k_mm))
             fb.VelMax = self.v_lim
         # Hold the integrator until the first arrival near the target
@@ -600,7 +817,7 @@ class ScheduledSlaveControllerST(SlaveController):
         else:
             s.SalineVolume = self.saline_ml                     # [mL]
         s.PassagesVolume = c['G_cfgPressureSchedPassagesVol']
-        s.HoseVolume = c['G_cfgPressureSchedHoseVolume']
+        s.HoseVolume = c['G_cfgPressureSchedHoseVol']
         s.HoseCompliance = c['G_cfgPressureSchedHoseCompl']
         s.HoseOpen = c['G_cfgPressureSchedHoseOpen']
         s.BulkModulus = c['G_cfgPressureSchedBulkModulus']

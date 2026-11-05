@@ -92,13 +92,13 @@
        IntegHold       : BOOL             (* Hold the controller's integrator at zero this scan
        KEst            : LREAL            (* Stiffness bound at the present pressure (MPa/mm), for diagnostics
        KEstTarget      : LREAL            (* Stiffness bound at the larger of the present and target pressure (MPa/mm), for diagnostics
-       Lag             : LREAL            (* Lag assumed by the stop law (s), for diagnostics
        ParamError      : BOOL             (* A setting is out of range; outputs are zero
      VAR:
        bArrived        : BOOL := FALSE    (* The error has come within ArriveBand since Reset
        rPRef           : LREAL := 0.0     (* Highest absolute pressure since Reset (Pa)
        rKiPrev         : LREAL := 0.0     (* Ki output on the previous scan; 0 after Reset
        rMedScans       : LREAL            (* Median filter delay (scans)
+       rLag            : LREAL            (* Lag assumed by the stop law (s)
        rPAbs           : LREAL            (* Absolute pressure (Pa)
        rArea           : LREAL            (* Piston area (m^2)
        rHoseVolume     : LREAL            (* Hose volume in the chamber: HoseVolume when HoseOpen, else 0 (mL)
@@ -118,7 +118,7 @@
        rKSched         : LREAL            (* Larger of KEst and KEstTarget (MPa/mm)
        rErr            : LREAL            (* Target - Actual (MPa)
        rDist           : LREAL            (* Travel that closes the error at KEst (mm)
-       rStep           : LREAL            (* Velocity lost over Lag at DecelMax (mm/s)
+       rStep           : LREAL            (* Velocity lost over rLag at DecelMax (mm/s)
        rVelStop        : LREAL            (* Stop-law velocity (mm/s)
    ============================================================================ *)
 
@@ -150,7 +150,6 @@ IF (NOT Enable) OR ParamError THEN
     IntegHold := FALSE;
     KEst := LREAL#0.0;
     KEstTarget := LREAL#0.0;
-    Lag := LREAL#0.0;
     RETURN;
 END_IF;
 
@@ -162,7 +161,7 @@ IF MedianSize >= 5 THEN
 ELSE
     rMedScans := LREAL#1.0;
 END_IF;
-Lag := FilterTime + (rMedScans + LREAL#3.0) * CycleTime + DriveDeadTime + DriveLag;
+rLag := FilterTime + (rMedScans + LREAL#3.0) * CycleTime + DriveDeadTime + DriveLag;
 
 (* --------------------------------------------------------------------------
    Stiffness bound, eq. (39), in SI units
@@ -211,7 +210,7 @@ rKiPrev := Ki;
    -------------------------------------------------------------------------- *)
 rErr := Target - Actual;
 rDist := ABS(rErr) / rKSched;
-rStep := DecelMax * Lag;
+rStep := DecelMax * rLag;
 rVelStop := -rStep + SQRT(rStep * rStep + LREAL#2.0 * DecelMax * rDist);
 VelLimit := MIN(VelMax, MAX(StopVelMin, rVelStop));
 Stiffness := LREAL#1.0E-6;

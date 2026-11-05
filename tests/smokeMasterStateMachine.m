@@ -15,7 +15,7 @@ h.y = slaveOutputs(h.sl);
 h.in = struct('reset', 1, 'confCode', 0, 'faultActive', 0, 'inMotion', 0, ...
     'homingComplete', 0, 'brakeDisengage', 0, 'position', 0, 'estop', 0, ...
     'op', 0, 'cmdSeq', 0, 'targetPosition', 300, 'jogVelocity', 0, ...
-    'targetPressure', 0, 'positionSpeed', h.cfg.positionSpeed);
+    'targetPressure', 0, 'positionSpeed', speedFromPercent(h.cfg.speedDefault, h.cfg));
 h.out = [];
 
 h = runFor(h, 0.5);
@@ -33,9 +33,12 @@ fprintf('ok  position move without homing\n');
 for v = [2.5, 0, 100, -3]
     h.in.positionSpeed = v;
     h = runFor(h, 0.1);
-    assert(h.out.positionSpeed == min(max(v, 0), h.cfg.positionSpeedMax));
+    assert(h.out.positionSpeed == min(max(v, 0), h.cfg.speedMax));
 end
-h.in.positionSpeed = h.cfg.positionSpeed;
+h.in.positionSpeed = speedFromPercent(h.cfg.speedDefault, h.cfg);
+assert(speedFromPercent(50, h.cfg) == h.cfg.speedMax / 2);
+assert(speedFromPercent(-5, h.cfg) == 0);
+assert(speedFromPercent(150, h.cfg) == h.cfg.speedMax);
 fprintf('ok  position speed passed on and limited\n');
 
 % Homing, requested from position control.
@@ -107,6 +110,21 @@ h = runFor(h, 40);
 assert(abs(h.sl.pos - 10) < 0.1 && h.sl.mode == 5);
 assert(h.out.state == 1 && h.out.statusCode == 0 && h.out.motionEnable == 0);
 fprintf('ok  go home\n');
+
+% Go Home at speed 0 is held: it neither moves nor ends on the start
+% timeout, and it finishes once the speed is restored.
+h.sl.pos = 30;
+speed0 = h.in.positionSpeed;
+h.in.positionSpeed = 0;
+h = command(h, 6);
+h = runFor(h, h.cfg.tGoHomeStartMax + 2);
+assert(h.out.statusCode == 8 && h.out.motionEnable == 1);
+assert(h.sl.pos == 30);
+h.in.positionSpeed = speed0;
+h = runFor(h, 40);
+assert(abs(h.sl.pos - 10) < 0.1);
+assert(h.out.state == 1 && h.out.statusCode == 0);
+fprintf('ok  go home held at speed 0\n');
 
 % E-stop during jog; release does not restart motion.
 h.in.jogVelocity = 2;
@@ -288,7 +306,7 @@ elseif sl.state == 3                                % operating
     elseif sl.mode == 3
         v = min(max(u.reference, -5), 5);
     elseif sl.mode == 5                             % go home
-        v = toward(sl.pos, 10, 3, dt);
+        v = toward(sl.pos, 10, min(3, u.positionSpeed), dt);
     elseif sl.mode == 6                             % stand-in for the homing sequence
         v = -60;
         if sl.pos <= 0

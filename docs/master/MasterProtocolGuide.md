@@ -42,13 +42,12 @@ This document provides step-by-step guidance for implementing the Simulink Deskt
 | HR3 | `G_mbMotionEnable` | 1 = MotionEnable |
 | HR4 | `G_mbFaultReset` | 1 = FaultReset (level) |
 | HR5-6 | `G_mbReference` | REAL reference: mm, mm/s or % by mode |
-| HR7-8 | `G_mbPositionSpeed` | REAL speed of a position move, mm/s (0 holds position) |
+| HR7-8 | `G_mbPositionSpeed` | REAL operator speed, mm/s: position moves, Go Home, homing (0 holds) |
 | HR9-10 | `G_mbSalineVolume` | REAL saline volume of the fill, mL (pressure gain schedule) |
 | HR11-12 | `G_mbOxygenRatio` | REAL oxygen charge as STP volume per saline volume (pressure gain schedule) |
 
-The slave debounces HR2 (`G_cfgDebounceTimeMode`, 50 ms), HR3
-(`G_cfgDebounceTimeMotion`, 20 ms) and HR4 (`G_cfgDebounceTimeFault`, 20 ms)
-before acting on them. The master DAQ drives P0.0 (safety control relay
+The slave debounces HR2 (`G_cfgDebounceTimeMode`, 50 ms) and HR3 and HR4
+(`G_cfgDebounceTimeCommand`, 20 ms for both) before acting on them. The master DAQ drives P0.0 (safety control relay
 enable - brake disengage / safe-torque-off) and P0.4 (stir bar motor); these
 are not part of the slave protocol. See [IOReference.md](IOReference.md) for
 the wiring.
@@ -111,7 +110,7 @@ state machines are in [ModbusRegisterMap.md](ModbusRegisterMap.md), section 6.
 | 010 | 2 | Position Control | Reference = position command (mm) |
 | 011 | 3 | Velocity Control | Reference = velocity command (mm/s) |
 | 100 | 4 | Torque Control | Reference = torque command (% of rated) |
-| 101 | 5 | Go Home | Move to home position (G_cfgGoHomePosition) |
+| 101 | 5 | Go Home | Move to home position (G_cfgGoHomePosition) at the operator speed (HR7-8, at most G_cfgGoHomeVelocity) |
 | 110 | 6 | Home to Limit | Homing via limit switch; re-establishes the zero |
 | 111 | 7 | Pressure Control | Reference = target pressure (MPa gauge); the slave closes the loop on its transducer and commands velocity |
 
@@ -329,22 +328,41 @@ FAULT_PERSISTENT:
 | Mode | Unit | Limits applied by the slave |
 |------|------|-----------------------------|
 | Position | mm | Soft limits, position path shaper (speed from HR7-8, acceleration `G_cfgPosShaperAccelMax`) |
-| Velocity | mm/s | `G_cfgVelLimitMax` (6 mm/s) |
+| Velocity | mm/s | `G_cfgVelLimitMax` (7 mm/s) |
 | Torque | % of rated | `G_cfgTorqueLimitNormal` |
 | Pressure | MPa gauge | `0` to `G_cfgPressureTargetMax` (15 MPa); velocity within `G_cfgPressureVelMax` (5 mm/s) and the stop law; torque within `G_cfgPressureTorqueLimit` |
 
-### Position Speed (Master to Slave): HR7-8
+### Operator Speed (Master to Slave): HR7-8
 
 **Signal**: `G_mbPositionSpeed`, a REAL in mm/s, copied to `G_sysPositionSpeed` by
 `PRG_Input`. The master writes it every exchange, with HR1-12 in the same FC16 write.
-In `ST_POSITION_CTRL` and `ST_RECOVERY_POSITION` the slave evaluates
-`LIMIT(0, G_sysPositionSpeed, G_cfgVelLimitMax)` every scan as the speed limit of
-`FB_PositionPathShaper`, so a change takes effect mid-move: a lower speed slows
-the command at `G_cfgPosShaperAccelMax`, a higher one speeds it up. A speed of 0
-decelerates the command to rest at `G_cfgPosShaperAccelMax` and holds position;
-restoring the speed resumes the move. Other modes ignore it. The master limits it
-to `0` to `cfg.positionSpeedMax` (not above `G_cfgVelLimitMax`); the operator app
-sets it in its move-speed field.
+The slave evaluates `rOperatorSpeed := LIMIT(0, G_sysPositionSpeed, G_cfgVelLimitMax)`
+every scan, so a change takes effect mid-move. Speed 0 holds every motion it applies
+to, and restoring the speed resumes it:
+
+- **Position** (`ST_POSITION_CTRL`, `ST_RECOVERY_POSITION`): the speed limit of
+  `FB_PositionPathShaper`. A lower speed slows the command at
+  `G_cfgPosShaperAccelMax`, a higher one speeds it up, and 0 decelerates the
+  command to rest at that acceleration and holds position.
+- **Go Home** (`ST_GO_HOME`): the move runs at `MIN(speed, G_cfgGoHomeVelocity)`.
+  Speed 0 does not start the move, or stops a running one with `MC_Stop` at
+  `G_cfgStopDecel` and holds; a non-zero speed resumes it. A change of more than
+  0.01 mm/s re-issues the `MC_MoveAbsolute` with the new velocity.
+- **Homing** (`ST_HOME_LIMIT`): the fast approach runs at
+  `MIN(speed, G_cfgHomeLimFastApproachVel)`, the backoff and the retract at
+  `MIN(speed, G_cfgHomeLimBackoffVel)`; the slow approach stays at
+  `G_cfgHomeLimSlowApproachVel` (switch-detect precision). Speed 0 releases the
+  jog direction, so the jog stops at `G_cfgHomeLimDecel`, and the sequence waits;
+  it does not start the retract while held, and a retract that has started
+  completes. The sequence timeout (`G_cfgHomingTimeout`) is a clock that runs at
+  the speed's fraction of `MIN(G_cfgHomeLimFastApproachVel, G_cfgVelLimitMax)`:
+  it counts no time while held, and at a reduced speed it allows the same travel
+  as at full speed.
+
+Other modes ignore the speed. The master limits it to `0` to `cfg.speedMax` (not
+above `G_cfgVelLimitMax`); the operator app sets it with its speed control. The
+master does not report a Go Home finished while the speed is 0: neither the rest
+after the move nor the start timeout `cfg.tGoHomeStartMax` counts while held.
 
 ### Fill description (Master to Slave): HR9-12
 
@@ -401,7 +419,7 @@ commands a full stroke the moment motion is enabled.
 **Setpoint behavior**: Position setpoints (steps in the reference) are executed as
 trapezoidal-velocity moves by `FB_PositionPathShaper`: `Y_DirectControl` does no path
 shaping in PositionMode (the command reaches the drive as given), so the shaper's
-speed (the position speed in HR7-8, at most `G_cfgVelLimitMax`) and acceleration
+speed (the operator speed in HR7-8, at most `G_cfgVelLimitMax`) and acceleration
 (`G_cfgPosShaperAccelMax`) limits are what bound a move — landing on the setpoint without
 overshoot. If the master instead ramps the reference itself, the slave's command follows with
 a small lag of approximately `v^2 / (2*A)`, where `v` is the reference's rate of change and
@@ -504,7 +522,7 @@ reference reverses direction. The master should judge arrival using position fee
 2. Slave: Sets confirmation = 2
 3. Master: Verifies confirmation == mode code, raises MotionEnable = 1
 4. Slave: Handshake complete; enables drive, releases brake, enters ST_POSITION_CTRL
-5. Master: Writes the position reference (HR5-6, mm) and the move speed (HR7-8, mm/s)
+5. Master: Writes the position reference (HR5-6, mm) and the operator speed (HR7-8, mm/s)
 6. Slave: Follows position, publishes feedback
 7. Master: Reads position from IR11-12
 ```

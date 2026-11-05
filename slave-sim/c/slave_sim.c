@@ -289,7 +289,13 @@ static void axis_model(slave_sim_t *sl, double dt)
 
     G->G_sysActualPosition = ax->x + ax->offset;
     G->G_sysActualVelocity = ax->v;
-    G->G_sysActualTorque = hook->torque;
+    /* The torque feedback: the hook's value, and the force that accelerates
+     * the reflected mass hook->mass at the change of velocity over this
+     * scan, as a percent of the force at rated torque (plant Fcap, at 100 %),
+     * so that it goes with the velocity feedback of the same scan. */
+    double aInertial = (ax->v - ax->vTorque) / dt * 1e-3;       /* [mm/s^2 -> m/s^2] */
+    G->G_sysActualTorque = hook->torque + hook->mass * aInertial / (sl->plant.p.Fcap * 0.01);
+    ax->vTorque = ax->v;
     G->G_sysDriveFault = hook->driveFault;
 }
 
