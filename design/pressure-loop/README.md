@@ -109,6 +109,20 @@ does both in one run with a 60 s hold. `stiffstep` (a liquid-only
 10 → 12 MPa step) is kept as a stiff-regime margin probe; it is not a
 process case.
 
+**Valve event times.** In a delivery the proximal opening and the first
+opening of the distal valve are at fixed times, but the purge ends on
+volume: the distal valve closes once the purge volume (the hose's
+virgin saline plus any solution that degassed entering it) has left,
+and reopens a fixed `Tclose + t_pause` later. The orifice flow rises
+with the chamber pressure, eq. (36), so a controller that holds a
+higher pressure through the purge closes the valve sooner, and the
+closing and reopening fall at a different time in each run: about
+12.3 s for the GVL at 1:1, 12.1 s for the scheduled controller, whose
+dip is smaller, and 12.7 s for a StopVelMin of 0.5 mm/s, which sits
+2 MPa low. The degassed volume also depends on the controller when the
+hose is opened at pressure. Each run records its own event times
+(`Result.events`), and the metrics use them.
+
 **Scheduled slave controller.** The candidate for the slave. It runs
 `FB_PressureController` with Kp, Ki and the stop law set every scan from
 an upper bound on the chamber stiffness computed from what the slave
@@ -780,6 +794,12 @@ it is stopped 19 % of the time and the error's standard deviation
 rises from 0.07 to 0.27 MPa, with a mean error of 0.18 MPa. The latch
 lets the piston run through those excursions while the outlet is open,
 which removes the chatter.
+
+The closing peak, the delivery-stage window and the detection and
+release delays are measured from each run's own valve events. The trace
+plot, `floor_traces.png`, shows every arm on the GVL run's time axis
+around its purge closing, so the other arms' closings and reopenings
+fall a little earlier or later in it (see Valve event times).
 
 **Monte Carlo** (100 Latin hypercube samples over the ranges of
 `robust.py`, hose opened before the compression unless stated; pass
