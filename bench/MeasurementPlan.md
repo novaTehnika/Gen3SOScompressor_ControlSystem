@@ -90,8 +90,8 @@ Piston in the bore, chamber open, no liquid.
 
    ```matlab
    opts.probe = true;
-   [path, info] = charDriveRecipe('reversal');       % 27 captures, 54 s
-   rrev = charRun('rev', path, opts);
+   [revPath, info] = charDriveRecipe('reversal');    % 27 captures, 54 s
+   rrev = charRun('rev', revPath, opts);
    rd = charDrivePath([r1.capFiles r2.capFiles rrev.capFiles]);
    ```
 
@@ -143,12 +143,25 @@ no second fill is needed.
    dissolves and the pressure decays at constant position; a compliance
    does not), and the second fill level of step 8 (a series compliance
    is the same at both fills). Take the liquid K from the fit's liquid
-   term (`K_liq_GPa`) and record the gas term of every run.
-2. **Bulk modulus**, three runs, probe on (section 3):
+   term (`K_liq_GPa`) and record the gas term of every run. Enter the
+   weighed fill, which the fits below take:
 
    ```matlab
+   V1 = ...;                                         % mL, the weighed fill (section 2 step 3)
+   ```
+2. **Bulk modulus**, three runs, probe on (section 3). `kPath` is the
+   K path of section 3; steps 6 and 8 and session 2 run it again:
+
+   ```matlab
+   kPath = {{'ramp',  0.1, 10.0, 90}, {'dwell', 2}, ...
+            {'ramp', -0.1,  3.0, 90}, {'dwell', 2}, ...
+            {'ramp',  0.1,  6.5, 90}, {'dwell', 2}, ...
+            {'ramp', -0.1,  3.0, 90}, {'dwell', 2}, ...
+            {'ramp',  0.1, 10.0, 90}, {'dwell', 2}, ...
+            {'ramp', -0.1,  6.5, 90}, {'dwell', 2}, ...
+            {'ramp',  0.1, 10.0, 90}, {'dwell', 2}, {'ramp', -0.1, 3.0, 90}};
    opts.probe = true;
-   r1 = charRun('K300', path, opts);  r2 = charRun('K300', path, opts);  r3 = charRun('K300', path, opts);
+   r1 = charRun('K300', kPath, opts);  r2 = charRun('K300', kPath, opts);  r3 = charRun('K300', kPath, opts);
    rk1 = charBulkModulus({r1.file, r2.file, r3.file}, struct('fillVolume_mL', V1));
    sc  = charScheduleCheck({r1.file, r2.file, r3.file}, struct('salineVolume_mL', V1));
    ```
@@ -162,7 +175,9 @@ no second fill is needed.
 3. **Lag at the piston** (section 5, closed chamber at 3 to 5 MPa):
 
    ```matlab
-   r = charRun('lag_wet', path, opts);
+   lagPath = {{'ramp', 0.1, 4.0, 60}, {'dwell', 3}, ...
+              {'velstep', [0.2 0 -0.2 0 0.2 0 -0.2 0], [0.3 3 0.3 3 0.3 3 0.3 3]}};
+   r = charRun('lag_wet', lagPath, opts);
    rl = charDriveLag([r.capFiles {r.file}], struct('accel', 1e4, 'decel', 1e4));
    ```
 
@@ -176,8 +191,8 @@ no second fill is needed.
 
    ```matlab
    opts.probe = true;
-   [path, info] = charDriveRecipe('dither');         % 75 captures, 105 s; errors if the swing nears the guard
-   rdi = charRun('dither', path, opts);
+   [ditherPath, info] = charDriveRecipe('dither');   % 75 captures, 105 s; errors if the swing nears the guard
+   rdi = charRun('dither', ditherPath, opts);
    rd = charDrivePath([r1.capFiles r2.capFiles rrev.capFiles rdi.capFiles]);   % session 0's steps and reversals too
    ```
 
@@ -192,10 +207,10 @@ no second fill is needed.
 
    ```matlab
    opts.probe = 'stops';
-   [path, plan] = charStopPath(struct('levels_MPa', [8 10], 'speeds', [0.25 0.5], ...
+   [stopPath, plan] = charStopPath(struct('levels_MPa', [8 10], 'speeds', [0.25 0.5], ...
        'budget_MPa', [2 0.7], 'rampOvershoot_MPa', 0.2, 'minRun_mm', 0.03, ...
        'minSteady_s', 0, 'pause_s', 3, 'P_start_MPa', 7));
-   r = charRun('stops_hp', path, opts);
+   r = charRun('stops_hp', stopPath, opts);
    rs = charStopDistance([r.capFiles {r.file}]);
    rr = frictionFit({}, r.file, struct('settle', 0.15, 'trim', 0.05, 'accel', 1e4));
    ```
@@ -213,8 +228,9 @@ no second fill is needed.
 
    ```matlab
    opts.probe = true;
-   ro1 = charRun('K300_hose', path, opts);
-   ro2 = charRun('K300_hose_purged', path, opts);
+   ro1 = charRun('K300_hose', kPath, opts);
+   mPurge = ...;                                     % g, the purge discharge, weighed
+   ro2 = charRun('K300_hose_purged', kPath, opts);
    ```
 
    The difference of the two from `rk1` is the hose's compliance, before
@@ -228,11 +244,15 @@ no second fill is needed.
    weighed (section 4), hose open as in service:
 
    ```matlab
+   x4 = ...; x7 = ...; x10 = ...;                    % mm, posStop of each run (below)
    rq4  = charRun('Q4',  {{'pressure', 4, 15}, {'pressure', 4, 100}},  struct('posStop', x4));
    rq7  = charRun('Q7',  {{'pressure', 4, 15}, {'pressure', 7, 100}},  struct('posStop', x7));
    rq10 = charRun('Q10', {{'pressure', 4, 15}, {'pressure', 10, 100}}, struct('posStop', x10));
+   m4 = ...; m7 = ...; m10 = ...;                    % g in the beakers, by hand
+   V = V1 - mPurge / 1.005;                          % mL left after the hose purge
    rq = charOrificeFlow({rq4.file, rq7.file, rq10.file}, ...
-       struct('K_Pa', rk1.K_Pa, 'fillVolume_mL', V, 'collected_mL', [m4 m7 m10] / 1.005));
+       struct('K_Pa', rk1.K_Pa, 'collected_mL', [m4 m7 m10] / 1.005, ...
+       'fillVolume_mL', [V, V - m4 / 1.005, V - (m4 + m7) / 1.005]));   % the fill at each run's start
    ```
 
    Set each `posStop` for 30 mL (8.7 mm) from the position at the
@@ -250,7 +270,8 @@ no second fill is needed.
    twice:
 
    ```matlab
-   r4 = charRun('K200', path, opts);  r5 = charRun('K200', path, opts);
+   V2 = V - (m4 + m7 + m10) / 1.005;                 % mL, what the deliveries left
+   r4 = charRun('K200', kPath, opts);  r5 = charRun('K200', kPath, opts);
    rk = charBulkModulus({r1.file, r2.file, r3.file, r4.file, r5.file}, ...
        struct('fillVolume_mL', [V1 V1 V1 V2 V2]));
    rk.split
@@ -272,10 +293,12 @@ state.
    `frictionRun('g1', 'gas')`. Optional: skip it if session 1's loaded
    legs and session 0's unloaded set agree on the Coulomb term.
 2. **Stiffness with free gas**: the K path with the probe, fitted with
-   the charge:
+   the charge. `V1` is now this session's weighed fill, and `kPath` is
+   session 1 step 2's (define it again in a new MATLAB session):
 
    ```matlab
-   rc = charRun('K300_o2', path, opts);
+   V1 = ...;                                         % mL, this session's weighed fill
+   rc = charRun('K300_o2', kPath, opts);
    rkc = charBulkModulus(rc.file, struct('fillVolume_mL', V1, 'chargeRatio', 1, ...
        'pressureRange', [0.5 11], 'minRows', 8));
    scg = charScheduleCheck(rc.file, struct('salineVolume_mL', V1, 'oxygenRatio', 1, ...

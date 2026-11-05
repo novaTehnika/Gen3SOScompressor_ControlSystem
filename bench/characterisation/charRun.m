@@ -637,6 +637,10 @@ end
 
 function steps = parsePath(path)
 C = codes();
+if ~iscell(path)
+    error(['path must be a cell array of steps, not a %s: with no variable ' ...
+        'named path in the workspace, MATLAB passes its built-in search path'], class(path));
+end
 steps = struct('name', {}, 'op', {}, 'target', {}, 'seconds', {}, 'pressureEnd', {}, ...
     'distance', {}, 'targetText', {});
 for k = 1:numel(path)
