@@ -73,12 +73,31 @@ the reference for each) and confirm:
       clicking. Walk the seed procedure on the machine: the position,
       pressure and stop steps, the timer, the volume discharged and the
       held pressure readouts, E-STOP and a pulled cable pausing it
-      (Resume refused until cleared), a slave fault ending it (the reset
-      dialog opens and Start begins again at step 1), Abort mid-move,
+      (Resume refused until cleared), a slave fault pausing it (the reset
+      dialog opens; Resume once reset), Abort mid-move,
       and Disconnect during a procedure.
 - [ ] Rerun `buildShell`. The Modbus Client Write block becomes 12
       registers (HR1-12) and the `PositionSpeed`, `SalineVolume` and
-      `OxygenRatio` Constant blocks are added.
+      `OxygenRatio` Constant blocks are added; `MasterStep` gains outputs
+      11 and 12, with the `PressureBlock` and `AtEndOfTravel` Gain blocks
+      the app reads (an older shell makes every poll fail).
+- [ ] Relaunch the operator app and check the pressure units and the
+      procedure rework: the psi/atm/MPa toggles fit the pressure panel and
+      the choice persists across a restart; the target spinner's limits
+      and steps in each unit (psi 5, atm 0.5, MPa 0.05) and its value
+      converting when the unit changes; the panel and label titles say
+      "abs"; the procedure's pressure fields, their range message and
+      their texts in each unit ("114.7 psi abs"); the pressure readout
+      turning red and the status suffixes while the slave blocks
+      pressurising and at the end of travel; the speed label's "(step)"
+      during the purge pushes and the operator's speed back afterwards;
+      the held pressure label in the unit; a slave fault pausing the
+      procedure ("Paused: Slave fault N"), Resume refused until the reset
+      has gone through, then the step issued again; the delivery step
+      ending at the end of travel with its note. Tune `PUSH_SPEED` and
+      `PUSH_PRESSURE_MAX` in `sopProcedure.m` against the real discharge
+      line, and the oxygen loading pressure default against the
+      regulator.
 - [ ] Relaunch the operator app and check the new speed control (percent field and presets).
       The app does not write `SalineVolume` or `OxygenRatio`; HR9-12 stay
       at the `buildShell` defaults (`masterConfig.m`: 343 mL, 1.0) until
@@ -179,18 +198,18 @@ specified here; the implementation plan decides the files.
   - [ ] From the first run of the seed procedure on the machine (manual
         control and the readouts run smoothly; the procedure panel works
         but the seed's content and two slave rules do not):
-    - [ ] Too many inputs at the start: keep the saline volume, the
+    - [x] Too many inputs at the start: keep the saline volume, the
           oxygen ratio, the oxygen loading pressure, the discharge
           pressure, the purge volume (swept, default 100 mL) and the
           mixer switch; the Henry's limit and the two ratio fields go.
-    - [ ] The machine computes the oxygen fill position (the chamber
+    - [x] The machine computes the oxygen fill position (the chamber
           volume for the saline plus the charge's gas volume at the
           loading pressure) and retracts to it before the regulator is
           opened.
-    - [ ] Purge draws the purge volume and pushes it out to the end of
+    - [x] Purge draws the purge volume and pushes it out to the end of
           travel; only the final fill draws past the target and purges
           back to it.
-    - [ ] Instructions quote the pressure in the unit the pressure
+    - [x] Instructions quote the pressure in the unit the pressure
           readout shows; a unit switch (psi, atm, MPa) shared by the
           readout and the procedure panel.
     - [ ] A purge as a position move through the outlet reached 170 atm:
@@ -199,18 +218,22 @@ specified here; the implementation plan decides the files.
           direction zeroed above `G_cfgPressureCeiling`, reported in a
           status bit, no fault); moves that push fluid through the outlet
           run slowly or under pressure control; the engine guards each
-          step with a pressure maximum.
+          step with a pressure maximum. Master side done (the engine's
+          `pressureMax` and pressure-block pauses, the slow pushes of the
+          seed procedure); the slave rule is open.
     - [ ] A delivery runs to the soft limit and faults: pressure mode
           stops a margin before `G_cfgPosSoftLimitMax` and reports the
           end of travel; the discharge step ends on the operator's confirm
-          or the end of travel, whichever first.
+          or the end of travel, whichever first. Master side done
+          (`alsoWhen`, `PressureBlock`/`AtEndOfTravel` read by the app);
+          the slave rule is open.
     - [ ] After `FAULT_POSITION` the reset looped back into the fault
           until the slave was power cycled: the reset from the drive-off
           fault state re-powers through the activation states, where the
           position check is not suppressed (`InRecovery` is false until
           `ST_RECOVERY`), so the slave refaults on the way. Suppress the
           check while recovery is pending.
-    - [ ] A slave fault pauses the procedure like E-STOP; after the reset
+    - [x] A slave fault pauses the procedure like E-STOP; after the reset
           the operator resumes or aborts.
 
 ## Checks on the machine

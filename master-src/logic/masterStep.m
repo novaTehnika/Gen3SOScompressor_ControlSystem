@@ -1,5 +1,6 @@
 function [mbWrite, doSafety, doMixer, position, velocity, pressure, ...
-          statusCode, faultCode, state, linkOk] = masterStep( ...
+          statusCode, faultCode, state, linkOk, pressureBlock, ...
+          atEndOfTravel] = masterStep( ...
           mbRead, op, cmdSeq, targetPosition, ...
           targetVelocity, jogDirection, targetPressure, estop, mixer, ...
           positionSpeed, salineVolume, oxygenRatio)
@@ -32,6 +33,10 @@ function [mbWrite, doSafety, doMixer, position, velocity, pressure, ...
 %   doMixer       stir bar motor (P0.4)
 %   position (mm), velocity (mm/s), pressure (atm absolute: the slave's
 %   gauge reading plus cfg.atmAmbient), statusCode, faultCode, state, linkOk  for the app
+%   pressureBlock 1 while the slave refuses pressurising motion above its
+%                 pressure ceiling (IR9); not a fault
+%   atEndOfTravel 1 while the slave reports the end of travel less its end
+%                 margin (IR10)
 %
 %   Link supervision: until the slave scan counter has been seen to advance
 %   the link is not up (STATUS_LINK_WAIT, safety relay off, E-stop path).
@@ -136,4 +141,6 @@ end
 faultCode = out.faultCode;
 state     = out.state;
 linkOk    = double(linkUp && ~linkLost);
+pressureBlock = double(r(map.ir.pressureBlock) ~= 0);
+atEndOfTravel = double(r(map.ir.atEndOfTravel) ~= 0);
 end
