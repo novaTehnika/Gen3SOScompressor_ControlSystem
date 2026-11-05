@@ -446,7 +446,9 @@ def monte_carlo(par, n, seed, workers, out, ratio, hose_before):
 def plot_traces(par, seed, out):
     """Plot the 1:1 delivery, hose opened before the compression, around
     the purge closing and the reopening: pressure, command and floor of
-    each arm."""
+    each arm. The purge ends on volume, so each arm closes and reopens
+    the valve at its own time; the window and the title follow the GVL
+    run's closing."""
     plt = studyutil.plt
     q = case_params(par, dict(CASES)[TRACE_CASE])
     s = R.make_scenario('deliver', q)
@@ -477,7 +479,8 @@ def plot_traces(par, seed, out):
     ax[2].set_ylabel('floor (mm/s)')
     ax[2].set_xlabel('t (s)')
     ax[0].set_title(f'delivery {TRACE_CASE}: purge closing at '
-                    f'{t_close:.1f} s and the reopening')
+                    f'{t_close:.1f} s (GVL; each arm closes on '
+                    f'volume) and the reopening')
     ax[0].legend(loc='center left', bbox_to_anchor=(1.01, 0.5),
                  fontsize=8, frameon=False)
     for a in ax:
