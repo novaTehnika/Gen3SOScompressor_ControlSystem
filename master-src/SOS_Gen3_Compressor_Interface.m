@@ -17,6 +17,10 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         PositionValue                   matlab.ui.control.Label
         PressurePanel                   matlab.ui.container.Panel
         PressureValue                   matlab.ui.control.Label
+        PressureUnitGroup               matlab.ui.container.ButtonGroup
+        PressureUnitPsiButton           matlab.ui.control.ToggleButton
+        PressureUnitAtmButton           matlab.ui.control.ToggleButton
+        PressureUnitMPaButton           matlab.ui.control.ToggleButton
         VolumePanel                     matlab.ui.container.Panel
         VolumeValue                     matlab.ui.control.Label
         VolumeViewGroup                 matlab.ui.container.ButtonGroup
@@ -100,6 +104,15 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         opConfirmed = false     % the model has reported activeOp running
         opSentAt = uint64(0)    % tic of the last request
 
+        % Pressure display unit: psi, atm or MPa, all absolute, with how it
+        % is shown and converted (pressureUnitInfo). The model, the engine
+        % and the target of a running operation stay in atm absolute.
+        pressureUnit = 'atm'
+        pressureInfo = []
+        flagPressureBlock = false   % the slave refuses pressurising motion (IR9)
+        flagAtEnd = false           % the slave is at the end of travel (IR10)
+        procSpeedCap = NaN          % mm/s: the running procedure step's speed cap
+
         % Procedure (non-manual mode): the engine state, the normalized
         % definition it runs, the inputs of the last poll (for steps taken
         % from a callback), the tic of the last step and the text of the
@@ -107,7 +120,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         procDef = []
         proc = []
         procIn = struct('connected', false, 'statusCode', 0, 'faultCode', 0, ...
-            'estop', false, 'pressure', 0, 'volume', 0)
+            'estop', false, 'pressure', 0, 'volume', 0, ...
+            'pressureBlock', false, 'atEndOfTravel', false)
         procTick = []
         procNote = ''
 
@@ -308,6 +322,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             d.position = readBlock(app, "Position");
             d.velocity = readBlock(app, "Velocity");
             d.pressure = readBlock(app, "Pressure");
+            d.pressureBlock = readBlock(app, "PressureBlock") ~= 0;
+            d.atEndOfTravel = readBlock(app, "AtEndOfTravel") ~= 0;
             d.faultCode = 0;
             if d.statusCode == app.STATUS_FAULT
                 d.faultCode = readBlock(app, "FaultCode");
@@ -358,6 +374,21 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.activeJogDir = 0;
             app.activeTarget = NaN;
             app.opConfirmed = false;
+            setSpeedCap(app, NaN);
+        end
+
+        % The procedure step's speed cap (mm/s, NaN for none). The
+        % operator's lower speed still wins. While the model runs the
+        % speed sent to the slave follows.
+        function setSpeedCap(app, cap)
+            changed = ~isequaln(app.procSpeedCap, cap);
+            app.procSpeedCap = cap;
+            if changed
+                showSpeed(app);
+                if isRunning(app)
+                    setBlock(app, "PositionSpeed", effectiveSpeed(app));
+                end
+            end
         end
 
 % Follow the active operation through the model's status with the
@@ -439,7 +470,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 "Go", text);
 
             text = "Stop";
-            if app.TargetPressureSpinner.Value ~= app.activeTarget
+            if ~sameTarget(app, pressureTargetAtm(app), app.activeTarget)
                 text = "Go";
             end
             setModeButton(app, app.PressureGoButton, op == app.OP_PRESSURE, ...
@@ -516,6 +547,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 app.estopActive = false;
                 app.linkReady = false;
                 app.rto = struct();
+                showPressureBlock(app, false);
+                app.flagAtEnd = false;
                 clearOp(app);
                 app.procIn.connected = false;
                 stepProcedure(app);
@@ -533,7 +566,10 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             trackOp(app, statusCode);
             app.lastPosition = d.position;
             refreshVolume(app);
-            setText(app, app.PressureValue, readoutText(d.pressure, 2, 0));
+            showPressureBlock(app, d.pressureBlock);
+            app.flagAtEnd = d.atEndOfTravel;
+            setText(app, app.PressureValue, readoutText( ...
+                app.pressureInfo.toUnit(d.pressure), app.pressureInfo.decimals, 0));
             setText(app, app.PositionValue, readoutText(app.cfg.posEOT - d.position, 2, 0));
             drainTrace(app);
             % Positive while the piston moves toward the end of travel
@@ -560,7 +596,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 'faultCode', d.faultCode, ...
                 'estop', app.ESTOP.Value || app.estopActive, ...
                 'pressure', d.pressure, ...
-                'volume', sweptVolume(d.position, app.cfg));
+                'volume', sweptVolume(d.position, app.cfg), ...
+                'pressureBlock', d.pressureBlock, ...
+                'atEndOfTravel', d.atEndOfTravel);
             stepProcedure(app);
             updateButtons(app);
 
@@ -614,10 +652,12 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             setSpinnerRange(app, app.TargetPositionSpinner, limits);
             app.TargetPositionSpinner.Value = limits(2);
 
-            % Pressure targets are atm absolute, up to the slave's highest
+            % Pressure targets: the spinner shows the display unit (the one
+            % chosen last time), from ambient up to the slave's highest
             % accepted target.
-            setSpinnerRange(app, app.TargetPressureSpinner, [app.cfg.atmAmbient, ...
-                floor(app.cfg.pressureMax * app.cfg.atmPerMPa + app.cfg.atmAmbient)]);
+            app.pressureUnit = 'atm';
+            app.pressureInfo = pressureUnitInfo('atm', app.cfg);
+            setPressureUnit(app, savedPressureUnit(app));
 
             % One operator speed in percent of cfg.speedMax: a button per
             % preset (the count comes from the configuration) and the
@@ -700,14 +740,6 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
             app.procDef = p.def;
             app.proc = p;
-            for k = 1:numel(app.ProcParamFields)
-                if k <= numel(p.def.params)
-                    try
-                        app.ProcParamFields(k).ValueDisplayFormat = p.def.params(k).format;
-                    catch
-                    end
-                end
-            end
             renderProcedure(app);
         end
 
@@ -719,7 +751,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.speedPercent = pct;
             v = speedFromPercent(pct, app.cfg);
             app.SpeedField.Value = pct;
-            app.SpeedMmsLabel.Text = sprintf("%.2f mm/s", v);
+            showSpeed(app);
             for k = 1:numel(app.SpeedPresetButtons)
                 if app.SpeedPresetButtons(k).UserData == pct
                     app.SpeedPresetButtons(k).BackgroundColor = app.COLOR_ACTIVE;
@@ -728,9 +760,19 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 end
             end
             if isRunning(app)
-                setBlock(app, "PositionSpeed", v);
+                setBlock(app, "PositionSpeed", effectiveSpeed(app));
                 setBlock(app, "TargetVelocity", v);
             end
+        end
+
+        % The speed label: the speed in force, marked while a procedure
+        % step caps it
+        function showSpeed(app)
+            text = sprintf("%.2f mm/s", effectiveSpeed(app));
+            if ~isnan(app.procSpeedCap)
+                text = append(text, " (step)");
+            end
+            setText(app, app.SpeedMmsLabel, text);
         end
 
         % Volume shown in the selected view
@@ -764,6 +806,87 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             v = speedFromPercent(app.speedPercent, app.cfg);
         end
 
+        % Speed sent for position moves: the operator's, or the running
+        % procedure step's cap when that is lower
+        function v = effectiveSpeed(app)
+            v = speedMmPerS(app);
+            if ~isnan(app.procSpeedCap)
+                v = min(v, app.procSpeedCap);
+            end
+        end
+
+        % The pressure unit saved by the last session, 'atm' when none
+        function unit = savedPressureUnit(~)
+            unit = 'atm';
+            try
+                saved = getpref("SOS_Gen3_Compressor", "pressureUnit", "atm");
+                if any(strcmp(char(saved), {'psi', 'atm', 'MPa'}))
+                    unit = char(saved);
+                end
+            catch
+            end
+        end
+
+        % Show pressures in the unit: the spinner (its value converted,
+        % its limits, step and format), the panel and label titles, the
+        % toggle and the procedure panel's pressure fields. The choice is
+        % kept for the next session.
+        function setPressureUnit(app, unit)
+            if ~any(strcmp(unit, {'psi', 'atm', 'MPa'}))
+                return
+            end
+            atm = pressureTargetAtm(app);
+            info = pressureUnitInfo(unit, app.cfg);
+            maxAtm = min(app.cfg.pressureMax, app.cfg.pressureCeiling - ...
+                app.cfg.pressureCeilingHyst) * app.cfg.atmPerMPa + app.cfg.atmAmbient;
+            limits = info.toUnit([app.cfg.atmAmbient, maxAtm]);
+            spinner = app.TargetPressureSpinner;
+            spinner.Limits = [-Inf Inf];
+            spinner.Value = min(max(info.toUnit(atm), limits(1)), limits(2));
+            spinner.Limits = limits;
+            spinner.Step = info.step;
+            spinner.ValueDisplayFormat = info.format;
+            app.pressureUnit = unit;
+            app.pressureInfo = info;
+            app.PressurePanel.Title = sprintf('Pressure (%s)', info.label);
+            app.TargetPressureatmSpinnerLabel.Text = sprintf('Target (%s)', info.label);
+            switch unit
+                case 'psi', app.PressureUnitGroup.SelectedObject = app.PressureUnitPsiButton;
+                case 'atm', app.PressureUnitGroup.SelectedObject = app.PressureUnitAtmButton;
+                otherwise,  app.PressureUnitGroup.SelectedObject = app.PressureUnitMPaButton;
+            end
+            try
+                setpref("SOS_Gen3_Compressor", "pressureUnit", unit);
+            catch
+            end
+            renderProcedure(app);
+            updateButtons(app);
+        end
+
+        % The spinner's target in atm absolute
+        function atm = pressureTargetAtm(app)
+            atm = app.pressureInfo.fromUnit(app.TargetPressureSpinner.Value);
+        end
+
+        % Two targets in atm are the same one (the spinner holds a
+        % converted value)
+        function tf = sameTarget(~, a, b)
+            tf = abs(a - b) <= 1e-9 * max(1, abs(b));
+        end
+
+        % The pressure readout is red while the slave refuses pressurising
+        % motion
+        function showPressureBlock(app, blocked)
+            if blocked ~= app.flagPressureBlock
+                app.flagPressureBlock = blocked;
+                if blocked
+                    app.PressureValue.FontColor = [1 0 0];
+                else
+                    app.PressureValue.FontColor = [0 0 0];
+                end
+            end
+        end
+
         % A spinner rejects a value outside its limits and limits that
         % exclude its value, so widen, move the value, then narrow.
         function setSpinnerRange(~, spinner, limits)
@@ -776,6 +899,12 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             text = statusTextBase(app, statusCode, faultCode);
             if app.speedPercent == 0 && any(statusCode == [2 4 8])
                 text = append(text, " (held: speed 0)");
+            end
+            if app.flagPressureBlock
+                text = append(text, " (pressure ceiling: pressurising blocked)");
+            end
+            if app.flagAtEnd && statusCode == 5
+                text = append(text, " (end of travel)");
             end
         end
 
@@ -904,11 +1033,13 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                         end
                         x = min(max(x, app.cfg.posMin), app.cfg.posMax);
                         setBlock(app, "TargetPosition", x);
-                        setBlock(app, "PositionSpeed", speedMmPerS(app));
+                        setSpeedCap(app, req.speed);
+                        setBlock(app, "PositionSpeed", effectiveSpeed(app));
                         if requestOp(app, app.OP_POSITION)
                             app.activeTarget = app.cfg.posEOT - x;
                         end
                     case app.OP_PRESSURE
+                        setSpeedCap(app, NaN);
                         setBlock(app, "TargetPressure", req.target);
                         if requestOp(app, app.OP_PRESSURE)
                             app.activeTarget = req.target;
@@ -916,11 +1047,13 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                     case app.OP_HOME
                         % Re-homing changes the position frame, so the zero
                         % of the incremental volume no longer holds.
+                        setSpeedCap(app, NaN);
                         if requestOp(app, app.OP_HOME)
                             app.volumeZeroPosition = NaN;
                             refreshVolume(app);
                         end
                     case app.OP_GO_HOME
+                        setSpeedCap(app, NaN);
                         requestOp(app, app.OP_GO_HOME);
                 end
                 updateButtons(app);
@@ -936,7 +1069,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             if isempty(app.proc)
                 return
             end
-            v = procView(app.proc);
+            v = procView(app.proc, app.pressureInfo);
             def = app.procDef;
 
             items = v.list(:)';
@@ -974,6 +1107,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             for k = 1:numel(app.ProcParamFields)
                 if k <= numel(v.params.keys)
                     setText(app, app.ProcParamLabels(k), v.params.labels{k});
+                    if ~strcmp(app.ProcParamFields(k).ValueDisplayFormat, v.params.formats{k})
+                        app.ProcParamFields(k).ValueDisplayFormat = v.params.formats{k};
+                    end
                     if app.ProcParamFields(k).Value ~= v.params.values(k)
                         app.ProcParamFields(k).Value = v.params.values(k);
                     end
@@ -998,12 +1134,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
             setText(app, app.ProcTimerLabel, [def.timerLabel ': ' v.timerText]);
             setText(app, app.ProcVolumeLabel, [def.volumeLabel ': ' v.volumeText]);
-            if isnan(v.pressureTarget)
-                setText(app, app.ProcPressureTargetLabel, 'Held pressure: --');
-            else
-                setText(app, app.ProcPressureTargetLabel, ...
-                    sprintf('Held pressure: %.2f atm', v.pressureTarget));
-            end
+            setText(app, app.ProcPressureTargetLabel, ...
+                ['Held pressure: ' v.pressureTargetText]);
             text = v.stateText;
             note = v.message;
             if ~isempty(app.procNote)
@@ -1179,9 +1311,26 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         end
 
         % Value changed function: ProcParamFields
+        % A pressure field holds the display unit: its range is checked
+        % here in that unit, and the engine gets atm absolute.
         function ProcParamChanged(app, event)
-            key = app.procDef.params(event.Source.UserData).key;
-            procAct(app, 'setParam', key, event.Source.Value);
+            k = event.Source.UserData;
+            q = app.procDef.params(k);
+            value = event.Source.Value;
+            if strcmp(q.kind, 'pressure')
+                info = app.pressureInfo;
+                v = procView(app.proc, info);
+                lo = v.params.mins(k);
+                hi = v.params.maxs(k);
+                if value < lo || value > hi
+                    app.procNote = sprintf(['%s must be between ' info.format ...
+                        ' and ' info.format ' %s'], q.label, lo, hi, info.label);
+                    renderProcedure(app);       % puts the accepted value back
+                    return
+                end
+                value = info.fromUnit(value);
+            end
+            procAct(app, 'setParam', q.key, value);
         end
 
         % Value changed function: ProcStepList
@@ -1207,8 +1356,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         % Button pushed function: PressureGoButton
         function PressureGoButtonPushed(app, event)
-            target = app.TargetPressureSpinner.Value;
-            if app.activeOp == app.OP_PRESSURE && target == app.activeTarget
+            target = pressureTargetAtm(app);
+            if app.activeOp == app.OP_PRESSURE && sameTarget(app, target, app.activeTarget)
                 stopOp(app);
                 return
             end
@@ -1229,6 +1378,11 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % operation takes the new speed at once.
         function SpeedPresetPushed(app, event)
             setSpeedPercent(app, event.Source.UserData);
+        end
+
+        % Selection changed function: PressureUnitGroup
+        function PressureUnitChanged(app, event)
+            setPressureUnit(app, event.NewValue.Tag);
         end
 
         % Selection changed function: VolumeViewGroup
@@ -1384,6 +1538,39 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.VolumeZeroButton.Enable = 'off';
             app.VolumeZeroButton.Tooltip = {'Zero the incremental volume at the present position'};
             app.VolumeZeroButton.Position = [128 8 38 22];
+        end
+
+        % The pressure panel's unit selector
+        function createPressureControls(app)
+            app.PressureValue.Position = [5 38 160 62];
+            app.PressureValue.FontSize = 36;
+
+            app.PressureUnitGroup = uibuttongroup(app.PressurePanel);
+            app.PressureUnitGroup.BorderType = 'none';
+            app.PressureUnitGroup.SelectionChangedFcn = ...
+                createCallbackFcn(app, @PressureUnitChanged, true);
+            app.PressureUnitGroup.Position = [4 4 122 30];
+
+            app.PressureUnitPsiButton = uitogglebutton(app.PressureUnitGroup);
+            app.PressureUnitPsiButton.Text = 'psi';
+            app.PressureUnitPsiButton.Tag = 'psi';
+            app.PressureUnitPsiButton.FontSize = 10;
+            app.PressureUnitPsiButton.Tooltip = {'Show pressures in psi, absolute'};
+            app.PressureUnitPsiButton.Position = [2 4 38 22];
+
+            app.PressureUnitAtmButton = uitogglebutton(app.PressureUnitGroup);
+            app.PressureUnitAtmButton.Text = 'atm';
+            app.PressureUnitAtmButton.Tag = 'atm';
+            app.PressureUnitAtmButton.FontSize = 10;
+            app.PressureUnitAtmButton.Tooltip = {'Show pressures in atm, absolute'};
+            app.PressureUnitAtmButton.Position = [42 4 38 22];
+
+            app.PressureUnitMPaButton = uitogglebutton(app.PressureUnitGroup);
+            app.PressureUnitMPaButton.Text = 'MPa';
+            app.PressureUnitMPaButton.Tag = 'MPa';
+            app.PressureUnitMPaButton.FontSize = 10;
+            app.PressureUnitMPaButton.Tooltip = {'Show pressures in MPa, absolute'};
+            app.PressureUnitMPaButton.Position = [82 4 38 22];
         end
 
         % Create UIFigure and components
@@ -1548,7 +1735,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             % Create SpeedMmsLabel
             app.SpeedMmsLabel = uilabel(app.ControlsPanel);
             app.SpeedMmsLabel.Enable = 'off';
-            app.SpeedMmsLabel.Position = [1110 40 90 22];
+            app.SpeedMmsLabel.Position = [1108 40 98 22];
             app.SpeedMmsLabel.Text = '';
 
             % Create JogUpButton
@@ -1577,7 +1764,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.TargetPressureatmSpinnerLabel.HorizontalAlignment = 'right';
             app.TargetPressureatmSpinnerLabel.Enable = 'off';
             app.TargetPressureatmSpinnerLabel.Position = [406 13 118 22];
-            app.TargetPressureatmSpinnerLabel.Text = 'Target Pressure (atm)';
+            app.TargetPressureatmSpinnerLabel.Text = 'Target (atm abs)';
 
             % Create TargetPressureSpinner
             app.TargetPressureSpinner = uispinner(app.ControlsPanel);
@@ -1612,7 +1799,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 'Swept volume (mL)', [15 275 170 140], 40);
             createVolumeControls(app);
             [app.PressurePanel, app.PressureValue] = createReadout(app, ...
-                'Pressure (atm)', [200 275 170 140], 40);
+                'Pressure (atm abs)', [200 275 170 140], 40);
+            createPressureControls(app);
             [app.PositionPanel, app.PositionValue] = createReadout(app, ...
                 'Position from EOT (mm)', [15 125 170 140], 28);
             [app.FlowPanel, app.FlowValue] = createReadout(app, ...

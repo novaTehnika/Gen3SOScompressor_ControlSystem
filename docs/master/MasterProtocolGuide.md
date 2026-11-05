@@ -64,6 +64,8 @@ the wiring.
 | IR6 | `G_mbInMotion` | Axis moving indicator | |
 | IR7 | `G_mbPerformanceStatus` | Mode-dependent status | |
 | IR8 | `G_mbHomingComplete` | Homing complete (ST_HOME_COMPLETE only) | |
+| IR9 | `G_mbPressureBlock` | 1 while pressurising motion is refused above `G_cfgPressureCeiling` (not a fault) | |
+| IR10 | `G_mbAtEndOfTravel` | 1 at or beyond `G_cfgPosSoftLimitMax - G_cfgPressureEndMargin` (every state) | |
 | IR11-18 | `G_mbActual*`, `G_mbCommandedPosition` | REAL position, velocity, torque, commanded position | |
 | IR19-20 | `G_mbActualPressure` | REAL pressure (MPa gauge) | |
 
@@ -330,7 +332,7 @@ FAULT_PERSISTENT:
 | Position | mm | Soft limits, position path shaper (speed from HR7-8, acceleration `G_cfgPosShaperAccelMax`) |
 | Velocity | mm/s | `G_cfgVelLimitMax` (7 mm/s) |
 | Torque | % of rated | `G_cfgTorqueLimitNormal` |
-| Pressure | MPa gauge | `0` to `G_cfgPressureTargetMax` (15 MPa); velocity within `G_cfgPressureVelMax` (5 mm/s) and the stop law; torque within `G_cfgPressureTorqueLimit` |
+| Pressure | MPa gauge | `0` to `MIN(G_cfgPressureTargetMax, G_cfgPressureCeiling - G_cfgPressureCeilingHyst)` (11.5 MPa); velocity within `G_cfgPressureVelMax` (5 mm/s) and the stop law; torque within `G_cfgPressureTorqueLimit` |
 
 ### Operator Speed (Master to Slave): HR7-8
 
@@ -392,11 +394,31 @@ velocity through `Y_DirectControl` in VelocityTLMode, so the master only
 sends the target. `G_mbPerformanceStatus` (IR7) is 1 while the measured
 pressure is within `G_cfgPressureInBand` (0.1 MPa) of the target. The
 target may change at any time while the mode is active; it is clamped to
-`G_cfgPressureTargetMax`. Dropping MotionEnable halts the axis as in
+the lower of `G_cfgPressureTargetMax` and `G_cfgPressureCeiling -
+G_cfgPressureCeilingHyst` (11.5 MPa). The mode stops positive motion
+`G_cfgPressureEndMargin` (1.0 mm) short of `G_cfgPosSoftLimitMax` and
+reports it in `G_mbAtEndOfTravel` (IR10), so a delivery that runs to the
+end of travel ends in place with no `FAULT_POSITION`; while a positive
+command is zeroed there or by the pressure ceiling, the loop's integrator
+is held at zero. Dropping MotionEnable halts the axis as in
 velocity mode. A transducer loop current out of range for
 `G_cfgPressureSensorFaultTime` raises `FAULT_PRESSURE_SENSOR` (8) in this
 mode only; the master should check IR19-20 for a plausible pressure before
 requesting the mode.
+
+### Pressure Ceiling (every mode)
+
+Above `G_cfgPressureCeiling` (12 MPa gauge, from the transducer) the slave
+zeroes every command in the pressurising (positive) direction, in every
+motion state: a position target further in is held at the command, a
+positive velocity or torque is set to zero, and the position shaper is
+re-seeded at the actual position so the axis stops at once. The block
+releases below `G_cfgPressureCeiling - G_cfgPressureCeilingHyst`
+(11.5 MPa). It is not a fault: `G_mbPressureBlock` (IR9) reads 1 while it
+is active. A retract (negative) command is always allowed. The master
+should treat IR9 as "pressurising refused" and not as a reason to reset.
+Go Home and the homing moves are not blocked: they lie below
+`G_cfgPosCylinderEntry`, where the chamber is open.
 
 ### Position Mode: Entry Requirement and Command Shaping
 
@@ -557,7 +579,9 @@ returning to idle/brake-hold. Jog off the limit, then resume normally:
 1. [Limit fault active] Slave: FaultActive = 1, fault code = 6 (or 3)
 2. Master: MotionEnable = 0; mirror the code in HR2; hold FaultReset = 1 (level-based)
 3. Slave: clears fault; limit still active -> enters ST_RECOVERY (drive stays on)
-          (if it had timed out to ST_FAULT_IDLE, the drive re-enables first)
+          (if it had timed out to ST_FAULT_IDLE, or the fault latched with the
+          brake applied (from idle or at power-up), the drive re-enables
+          first; the position check stays suppressed on the way)
 4. Master: set mode code 2 (Position) or 3 (Velocity), MotionEnable still 0
 5. Master: wait for the confirmation to match, then raise MotionEnable
 6. Master: drive the reference AWAY from the limit

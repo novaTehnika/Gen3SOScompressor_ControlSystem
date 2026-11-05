@@ -6,7 +6,8 @@ function [sl, y] = slaveStep(sl, u)
 %      every field is required
 %   y  the Modbus input registers in engineering units: heartbeatEcho,
 %      slaveCounter, confCode, faultCode, faultActive, inMotion,
-%      performanceStatus, homingComplete, actualPosition, actualVelocity,
+%      performanceStatus, homingComplete, pressureBlock, atEndOfTravel,
+%      actualPosition, actualVelocity,
 %      actualTorque, commandedPosition, actualPressure, plus brakeDisengage
 %      from DO7
 %

@@ -1,29 +1,45 @@
-function v = procView(p)
+function v = procView(p, opts)
 %PROCVIEW What the procedure panel shows for an engine state.
 %   v = procView(p)
+%   v = procView(p, opts)
+%
+%   opts  how pressure parameters and the held pressure are shown: the
+%         struct of pressureUnitInfo (label, format, toUnit); the default
+%         shows atm absolute
 %
 %   A pure function: the app copies the fields into its components.
 %     stateText      one line on the engine's state
 %     heading        'Step 4 of 19 - Saline purge/fill'
 %     title, text    the step's title and instruction, with {key} replaced
-%                    by the parameter value in its format
+%                    by the parameter value in its format; a pressure
+%                    parameter is converted and followed by its unit label
 %     list           cellstr, one entry per step: '[x] title' (done),
 %                    '> title' (current) or '  title'
 %     listIndex      index of the current step in list (1 when none)
 %     checks         labels (cellstr), values (logical) and enable
-%     params         keys, labels (with unit), values, and editable (true
-%                    only for the keys of the current param step)
+%     params         keys, kinds, labels (with unit), values, formats, mins,
+%                    maxs (a pressure parameter's in the display unit) and
+%                    editable (true only for the keys of the current param
+%                    step)
 %     confirm        visible, enable, label of the Confirm button
 %     repeat         visible, label of the Repeat button
 %     pause          enable, label ('Pause' or 'Resume'); Resume is
 %                    disabled while a pause reason (E-STOP, link lost,
-%                    model stopped) holds, and enabled once it clears
+%                    model stopped, slave fault) holds, and enabled once it
+%                    clears
 %     abortEnable, startEnable, active
 %     timerText      elapsed time as m:ss, or '--' when never started
 %     volumeText     volume discharged in mL (%.1f), or '--'
 %     pressureTarget atm of the pressure the procedure holds, NaN if none
-%     message        why the procedure paused or ended, or the last refusal
+%     pressureTargetText  that pressure in the display unit with its label,
+%                    or '--'
+%     message        why the procedure paused or ended, or the last refusal;
+%                    the note of a step that ended on its own when there is
+%                    none
 
+if nargin < 2
+    opts = struct('label', 'atm abs', 'format', '%.2f', 'toUnit', @(x) x);
+end
 d = p.def;
 n = numel(d.steps);
 k = p.k;
@@ -53,18 +69,16 @@ switch p.state
         else
             v.stateText = 'Aborted';
         end
-    case 'faulted'
-        v.stateText = ['Stopped: ' p.reason];
     otherwise,           v.stateText = p.state;
 end
 if active
     v.heading = sprintf('Step %d of %d - %s', k, n, st.section);
-    v.title = fillKeys(p, st.title);
-    v.text = fillKeys(p, st.text);
+    v.title = fillKeys(p, opts, st.title);
+    v.text = fillKeys(p, opts, st.text);
 elseif k >= 1
     v.heading = sprintf('Stopped at step %d of %d - %s', k, n, st.section);
-    v.title = fillKeys(p, st.title);
-    v.text = fillKeys(p, st.text);
+    v.title = fillKeys(p, opts, st.title);
+    v.text = fillKeys(p, opts, st.text);
 else
     v.heading = d.name;
     v.title = '';
@@ -90,7 +104,7 @@ isConfirm = ~isempty(st) && strcmp(st.type, 'confirm');
 isParam = ~isempty(st) && strcmp(st.type, 'param');
 labels = cell(1, 0);
 if isConfirm && active
-    labels = cellfun(@(s) fillKeys(p, s), st.checks, 'UniformOutput', false);
+    labels = cellfun(@(s) fillKeys(p, opts, s), st.checks, 'UniformOutput', false);
 end
 vals = false(1, numel(labels));
 if isConfirm && active
@@ -100,22 +114,39 @@ v.checks = struct('labels', {labels}, 'values', vals, ...
     'enable', strcmp(p.state, 'waitOperator'));
 np = numel(d.params);
 keys = cell(1, np);
+kinds = cell(1, np);
 plabels = cell(1, np);
 pvals = zeros(1, np);
+formats = cell(1, np);
+mins = zeros(1, np);
+maxs = zeros(1, np);
 editable = false(1, np);
 for i = 1:np
     q = d.params(i);
     keys{i} = q.key;
-    if isempty(q.unit)
-        plabels{i} = q.label;
+    kinds{i} = q.kind;
+    if strcmp(q.kind, 'pressure')
+        plabels{i} = sprintf('%s (%s)', q.label, opts.label);
+        formats{i} = opts.format;
+        pvals(i) = opts.toUnit(p.values.(q.key));
+        mins(i) = opts.toUnit(q.min);
+        maxs(i) = opts.toUnit(q.max);
     else
-        plabels{i} = sprintf('%s (%s)', q.label, q.unit);
+        if isempty(q.unit)
+            plabels{i} = q.label;
+        else
+            plabels{i} = sprintf('%s (%s)', q.label, q.unit);
+        end
+        formats{i} = q.format;
+        pvals(i) = p.values.(q.key);
+        mins(i) = q.min;
+        maxs(i) = q.max;
     end
-    pvals(i) = p.values.(q.key);
     editable(i) = isParam && strcmp(p.state, 'waitOperator') && ...
         any(strcmp(q.key, st.params));
 end
-v.params = struct('keys', {keys}, 'labels', {plabels}, 'values', pvals, ...
+v.params = struct('keys', {keys}, 'kinds', {kinds}, 'labels', {plabels}, ...
+    'values', pvals, 'formats', {formats}, 'mins', mins, 'maxs', maxs, ...
     'editable', editable);
 
 % ----- Buttons -----
@@ -153,7 +184,7 @@ else
         'label', 'Pause');
 end
 v.abortEnable = any(strcmp(p.state, {'running', 'waitOperator', 'paused'}));
-v.startEnable = any(strcmp(p.state, {'idle', 'done', 'faulted'}));
+v.startEnable = any(strcmp(p.state, {'idle', 'done'}));
 v.active = active;
 
 % ----- Readouts -----
@@ -169,16 +200,29 @@ else
     v.volumeText = sprintf('%.1f', p.volumeDischarged);
 end
 v.pressureTarget = NaN;
+v.pressureTargetText = '--';
 if p.bg.op == 4 && ~p.bg.lost
     v.pressureTarget = p.bg.target;
+    v.pressureTargetText = sprintf([opts.format ' %s'], ...
+        opts.toUnit(p.bg.target), opts.label);
 end
 v.message = p.message;
+if isempty(v.message)
+    v.message = p.note;
+end
 end
 
-function s = fillKeys(p, s)
-% Replace {key} by the parameter's value in its format.
+function s = fillKeys(p, opts, s)
+% Replace {key} by the parameter's value in its format; a pressure
+% parameter is converted to the display unit and followed by its label.
 for i = 1:numel(p.def.params)
     q = p.def.params(i);
-    s = strrep(s, ['{' q.key '}'], sprintf(q.format, p.values.(q.key)));
+    if strcmp(q.kind, 'pressure')
+        t = sprintf([opts.format ' %s'], opts.toUnit(p.values.(q.key)), ...
+            opts.label);
+    else
+        t = sprintf(q.format, p.values.(q.key));
+    end
+    s = strrep(s, ['{' q.key '}'], t);
 end
 end

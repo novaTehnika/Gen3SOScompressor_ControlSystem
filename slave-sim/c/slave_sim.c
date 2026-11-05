@@ -341,6 +341,8 @@ void slave_sim_scan(slave_sim_t *sl, sim_y_t *y)
     y->inMotion = sl->G.G_mbInMotion;
     y->performanceStatus = sl->G.G_mbPerformanceStatus;
     y->homingComplete = sl->G.G_mbHomingComplete;
+    y->pressureBlock = sl->G.G_mbPressureBlock;
+    y->atEndOfTravel = sl->G.G_mbAtEndOfTravel;
     y->actualPosition = sl->G.G_mbActualPosition;
     y->actualVelocity = sl->G.G_mbActualVelocity;
     y->actualTorque = sl->G.G_mbActualTorque;

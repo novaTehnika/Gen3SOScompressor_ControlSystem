@@ -32,7 +32,7 @@ These parameters control the duration of timeouts and delays within the state ma
 | `G_cfgBrakeDisengageDelay`| T#500MS | ms | Time to wait after commanding the brake to release before proceeding. Should be slightly longer than the mechanical brake's specified release time. |
 | `G_cfgHomingTimeout` | T#90S | s | Maximum time allowed for the Mode 110 homing sequence to complete. **Tuning:** Increase if the travel distance is long or homing velocities are very slow. |
 | `G_cfgDriveReadyTimeout` | T#5S | s | Max time to wait for the servo drive to report "Ready" after being enabled. Should not need adjustment unless the drive has an unusually long power-on sequence. |
-| `G_cfgFaultIdleTimeout` | T#30S | s | When a fault occurs, the system enters a controlled stop. If the master does not acknowledge/reset the fault within this time, the slave will proceed to a safe-idle state (drive off, brake on). |
+| `G_cfgFaultIdleTimeout` | T#30S | s | When a fault occurs, the system enters a controlled stop. If the master does not acknowledge/reset the fault within this time, the slave will proceed to a safe-idle state (drive off, brake on). A limit-fault reset from that state re-powers through the activation states to `ST_RECOVERY` (`bRecoveryPending`). |
 
 ---
 
@@ -194,5 +194,8 @@ The transducer is a 4-20 mA loop read as the voltage across a shunt on the contr
 | `G_cfgPressureStopStiffness` | 100.0 | MPa/mm | Chamber stiffness assumed by the stop law: the velocity is clamped to `sqrt(2·Decel·|error|/stiffness)`. Above the liquid-only chamber's about 20 MPa/mm because the filtered reading lags the chamber during the approach. Fallback when the schedule is off. |
 | `G_cfgPressureStopVelMin` | 2.0 | mm/s | The stop law never clamps below this, so outflow can be balanced at zero error. It must exceed the piston speed the outlet needs (1.4 mm/s at 10 MPa through the orifice bank) or the loop holds a steady error below the target. Overshoot from this velocity is at most `stiffness·v²/(2·decel)`. |
 | `G_cfgPressureTorqueLimit` | 100.0 | % of rated | Torque limit in pressure mode. Caps the piston force if the sensor reads low. |
-| `G_cfgPressureTargetMax` | 15.0 | MPa gauge | Highest target accepted from the master. |
+| `G_cfgPressureTargetMax` | 15.0 | MPa gauge | Highest target accepted from the master. The effective limit is `MIN(G_cfgPressureTargetMax, G_cfgPressureCeiling - G_cfgPressureCeilingHyst)`. |
+| `G_cfgPressureCeiling` | 12.0 | MPa gauge | Mechanical pressure ceiling. Above it `PRG_Main` zeroes every command in the pressurising (positive) direction in every motion state (`G_sysPressureBlock`, IR9). No fault. Also caps the pressure target at Ceiling − Hyst. |
+| `G_cfgPressureCeilingHyst` | 0.5 | MPa | The block releases below Ceiling − Hyst. Well above the filtered transducer noise and the PI ripple, so the block does not chatter, and small against the 4 MPa headroom to the 16 MPa transducer range. |
+| `G_cfgPressureEndMargin` | 1.0 | mm | Pressure mode stops positive motion at `G_cfgPosSoftLimitMax` minus this, so a delivery ends at the end of travel without `FAULT_POSITION` (`G_sysAtEndOfTravel`, IR10). Stopping from `G_cfgPressureVelMax` takes about 0.45 mm (0.25 mm at `G_cfgPressureAccel`, 0.11 mm in the 22.8 ms dead time, 0.09 mm in the 18.2 ms lag), so 1.0 mm leaves at least 0.5 mm to the soft limit and costs 3.4 mL of deliverable volume. |
 | `G_cfgPressureInBand` | 0.1 | MPa | `|actual - target|` below which the in-band status bit (`G_sysPerformanceStatus`, IR7) is set. |

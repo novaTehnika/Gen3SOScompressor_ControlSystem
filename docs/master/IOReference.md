@@ -49,7 +49,7 @@ serves as the home reference switch for Mode 110 homing. `DI7`
 
 DO3-DO6 are no longer driven. The slave's status bits (`G_sysPerformanceStatus`,
 `G_sysFaultActive`, `G_sysHomingComplete`, `G_sysInMotion`) are internal
-globals published only in input registers IR7, IR5, IR8 and IR6. Their
+globals published only in input registers IR7, IR5, IR8, IR6, IR9 and IR10. Their
 meanings are given with the registers in
 [MasterProtocolGuide.md](MasterProtocolGuide.md#slave-to-master-input-registers-one-fc04-read).
 

@@ -23,6 +23,11 @@ for dt = [0.05 0.2]
 end
 testFault(0.05);
 testStopsAndLoss(0.05);
+testFunctionTarget(0.05);
+testSpeed(0.05);
+testPressureGuards(0.05);
+testAlsoWhen(0.05);
+testSeedWalk(0.1);
 testEarlyEnd(0.05);
 testBackgroundLost(0.05);
 testTimeout(0.05);
@@ -30,6 +35,7 @@ testRepeat(0.05);
 testWrongState(0.05);
 testPurity();
 testView();
+testPressureView();
 end
 
 % ===== Scenarios =====
@@ -68,6 +74,24 @@ assert(strcmp(p.state, 'idle'));
 for k = 1:numel(p.def.steps)
     assert(~isempty(p.def.steps(k).title));
 end
+assert(numel(p.def.steps) == 21 && numel(p.def.params) == 6);
+% The oxygen fill target on the defaults: the saline plus the oxygen at
+% the loading pressure (ideal gas at room temperature).
+st = p.def.steps(13);
+assert(strcmp(st.op, 'position') && strcmp(st.unit, 'mL'));
+want = 343 + 343 * (1 / 7.8) * 293.15 / 273.15;
+assert(abs(st.target(p.values, p.cfg) - want) < 1e-9);
+% A charge the chamber cannot hold is reported by the target.
+v = p.values;
+v.salineVolume = 900;
+v.oxygenRatio = 4;
+v.oxygenLoadPressure = 2;
+try
+    st.target(v, p.cfg);
+    error('smoke:noError', 'the oxygen fill target accepted too large a charge');
+catch err
+    assert(~isempty(strfind(err.message, 'more than the chamber holds')), err.message);
+end
 fprintf('ok  seed procedure validates (%d steps, %d parameters)\n', ...
     numel(p.def.steps), numel(p.def.params));
 
@@ -78,6 +102,11 @@ base = mk({ ...
     struct('type', 'wait', 'title', 'W', 'until', 'settled'), ...
     struct('type', 'machine', 'title', 'M', 'op', 'position', 'target', 1)});
 procNew(base, cfg);   % the base procedure is valid
+procNew(setStep(base, 4, 'speed', 0.5), cfg);
+procNew(setStep(base, 4, 'pressureMax', 5), cfg);
+procNew(setStep(base, 1, 'alsoWhen', 'endOfTravel'), cfg);
+procNew(setStep(base, 2, 'alsoWhen', 'endOfTravel'), cfg);
+procNew(setStep(base, 4, 'target', @(v, c) c.deadVolume + v.vol), cfg);
 bad = {};
 bad{end+1} = setStep(base, 1, 'type', 'bogus');
 bad{end+1} = setStep(base, 4, 'op', 'bogus');
@@ -97,6 +126,20 @@ bad{end+1} = setStep(setStep(base, 2, 'op', 'home'), 2, 'target', []);   % keep 
 bad{end+1} = setStep(base, 4, 'keep', true);    % keep on a move is fine, below
 bad{end} = setStep(setStep(setStep(base, 4, 'op', 'stop'), 4, 'target', []), ...
     4, 'keep', true);
+bad{end+1} = setStep(base, 4, 'target', @(v, c) error('smoke:fn', 'no'));
+bad{end+1} = setStep(base, 4, 'target', @(v, c) [1 2]);
+bad{end+1} = setStep(base, 4, 'target', {1});
+bad{end+1} = setStep(base, 2, 'speed', 1);          % speed on a pressure step
+bad{end+1} = setStep(base, 4, 'speed', 0);
+bad{end+1} = setStep(base, 4, 'speed', -1);
+bad{end+1} = setStep(base, 4, 'speed', [1 2]);
+bad{end+1} = setStep(base, 4, 'pressureMax', 0);
+bad{end+1} = setStep(base, 1, 'pressureMax', 5);    % pressureMax on a confirm
+bad{end+1} = setStep(base, 4, 'alsoWhen', 'bogus');
+bad{end+1} = setStep(base, 4, 'alsoWhen', 'endOfTravel');   % on a position step
+bad{end+1} = setStep(base, 3, 'alsoWhen', 'endOfTravel');   % on a wait
+bad{end+1} = setParam(base, 2, 'kind', 'bogus');
+bad{end+1} = setParam(base, 1, 'kind', 'pressure');         % with a unit
 many = base;
 for i = 1:9
     many.params{end+1} = struct('key', sprintf('q%d', i), 'value', 1);
@@ -290,27 +333,118 @@ fprintf('ok  abort from a move, an operator step and pause; stop not confirmed; 
 end
 
 function testFault(dt)
+% A slave fault pauses the procedure in every situation: nothing is sent,
+% the mixer stays on, resume is refused until the status has left 9, 10 and
+% 32, and the run goes on from the same step.
 kinds = {'machine', 'wait', 'operator', 'paused'};
 for i = 1:numel(kinds)
     h = faultHost(kinds{i}, dt);
+    n = size(h.events, 1);
+    nMix = size(h.mixer, 1);
+    stepBefore = h.p.k;
+    ticksBefore = h.p.checks;
     h.m.force = 10;
     h.m.faultCode = 7;
     h = tick(h);   % the model's status changes, then the engine reads it
     h = tick(h);
-    assert(strcmp(h.p.state, 'faulted') && strcmp(h.p.outcome, 'fault'));
-    assert(h.p.faultCode == 7 && strcmp(h.p.reason, 'Slave fault 7'));
-    assert(h.mixer(end, 2) == 0, 'the mixer the procedure turned on is off');
-    n = size(h.events, 1);
+    assert(strcmp(h.p.state, 'paused') && strcmp(h.p.reason, 'Slave fault 7'), kinds{i});
+    assert(h.p.faultCode == 7 && isempty(h.p.outcome));
+    assert(strcmp(procView(h.p).stateText, 'Paused: Slave fault 7'));
+    assert(~procView(h.p).pause.enable);
     h = runFor(h, 1.0);
     assert(size(h.events, 1) == n, 'no request after a fault');
-    for a = {'confirm', 'pause', 'resume', 'abort', 'start', 'repeat'}
-        h = refuse(h, a{1});
+    assert(size(h.mixer, 1) == nMix && h.mixer(end, 2) == 1, 'the mixer is left on');
+    % Resume is refused through the reset (9) and a failed reset (32).
+    for force = [10 9 32]
+        h.m.force = force;
+        h = tick(h);
+        h = act(h, 'resume');
+        h = tick(h);
+        assert(strcmp(h.p.state, 'paused') && strcmp(h.p.reason, 'Slave fault 7'));
+        assert(~isempty(strfind(h.p.message, 'Cannot resume: Slave fault 7')));
     end
-    [q, ok] = procAction(h.p, 'reset');
-    assert(ok && strcmp(q.state, 'idle'));
-    assert(isequal(q.values, h.p.values));
+    % The fault is gone.
+    h.m.force = [];
+    h = tick(h);
+    h = tick(h);
+    assert(strcmp(h.p.state, 'paused') && isempty(h.p.reason));
+    assert(~isempty(strfind(h.p.message, 'cleared')));
+    assert(procView(h.p).pause.enable);
+    h = act(h, 'resume');
+    h = tick(h);
+    switch kinds{i}
+        case 'machine'
+            h = runUntil(h, @(h) h.p.k == 3, 30);
+            assert(sum(h.events(:, 2) == 2) == 2, 'the move is issued again');
+        case 'wait'
+            assert(strcmp(h.p.state, 'running') && h.p.k == stepBefore);
+        case 'operator'
+            assert(strcmp(h.p.state, 'waitOperator') && h.p.k == stepBefore);
+            assert(isequal(h.p.checks, ticksBefore), 'the ticks are kept');
+        case 'paused'
+            assert(strcmp(h.p.state, 'running') && h.p.k == stepBefore);
+    end
+    h = runUntil(h, @(h) h.p.k == 4 && strcmp(h.p.state, 'waitOperator'), 30);
+    h = act(h, 'check', 1, true);
+    h = act(h, 'check', 2, true);
+    h = act(h, 'confirm');
+    h = tick(h);
+    assert(strcmp(h.p.state, 'done') && strcmp(h.p.outcome, 'completed'), kinds{i});
 end
-fprintf('ok  slave fault in a move, a wait, an operator step and pause\n');
+fprintf('ok  a slave fault pauses a move, a wait, an operator step and a pause; resume follows the reset\n');
+
+% Abort while faulted: a stop is sent and the run ends aborted.
+h = faultHost('machine', dt);
+h.m.force = 10;
+h.m.faultCode = 7;
+h = runFor(h, 0.2);
+assert(strcmp(h.p.state, 'paused'));
+h = act(h, 'abort');
+h = tick(h);
+assert(strcmp(h.p.state, 'aborting') && h.events(end, 2) == -1);
+h = runUntil(h, @(h) strcmp(h.p.state, 'done'), 5);
+assert(strcmp(h.p.outcome, 'aborted'));
+assert(h.mixer(end, 2) == 0, 'abort switches the mixer off');
+% And with the model not running.
+h = faultHost('operator', dt);
+h.m.force = 10;
+h.m.faultCode = 7;
+h = runFor(h, 0.2);
+h.m.connected = false;
+h = tick(h);
+assert(strcmp(h.p.state, 'paused') && strcmp(h.p.reason, 'Model stopped'));
+h = act(h, 'abort');
+h = tick(h);
+assert(strcmp(h.p.state, 'done') && strcmp(h.p.outcome, 'aborted'));
+fprintf('ok  abort after a slave fault ends aborted\n');
+
+% A kept pressure hold: the fault counts it as lost and resume re-runs it
+% before the interrupted step.
+proc = mk({struct('type', 'machine', 'title', 'Hold', 'op', 'pressure', ...
+        'target', 'pTarget', 'keep', true, 'timerStart', true), ...
+    struct('type', 'confirm', 'title', 'Operator', 'checks', {{'a', 'b'}})});
+h = newHost(proc, dt);
+h = act(h, 'start');
+h = runUntil(h, @(h) h.p.k == 2, 10);
+h = act(h, 'check', 1, true);
+h = tick(h);
+n = size(h.events, 1);
+h.m.force = 10;
+h.m.faultCode = 4;
+h = runFor(h, 0.3);
+assert(strcmp(h.p.state, 'paused') && h.p.bg.lost && strcmp(h.p.reason, 'Slave fault 4'));
+assert(size(h.events, 1) == n);
+h.m.mode = 'idle';      % the master was latched: the hold is gone
+h.m.op = 0;
+h.m.force = [];
+h = runFor(h, 0.3);
+h = act(h, 'resume');
+h = tick(h);
+assert(h.p.k == 1 && strcmp(h.p.state, 'running'), 'the hold is re-run first');
+h = runUntil(h, @(h) h.p.k == 2, 10);
+assert(strcmp(h.p.state, 'waitOperator') && isequal(h.p.checks, [true false]));
+assert(sum(h.events(:, 2) == 4) == 2);
+fprintf('ok  a slave fault re-runs the kept pressure step on resume\n');
 end
 
 function testStopsAndLoss(dt)
@@ -352,6 +486,8 @@ for i = 1:size(cases, 1)
     h = runUntil(h, @(h) h.p.k == 3, 30);
     assert(sum(h.events(:, 2) == 2) == 2, 'the interrupted move is issued again');
     h = runUntil(h, @(h) h.p.k == 4, 10);
+    h = act(h, 'check', 1, true);
+    h = act(h, 'check', 2, true);
     h = act(h, 'confirm');
     h = tick(h);
     assert(strcmp(h.p.state, 'done') && strcmp(h.p.outcome, 'completed'));
@@ -538,9 +674,11 @@ pb = procNew(proc, cfg);
 % Script for each engine: input and action at each tick.
 n = 60;
 inA = @(i) struct('connected', true, 'statusCode', 0, 'faultCode', 0, ...
-    'estop', false, 'pressure', 1 + 0.1 * i, 'volume', 100 - i);
+    'estop', false, 'pressure', 1 + 0.1 * i, 'volume', 100 - i, ...
+    'pressureBlock', false, 'atEndOfTravel', false);
 inB = @(i) struct('connected', true, 'statusCode', 10 * (i > 20), ...
-    'faultCode', 3, 'estop', false, 'pressure', 2, 'volume', 50);
+    'faultCode', 3, 'estop', false, 'pressure', 2, 'volume', 50, ...
+    'pressureBlock', false, 'atEndOfTravel', false);
 soloA = runScript(pa, inA, n, dt);
 soloB = runScript(pb, inB, n, dt);
 % Interleaved, one tick of each in turn.
@@ -551,7 +689,8 @@ for i = 1:n
     qb = scriptTick(qb, inB, i, dt);
 end
 assert(isequaln(qa, soloA) && isequaln(qb, soloB));
-assert(strcmp(soloA.state, 'done') && strcmp(soloB.state, 'faulted'));
+assert(strcmp(soloA.state, 'done'));
+assert(strcmp(soloB.state, 'paused') && strcmp(soloB.reason, 'Slave fault 3'));
 fprintf('ok  the engine is pure: interleaved engines match their solo runs\n');
 end
 
@@ -619,6 +758,239 @@ assert(strcmp(procView(p).timerText, '--'));
 fprintf('ok  procView: heading, list markers, substitution, buttons, readouts\n');
 end
 
+function testFunctionTarget(dt)
+% A target given as a function of the parameter values and the cfg is
+% evaluated when the step issues its operation.
+proc = mk({struct('type', 'machine', 'title', 'Move', 'op', 'position', ...
+    'unit', 'mL', 'target', @(v, c) c.deadVolume + 2 * v.vol)});
+h = newHost(proc, dt);
+h = act(h, 'start');
+h = runFor(h, 0.2);
+op = h.events(h.events(:, 2) == 2, :);
+assert(size(op, 1) == 1 && abs(op(1, 4) - (h.cfg.deadVolume + 20)) < 1e-12);
+h = runUntil(h, @(h) strcmp(h.p.state, 'done'), 30);
+fprintf('ok  a target function is evaluated at the step (%.1f mL)\n', op(1, 4));
+
+% A function that fails once a value is set: the step pauses with the
+% message and issues nothing; resume tries again.
+proc = mk({struct('type', 'param', 'title', 'Set', 'params', {{'vol'}}), ...
+    struct('type', 'machine', 'title', 'Move', 'op', 'position', ...
+        'unit', 'mL', 'target', @(v, c) failAbove(v.vol, 15))});
+h = newHost(proc, dt);
+h = act(h, 'start');
+h = tick(h);
+h = act(h, 'setParam', 'vol', 18);
+h = act(h, 'confirm');
+h = runFor(h, 0.5);
+assert(strcmp(h.p.state, 'paused') && isempty(h.p.reason));
+assert(strncmp(h.p.message, 'Step target could not be computed: too large', 44));
+assert(isempty(h.events), 'nothing is issued');
+h = act(h, 'resume');
+h = runFor(h, 0.3);
+assert(strcmp(h.p.state, 'paused') && isempty(h.events));
+h = act(h, 'abort');
+h = runUntil(h, @(h) strcmp(h.p.state, 'done'), 5);
+assert(strcmp(h.p.outcome, 'aborted'));
+fprintf('ok  a target function that fails pauses the step and issues nothing\n');
+end
+
+function v = failAbove(x, limit)
+if x > limit
+    error('smoke:target', 'too large');
+end
+v = x;
+end
+
+function testSpeed(dt)
+proc = mk({struct('type', 'machine', 'title', 'Slow', 'op', 'position', ...
+        'target', 250, 'speed', 0.5), ...
+    struct('type', 'machine', 'title', 'Free', 'op', 'position', 'target', 200)});
+h = newHost(proc, dt);
+h.m.speed = 500;
+h = act(h, 'start');
+h = runUntil(h, @(h) strcmp(h.p.state, 'done'), 20);
+op = h.events(h.events(:, 2) == 2, :);
+assert(size(op, 1) == 2 && op(1, 3) == 0.5 && isnan(op(2, 3)));
+fprintf('ok  a position step issues its speed cap (NaN when it has none)\n');
+end
+
+function testPressureGuards(dt)
+% The pressure above the step's limit and the slave's pressure block pause
+% a machine step with a stop; resume issues the step again.
+move = struct('type', 'machine', 'title', 'Move', 'op', 'position', ...
+    'target', 100, 'pressureMax', 3);
+cases = {'pressure', 'Pressure above the step''s limit'; ...
+    'block', 'Pressure ceiling reached'};
+for i = 1:size(cases, 1)
+    h = newHost(mk({move}), dt);
+    h = act(h, 'start');
+    h = runFor(h, 0.5);
+    assert(strcmp(h.p.phase, 'track'));
+    n = size(h.events, 1);
+    if i == 1
+        h.m.pressure = 4;
+    else
+        h.m.pressureBlock = true;
+    end
+    h = tick(h);
+    assert(strcmp(h.p.state, 'paused') && strcmp(h.p.message, cases{i, 2}), cases{i, 1});
+    assert(isempty(h.p.reason));
+    assert(size(h.events, 1) == n + 1 && h.events(end, 2) == -1, 'a stop is sent');
+    h.m.pressure = 1;
+    h.m.pressureBlock = false;
+    h = runFor(h, 0.5);
+    h = act(h, 'resume');
+    h = runUntil(h, @(h) strcmp(h.p.state, 'done'), 30);
+    assert(sum(h.events(:, 2) == 2) == 2, 'the move is issued again');
+end
+% A step without the limit rides through a high pressure.
+h = newHost(mk({struct('type', 'machine', 'title', 'Move', 'op', 'position', ...
+    'target', 100)}), dt);
+h = act(h, 'start');
+h.m.pressure = 50;
+h = runUntil(h, @(h) strcmp(h.p.state, 'done'), 30);
+fprintf('ok  the pressure limit and the pressure block pause a move with a stop\n');
+end
+
+function testAlsoWhen(dt)
+mk2 = @(extra) mk({fieldsOver(struct('type', 'confirm', 'title', 'Deliver', ...
+    'zeroVolume', true), extra), struct('type', 'confirm', 'title', 'After')});
+% The slave's end-of-travel flag completes the step without the click.
+h = newHost(mk2(struct('alsoWhen', 'endOfTravel')), dt);
+h = act(h, 'start');
+h = runFor(h, 0.3);
+assert(h.p.k == 1 && strcmp(h.p.state, 'waitOperator'));
+h.m.atEnd = true;
+h = tick(h);
+assert(h.p.k == 2 && h.p.stepDone(1));
+assert(~isempty(strfind(procView(h.p).message, 'Deliver ended at the end of travel')));
+% The swept volume at or below the end volume does the same.
+h = newHost(mk2(struct('alsoWhen', 'endOfTravel')), dt);
+h = act(h, 'start');
+h = runFor(h, 0.3);
+h.m.d = 1.0;     % mm: about 3.4 mL
+assert(mLPerMm(h.cfg) * h.m.d <= h.cfg.procEndVolume);
+h = tick(h);
+assert(h.p.k == 2);
+h.m.d = 300;
+% Without alsoWhen the step waits for the click.
+h = newHost(mk2(struct()), dt);
+h = act(h, 'start');
+h = runFor(h, 0.3);
+h.m.atEnd = true;
+h.m.d = 1.0;
+h = runFor(h, 0.5);
+assert(h.p.k == 1 && strcmp(h.p.state, 'waitOperator'));
+% A pressure step that is not kept ends with a stop at the end of travel.
+proc = mk({struct('type', 'machine', 'title', 'Hold', 'op', 'pressure', ...
+        'target', 'pTarget', 'until', 'settled', 'duration', 100, ...
+        'alsoWhen', 'endOfTravel'), ...
+    struct('type', 'confirm', 'title', 'After')});
+h = newHost(proc, dt);
+h = act(h, 'start');
+h = runFor(h, 1.0);
+assert(h.p.k == 1 && strcmp(h.p.phase, 'track') && h.m.status == 5);
+n = sum(h.events(:, 2) == -1);
+h.m.atEnd = true;
+h = runUntil(h, @(h) h.p.k == 2, 5);
+assert(sum(h.events(:, 2) == -1) == n + 1, 'a stop is sent');
+assert(~isempty(strfind(h.p.note, 'Hold ended at the end of travel')));
+fprintf('ok  alsoWhen ends a confirm or a pressure step at the end of travel\n');
+end
+
+function s = fieldsOver(s, extra)
+f = fieldnames(extra);
+for i = 1:numel(f)
+    s.(f{i}) = extra.(f{i});
+end
+end
+
+function testSeedWalk(dt)
+% The seed procedure through the stand-in: every machine step's request,
+% the speed of the two pushes and the order of the operations.
+proc = sopProcedure();
+h = newHost(proc, dt);
+cfg = h.cfg;
+h = act(h, 'start');
+guard = 0;
+while ~strcmp(h.p.state, 'done') && guard < 4000
+    h = tick(h);
+    guard = guard + 1;
+    if strcmp(h.p.state, 'waitOperator')
+        st = h.p.def.steps(h.p.k);
+        for i = 1:numel(st.checks)
+            h = act(h, 'check', i, true);
+        end
+        h = act(h, 'confirm');
+    end
+end
+assert(strcmp(h.p.state, 'done') && strcmp(h.p.outcome, 'completed'));
+assert(all(h.p.stepDone));
+ops = h.events(:, 2)';
+assert(isequal(ops, [2 -1 2 -1 2 -1 2 -1 2 -1 4 -1]), mat2str(ops));
+mv = h.events(h.events(:, 2) == 2, :);
+assert(abs(mv(1, 4) - (cfg.deadVolume + 100)) < 1e-9);
+assert(mv(2, 4) == 0 && mv(2, 3) == 0.5);
+assert(abs(mv(3, 4) - (343 + 30)) < 1e-9);
+assert(abs(mv(4, 4) - 343) < 1e-9 && mv(4, 3) == 0.5);
+assert(abs(mv(5, 4) - (343 + 343 * (1 / 7.8) * 293.15 / 273.15)) < 1e-9);
+assert(all(isnan(mv([1 3 5], 3))));
+assert(isequal(h.params{1}, struct('SalineVolume', 343, 'OxygenRatio', 1)));
+fprintf('ok  the seed procedure walks to the end (%d operations)\n', size(h.events, 1));
+end
+
+function testPressureView()
+cfg = masterConfig();
+params = {struct('key', 'pp', 'label', 'Hold', 'kind', 'pressure', ...
+        'value', 3, 'min', 1, 'max', 10), ...
+    struct('key', 'vol', 'label', 'Volume', 'unit', 'mL', 'value', 10, ...
+        'min', 0, 'max', 20, 'format', '%.1f')};
+proc = mk({struct('type', 'param', 'title', 'Set', 'params', {{'pp', 'vol'}}, ...
+        'text', 'Hold {pp} and {vol}.'), ...
+    struct('type', 'machine', 'title', 'Hold', 'op', 'pressure', ...
+        'target', 'pp', 'until', 'running', 'keep', true), ...
+    struct('type', 'confirm', 'title', 'Next')}, params);
+p = procNew(proc, cfg);
+p = procAction(p, 'start');
+p = procStep(p, idleIn(), 0.05);
+% Atm by default.
+v = procView(p);
+assert(strcmp(v.text, 'Hold 3.00 atm abs and 10.0.'), v.text);
+assert(strcmp(v.params.labels{1}, 'Hold (atm abs)') && v.params.values(1) == 3);
+assert(isequal(v.params.kinds, {'pressure', ''}));
+% Psi.
+psi = pressureUnitInfo('psi', cfg);
+v = procView(p, psi);
+k = cfg.psiPerAtm;
+assert(strcmp(v.text, sprintf('Hold %.1f psi abs and 10.0.', 3 * k)), v.text);
+assert(strcmp(v.params.labels{1}, 'Hold (psi abs)'));
+assert(abs(v.params.values(1) - 3 * k) < 1e-12);
+assert(abs(v.params.mins(1) - k) < 1e-12 && abs(v.params.maxs(1) - 10 * k) < 1e-12);
+assert(strcmp(v.params.formats{1}, '%.1f') && strcmp(v.params.formats{2}, '%.1f'));
+assert(strcmp(v.params.labels{2}, 'Volume (mL)') && v.params.maxs(2) == 20);
+% The engine keeps atm and gives a unit-free range message.
+[~, ok, msg] = procAction(p, 'setParam', 'pp', 11);
+assert(~ok && strcmp(msg, 'Hold is out of range'));
+p = procAction(p, 'setParam', 'pp', 4);
+p = procAction(p, 'confirm');
+p = procStep(p, idleIn(), 0.05);
+assert(p.values.pp == 4);
+% The held pressure.
+assert(strcmp(procView(p, psi).pressureTargetText, '--'));
+h = newHost(proc, 0.05);
+h = act(h, 'start');
+h = tick(h);
+h = act(h, 'confirm');
+h = runUntil(h, @(h) h.p.k == 3, 10);
+v = procView(h.p, psi);
+assert(v.pressureTarget == 3);
+assert(strcmp(v.pressureTargetText, sprintf('%.1f psi abs', 3 * k)));
+assert(strcmp(procView(h.p).pressureTargetText, '3.00 atm abs'));
+mpa = procView(h.p, pressureUnitInfo('MPa', cfg));
+assert(strcmp(mpa.pressureTargetText, sprintf('%.3f MPa abs', 3 / cfg.atmPerMPa)));
+fprintf('ok  procView converts pressure parameters, ranges, texts and the held pressure\n');
+end
+
 % ===== Fixtures =====
 
 function proc = mk(steps, params)
@@ -637,9 +1009,14 @@ function proc = setStep(proc, k, field, value)
 proc.steps{k}.(field) = value;
 end
 
+function proc = setParam(proc, k, field, value)
+proc.params{k}.(field) = value;
+end
+
 function in = idleIn()
 in = struct('connected', true, 'statusCode', 0, 'faultCode', 0, ...
-    'estop', false, 'pressure', 1, 'volume', 100);
+    'estop', false, 'pressure', 1, 'volume', 100, 'pressureBlock', false, ...
+    'atEndOfTravel', false);
 end
 
 function h = faultHost(kind, dt)
@@ -648,7 +1025,7 @@ function h = faultHost(kind, dt)
 proc = mk({struct('type', 'confirm', 'title', 'Mixer on', 'mixer', 'on'), ...
     struct('type', 'machine', 'title', 'Move', 'op', 'position', 'target', 100), ...
     struct('type', 'wait', 'title', 'Wait', 'duration', 3), ...
-    struct('type', 'confirm', 'title', 'Operator')});
+    struct('type', 'confirm', 'title', 'Operator', 'checks', {{'a', 'b'}})});
 h = newHost(proc, dt);
 h = act(h, 'start');
 h = tick(h);
@@ -668,6 +1045,8 @@ if strcmp(kind, 'paused')
     assert(strcmp(h.p.state, 'paused'));
 elseif strcmp(kind, 'operator')
     h = runUntil(h, @(h) h.p.k == 4, 10);
+    h = act(h, 'check', 1, true);
+    h = tick(h);
 end
 end
 
@@ -678,7 +1057,7 @@ function m = modelInit(cfg)
 m = struct('status', 0, 'mode', 'idle', 'tm', 0, 'op', 0, 'unit', 'mm', ...
     'target', 0, 'd', 300, 'speed', 50, 'homeT', 1.0, 'pressure', 1, ...
     'connected', true, 'estop', false, 'faultCode', 0, 'inject', '', ...
-    'force', []);
+    'force', [], 'pressureBlock', false, 'atEnd', false);
 m.cfg = cfg;
 end
 
@@ -779,7 +1158,7 @@ h.dt = dt;
 h.p = procNew(proc, h.cfg);
 h.m = modelInit(h.cfg);
 h.t = 0;
-h.events = zeros(0, 2);      % [time, op code or -1 for a stop]
+h.events = zeros(0, 4);      % [time, op code or -1 for a stop, speed, target]
 h.mixer = zeros(0, 2);       % [time, 0/1]
 h.params = {};
 h.zero = 0;
@@ -792,7 +1171,8 @@ function h = tick(h)
 m = h.m;
 in = struct('connected', m.connected, 'statusCode', m.status, ...
     'faultCode', m.faultCode, 'estop', m.estop, 'pressure', m.pressure, ...
-    'volume', mLPerMm(h.cfg) * m.d + h.cfg.deadVolume);
+    'volume', mLPerMm(h.cfg) * m.d, 'pressureBlock', m.pressureBlock, ...
+    'atEndOfTravel', m.atEnd);
 [h.p, req] = procStep(h.p, in, h.dt);
 h.t = h.t + h.dt;
 if ~isempty(req.params)
@@ -802,10 +1182,10 @@ if req.mixer >= 0
     h.mixer(end + 1, :) = [h.t req.mixer];
 end
 if req.stop
-    h.events(end + 1, :) = [h.t -1];
+    h.events(end + 1, :) = [h.t -1 NaN NaN];
 end
 if req.op >= 0
-    h.events(end + 1, :) = [h.t req.op];
+    h.events(end + 1, :) = [h.t req.op req.speed req.target];
 end
 if req.zeroVolume
     h.zero = h.zero + 1;

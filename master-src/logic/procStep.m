@@ -10,7 +10,12 @@ function [p, req] = procStep(p, in, dt)
 %          faultCode   the model's FaultCode (read when statusCode is 10)
 %          estop       the E-STOP button is down or the model reports E-STOP
 %          pressure    atm absolute
-%          volume      mL; only its differences are used
+%          volume      swept volume in mL (the travel left times the bore
+%                      area, without the dead volume)
+%          pressureBlock  logical: the slave refuses pressurising motion
+%                      above its pressure ceiling (IR9)
+%          atEndOfTravel  logical: the slave is at the end of travel less
+%                      its end margin (IR10)
 %
 %   req is what the app is to do, in this order (an empty value means do
 %   nothing):
@@ -23,6 +28,8 @@ function [p, req] = procStep(p, in, dt)
 %          target      mm from the end of travel or mL (unit 'mm'/'mL') for
 %                      a position, atm absolute (unit 'atm') for a pressure
 %          unit        '' when op has no target
+%          speed       mm/s the step caps a position move at, NaN for the
+%                      operator's speed alone (op 2 only)
 %          zeroVolume  true: take the reference of the volume readout
 %
 %   The engine does everything the operator and the model decide here, and
@@ -31,13 +38,18 @@ function [p, req] = procStep(p, in, dt)
 %   the interlocks are enforced.
 %
 %   States: idle, running, waitOperator (a confirm or param step), paused,
-%   aborting (stop sent, waiting for the axis), done (outcome completed or
-%   aborted) and faulted (a slave fault; nothing resumes, the operator
-%   starts again). E-STOP, a lost slave link and a stopped model pause the
-%   procedure with reason set; resume is refused until the condition has
-%   gone, and abort ends at once if the model is not running. Fields of p:
-%     def, c        the normalized procedure and the cfg values it needs
+%   aborting (stop sent, waiting for the axis) and done (outcome completed
+%   or aborted). E-STOP, a lost slave link, a stopped model and a slave
+%   fault (status 10, then 9 while resetting and 32 if the reset failed)
+%   pause the procedure with reason set; resume is refused until the
+%   condition has gone, and abort ends at once if the model is not running.
+%   Two guards pause a machine step without a reason: the pressure above
+%   the step's pressureMax and the slave's pressure block. A target given as
+%   a function is evaluated when the step issues its operation. Fields of p:
+%     def, c, cfg   the normalized procedure, the cfg values it needs and
+%                   the whole masterConfig (for target functions)
 %     state, outcome, reason, faultCode, message
+%     note          what ended a step on its own (end of travel)
 %     k, stepT      current step and the time in it (not counted paused)
 %     phase         within a machine step: issue, track, stopping, settle
 %     track         the current step's operation: op, confirmed, sinceSent,
@@ -72,7 +84,7 @@ c = p.c;
 status = in.statusCode;
 
 % ----- Terminal or idle -----
-if any(strcmp(p.state, {'idle', 'done', 'faulted'}))
+if any(strcmp(p.state, {'idle', 'done'}))
     if strcmp(p.state, 'idle') && strcmp(p.intent, 'start')
         p.intent = '';
         why = '';
@@ -109,9 +121,12 @@ if ~strcmp(p.state, 'paused')
 end
 
 % ----- Supervision -----
-% E-STOP, a lost link and a stopped model pause the procedure: the master
-% has stopped everything already, so no stop is sent. A slave fault ends it.
-cause = supervisionCause(in);
+% E-STOP, a lost link, a stopped model and a slave fault pause the
+% procedure: the master has stopped everything already, so no stop is sent.
+if status == STATUS_FAULT && in.connected
+    p.faultCode = in.faultCode;
+end
+cause = supervisionCause(in, p);
 if strcmp(p.state, 'aborting')
     if ~in.connected
         [p, req] = finishAbort(p, req, 'Model stopped');
@@ -122,11 +137,6 @@ elseif ~isempty(cause)
 elseif strcmp(p.state, 'paused') && ~isempty(p.reason)
     p.reason = '';
     p.message = 'The condition has cleared: resume or abort';
-end
-if status == STATUS_FAULT && in.connected && isempty(cause)
-    [p, req] = endFault(p, req, sprintf('Slave fault %d', in.faultCode), ...
-        in.faultCode);
-    return
 end
 
 % ----- Background operation -----
@@ -166,6 +176,13 @@ elseif strcmp(p.state, 'running')
         [p, req] = machineWork(p, req, in, dt, st);
     elseif strcmp(st.type, 'wait')
         [p, req] = waitWork(p, req, in, dt, st);
+    end
+elseif strcmp(p.state, 'waitOperator')
+    st = p.def.steps(p.k);
+    if strcmp(st.type, 'confirm') && strcmp(st.alsoWhen, 'endOfTravel') ...
+            && atEnd(in, c)
+        [p, req] = completeStep(p, req, in);
+        p.note = sprintf('%s ended at the end of travel', st.title);
     end
 end
 end
@@ -216,8 +233,9 @@ switch intent
 end
 end
 
-function cause = supervisionCause(in)
-% Why the procedure cannot run now, or ''.
+function cause = supervisionCause(in, p)
+% Why the procedure cannot run now, or ''. A slave fault lasts through the
+% reset (9) and a failed reset (32); the code is the one read at status 10.
 cause = '';
 if ~in.connected
     cause = 'Model stopped';
@@ -225,6 +243,8 @@ elseif in.statusCode == 34 || in.statusCode == 35
     cause = 'Slave link lost';
 elseif in.estop || in.statusCode == 20
     cause = 'E-STOP';
+elseif any(in.statusCode == [9 10 32])
+    cause = sprintf('Slave fault %d', p.faultCode);
 end
 end
 
@@ -317,6 +337,17 @@ end
 function [p, req] = machineWork(p, req, in, dt, st)
 status = in.statusCode;
 c = p.c;
+if any(strcmp(p.phase, {'track', 'settle'}))
+    % Pressure guards. The messages carry no numbers (the app's unit is its
+    % own); the step is issued again on resume.
+    if in.pressure > st.pressureMax
+        [p, req] = pauseStep(p, req, 'Pressure above the step''s limit', true);
+        return
+    elseif in.pressureBlock && ~strcmp(st.op, 'stop')
+        [p, req] = pauseStep(p, req, 'Pressure ceiling reached', true);
+        return
+    end
+end
 switch p.phase
     case 'issue'
         if strcmp(st.op, 'stop')
@@ -327,12 +358,18 @@ switch p.phase
         end
         code = opCode(st.op);
         target = NaN;
-        req.unit = '';
+        if any(strcmp(st.op, {'position', 'pressure'}))
+            [target, why] = resolveTarget(p, st);
+            if ~isfinite(target)
+                [p, req] = pauseNow(p, req, ...
+                    ['Step target could not be computed: ' why], false);
+                return
+            end
+        end
         if strcmp(st.op, 'position')
-            target = resolveTarget(p, st);
             req.unit = st.unit;
+            req.speed = st.speed;
         elseif strcmp(st.op, 'pressure')
-            target = resolveTarget(p, st);
             req.unit = 'atm';
         end
         req.op = code;
@@ -370,6 +407,11 @@ switch p.phase
                     end
                     done = p.settleT >= st.duration;
                 end
+        end
+        if ~done && late && tr.confirmed && strcmp(st.op, 'pressure') ...
+                && strcmp(st.alsoWhen, 'endOfTravel') && atEnd(in, c)
+            done = true;
+            p.note = sprintf('%s ended at the end of travel', st.title);
         end
         if done
             if st.keep
@@ -513,19 +555,6 @@ end
 [p, req] = enterStep(p, req, in, p.k + 1);
 end
 
-function [p, req] = endFault(p, req, reason, code)
-% Terminal: the master is latched or in E-STOP, so no operation is sent.
-p.state = 'faulted';
-p.outcome = 'fault';
-p.reason = reason;
-p.message = reason;
-p.faultCode = code;
-p.timer.running = false;
-p.bg = emptyBg();
-p.intent = '';
-[p, req] = mixerOff(p, req);
-end
-
 function [p, req] = finishAbort(p, req, reason)
 p.state = 'done';
 p.outcome = 'aborted';
@@ -549,6 +578,7 @@ p.outcome = '';
 p.reason = '';
 p.faultCode = 0;
 p.message = '';
+p.note = '';
 p.k = 0;
 p.stepDone = false(1, numel(p.def.steps));
 p.timer = struct('running', false, 'elapsed', NaN);
@@ -563,8 +593,8 @@ end
 % ===== Helpers =====
 
 function req = emptyReq()
-req = struct('op', -1, 'target', NaN, 'unit', '', 'stop', false, ...
-    'mixer', -1, 'params', [], 'zeroVolume', false);
+req = struct('op', -1, 'target', NaN, 'unit', '', 'speed', NaN, ...
+    'stop', false, 'mixer', -1, 'params', [], 'zeroVolume', false);
 end
 
 function t = emptyTrack()
@@ -613,13 +643,34 @@ switch code
 end
 end
 
-function v = resolveTarget(p, st)
-% A target is a number or the key of a parameter.
+function [v, why] = resolveTarget(p, st)
+% A target is a number, the key of a parameter or a function of the
+% parameter values and the configuration. why says what failed when v is
+% not a finite number.
+why = '';
 if ischar(st.target)
     v = p.values.(st.target);
+elseif isa(st.target, 'function_handle')
+    try
+        v = st.target(p.values, p.cfg);
+        if ~(isnumeric(v) && isscalar(v) && isfinite(v))
+            v = NaN;
+            why = 'the result is not a finite number';
+        end
+    catch err
+        v = NaN;
+        why = err.message;
+    end
 else
     v = st.target;
 end
+end
+
+function tf = atEnd(in, c)
+% The piston is at the end of travel: the slave's own flag, or the swept
+% volume down to the end volume (which also ends a step on a slave without
+% the flag).
+tf = logical(in.atEndOfTravel) || in.volume <= c.procEndVolume;
 end
 
 function s = sinkParams(p, st)
