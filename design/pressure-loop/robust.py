@@ -286,16 +286,19 @@ class ControllerSpec:
     sched: dict = None      # ScheduledSlaveController arguments, or None
     P_target: float = None  # [Pa] target pressure; None for the default
     hose_before: bool = False   # hose opened before the compression
+    floor: dict = None      # FloorPolicy arguments, or None for the
+    #                         configured StopVelMin
 
 
 def make_controller(spec):
     """Return the controller of a study arm."""
+    floor = None if spec.floor is None else ctl.FloorPolicy(**spec.floor)
     if spec.sched is not None:
         return ctl.ScheduledSlaveController(
-            spec.name, flow_ff=spec.flow_ff, **spec.sched,
+            spec.name, flow_ff=spec.flow_ff, floor=floor, **spec.sched,
             **spec.overrides)
     return ctl.SlaveController(spec.name, flow_ff=spec.flow_ff,
-                               **spec.overrides)
+                               floor=floor, **spec.overrides)
 
 
 def point_metrics(point):
