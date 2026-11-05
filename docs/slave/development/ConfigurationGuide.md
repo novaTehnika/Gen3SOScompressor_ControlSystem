@@ -30,7 +30,7 @@ These parameters control the duration of timeouts and delays within the state ma
 | `G_cfgHoldPositionTimeout` | T#2M | min | Hold-position inactivity watchdog: if no handshake completes within this time after motion halts in `ST_HOLD_POSITION`, the slave shuts down gracefully to idle (no fault). |
 | `G_cfgBrakeEngageDelay` | T#500MS | ms | Time to wait after commanding the brake to engage before proceeding. Should be slightly longer than the mechanical brake's specified engagement time. |
 | `G_cfgBrakeDisengageDelay`| T#500MS | ms | Time to wait after commanding the brake to release before proceeding. Should be slightly longer than the mechanical brake's specified release time. |
-| `G_cfgHomingTimeout` | T#90S | s | Timeout of the Mode 110 homing sequence, counted by a clock that runs at the operator speed's fraction of the fast-approach ceiling (`MIN(G_cfgHomeLimFastApproachVel, G_cfgVelLimitMax)`): it is a time at that ceiling, counts nothing while the operator speed (HR7-8) is 0, and at a reduced speed allows the same travel as at full speed. **Tuning:** Scale it with 372 mm / `G_cfgHomeLimFastApproachVel` + 7 s plus a margin; increase it if the travel distance is long or the ceiling is lowered. |
+| `G_cfgHomingTimeout` | T#90S | s | Maximum time allowed for the Mode 110 homing sequence to complete. **Tuning:** Increase if the travel distance is long or homing velocities are very slow. |
 | `G_cfgDriveReadyTimeout` | T#5S | s | Max time to wait for the servo drive to report "Ready" after being enabled. Should not need adjustment unless the drive has an unusually long power-on sequence. |
 | `G_cfgFaultIdleTimeout` | T#30S | s | When a fault occurs, the system enters a controlled stop. If the master does not acknowledge/reset the fault within this time, the slave will proceed to a safe-idle state (drive off, brake on). |
 
@@ -46,7 +46,7 @@ These define the safe operating envelope of the machine.
 | `G_cfgPosSoftLimitMin` | -2.5 | mm | Software-enforced minimum retraction position. It sits between position 0 (the homed retract endpoint) and the negative overtravel switch at `-G_cfgHomeLimRetractDist`; keep it bracketed by the two if `G_cfgHomeLimRetractDist` changes. A `FAULT_POSITION` occurs if exceeded. |
 | `G_cfgPosCylinderEntry` | 176.0 | mm | Physical cylinder-entry position in the homed frame. Below it the piston is leaving the cylinder bore; the exit guard's boundary is this value plus `G_cfgPosExitGuardMargin`. **Tuning:** Measure on the machine and set to the actual mechanical entry point. |
 | `G_cfgPosExitGuardMargin`| 20.0 | mm | Safety margin for the piston exit guard. The guard's torque/velocity danger-zone monitoring is active below `G_cfgPosCylinderEntry + G_cfgPosExitGuardMargin`. |
-| `G_cfgVelLimitMax` | 7.0 | mm/s | The one axis speed ceiling: `stCurrentLimits.VelMax` in velocity, torque and velocity recovery, and the upper bound of the operator speed (HR7-8). `G_cfgPressureVelMax` and `G_cfgHomeLimSlowApproachVel` reach their blocks through `MIN(.., G_cfgVelLimitMax)`; the Go Home, fast-approach and backoff speeds are `MIN(operator speed, G_cfg..)` and the operator speed is already limited to this ceiling, so none can exceed it, and `masterConfig.speedMax` must not either (checked in `tests/closedLoopMasterSlave.m`). `Y_DirectControl` does no path shaping in PositionMode (the position command reaches the drive as given), so its `Velocity` and `Acceleration` inputs set no limits there; `FB_PositionPathShaper` does the path shaping, and its `VelMax` and `AccelMax` (`G_cfgPosShaperAccelMax`) limit a position move. `VelMax` is the operator speed (HR7-8, `G_mbPositionSpeed`) limited to `0..G_cfgVelLimitMax` (`rOperatorSpeed`), evaluated every scan; a speed of 0 brakes the command to rest and holds. `Y_DirectControl`'s `Velocity` input is given the same value in position mode, so the two never disagree. |
+| `G_cfgVelLimitMax` | 7.0 | mm/s | The one axis speed ceiling: `stCurrentLimits.VelMax` in velocity, torque and velocity recovery, and the upper bound of the operator speed (HR7-8). The mode speeds (`G_cfgGoHomeVelocity`, the three `G_cfgHomeLim*Vel`, `G_cfgPressureVelMax`) reach their blocks through `MIN(.., G_cfgVelLimitMax)`, and the Go Home velocity is `MIN(operator speed, G_cfgGoHomeVelocity)` with the operator speed already limited to this ceiling, so none can exceed it, and `masterConfig.speedMax` must not either (checked in `tests/closedLoopMasterSlave.m`). `Y_DirectControl` does no path shaping in PositionMode (the position command reaches the drive as given), so its `Velocity` and `Acceleration` inputs set no limits there; `FB_PositionPathShaper` does the path shaping, and its `VelMax` and `AccelMax` (`G_cfgPosShaperAccelMax`) limit a position move. `VelMax` is the operator speed (HR7-8, `G_mbPositionSpeed`) limited to `0..G_cfgVelLimitMax` (`rOperatorSpeed`), evaluated every scan; a speed of 0 brakes the command to rest and holds. `Y_DirectControl`'s `Velocity` input is given the same value in position mode, so the two never disagree. |
 | `G_cfgStopDecel` | 10.0 | mm/s² | The one `MC_Stop` deceleration: hold, fault, recovery and the Go Home abort. |
 | `G_cfgInMotionVelThreshold`| 0.1 | mm/s | The velocity above which the `G_sysInMotion` flag is set. **Tuning:** Increase if motor vibration at rest causes the flag to flicker. |
 
@@ -111,9 +111,9 @@ These parameters define the behavior of the homing (110) and Go Home (101) modes
 ### Mode 110: Home to Limit Switch
 | Parameter | Default Value | Units | Description & Tuning Considerations |
 |---|---|---|---|
-| `G_cfgHomeLimFastApproachVel` | 6.0 | mm/s | Ceiling of the coarse approach toward the negative overtravel switch; the operator speed (HR7-8) caps it, and it is the reference of the homing timeout clock. |
-| `G_cfgHomeLimSlowApproachVel` | 1.0 | mm/s | Slow re-approach that captures the precise switch position. Fixed (not capped by the operator speed); held while the operator speed is 0. |
-| `G_cfgHomeLimBackoffVel` | 5.0 | mm/s | Ceiling of the velocity for the backoff between approaches and for the final retract; the operator speed (HR7-8) caps it. |
+| `G_cfgHomeLimFastApproachVel` | 6.0 | mm/s | Coarse approach toward the negative overtravel switch. |
+| `G_cfgHomeLimSlowApproachVel` | 1.0 | mm/s | Slow re-approach that captures the precise switch position. |
+| `G_cfgHomeLimBackoffVel` | 5.0 | mm/s | Velocity for the backoff between approaches and for the final retract. |
 | `G_cfgHomeLimRetractDist` | 5.0 | mm | Distance retracted from the precise switch position to the retract endpoint. The switch lands at `-G_cfgHomeLimRetractDist` in the homed frame. |
 | `G_cfgHomeLimSetPosition`| 0.0 | mm | The position value assigned at the retract endpoint. This defines the origin of the coordinate system. |
 | `G_cfgHomeLimDecel` | 50.0 | mm/s² | Deceleration for all homing moves. |
@@ -122,7 +122,7 @@ These parameters define the behavior of the homing (110) and Go Home (101) modes
 | Parameter | Default Value | Units | Description & Tuning Considerations |
 |---|---|---|---|
 | `G_cfgGoHomePosition` | 0.0 | mm | The target position for the Go Home command. This should match `G_cfgHomeLimSetPosition`. |
-| `G_cfgGoHomeVelocity` | 6.0 | mm/s | Ceiling of the move-to-home velocity; the operator speed (HR7-8) caps it. |
+| `G_cfgGoHomeVelocity` | 6.0 | mm/s | Ceiling of the move-to-home velocity; the operator speed (HR7-8) caps it at the start of the move. |
 | `G_cfgGoHomeDecel` | 10.0 | mm/s² | Deceleration for the Go Home move. |
 
 ---

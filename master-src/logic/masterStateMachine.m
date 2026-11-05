@@ -20,7 +20,8 @@ function out = masterStateMachine(in, cfg, dt)
 %     jogVelocity       signed mm/s, read continuously during OP_JOG
 %     targetPressure    MPa gauge, read continuously during OP_PRESSURE
 %     positionSpeed     mm/s, the operator speed, read continuously and
-%                       passed on in every mode (0 holds the motion)
+%                       passed on in every mode (0 holds a position move;
+%                       a Go Home does not start)
 %
 %   out fields
 %     modeCode          mode command, or the mirrored fault code
@@ -76,16 +77,13 @@ STATUS_STOP_TIMEOUT    = 33;
 if isempty(s) || in.reset ~= 0
     % t is the time in the current state, tDwell a per-state condition
     % timer, moved whether InMotion has been seen in the current operation
-    % and note a status that stays on display while idle. tRun is the time
-    % a Go Home has run unheld.
-    s = struct('state', ST_INIT, 't', 0, 'tDwell', 0, 'moved', 0, 'tRun', 0, ...
+    % and note a status that stays on display while idle.
+    s = struct('state', ST_INIT, 't', 0, 'tDwell', 0, 'moved', 0, ...
         'activeOp', OP_STOP, 'pendingOp', OP_STOP, 'lastSeq', in.cmdSeq, ...
         'note', STATUS_IDLE, 'modeCode', 0, 'motionEnable', 0, ...
         'faultReset', 0, 'reference', 0, 'statusCode', STATUS_IDLE, ...
         'faultCode', 0);
 end
-
-speed = min(max(in.positionSpeed, 0), cfg.speedMax);
 
 newCmd = in.cmdSeq ~= s.lastSeq;
 s.lastSeq = in.cmdSeq;
@@ -183,7 +181,6 @@ switch s.state
         if s.t == 0
             s.tDwell = 0;
             s.moved = 0;
-            s.tRun = 0;
         end
         done = false;
 
@@ -199,24 +196,19 @@ switch s.state
             % to rest after it has moved ends it. The slave may still be
             % starting the move when this state is entered, so rest before
             % any motion does not count. An axis already at home never
-            % moves, so the operation also ends after tGoHomeStartMax. A
-            % Go Home held by speed 0 is stopped or not started, so it ends
-            % neither on rest nor on the start timeout: both count only
-            % while the speed is above 0.
-            held = speed <= 0;
+            % moves, so the operation also ends after tGoHomeStartMax,
+            % counted in tDwell until the first motion. The slave does not
+            % start a Go Home while the operator speed is 0, so that wait
+            % does not count then; the rest after the move counts at any
+            % speed.
             if in.inMotion ~= 0
                 s.moved = 1;
                 s.tDwell = 0;
-            elseif s.moved ~= 0 && ~held
+            elseif s.moved ~= 0 || in.positionSpeed > 0
                 s.tDwell = s.tDwell + dt;
-            else
-                s.tDwell = 0;
-            end
-            if ~held
-                s.tRun = s.tRun + dt;
             end
             done = (s.moved ~= 0 && s.tDwell >= cfg.tGoHomeDone) || ...
-                   (s.moved == 0 && s.tRun >= cfg.tGoHomeStartMax);
+                   (s.moved == 0 && s.tDwell >= cfg.tGoHomeStartMax);
 
         elseif s.activeOp == OP_POSITION
             target = min(max(in.targetPosition, cfg.posMin), cfg.posMax);
@@ -364,7 +356,7 @@ out.modeCode     = s.modeCode;
 out.motionEnable = s.motionEnable;
 out.faultReset   = s.faultReset;
 out.reference    = s.reference;
-out.positionSpeed = speed;
+out.positionSpeed = min(max(in.positionSpeed, 0), cfg.speedMax);
 out.statusCode   = s.statusCode;
 out.faultCode    = s.faultCode;
 out.state        = s.state;

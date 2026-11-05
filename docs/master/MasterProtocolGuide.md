@@ -42,7 +42,7 @@ This document provides step-by-step guidance for implementing the Simulink Deskt
 | HR3 | `G_mbMotionEnable` | 1 = MotionEnable |
 | HR4 | `G_mbFaultReset` | 1 = FaultReset (level) |
 | HR5-6 | `G_mbReference` | REAL reference: mm, mm/s or % by mode |
-| HR7-8 | `G_mbPositionSpeed` | REAL operator speed, mm/s: position moves, Go Home, homing (0 holds) |
+| HR7-8 | `G_mbPositionSpeed` | REAL operator speed, mm/s: position moves and Go Home (0 holds a position move; Go Home does not start) |
 | HR9-10 | `G_mbSalineVolume` | REAL saline volume of the fill, mL (pressure gain schedule) |
 | HR11-12 | `G_mbOxygenRatio` | REAL oxygen charge as STP volume per saline volume (pressure gain schedule) |
 
@@ -110,7 +110,7 @@ state machines are in [ModbusRegisterMap.md](ModbusRegisterMap.md), section 6.
 | 010 | 2 | Position Control | Reference = position command (mm) |
 | 011 | 3 | Velocity Control | Reference = velocity command (mm/s) |
 | 100 | 4 | Torque Control | Reference = torque command (% of rated) |
-| 101 | 5 | Go Home | Move to home position (G_cfgGoHomePosition) at the operator speed (HR7-8, at most G_cfgGoHomeVelocity) |
+| 101 | 5 | Go Home | Move to home position (G_cfgGoHomePosition) at the operator speed (HR7-8) in effect at its start, at most G_cfgGoHomeVelocity |
 | 110 | 6 | Home to Limit | Homing via limit switch; re-establishes the zero |
 | 111 | 7 | Pressure Control | Reference = target pressure (MPa gauge); the slave closes the loop on its transducer and commands velocity |
 
@@ -337,32 +337,24 @@ FAULT_PERSISTENT:
 **Signal**: `G_mbPositionSpeed`, a REAL in mm/s, copied to `G_sysPositionSpeed` by
 `PRG_Input`. The master writes it every exchange, with HR1-12 in the same FC16 write.
 The slave evaluates `rOperatorSpeed := LIMIT(0, G_sysPositionSpeed, G_cfgVelLimitMax)`
-every scan, so a change takes effect mid-move. Speed 0 holds every motion it applies
-to, and restoring the speed resumes it:
+every scan. It applies to:
 
 - **Position** (`ST_POSITION_CTRL`, `ST_RECOVERY_POSITION`): the speed limit of
-  `FB_PositionPathShaper`. A lower speed slows the command at
-  `G_cfgPosShaperAccelMax`, a higher one speeds it up, and 0 decelerates the
-  command to rest at that acceleration and holds position.
-- **Go Home** (`ST_GO_HOME`): the move runs at `MIN(speed, G_cfgGoHomeVelocity)`.
-  Speed 0 does not start the move, or stops a running one with `MC_Stop` at
-  `G_cfgStopDecel` and holds; a non-zero speed resumes it. A change of more than
-  0.01 mm/s re-issues the `MC_MoveAbsolute` with the new velocity.
-- **Homing** (`ST_HOME_LIMIT`): the fast approach runs at
-  `MIN(speed, G_cfgHomeLimFastApproachVel)`, the backoff and the retract at
-  `MIN(speed, G_cfgHomeLimBackoffVel)`; the slow approach stays at
-  `G_cfgHomeLimSlowApproachVel` (switch-detect precision). Speed 0 releases the
-  jog direction, so the jog stops at `G_cfgHomeLimDecel`, and the sequence waits;
-  it does not start the retract while held, and a retract that has started
-  completes. The sequence timeout (`G_cfgHomingTimeout`) is a clock that runs at
-  the speed's fraction of `MIN(G_cfgHomeLimFastApproachVel, G_cfgVelLimitMax)`:
-  it counts no time while held, and at a reduced speed it allows the same travel
-  as at full speed.
+  `FB_PositionPathShaper`, so a change takes effect mid-move. A lower speed slows
+  the command at `G_cfgPosShaperAccelMax`, a higher one speeds it up, and 0
+  decelerates the command to rest at that acceleration and holds position;
+  restoring the speed resumes the move.
+- **Go Home** (`ST_GO_HOME`): the move runs at `MIN(speed, G_cfgGoHomeVelocity)`,
+  the speed in effect when it starts; `MC_MoveAbsolute` latches the velocity, so
+  a change of the speed during the move does not alter it and applies to the next
+  Go Home. Speed 0 does not start the move; it starts when the speed is positive.
 
-Other modes ignore the speed. The master limits it to `0` to `cfg.speedMax` (not
-above `G_cfgVelLimitMax`); the operator app sets it with its speed control. The
-master does not report a Go Home finished while the speed is 0: neither the rest
-after the move nor the start timeout `cfg.tGoHomeStartMax` counts while held.
+Homing (mode 110) and the other modes ignore the speed: homing runs at its
+configured speeds (`G_cfgHomeLim*Vel`). The master limits the speed to `0` to
+`cfg.speedMax` (not above `G_cfgVelLimitMax`); the operator app sets it with its
+speed control. The master does not count the start timeout of a Go Home
+(`cfg.tGoHomeStartMax`) while the speed is 0 and the move has not yet begun; once
+it has moved, the rest that ends it counts at any speed.
 
 ### Fill description (Master to Slave): HR9-12
 
