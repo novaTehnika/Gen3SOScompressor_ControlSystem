@@ -215,17 +215,17 @@ no second fill is needed.
    opts.probe = 'stops';
    [stopPath, plan] = charStopPath(struct('levels_MPa', [8 10], 'speeds', [0.25 0.5], ...
        'budget_MPa', [2 0.7], 'rampOvershoot_MPa', 0.2, 'minRun_mm', 0.02, ...
-       'minSteady_s', 0, 'pause_s', 3, 'P_start_MPa', 7, 'stiffness', @(P) kMax));
+       'minSteady_s', 0, 'pause_s', 3, 'P_start_MPa', 7, ...
+       'chargeRatio', 0, 'stiffness', @(P) kMax));
    r = charRun('stops_hp', stopPath, opts);
    rs = charStopDistance([r.capFiles {r.file}]);
    rr = frictionFit({}, r.file, struct('settle', 0.15, 'trim', 0.05, 'accel', 1e4));
    ```
 
-   The plan's first line must not say `charge 2:1`, and its `k MPa/mm`
-   column must read `kMax`. At 10 MPa the 0.7 MPa budget leaves the
-   0.25 mm/s leg 0.035 to 0.015 mm after its stop allowance for 7 to
-   9 MPa/mm, hence
-   `minRun_mm` 0.02; if the plan still skips it, the 10 MPa level gives
+   Read the plan before the run: its first line says `charge 0:1` and
+   its `k MPa/mm` column reads `kMax`. At 10 MPa the 0.7 MPa budget
+   leaves the 0.25 mm/s leg 0.035 to 0.015 mm after its stop allowance
+   for 7 to 9 MPa/mm, hence `minRun_mm` 0.02; if the plan still skips it, the 10 MPa level gives
    no stops and the 8 MPa level carries the fit. Start the run with the
    chamber below 8 MPa: the first ramp is the one that ends at the level.
 
