@@ -61,7 +61,7 @@ the reference for each) and confirm:
 - [ ] Rerun `buildShell`. The Modbus Client Write block becomes 12
       registers (HR1-12) and the `PositionSpeed`, `SalineVolume` and
       `OxygenRatio` Constant blocks are added.
-- [ ] Relaunch the operator app and check the new "Move speed" field.
+- [ ] Relaunch the operator app and check the new speed control (percent field and presets).
       The app does not write `SalineVolume` or `OxygenRatio`; HR9-12 stay
       at the `buildShell` defaults (`masterConfig.m`: 343 mL, 1.0) until
       the app's oxygen:saline field is wired to the shell.
@@ -86,7 +86,11 @@ Changes to `master-src/SOS_Gen3_Compressor_Interface.m`, `masterConfig.m`
 and, where the slave must follow, the protocol and the ST. Each is
 specified here; the implementation plan decides the files.
 
-- [ ] One operator speed for every move. Today jog takes the
+- [x] One operator speed for every move (app and master half done: the
+      speed control, `cfg.speedMax`/`speedPresets`/`speedDefault`, the
+      one value in `TargetVelocity` and `PositionSpeed`; the slave-side
+      cap of Go Home and homing by HR7-8 and the speed-0 hold are
+      pending). Today jog takes the
       `JogSpeedDropDown` preset (`TargetVelocity`, limited by
       `jogVelMax`), position moves take `PositionSpeedField` (HR7-8,
       clamped by `positionSpeedMax` and `G_cfgVelLimitMax`), and Go Home

@@ -22,9 +22,7 @@ E = h.sl.E;
 h = runFor(h, 0.5);
 assert(h.out.state == 1 && h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE);
 vLimit = h.sl.G.G_cfgVelLimitMax;
-assert(h.mcfg.jogVelMax <= vLimit, 'masterConfig.jogVelMax exceeds G_cfgVelLimitMax');
-assert(h.mcfg.positionSpeedMax <= vLimit, 'masterConfig.positionSpeedMax exceeds G_cfgVelLimitMax');
-assert(h.mcfg.positionSpeed <= h.mcfg.positionSpeedMax, 'masterConfig.positionSpeed exceeds positionSpeedMax');
+assert(h.mcfg.speedMax <= vLimit, 'masterConfig.speedMax exceeds G_cfgVelLimitMax');
 
 % Position move from power-up: lands inside tolerance, no overshoot,
 % velocity limited. No homing is needed first. The move is long enough to
@@ -37,7 +35,7 @@ h = runUntil(h, 15, @(h) h.out.statusCode == 3);
 assert(h.out.statusCode == 3, 'position move did not reach target');
 assert(abs(h.sl.ax.x - target) <= h.mcfg.posTolerance);
 assert(h.xMax <= target + 0.05 && h.vMax <= vLimit + 0.01);
-assert(h.vMax >= min(h.mcfg.positionSpeed, vLimit) - 0.05, 'move did not reach the position speed');
+assert(h.vMax >= min(h.mcfg.speedMax, vLimit) - 0.05, 'move did not reach the position speed');
 fprintf('ok  position move (peak %.2f mm/s, overshoot %.3f mm)\n', h.vMax, h.xMax - target);
 
 % Position speed: the master sets the speed of the move through HR7-8.
@@ -57,8 +55,8 @@ fprintf('ok  position speed 2 mm/s (peak %.2f mm/s)\n', h.vMax);
 % the master's limit is bypassed.
 h.in.positionSpeed = 100;
 h = runFor(h, 0.2);
-assert(h.out.positionSpeed == h.mcfg.positionSpeedMax && h.u.positionSpeed == h.mcfg.positionSpeedMax);
-h.mcfg.positionSpeedMax = 100;
+assert(h.out.positionSpeed == h.mcfg.speedMax && h.u.positionSpeed == h.mcfg.speedMax);
+h.mcfg.speedMax = 100;
 h = runFor(h, 0.2);
 assert(h.u.positionSpeed == 100);
 h.vMax = 0;
@@ -68,7 +66,7 @@ h = runFor(h, 0.3);
 h = runUntil(h, 20, @(h) h.out.statusCode == 3);
 assert(h.out.statusCode == 3 && h.vMax <= vLimit + 0.01 && h.vMax >= vLimit - 0.05, ...
     'peak %.3f mm/s at a speed above the ceiling', h.vMax);
-h.mcfg.positionSpeedMax = masterConfig().positionSpeedMax;
+h.mcfg.speedMax = masterConfig().speedMax;
 fprintf('ok  position speed above the ceiling limited (peak %.2f mm/s)\n', h.vMax);
 
 % Speed 0 set mid-move: the command decelerates at the acceleration limit
@@ -105,7 +103,7 @@ assert(h.out.statusCode == 3 && abs(h.sl.ax.x - h.in.targetPosition) <= h.mcfg.p
 fprintf('ok  position speed restored: move resumed to target\n');
 
 % Back to the original target at the default speed for the tests that follow.
-h.in.positionSpeed = h.mcfg.positionSpeed;
+h.in.positionSpeed = h.mcfg.speedMax;
 h.in.targetPosition = target;
 h = command(h, 2);
 h = runFor(h, 0.3);
@@ -268,7 +266,7 @@ h.mcfg.posMax = h.sl.G.G_cfgPosSoftLimitMax - 5;
 h.in = struct('reset', 1, 'confCode', 0, 'faultActive', 0, 'inMotion', 0, ...
     'homingComplete', 0, 'brakeDisengage', 0, 'position', 0, 'estop', 0, ...
     'op', 0, 'cmdSeq', 0, 'targetPosition', 100, 'jogVelocity', 0, ...
-    'targetPressure', 0, 'positionSpeed', h.mcfg.positionSpeed);
+    'targetPressure', 0, 'positionSpeed', h.mcfg.speedMax);
 h.u = struct('heartbeat', 0, 'modeCode', 0, 'motionEnable', 0, ...
     'faultReset', 0, 'reference', 0, 'positionSpeed', 0);
 [h.sl, h.y] = slaveStep(h.sl, h.u);

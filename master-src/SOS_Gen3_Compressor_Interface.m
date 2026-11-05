@@ -24,12 +24,13 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         MixerButton                     matlab.ui.control.StateButton
         JogDownButton                   matlab.ui.control.StateButton
         JogUpButton                     matlab.ui.control.StateButton
-        JogSpeedDropDown                matlab.ui.control.DropDown
         PositionGoButton                matlab.ui.control.Button
         TargetPositionSpinner           matlab.ui.control.Spinner
         TargetPositionmmSpinnerLabel    matlab.ui.control.Label
-        PositionSpeedField              matlab.ui.control.NumericEditField
-        PositionSpeedLabel              matlab.ui.control.Label
+        SpeedPresetButtons              matlab.ui.control.Button
+        SpeedMmsLabel                   matlab.ui.control.Label
+        SpeedField                      matlab.ui.control.NumericEditField
+        SpeedLabel                      matlab.ui.control.Label
         GoHomeButton                    matlab.ui.control.Button
         HomeButton                      matlab.ui.control.Button
         ManualControlButton            matlab.ui.control.StateButton
@@ -107,6 +108,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % model reports it ended, so its button can stop it.
         activeOp = 0            % OP_STOP when none
         activeJogDir = 0
+        speedPercent = 100      % operator speed, % of cfg.speedMax
         activeTarget = NaN      % position or pressure sent with activeOp
         opConfirmed = false     % the model has reported activeOp running
         opSentAt = uint64(0)    % tic of the last request
@@ -456,17 +458,51 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             setSpinnerRange(app, app.TargetPressureSpinner, [app.cfg.atmAmbient, ...
                 floor(app.cfg.pressureMax * app.cfg.atmPerMPa + app.cfg.atmAmbient)]);
 
-            % Preset jog speeds, starting at the fastest. The master clamps
-            % any preset above jogVelMax.
-            speeds = unique(app.cfg.jogSpeeds);
-            app.JogSpeedDropDown.Items = compose("%g mm/s", speeds);
-            app.JogSpeedDropDown.ItemsData = speeds;
-            app.JogSpeedDropDown.Value = speeds(end);
+            % One operator speed in percent of cfg.speedMax: a button per
+            % preset (the count comes from the configuration) and the
+            % typed field, starting at the default.
+            app.SpeedPresetButtons = matlab.ui.control.Button.empty;
+            for k = 1:numel(app.cfg.speedPresets)
+                p = app.cfg.speedPresets(k);
+                app.SpeedPresetButtons(k) = uibutton(app.ControlsPanel, 'push');
+                app.SpeedPresetButtons(k).ButtonPushedFcn = ...
+                    createCallbackFcn(app, @SpeedPresetPushed, true);
+                app.SpeedPresetButtons(k).Position = [990 + (k - 1) * 35, 9, 33, 22];
+                app.SpeedPresetButtons(k).Text = num2str(p);
+                app.SpeedPresetButtons(k).UserData = p;
+                app.SpeedPresetButtons(k).FontSize = 11;
+                app.SpeedPresetButtons(k).Enable = 'off';
+                app.SpeedPresetButtons(k).Tooltip = {sprintf('%g %% (%.2f mm/s)', ...
+                    p, speedFromPercent(p, app.cfg))};
+            end
+            setSpeedPercent(app, app.cfg.speedDefault);
+        end
 
-            % Position-move speed, 0 to the master's ceiling, starting at
-            % the default.
-            app.PositionSpeedField.Limits = [0 app.cfg.positionSpeedMax];
-            app.PositionSpeedField.Value = app.cfg.positionSpeed;
+        % Set the operator speed (percent of cfg.speedMax). While the
+        % model runs it is written to both blocks that carry it: the jog
+        % reference and the speed sent in HR7-8.
+        function setSpeedPercent(app, pct)
+            pct = min(max(pct, 0), 100);
+            app.speedPercent = pct;
+            v = speedFromPercent(pct, app.cfg);
+            app.SpeedField.Value = pct;
+            app.SpeedMmsLabel.Text = sprintf("%.2f mm/s", v);
+            for k = 1:numel(app.SpeedPresetButtons)
+                if app.SpeedPresetButtons(k).UserData == pct
+                    app.SpeedPresetButtons(k).BackgroundColor = app.COLOR_ACTIVE;
+                else
+                    app.SpeedPresetButtons(k).BackgroundColor = app.COLOR_IDLE;
+                end
+            end
+            if isRunning(app)
+                setBlock(app, "PositionSpeed", v);
+                setBlock(app, "TargetVelocity", v);
+            end
+        end
+
+        % Operator speed in mm/s
+        function v = speedMmPerS(app)
+            v = speedFromPercent(app.speedPercent, app.cfg);
         end
 
         % A spinner rejects a value outside its limits and limits that
@@ -478,6 +514,13 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         end
 
         function text = statusText(app, statusCode)
+            text = statusTextBase(app, statusCode);
+            if app.speedPercent == 0 && any(statusCode == [1 2 4 8])
+                text = append(text, " (held: speed 0)");
+            end
+        end
+
+        function text = statusTextBase(app, statusCode)
             switch statusCode
                 case 0,  text = "Idle";
                 case 1,  text = "Homing";
@@ -526,7 +569,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 stopOp(app);
                 return
             end
-            setBlock(app, "TargetVelocity", app.JogSpeedDropDown.Value);
+            setBlock(app, "TargetVelocity", speedMmPerS(app));
             setBlock(app, "JogDirection", direction);
             if requestOp(app, app.OP_JOG)
                 app.activeJogDir = direction;
@@ -574,7 +617,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                         setBlock(app, "CommandSeq", app.commandSeq);
                         setBlock(app, "ESTOP", app.ESTOP.Value);
                         setBlock(app, "Mixer", app.MixerButton.Value);
-                        setBlock(app, "PositionSpeed", app.PositionSpeedField.Value);
+                        setBlock(app, "PositionSpeed", speedMmPerS(app));
+                        setBlock(app, "TargetVelocity", speedMmPerS(app));
                         app.StatusLabel.Text = "Connected to Simulink";
                     else
                         app.StatusLabel.Text = append(...
@@ -594,9 +638,12 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.TargetPositionmmSpinnerLabel.Enable = value;
             app.TargetPressureSpinner.Enable = value;
             app.TargetPressureatmSpinnerLabel.Enable = value;
-            app.JogSpeedDropDown.Enable = value;
-            app.PositionSpeedField.Enable = value;
-            app.PositionSpeedLabel.Enable = value;
+            app.SpeedField.Enable = value;
+            app.SpeedLabel.Enable = value;
+            app.SpeedMmsLabel.Enable = value;
+            for k = 1:numel(app.SpeedPresetButtons)
+                app.SpeedPresetButtons(k).Enable = value;
+            end
             app.MixerButton.Enable = value;
             updateButtons(app);
         end
@@ -670,7 +717,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 return
             end
             setBlock(app, "TargetPosition", app.cfg.posEOT - target);
-            setBlock(app, "PositionSpeed", app.PositionSpeedField.Value);
+            setBlock(app, "PositionSpeed", speedMmPerS(app));
             if requestOp(app, app.OP_POSITION)
                 app.activeTarget = target;
             end
@@ -696,23 +743,16 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             updateButtons(app);
         end
 
-        % Value changed function: JogSpeedDropDown
-        % The model reads TargetVelocity continuously, so a running jog
-        % takes the new speed at once.
-        function JogSpeedChanged(app, event)
-            if app.activeOp == app.OP_JOG && isRunning(app)
-                setBlock(app, "TargetVelocity", app.JogSpeedDropDown.Value);
-            end
+        % Button pushed function: SpeedPresetButtons
+        % The model reads both speed blocks continuously, so a running
+        % operation takes the new speed at once.
+        function SpeedPresetPushed(app, event)
+            setSpeedPercent(app, event.Source.UserData);
         end
 
-        % Value changed function: PositionSpeedField
-        % The model reads PositionSpeed continuously and sends it every
-        % exchange, so a running position move takes the new speed at once
-        % (0 holds position).
-        function PositionSpeedChanged(app, event)
-            if isRunning(app)
-                setBlock(app, "PositionSpeed", app.PositionSpeedField.Value);
-            end
+        % Value changed function: SpeedField
+        function SpeedFieldChanged(app, event)
+            setSpeedPercent(app, app.SpeedField.Value);
         end
 
         % Value changed function: JogDownButton
@@ -1102,21 +1142,28 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.PositionGoButton.Position = [657 40 100 23];
             app.PositionGoButton.Text = 'Go';
 
-            % Create PositionSpeedLabel
-            app.PositionSpeedLabel = uilabel(app.ControlsPanel);
-            app.PositionSpeedLabel.HorizontalAlignment = 'right';
-            app.PositionSpeedLabel.Enable = 'off';
-            app.PositionSpeedLabel.Position = [990 40 110 22];
-            app.PositionSpeedLabel.Text = 'Move speed (mm/s)';
+            % Create SpeedLabel
+            app.SpeedLabel = uilabel(app.ControlsPanel);
+            app.SpeedLabel.HorizontalAlignment = 'right';
+            app.SpeedLabel.Enable = 'off';
+            app.SpeedLabel.Position = [990 40 60 22];
+            app.SpeedLabel.Text = 'Speed (%)';
 
-            % Create PositionSpeedField
-            app.PositionSpeedField = uieditfield(app.ControlsPanel, 'numeric');
-            app.PositionSpeedField.ValueChangedFcn = createCallbackFcn(app, @PositionSpeedChanged, true);
-            app.PositionSpeedField.Limits = [0 6];   % replaced by applyConfig
-            app.PositionSpeedField.Enable = 'off';
-            app.PositionSpeedField.Tooltip = {'Speed of position moves; 0 holds position'};
-            app.PositionSpeedField.Position = [1105 40 90 22];
-            app.PositionSpeedField.Value = 6;        % replaced by applyConfig
+            % Create SpeedField
+            app.SpeedField = uieditfield(app.ControlsPanel, 'numeric');
+            app.SpeedField.ValueChangedFcn = createCallbackFcn(app, @SpeedFieldChanged, true);
+            app.SpeedField.Limits = [0 100];
+            app.SpeedField.ValueDisplayFormat = '%g';
+            app.SpeedField.Enable = 'off';
+            app.SpeedField.Tooltip = {'Percent of the maximum speed for jog, moves, Go Home and homing; 0 holds'};
+            app.SpeedField.Position = [1055 40 50 22];
+            app.SpeedField.Value = 100;
+
+            % Create SpeedMmsLabel
+            app.SpeedMmsLabel = uilabel(app.ControlsPanel);
+            app.SpeedMmsLabel.Enable = 'off';
+            app.SpeedMmsLabel.Position = [1110 40 90 22];
+            app.SpeedMmsLabel.Text = '';
 
             % Create JogUpButton
             app.JogUpButton = uibutton(app.ControlsPanel, 'state');
@@ -1131,13 +1178,6 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.JogDownButton.Enable = 'off';
             app.JogDownButton.Text = 'Jog Down';
             app.JogDownButton.Position = [768 9 100 23];
-
-            % Create JogSpeedDropDown
-            app.JogSpeedDropDown = uidropdown(app.ControlsPanel);
-            app.JogSpeedDropDown.ValueChangedFcn = createCallbackFcn(app, @JogSpeedChanged, true);
-            app.JogSpeedDropDown.Tooltip = {'Jog speed'};
-            app.JogSpeedDropDown.Enable = 'off';
-            app.JogSpeedDropDown.Position = [879 9 100 22];
 
             % Create MixerButton
             app.MixerButton = uibutton(app.ControlsPanel, 'state');

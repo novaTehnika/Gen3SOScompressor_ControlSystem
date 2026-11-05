@@ -15,7 +15,7 @@ h.y = slaveOutputs(h.sl);
 h.in = struct('reset', 1, 'confCode', 0, 'faultActive', 0, 'inMotion', 0, ...
     'homingComplete', 0, 'brakeDisengage', 0, 'position', 0, 'estop', 0, ...
     'op', 0, 'cmdSeq', 0, 'targetPosition', 300, 'jogVelocity', 0, ...
-    'targetPressure', 0, 'positionSpeed', h.cfg.positionSpeed);
+    'targetPressure', 0, 'positionSpeed', speedFromPercent(h.cfg.speedDefault, h.cfg));
 h.out = [];
 
 h = runFor(h, 0.5);
@@ -33,9 +33,12 @@ fprintf('ok  position move without homing\n');
 for v = [2.5, 0, 100, -3]
     h.in.positionSpeed = v;
     h = runFor(h, 0.1);
-    assert(h.out.positionSpeed == min(max(v, 0), h.cfg.positionSpeedMax));
+    assert(h.out.positionSpeed == min(max(v, 0), h.cfg.speedMax));
 end
-h.in.positionSpeed = h.cfg.positionSpeed;
+h.in.positionSpeed = speedFromPercent(h.cfg.speedDefault, h.cfg);
+assert(speedFromPercent(50, h.cfg) == h.cfg.speedMax / 2);
+assert(speedFromPercent(-5, h.cfg) == 0);
+assert(speedFromPercent(150, h.cfg) == h.cfg.speedMax);
 fprintf('ok  position speed passed on and limited\n');
 
 % Homing, requested from position control.

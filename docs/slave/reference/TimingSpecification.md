@@ -147,7 +147,7 @@ acceleration limit `A` (`G_cfgPosShaperAccelMax`). For a setpoint step of size `
 | Triangular | `d <= V^2/A` | `2*SQRT(d/A)` |
 
 **Worked example at defaults** (`V` = 6 mm/s, the master's default position speed
-`masterConfig.positionSpeed` and the ceiling `G_cfgVelLimitMax`; `A` = 10 mm/s², so
+`masterConfig.speedMax` and the ceiling `G_cfgVelLimitMax`; `A` = 10 mm/s², so
 `V^2/A` = 3.6 mm):
 
 | Step Size | Profile | Move Time |

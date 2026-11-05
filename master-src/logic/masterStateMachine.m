@@ -19,8 +19,8 @@ function out = masterStateMachine(in, cfg, dt)
 %     targetPosition    mm, read continuously during OP_POSITION
 %     jogVelocity       signed mm/s, read continuously during OP_JOG
 %     targetPressure    MPa gauge, read continuously during OP_PRESSURE
-%     positionSpeed     mm/s, speed of position moves, read continuously
-%                       and passed on in every mode (0 holds position)
+%     positionSpeed     mm/s, the operator speed, read continuously and
+%                       passed on in every mode (0 holds position)
 %
 %   out fields
 %     modeCode          mode command, or the mirrored fault code
@@ -28,7 +28,7 @@ function out = masterStateMachine(in, cfg, dt)
 %     faultReset        0/1
 %     reference         mm in position mode, mm/s in jog, MPa gauge in
 %                       pressure mode
-%     positionSpeed     in.positionSpeed limited to [0, cfg.positionSpeedMax]
+%     positionSpeed     in.positionSpeed limited to [0, cfg.speedMax]
 %     statusCode        STATUS_* below
 %     faultCode         last fault code read from the slave
 %     state             ST_* below
@@ -220,7 +220,7 @@ switch s.state
             end
 
         elseif s.activeOp == OP_JOG
-            v = limitVelocity(in.jogVelocity, cfg.jogVelMax, in.position, cfg);
+            v = limitVelocity(in.jogVelocity, cfg.speedMax, in.position, cfg);
             s.reference = v;
             s.statusCode = STATUS_JOG;
 
@@ -351,7 +351,7 @@ out.modeCode     = s.modeCode;
 out.motionEnable = s.motionEnable;
 out.faultReset   = s.faultReset;
 out.reference    = s.reference;
-out.positionSpeed = min(max(in.positionSpeed, 0), cfg.positionSpeedMax);
+out.positionSpeed = min(max(in.positionSpeed, 0), cfg.speedMax);
 out.statusCode   = s.statusCode;
 out.faultCode    = s.faultCode;
 out.state        = s.state;

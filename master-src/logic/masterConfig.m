@@ -27,14 +27,12 @@ cfg.oxygenRatio  = 1.0;     % oxygen charge as STP volume per saline volume (1.0
 cfg.posMin = 0;             % mm
 cfg.posMax = 367;           % mm
 
-% Velocity command limit.
-cfg.jogVelMax = 6;          % mm/s
-cfg.jogSpeeds = [0.1 0.25 0.5 1 2 5 6];   % mm/s, app presets; the largest is the default
-
-% Position-move speed sent every exchange (HR7-8). The slave limits a
-% position move to it, clamped to its own ceiling G_cfgVelLimitMax.
-cfg.positionSpeedMax = 6;   % mm/s, master-side clamp; must not exceed G_cfgVelLimitMax
-cfg.positionSpeed    = 6;   % mm/s, default
+% Operator speed: one setting, as a percentage of speedMax, for jog,
+% position moves, Go Home and homing. It is sent as the jog reference and
+% in HR7-8 every exchange; the slave caps each mode by its own ceiling.
+cfg.speedMax     = 6;               % mm/s at 100 %; must not exceed G_cfgVelLimitMax
+cfg.speedPresets = [2 5 10 25 50 100];   % % of speedMax, the app's preset buttons
+cfg.speedDefault = 100;             % % at app start and the shell's default
 
 % Position arrival judged from feedback.
 cfg.posTolerance = 0.5;     % mm

@@ -12,7 +12,7 @@ reading over the link.
 | `shell/buildShell.m` | Generates `shell/SOS_Gen3_Master_Shell.slx`: Modbus Client blocks at the 50 ms exchange, DAQ blocks, one MATLAB Function block calling `masterStep`, the Constant blocks the app writes and the Gain blocks it reads. The model holds no logic and is rebuilt from this script, not edited by hand. |
 | `shell/modbusShellDiscover.m` | Prints the Modbus block and client settings of a hand-configured shell so they can be pasted into `buildShell.m`. |
 | `shell/addDaq.m` | Creates one Simulink Desktop Real-Time DAQ block. Holds the board setup (PCI-6221, driver options, missed-tick limit) and the digital channel numbering. |
-| `SOS_Gen3_Compressor_Interface.m` | Operator app (programmatic App Designer export). Starts the shell model, writes operator requests to its Constant blocks and polls its outputs. Takes its position target range, jog speed presets and cylinder geometry from `masterConfig.m` at startup. |
+| `SOS_Gen3_Compressor_Interface.m` | Operator app (programmatic App Designer export). Starts the shell model, writes operator requests to its Constant blocks and polls its outputs. Takes its position target range, speed presets and cylinder geometry from `masterConfig.m` at startup. |
 | `legacy/`, `SOS_Gen3_Compressor_Master.slx` | Earlier Stateflow-based app model and its `.mlapp`, and the hand-built `SimulinkMaster.slx` bench model with manual mode control, kept for reference. |
 
 ## Running on the lab PC
@@ -50,10 +50,10 @@ The app writes `RequestedMode` (0 stop, 1 home to the limit switch, 2 position,
 3 jog, 4 pressure, 5 reset fault, 6 go home) and then increments `CommandSeq`; the model acts on an operation
 only when `CommandSeq` changes, except that `RequestedMode = 0` always stops.
 `TargetPosition`, `TargetVelocity`, `JogDirection` and `TargetPressure` are read
-continuously while their operation is active. `PositionSpeed` (mm/s, the app's
-"Move speed" field, default `cfg.positionSpeed`, limited to `0..cfg.positionSpeedMax`) is the
-speed of position moves; it is sent to the slave in HR7-8 every exchange, takes
-effect mid-move, and 0 holds position. `TargetPressure` is in atm absolute;
+continuously while their operation is active. `PositionSpeed` and `TargetVelocity`
+both carry the one operator speed, set from the app's speed control in percent of
+`cfg.speedMax` (presets `cfg.speedPresets`, default `cfg.speedDefault`, converted by
+`speedFromPercent`). It is sent in HR7-8 every exchange, acts mid-move, and 0 holds. `TargetPressure` is in atm absolute;
 the model sends it to the slave in MPa gauge, and the slave closes the loop on its
 own transducer. `ESTOP` and `Mixer` act at once.
 
@@ -95,8 +95,10 @@ being entered and green once its running status appears, and returns to normal
 when that status goes (stopped, finished, faulted, E-STOP or not confirmed by
 the slave). While position or pressure control runs, changing the target turns
 its button back to Go, which sends the new target without leaving the mode; the
-other jog button reverses a running jog. Jog speed is picked from `masterConfig`'s
-`jogSpeeds` (the fastest is the default), and a change applies to a running jog. STOP turns dark red while E-STOP is
+other jog button reverses a running jog. The speed control (a percentage
+field and a button per `masterConfig` `speedPresets` entry, `speedDefault` at start)
+sets the one speed of jog, position moves, Go Home and homing, and a change applies
+to a running operation; 0 holds, and the status line then reads "held: speed 0". STOP turns dark red while E-STOP is
 requested but not yet reported by the model, and yellow while the model reports
 E-STOP (`StatusCode` 20); pressing it then releases E-STOP.
 
