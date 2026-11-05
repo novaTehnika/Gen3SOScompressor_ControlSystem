@@ -69,12 +69,12 @@ keep the table to what the picture shows.
 |---|---|---|---|
 | Axis | in | `AXIS1` | |
 | Execute | in | `G_cmdStop.Execute` | |
-| Deceleration | in | `G_cmdStop.Deceleration` | `PRG_Main` sets it from `G_cfgStopDecel` (hold, fault and recovery); `FB_GoHome` overrides the struct while it owns the axis: it holds a Go Home at operator speed 0 and stops an aborted one with it. |
+| Deceleration | in | `G_cmdStop.Deceleration` | `PRG_Main` sets it from `G_cfgStopDecel` (hold, fault and recovery); `FB_GoHome` overrides the struct while it owns the axis. |
 | Jerk | in | not wired | |
 | BufferMode | in | not wired | |
 | Axis | out | `AXIS1` | |
 | Done | out | `G_staStop.Done` | Read by `PRG_Main` in the hold/fault/recovery states and by `FB_GoHome`. |
-| Busy | out | `G_staStop.Busy` | Read by `PRG_Main` in the hand-off from `Y_DirectControl` and by `FB_GoHome` while it holds. |
+| Busy | out | `G_staStop.Busy` | Read by `PRG_Main` in the hand-off from `Y_DirectControl`. |
 | Active | out | not wired | |
 | CommandAborted | out | not wired | |
 | Error | out | `G_staStop.Error` | Read by `PRG_Main` in the hand-off and by `FB_GoHome`. |
@@ -101,9 +101,9 @@ keep the table to what the picture shows.
 | Pin | Direction | Wired to | Note |
 |---|---|---|---|
 | Axis | in | `AXIS1` | |
-| Execute | in | `G_cmdMoveAbsolute.Execute` | The struct is written whole from `FB_GoHome.CmdMoveAbsolute` or `FB_HomeLimit.CmdMoveAbsolute` while those blocks own the axis; otherwise `PRG_Main` holds Execute FALSE. `FB_GoHome` re-issues the move for a new velocity by holding Execute FALSE for one scan and raising it again, which relies on the block taking the new parameters on a rising Execute while busy (BufferMode aborting); it does not raise Execute while `G_cmdStop.Execute` is TRUE. |
+| Execute | in | `G_cmdMoveAbsolute.Execute` | The struct is written whole from `FB_GoHome.CmdMoveAbsolute` or `FB_HomeLimit.CmdMoveAbsolute` while those blocks own the axis; otherwise `PRG_Main` holds Execute FALSE. |
 | Position | in | `G_cmdMoveAbsolute.Position` | |
-| Velocity | in | `G_cmdMoveAbsolute.Velocity` | Go Home: `MIN(operator speed, G_cfgGoHomeVelocity)` latched at the rising Execute; retract: `MIN(operator speed, G_cfgHomeLimBackoffVel)`. Never 0: a speed of 0 does not issue the move. |
+| Velocity | in | `G_cmdMoveAbsolute.Velocity` | Go Home: `MIN(operator speed, G_cfgGoHomeVelocity)`, latched at the rising Execute; never 0, since `FB_GoHome` does not start the move at operator speed 0. |
 | Acceleration | in | `G_cmdMoveAbsolute.Acceleration` | Default `G_cfgMoveAccel`. |
 | Deceleration | in | `G_cmdMoveAbsolute.Deceleration` | Default `G_cfgGoHomeDecel`. |
 | Jerk | in | not wired | |
@@ -126,7 +126,7 @@ keep the table to what the picture shows.
 | Axis | in | `AXIS1` | |
 | Forward | in | `G_cmdJog.Forward` | The struct is written whole from `FB_HomeLimit.CmdJog` while homing; otherwise `PRG_Main` holds Forward and Reverse FALSE. |
 | Reverse | in | `G_cmdJog.Reverse` | |
-| Velocity | in | `G_cmdJog.Velocity` | `MIN(operator speed, ..)` of the phase, followed every scan while Forward or Reverse is TRUE; at operator speed 0 the direction is released instead of commanding 0. |
+| Velocity | in | `G_cmdJog.Velocity` | |
 | Acceleration | in | `G_cmdJog.Acceleration` | Default `G_cfgMoveAccel`. |
 | Deceleration | in | `G_cmdJog.Deceleration` | Default `G_cfgHomeLimDecel`; the block stops on it when an abort drops Forward/Reverse. |
 | Jerk | in | not wired | |

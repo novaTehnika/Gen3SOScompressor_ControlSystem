@@ -74,7 +74,7 @@ task interval.
 | 3 | `%MW3.483332` | UINT | `G_mbMotionEnable` | 1 = MotionEnable |
 | 4 | `%MW3.483334` | UINT | `G_mbFaultReset` | 1 = FaultReset (level) |
 | 5–6 | `%MD3.483336` | REAL | `G_mbReference` | Position mode: mm. Velocity mode: mm/s. Torque mode: % of rated. Pressure mode (code 7): target pressure, MPa gauge |
-| 7–8 | `%MD3.483340` | REAL | `G_mbPositionSpeed` | Operator speed, mm/s: position moves, Go Home and the homing approach, backoff and retract. The slave limits it to `0` to `G_cfgVelLimitMax`; 0 holds the motion. Written every exchange |
+| 7–8 | `%MD3.483340` | REAL | `G_mbPositionSpeed` | Operator speed, mm/s: position moves and Go Home. The slave limits it to `0` to `G_cfgVelLimitMax`; 0 holds a position move and a Go Home does not start. Homing uses its configured speeds. Written every exchange |
 | 9–10 | `%MD3.483344` | REAL | `G_mbSalineVolume` | Saline volume of the fill, mL, for the pressure gain schedule. Latched by the slave on entry to pressure mode; 0 (never written) makes the schedule fall back to the configured gains |
 | 11–12 | `%MD3.483348` | REAL | `G_mbOxygenRatio` | Oxygen charge as STP volume per saline volume (1.0 for 1:1), for the pressure gain schedule. Latched on entry to pressure mode |
 | 13–20 | | | | Reserved |

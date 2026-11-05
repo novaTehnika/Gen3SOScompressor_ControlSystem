@@ -93,9 +93,7 @@
        bLimitConditionActive : BOOL           (* Either direction blocked - a limit is currently active
        bRecoveryPending    : BOOL             (* Latched at ST_FAULT_IDLE reset; routes activation to ST_RECOVERY at brake release
        (* Position path shaper (ST_POSITION_CTRL / ST_RECOVERY_POSITION)
-       rOperatorSpeed      : LREAL            (* Master's speed (HR7-8) limited to [0, G_cfgVelLimitMax] (mm/s): VelMax of the position shaper and the cap of the Go Home and homing speeds; 0 holds
-       rHomeFastCap        : LREAL            (* Homing fast-approach ceiling, MIN(G_cfgHomeLimFastApproachVel, G_cfgVelLimitMax) (mm/s)
-       rHomeSpeedFraction  : LREAL            (* rOperatorSpeed over rHomeFastCap, [0, 1]: rate of FB_HomeLimit's timeout clock; 0 holds homing
+       rOperatorSpeed      : LREAL            (* Master's speed (HR7-8) limited to [0, G_cfgVelLimitMax] (mm/s): VelMax of the position shaper and the cap of the Go Home velocity; 0 holds a position move and Go Home does not start
        rPosShaperVelMax    : LREAL            (* Shaper speed limit (mm/s): rOperatorSpeed, set every scan by a position state body
        rPosTarget          : LREAL            (* Soft-limit-clamped position target from the master, input to fbPosShaper
        bPosShaperActive    : BOOL             (* Set by a position state body this scan; gates fbPosShaper.Enable
@@ -182,15 +180,8 @@ rTrigMotionEnable(CLK := bFilteredMotionEnable);
 G_sysOvertravelNegActive := NOT bFilteredOvertravelNeg;
 G_sysOvertravelPosActive := NOT bFilteredOvertravelPos;
 
-(* Operator speed (HR7-8, set by PRG_Input) and the fraction of the homing
-   fast-approach ceiling it allows. *)
+(* Operator speed (HR7-8, set by PRG_Input). *)
 rOperatorSpeed := LIMIT(LREAL#0.0, G_sysPositionSpeed, G_cfgVelLimitMax);
-rHomeFastCap := MIN(G_cfgHomeLimFastApproachVel, G_cfgVelLimitMax);
-IF rHomeFastCap > LREAL#0.0 THEN
-    rHomeSpeedFraction := MIN(rOperatorSpeed / rHomeFastCap, LREAL#1.0);
-ELSE
-    rHomeSpeedFraction := LREAL#0.0;
-END_IF;
 
 
 (* --------------------------------------------------------------------------
@@ -1158,16 +1149,14 @@ fbGoHome(
 fbHomeLimit(
     Enable := bInHomeLimit,
     Execute := bInHomeLimit,
-    FastApproachVelocity := MIN(rOperatorSpeed, G_cfgHomeLimFastApproachVel),
+    FastApproachVelocity := MIN(G_cfgHomeLimFastApproachVel, G_cfgVelLimitMax),
     SlowApproachVelocity := MIN(G_cfgHomeLimSlowApproachVel, G_cfgVelLimitMax),
-    BackoffVelocity := MIN(rOperatorSpeed, G_cfgHomeLimBackoffVel),
+    BackoffVelocity := MIN(G_cfgHomeLimBackoffVel, G_cfgVelLimitMax),
     RetractDist := G_cfgHomeLimRetractDist,
     Acceleration := G_cfgMoveAccel,
     Deceleration := G_cfgHomeLimDecel,
     SetPosition := G_cfgHomeLimSetPosition,
     Timeout := G_cfgHomingTimeout,
-    SpeedFraction := rHomeSpeedFraction,
-    CycleTime := G_cfgScanTime,
     OvertravelNegActive := G_sysOvertravelNegActive,
     OvertravelPosActive := G_sysOvertravelPosActive,
     Abort := NOT bFilteredMotionEnable,

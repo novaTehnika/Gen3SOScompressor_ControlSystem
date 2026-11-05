@@ -111,8 +111,8 @@ assert(abs(h.sl.pos - 10) < 0.1 && h.sl.mode == 5);
 assert(h.out.state == 1 && h.out.statusCode == 0 && h.out.motionEnable == 0);
 fprintf('ok  go home\n');
 
-% Go Home at speed 0 is held: it neither moves nor ends on the start
-% timeout, and it finishes once the speed is restored.
+% Go Home started at speed 0 waits: the slave does not move, the start
+% timeout does not count, and it finishes once the speed is restored.
 h.sl.pos = 30;
 speed0 = h.in.positionSpeed;
 h.in.positionSpeed = 0;
@@ -124,7 +124,7 @@ h.in.positionSpeed = speed0;
 h = runFor(h, 40);
 assert(abs(h.sl.pos - 10) < 0.1);
 assert(h.out.state == 1 && h.out.statusCode == 0);
-fprintf('ok  go home held at speed 0\n');
+fprintf('ok  go home started at speed 0 waits\n');
 
 % E-stop during jog; release does not restart motion.
 h.in.jogVelocity = 2;

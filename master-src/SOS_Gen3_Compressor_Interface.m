@@ -774,7 +774,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         function text = statusText(app, statusCode, faultCode)
             text = statusTextBase(app, statusCode, faultCode);
-            if app.speedPercent == 0 && any(statusCode == [1 2 4 8])
+            if app.speedPercent == 0 && any(statusCode == [2 4 8])
                 text = append(text, " (held: speed 0)");
             end
         end

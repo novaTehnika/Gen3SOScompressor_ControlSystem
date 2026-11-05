@@ -141,8 +141,10 @@ the slave). While position or pressure control runs, changing the target turns
 its button back to Go, which sends the new target without leaving the mode; the
 other jog button reverses a running jog. The speed control (a percentage
 field and a button per `masterConfig` `speedPresets` entry, `speedDefault` at start)
-sets the one speed of jog, position moves, Go Home and homing, and a change applies
-to a running operation; 0 holds, and the status line then reads "held: speed 0". STOP turns dark red while E-STOP is
+sets the one speed of jog, position moves and Go Home, and a change applies
+to a running jog or position move (a Go Home keeps the speed it started at, and
+homing runs at its configured speeds); 0 holds a jog or position move, a Go Home does not
+start, and the status line then reads "held: speed 0". STOP turns dark red while E-STOP is
 requested but not yet reported by the model, and yellow while the model reports
 E-STOP (`StatusCode` 20); pressing it then releases E-STOP.
 
