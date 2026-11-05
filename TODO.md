@@ -10,15 +10,18 @@ holding registers.
 
 ## MotionWorks project
 
-The project is built from `slave-src` and runs on the controller. Left
-to confirm in it:
+The project is built from `slave-src` and runs on the controller. The
+build predates the step probe's 4096-record ring and the declarations
+below, so rebuild with them (the `.st` headers and the GVL reference are
+the reference for each) and confirm:
 
+- [ ] Rebuild with the current `FB_Probe` (the 4096-record ring, 16 s;
+      HR111-114, IR401-524) and `G_cfgProbeEnable`,
+      `G_cfgProbeFillPerScan`.
 - [ ] LD POU: delete the `MC_MoveVelocity` instance if it is still
       there (no recaptured screenshot shows it), with `G_cmdMoveVelocity`,
       `G_staMoveVelocity`, their two types and `G_sysCycleCount`.
-- [ ] Declarations this branch changed after the project was built from
-      `main`; mirror them (the `.st` headers and the GVL reference are
-      the reference for each):
+- [ ] Declarations changed after the project was built from `main`:
   - [ ] `G_cfgMoveAccel : LREAL := 5.0` replaces `G_cfgGoHomeAccel` and
         `G_cfgHomeLimAccel` (on `main` `G_cfgGoHomeAccel` reads 510.0,
         which looks like a slip for 5.0).
@@ -76,6 +79,81 @@ to confirm in it:
       says the Read block errors on the first exchange after the drop. The
       link model (`slave-sim/modbusLinkConfig.m` `lostLinkErrorDelay`)
       uses the bench figure, 0; correct whichever is wrong.
+
+## Operator app features
+
+Changes to `master-src/SOS_Gen3_Compressor_Interface.m`, `masterConfig.m`
+and, where the slave must follow, the protocol and the ST. Each is
+specified here; the implementation plan decides the files.
+
+- [ ] One operator speed for every move. Today jog takes the
+      `JogSpeedDropDown` preset (`TargetVelocity`, limited by
+      `jogVelMax`), position moves take `PositionSpeedField` (HR7-8,
+      clamped by `positionSpeedMax` and `G_cfgVelLimitMax`), and Go Home
+      and homing run at the slave's own `G_cfgGoHomeVelocity`,
+      `G_cfgHomeLimFastApproachVel` and `G_cfgHomeLimBackoffVel`. Replace
+      the drop-down and the field with one speed control: a row of
+      preset buttons plus a field for a typed value, labelled in percent
+      of the maximum (one master ceiling for jog and position moves, the
+      `jogVelMax`/`positionSpeedMax` pair collapsed to one), the mm/s
+      equivalent shown beside it. The one speed sets the jog velocity
+      and HR7-8. For Go Home and homing the slave takes HR7-8 as well:
+      `FB_GoHome`'s `HomeVelocity` and `FB_HomeLimit`'s fast approach
+      and backoff become `MIN(G_sysPositionSpeed, G_cfg...)`, so the
+      operator's speed caps them and the GVL values stay the ceilings;
+      the slow approach (`G_cfgHomeLimSlowApproachVel`, 1 mm/s, the
+      switch-detect precision) stays fixed. A speed of 0 holds position
+      moves today (`G_mbPositionSpeed` 0); decide what Go Home and homing
+      do at 0 (hold, as position moves do, is the consistent choice).
+      Update `MasterProtocolGuide.md` (HR7-8), `ConfigurationGuide.md`,
+      `HomingSequenceGuide.md`, `master-src/README.md`, the simulator and
+      `closedLoopMasterSlave`.
+- [ ] Volume readout with three views, switched on the panel: swept
+      volume (bore area times the travel left to the end of travel,
+      without the dead volume: the saline still deliverable), mixing
+      volume (the swept volume plus the part of the dead volume that
+      takes part in mixing, a new `masterConfig` constant beside
+      `deadVolume`, for the in-situ ratio) and an incremental volume
+      (swept volume since the operator zeroed it, with a Zero button).
+      Today `VolumeValue` shows swept volume plus the whole dead volume
+      (`x2mL`). Keep the mL/mm scaling in `mLPerMm`.
+- [ ] Flow readout: the velocity feedback dithers about zero and the
+      sign flickers (`-0.00`). Show a zero without a sign (round first,
+      then drop the sign of a zero) and consider a deadband at the
+      display resolution.
+- [ ] Faster display updates. The app polls the model on a 0.2 s timer
+      (`updateTimer`, `pollModel`) through `get_param(...,
+      'RuntimeObject')` per block; the exchange runs every 50 ms. Raise
+      the rate (50 to 100 ms), measure the poll's cost on the lab PC and
+      keep the readouts from lagging the timer (coalesce reads; skip a
+      tick that overruns).
+- [ ] Non-manual mode: the operator walk-through and the machine
+      automation behind "Start Procedure". The tabs (Process
+      Parameters, Saline Purge/Fill, Oxygen Fill, Pressurize/Discharge)
+      are a checkbox stub; `StartProcedureButtonPushed` only enables
+      them. A graduate student's standard operating procedure will set
+      the steps; the backend comes first:
+  - [ ] A procedure engine in the app: an ordered list of steps, each an
+        operator step (instruction, confirmed by a checkbox or a button)
+        or a machine step (one of the existing operations with its
+        target, run through `requestOp`/`trackOp`, complete on the
+        model's status), with pause, abort (stop the axis) and the
+        fault path (a fault aborts the procedure, the reset dialog
+        stays). It runs from the poll timer, never blocks it and never
+        bypasses the manual-mode interlocks (`canMove`).
+  - [ ] The procedure as data separate from the engine (a list of step
+        structs from one `.m` file), seeded with the steps the tabs name
+        today, so that the SOP replaces the data and not the code.
+  - [ ] The walk-through panel: the current step, its instruction, the
+        confirm/next, pause and abort controls, and progress; it replaces
+        the tabs. Manual control and the procedure exclude each other.
+  - [ ] Pressurize/Discharge needs the pressure target and the volume
+        readouts (above) during delivery; `TimePressurized` and
+        `VolumeDischarged` come from the engine's timing and the
+        incremental volume.
+  - [ ] Testable without the lab PC: the engine's sequencing against a
+        stand-in for the model's status (as `smokeMasterStateMachine`
+        does for the state machine), under Octave as well.
 
 ## Checks on the machine
 
