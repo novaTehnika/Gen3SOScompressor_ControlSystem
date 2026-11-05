@@ -56,4 +56,13 @@ cfg.tGoHomeStartMax = 5.0;  % Go Home with no motion by then ends (axis already 
 cfg.tFaultSettle  = 0.02;   % after FaultActive before reading the code
 cfg.tMirrorStable = 0.05;   % mirrored code stable before reset may be asserted
 cfg.tResetMax     = 1.0;    % give up waiting for FaultActive low
+
+% Operator app: operation tracking and the procedure engine.
+cfg.opConfirmWait    = 0.5;  % s a request has before a status that does not show it running ends it
+cfg.procedure        = 'sopProcedure';  % function in master-src/procedure returning the procedure
+cfg.procStatusDelay  = 0.1;  % s after a request before a status counts toward completion (> model step + exchange)
+cfg.procPressureTol  = 0.2;  % atm, default band for "settled" pressure
+cfg.procSettleTime   = 2.0;  % s inside the band for "settled", default
+cfg.procMaxChecks    = 6;    % checklist items per step (the panel's checkbox pool)
+cfg.procMaxParams    = 8;    % parameters per procedure (the panel's field pool)
 end
