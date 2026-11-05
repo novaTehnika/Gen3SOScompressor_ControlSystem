@@ -82,9 +82,34 @@ The app shows volume (mL), absolute pressure (atm), position (mm from the end
 of travel) and flow (mL/s, positive toward the end of travel). Position targets
 in manual control are also mm from the end of travel, and pressure targets are
 atm absolute. `masterConfig` holds the end of travel (`posEOT`), bore and dead
-volume, and the atmosphere added to the slave's gauge pressure (`atmAmbient`);
-`x2mL` and `mLPerMm` convert position and velocity. The transducer's 4-20 mA
-range and shunt resistance are slave settings (`G_cfgPressure*`).
+volume, and the atmosphere added to the slave's gauge pressure (`atmAmbient`).
+`mLPerMm` converts position and velocity to volume and flow; `sweptVolume`,
+`mixingVolume` and `readoutText` give the volume views and the readout text.
+The transducer's 4-20 mA range and shunt resistance are slave settings
+(`G_cfgPressure*`).
+
+The volume panel has three views, chosen with the buttons under the value:
+
+- Swept: the bore area times the travel left to the end of travel, without
+  the dead volume (the saline still deliverable).
+- Mix: the swept volume plus `mixingDeadVolume`, the part of `deadVolume` that
+  takes part in mixing (at most `deadVolume`).
+- Incr: the swept volume delivered since the operator pressed Zero, positive
+  as the piston advances toward the end of travel, like the flow. It reads
+  `--` until zeroed, and starting Home clears the zero because homing changes
+  the position frame.
+
+Readouts are rounded to their display resolution before the sign is chosen, so
+a zero never reads `-0.00`, and a flow smaller than `flowDeadband` reads 0.00.
+
+Display rate: the display timer runs at `displayPeriod` (`fixedRate`, a tick
+that is still busy when the next is due is dropped). Each poll reads the
+status, position, velocity and pressure blocks once through cached
+`RuntimeObject` handles, and the fault code only while faulted; a label is
+rewritten only when its text changed. The app measures its own poll: in a
+MATLAB session, `app = SOS_Gen3_Compressor_Interface;`, connect, run for a
+while and read `app.PollStats` (`n` polls, `mean`, `max` and `last` in
+seconds, `overruns` the polls longer than `displayPeriod`).
 
 ## Operator app buttons
 

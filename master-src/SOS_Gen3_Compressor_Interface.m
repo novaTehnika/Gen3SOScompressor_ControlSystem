@@ -15,6 +15,11 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         PressureValue                   matlab.ui.control.Label
         VolumePanel                     matlab.ui.container.Panel
         VolumeValue                     matlab.ui.control.Label
+        VolumeViewGroup                 matlab.ui.container.ButtonGroup
+        VolumeSweptButton               matlab.ui.control.ToggleButton
+        VolumeMixingButton              matlab.ui.control.ToggleButton
+        VolumeSinceZeroButton           matlab.ui.control.ToggleButton
+        VolumeZeroButton                matlab.ui.control.Button
         StatusLabel                     matlab.ui.control.Label
         ControlsPanel                   matlab.ui.container.Panel
         ESTOP                           matlab.ui.control.StateButton
@@ -92,6 +97,12 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         Simulation simulink.Simulation
     end
 
+    % Cost of the display poll in seconds (n polls, mean, max, last) and
+    % the polls that took longer than cfg.displayPeriod
+    properties (SetAccess = private)
+        PollStats = struct('n', 0, 'mean', 0, 'max', 0, 'last', 0, 'overruns', 0)
+    end
+
 
     properties (Access = private)
         modelName
@@ -109,6 +120,10 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         activeOp = 0            % OP_STOP when none
         activeJogDir = 0
         speedPercent = 100      % operator speed, % of cfg.speedMax
+        volumeView = "swept"    % "swept", "mixing" or "sinceZero"
+        volumeZeroPosition = NaN    % mm, slave frame, where the incremental volume was zeroed
+        lastPosition = NaN      % mm, slave frame, at the last poll
+        rto = struct()          % cached RuntimeObject of each read block
         activeTarget = NaN      % position or pressure sent with activeOp
         opConfirmed = false     % the model has reported activeOp running
         opSentAt = uint64(0)    % tic of the last request
@@ -190,13 +205,44 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             set_param(blockPath(app, name), "Value", num2str(double(value)));
         end
 
-        % Read the output of one of the model's named Gain blocks
+        % Read the output of one of the model's named Gain blocks,
+        % through the cached RuntimeObject; a handle that no longer reads
+        % is fetched again.
         function value = readBlock(app, name)
+            key = matlab.lang.makeValidName(name);
+            if isfield(app.rto, key)
+                try
+                    value = app.rto.(key).OutputPort(1).Data;
+                    return
+                catch
+                end
+            end
             rto = get_param(blockPath(app, name), "RuntimeObject");
             if isempty(rto)
                 value = 0;
             else
+                app.rto.(key) = rto;
                 value = rto.OutputPort(1).Data;
+            end
+        end
+
+        % The values shown on every poll, each block read once. The fault
+        % code is read only while the status reports a fault.
+        function d = readDisplay(app)
+            d.statusCode = readBlock(app, "StatusCode");
+            d.position = readBlock(app, "Position");
+            d.velocity = readBlock(app, "Velocity");
+            d.pressure = readBlock(app, "Pressure");
+            d.faultCode = 0;
+            if d.statusCode == app.STATUS_FAULT
+                d.faultCode = readBlock(app, "FaultCode");
+            end
+        end
+
+        % Set a label's text only when it changed, which saves redraws
+        function setText(~, label, text)
+            if ~strcmp(char(label.Text), char(text))
+                label.Text = text;
             end
         end
 
@@ -357,11 +403,19 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             if ~isvalid(app)
                 return
             end
+            t0 = tic;
             try
                 updateFromModel(app);
             catch ME
                 app.StatusLabel.Text = append("Display update failed: ", ME.message);
             end
+            st = app.PollStats;
+            st.last = toc(t0);
+            st.mean = (st.mean * st.n + st.last) / (st.n + 1);
+            st.n = st.n + 1;
+            st.max = max(st.max, st.last);
+            st.overruns = st.overruns + (st.last > app.cfg.displayPeriod);
+            app.PollStats = st;
         end
 
         function updateFromModel(app)
@@ -375,25 +429,27 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 end
                 app.estopActive = false;
                 app.linkReady = false;
+                app.rto = struct();
                 clearOp(app);
                 updateButtons(app);
                 return
             end
             app.wasRunning = true;
 
-            statusCode = readBlock(app, "StatusCode");
+            d = readDisplay(app);
+            statusCode = d.statusCode;
             app.estopActive = statusCode == app.STATUS_ESTOP;
             app.linkReady = statusCode ~= app.STATUS_LINK_LOST && ...
                 statusCode ~= app.STATUS_LINK_WAIT;
             trackOp(app, statusCode);
             updateButtons(app);
-            position = readBlock(app, "Position");
-            app.VolumeValue.Text = sprintf("%.1f", x2mL(position, app.cfg));
-            app.PressureValue.Text = sprintf("%.2f", readBlock(app, "Pressure"));
-            app.PositionValue.Text = sprintf("%.2f", app.cfg.posEOT - position);
+            app.lastPosition = d.position;
+            refreshVolume(app);
+            setText(app, app.PressureValue, readoutText(d.pressure, 2, 0));
+            setText(app, app.PositionValue, readoutText(app.cfg.posEOT - d.position, 2, 0));
             % Positive while the piston moves toward the end of travel
-            app.FlowValue.Text = sprintf("%.2f", ...
-                mLPerMm(app.cfg) * readBlock(app, "Velocity"));
+            setText(app, app.FlowValue, readoutText( ...
+                mLPerMm(app.cfg) * d.velocity, 2, app.cfg.flowDeadband));
 
             faulted = statusCode == app.STATUS_FAULT;
             if faulted
@@ -407,13 +463,13 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 app.MixerOnLamp.Color = [0.6 0.6 0.6];
             end
 
-            app.StatusLabel.Text = statusText(app, statusCode);
+            setText(app, app.StatusLabel, statusText(app, statusCode, d.faultCode));
 
             % Ask the operator before resetting a fault. The dialog opens
             % when a fault is first latched and again after a failed reset.
             if faulted && ~app.resetDialogOpen && ...
                     app.lastStatusCode ~= app.STATUS_FAULT
-                askFaultReset(app, readBlock(app, "FaultCode"));
+                askFaultReset(app, d.faultCode);
             end
             app.lastStatusCode = statusCode;
         end
@@ -500,6 +556,32 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
         end
 
+        % Volume shown in the selected view
+        function refreshVolume(app)
+            switch app.volumeView
+                case "mixing"
+                    v = mixingVolume(app.lastPosition, app.cfg);
+                case "sinceZero"
+                    v = volumeSinceZero(app);
+                otherwise
+                    v = sweptVolume(app.lastPosition, app.cfg);
+            end
+            setText(app, app.VolumeValue, readoutText(v, 1, 0));
+        end
+
+        % Swept volume delivered since the operator zeroed it (mL),
+        % positive as the piston advances toward the end of travel, like
+        % the flow; NaN until zeroed.
+        function v = volumeSinceZero(app)
+            v = sweptVolume(app.volumeZeroPosition, app.cfg) ...
+                - sweptVolume(app.lastPosition, app.cfg);
+        end
+
+        function zeroVolume(app)
+            app.volumeZeroPosition = app.lastPosition;
+            refreshVolume(app);
+        end
+
         % Operator speed in mm/s
         function v = speedMmPerS(app)
             v = speedFromPercent(app.speedPercent, app.cfg);
@@ -513,14 +595,14 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             spinner.Limits = limits;
         end
 
-        function text = statusText(app, statusCode)
-            text = statusTextBase(app, statusCode);
+        function text = statusText(app, statusCode, faultCode)
+            text = statusTextBase(app, statusCode, faultCode);
             if app.speedPercent == 0 && any(statusCode == [1 2 4 8])
                 text = append(text, " (held: speed 0)");
             end
         end
 
-        function text = statusTextBase(app, statusCode)
+        function text = statusTextBase(app, statusCode, faultCode)
             switch statusCode
                 case 0,  text = "Idle";
                 case 1,  text = "Homing";
@@ -533,7 +615,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 case 8,  text = "Going home";
                 case 9,  text = "Resetting fault";
                 case app.STATUS_FAULT
-                    text = append("FAULT: ", faultName(app, readBlock(app, "FaultCode")));
+                    text = append("FAULT: ", faultName(app, faultCode));
                 case app.STATUS_ESTOP, text = "E-STOP";
                 case 30, text = "Slave did not confirm the mode";
                 case 32, text = "Fault reset failed";
@@ -589,8 +671,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             applyConfig(app);
 
             app.updateTimer = timer( ...
-                ExecutionMode="fixedSpacing", ...
-                Period=0.2, ...
+                ExecutionMode="fixedRate", ...
+                Period=app.cfg.displayPeriod, ...
                 BusyMode="drop", ...
                 TimerFcn=@(~,~) pollModel(app));
             start(app.updateTimer);
@@ -611,6 +693,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                     app.StatusLabel.Text = "Model is already running";
                 else
                     start(app.Simulation);
+                    app.rto = struct();
                     if isRunning(app)
                         app.commandSeq = 0;
                         setBlock(app, "RequestedMode", app.OP_STOP);
@@ -653,7 +736,12 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             if app.activeOp == app.OP_HOME
                 stopOp(app);
             else
-                requestOp(app, app.OP_HOME);
+                % Re-homing changes the position frame, so the zero of the
+                % incremental volume no longer holds.
+                if requestOp(app, app.OP_HOME)
+                    app.volumeZeroPosition = NaN;
+                    refreshVolume(app);
+                end
                 updateButtons(app);
             end
         end
@@ -750,6 +838,23 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             setSpeedPercent(app, event.Source.UserData);
         end
 
+        % Selection changed function: VolumeViewGroup
+        function VolumeViewChanged(app, event)
+            app.volumeView = string(event.NewValue.Tag);
+            switch app.volumeView
+                case "mixing",    app.VolumePanel.Title = 'Mixing volume (mL)';
+                case "sinceZero", app.VolumePanel.Title = 'Volume since zero (mL)';
+                otherwise,        app.VolumePanel.Title = 'Swept volume (mL)';
+            end
+            app.VolumeZeroButton.Enable = app.volumeView == "sinceZero";
+            refreshVolume(app);
+        end
+
+        % Button pushed function: VolumeZeroButton
+        function VolumeZeroButtonPushed(app, event)
+            zeroVolume(app);
+        end
+
         % Value changed function: SpeedField
         function SpeedFieldChanged(app, event)
             setSpeedPercent(app, app.SpeedField.Value);
@@ -804,6 +909,48 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             value.FontWeight = 'bold';
             value.Position = [5 10 position(3) - 10 position(4) - 45];
             value.Text = '--';
+        end
+
+        % The volume panel's view selector and Zero button
+        function createVolumeControls(app)
+            app.VolumeValue.Position = [5 38 160 62];
+            app.VolumeValue.FontSize = 36;
+
+            app.VolumeViewGroup = uibuttongroup(app.VolumePanel);
+            app.VolumeViewGroup.BorderType = 'none';
+            app.VolumeViewGroup.SelectionChangedFcn = ...
+                createCallbackFcn(app, @VolumeViewChanged, true);
+            app.VolumeViewGroup.Position = [4 4 122 30];
+
+            app.VolumeSweptButton = uitogglebutton(app.VolumeViewGroup);
+            app.VolumeSweptButton.Text = 'Swept';
+            app.VolumeSweptButton.Tag = 'swept';
+            app.VolumeSweptButton.FontSize = 10;
+            app.VolumeSweptButton.Tooltip = {'Swept volume: the saline still deliverable, without the dead volume'};
+            app.VolumeSweptButton.Position = [2 4 38 22];
+
+            app.VolumeMixingButton = uitogglebutton(app.VolumeViewGroup);
+            app.VolumeMixingButton.Text = 'Mix';
+            app.VolumeMixingButton.Tag = 'mixing';
+            app.VolumeMixingButton.FontSize = 10;
+            app.VolumeMixingButton.Tooltip = {'Mixing volume: the swept volume plus the dead volume that takes part in mixing'};
+            app.VolumeMixingButton.Position = [42 4 38 22];
+
+            app.VolumeSinceZeroButton = uitogglebutton(app.VolumeViewGroup);
+            app.VolumeSinceZeroButton.Text = 'Incr';
+            app.VolumeSinceZeroButton.Tag = 'sinceZero';
+            app.VolumeSinceZeroButton.FontSize = 10;
+            app.VolumeSinceZeroButton.Tooltip = {'Volume delivered since Zero was pressed; -- until then'};
+            app.VolumeSinceZeroButton.Position = [82 4 38 22];
+
+            app.VolumeZeroButton = uibutton(app.VolumePanel, 'push');
+            app.VolumeZeroButton.ButtonPushedFcn = ...
+                createCallbackFcn(app, @VolumeZeroButtonPushed, true);
+            app.VolumeZeroButton.Text = 'Zero';
+            app.VolumeZeroButton.FontSize = 10;
+            app.VolumeZeroButton.Enable = 'off';
+            app.VolumeZeroButton.Tooltip = {'Zero the incremental volume at the present position'};
+            app.VolumeZeroButton.Position = [128 8 38 22];
         end
 
         % Create UIFigure and components
@@ -1223,7 +1370,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
             % Create readouts
             [app.VolumePanel, app.VolumeValue] = createReadout(app, ...
-                'Volume (mL)', [15 275 170 140], 40);
+                'Swept volume (mL)', [15 275 170 140], 40);
+            createVolumeControls(app);
             [app.PressurePanel, app.PressureValue] = createReadout(app, ...
                 'Pressure (atm)', [200 275 170 140], 40);
             [app.PositionPanel, app.PositionValue] = createReadout(app, ...

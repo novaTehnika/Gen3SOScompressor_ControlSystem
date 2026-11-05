@@ -112,7 +112,7 @@ specified here; the implementation plan decides the files.
       Update `MasterProtocolGuide.md` (HR7-8), `ConfigurationGuide.md`,
       `HomingSequenceGuide.md`, `master-src/README.md`, the simulator and
       `closedLoopMasterSlave`.
-- [ ] Volume readout with three views, switched on the panel: swept
+- [x] Volume readout with three views, switched on the panel: swept
       volume (bore area times the travel left to the end of travel,
       without the dead volume: the saline still deliverable), mixing
       volume (the swept volume plus the part of the dead volume that
@@ -121,11 +121,11 @@ specified here; the implementation plan decides the files.
       (swept volume since the operator zeroed it, with a Zero button).
       Today `VolumeValue` shows swept volume plus the whole dead volume
       (`x2mL`). Keep the mL/mm scaling in `mLPerMm`.
-- [ ] Flow readout: the velocity feedback dithers about zero and the
+- [x] Flow readout: the velocity feedback dithers about zero and the
       sign flickers (`-0.00`). Show a zero without a sign (round first,
       then drop the sign of a zero) and consider a deadband at the
       display resolution.
-- [ ] Faster display updates. The app polls the model on a 0.2 s timer
+- [x] Faster display updates. The app polls the model on a 0.2 s timer
       (`updateTimer`, `pollModel`) through `get_param(...,
       'RuntimeObject')` per block; the exchange runs every 50 ms. Raise
       the rate (50 to 100 ms), measure the poll's cost on the lab PC and
@@ -161,6 +161,15 @@ specified here; the implementation plan decides the files.
 
 ## Checks on the machine
 
+- [ ] Measure the operator app's display poll on the lab PC: connect,
+      run, and read `app.PollStats` at `cfg.displayPeriod` 0.1 s and
+      0.05 s. If the mean cost exceeds 30 % of the period, add one Mux
+      "Display" block in `buildShell` and read a single RuntimeObject.
+- [ ] Measure the share of the dead volume that takes part in mixing and
+      set `cfg.mixingDeadVolume` (it defaults to the whole `deadVolume`).
+- [ ] Relaunch the app and check the speed row (percent field, mm/s label,
+      preset buttons) fits the controls panel, and that the preset
+      buttons, the field and the status line ("held: speed 0") behave.
 - [ ] Confirm `Y_DirectControl` accepts a Velocity of 0 in PositionMode,
       which it gets when the master sets a position speed of 0.
 - [ ] Measure the protocol exchange time with the enlarged Modbus groups

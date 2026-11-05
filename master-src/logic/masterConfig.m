@@ -6,10 +6,18 @@ cfg.exchangePeriod = 0.05;      % Modbus write + read period (s), a multiple of 
 cfg.commTimeout    = 0.3;       % slave counter unchanged this long = link lost (s): several exchanges, to ride out a slow one
 
 % Cylinder geometry. Displayed positions are distances from the end of
-% travel (posEOT) and volume is swept volume from there plus deadVolume.
+% travel (posEOT); the displayed volume is one of three views: swept
+% (from there, without the dead volume), mixing (swept plus
+% mixingDeadVolume) and since zero (swept volume change since the
+% operator zeroed it).
 cfg.posEOT       = 367;             % mm, position at the end of travel (compression end)
 cfg.boreDiameter = 2.602 * 25.4;    % mm (2.602 in)
 cfg.deadVolume   = 57;              % mL, volume left at the end of travel (measured: 57 g of water fills it, with the present fittings)
+cfg.mixingDeadVolume = 57;          % mL, the part of deadVolume that takes part in mixing (at most deadVolume); added to the swept volume in the mixing view
+
+% Operator app display.
+cfg.flowDeadband  = 0.01;           % mL/s, a flow smaller than this reads 0.00
+cfg.displayPeriod = 0.1;            % s, the display timer period
 
 % Pressure: the app works in atm absolute, the slave in MPa gauge.
 cfg.atmPerMPa   = 9.869;

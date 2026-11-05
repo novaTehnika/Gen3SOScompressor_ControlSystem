@@ -106,6 +106,7 @@ The characterisation bench's fits are `charBulkModulus`, `charOrificeFlow`, `cha
 
 ### Tests
 
+- `masterReadouts`: the operator app's logic that Octave can run: the volume views, the readout text and the speed conversion.
 - `smokeMasterStateMachine`: master state machine against a protocol-level stand-in slave (not the ST sim).
 - `closedLoopMasterSlave`: `masterStateMachine` against the generated slave in engineering units. The master steps every 25 ms, the exchange runs every 50 ms and the slave every 4 ms (its scan) on a 1 ms tick.
 - `closedLoopModbusStep`: `masterStep` against the simulated slave's own registers (16-bit words packed by the slave's register map) through the timed link (read, step, write per exchange, as the Simulink blocks run, with the calls blocking the model), including link loss on either side, a late exchange and the model stopping on a lost link; it first checks every register `modbusMap.m` names against the GVL's `AT` addresses, and checks that the slave's reply to a write appears in the following exchange.
