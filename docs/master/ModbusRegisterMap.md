@@ -97,7 +97,8 @@ task interval.
 | 6 | `%QW73802` | UINT | `G_mbInMotion` | 1 = axis moving (`G_sysInMotion`) |
 | 7 | `%QW73804` | UINT | `G_mbPerformanceStatus` | `G_sysPerformanceStatus` |
 | 8 | `%QW73806` | UINT | `G_mbHomingComplete` | `G_sysHomingComplete` |
-| 9–10 | `%QW73808` | UINT | | Reserved |
+| 9 | `%QW73808` | UINT | `G_mbPressureBlock` | 1 = pressurising motion blocked: pressure above `G_cfgPressureCeiling` (`G_sysPressureBlock`) |
+| 10 | `%QW73810` | UINT | `G_mbAtEndOfTravel` | 1 = within `G_cfgPressureEndMargin` of `G_cfgPosSoftLimitMax` (`G_sysAtEndOfTravel`) |
 | 11–12 | `%QD73812` | REAL | `G_mbActualPosition` | `G_sysActualPosition` (mm) |
 | 13–14 | `%QD73816` | REAL | `G_mbActualVelocity` | `G_sysActualVelocity` (mm/s) |
 | 15–16 | `%QD73820` | REAL | `G_mbActualTorque` | `G_sysActualTorque` (% of rated) |

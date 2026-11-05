@@ -79,6 +79,8 @@
      G_mbInMotion          AT %QW73802 : UINT  (* IR6: G_sysInMotion *)
      G_mbPerformanceStatus AT %QW73804 : UINT  (* IR7: G_sysPerformanceStatus *)
      G_mbHomingComplete    AT %QW73806 : UINT  (* IR8: G_sysHomingComplete *)
+     G_mbPressureBlock     AT %QW73808 : UINT  (* IR9: G_sysPressureBlock, pressurising motion zeroed above G_cfgPressureCeiling *)
+     G_mbAtEndOfTravel     AT %QW73810 : UINT  (* IR10: G_sysAtEndOfTravel, within G_cfgPressureEndMargin of G_cfgPosSoftLimitMax *)
      G_mbActualPosition    AT %QD73812 : REAL  (* IR11-12: mm *)
      G_mbActualVelocity    AT %QD73816 : REAL  (* IR13-14: mm/s *)
      G_mbActualTorque      AT %QD73820 : REAL  (* IR15-16: % of rated *)
