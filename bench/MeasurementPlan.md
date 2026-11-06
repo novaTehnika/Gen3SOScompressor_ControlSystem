@@ -263,11 +263,16 @@ no second fill is needed.
    rq7  = charRun('Q7',  {{'pressure', 4, 15}, {'pressure', 7, 100}},  struct('posStop', x7));
    rq10 = charRun('Q10', {{'pressure', 4, 15}, {'pressure', 10, 100}}, struct('posStop', x10));
    m4 = ...; m7 = ...; m10 = ...;                    % g in the beakers, by hand
-   V = V1 - mPurge / 1.005;                          % mL left after the hose purge
    rq = charOrificeFlow({rq4.file, rq7.file, rq10.file}, ...
-       struct('K_Pa', rk1.K_Pa, 'collected_mL', [m4 m7 m10] / 1.005, ...
-       'fillVolume_mL', [V, V - m4 / 1.005, V - (m4 + m7) / 1.005]));   % the fill at each run's start
+       struct('K_Pa', rk1.K_Pa, 'collected_mL', [m4 m7 m10] / 1.005));
    ```
+
+   The liquid at each opening, which the compressibility correction
+   needs, comes from the piston position there and the 57 mL dead
+   volume, so the fit needs no weighed fill. If `V1` and `mPurge` were
+   weighed, `'fillVolume_mL', [V, V - m4 / 1.005, V - (m4 + m7) / 1.005]`
+   with `V = V1 - mPurge / 1.005` gives the liquid at each run's start
+   instead.
 
    Set each `posStop` for 30 mL (8.7 mm) from the position at the
    target. Open the distal valve when the run prints that the pressure
@@ -284,16 +289,19 @@ no second fill is needed.
    twice:
 
    ```matlab
-   V2 = V - (m4 + m7 + m10) / 1.005;                 % mL, what the deliveries left
    r4 = charRun('K200', kPath, opts);  r5 = charRun('K200', kPath, opts);
-   rk = charBulkModulus({r1.file, r2.file, r3.file, r4.file, r5.file}, ...
-       struct('fillVolume_mL', [V1 V1 V1 V2 V2]));
+   rk = charBulkModulus({r1.file, r2.file, r3.file, r4.file, r5.file});
    rk.split
    ```
 
    `rk.split` separates the liquid's K from the series compliance of
-   the seals and the actuator, which only two fill levels can do. `V2`
-   is `V1` less the weighed volumes, so nothing is refilled.
+   the seals and the actuator, which only two fill levels can do.
+   Without `fillVolume_mL` each segment's liquid is the geometry's at
+   its position, so the two levels need no weighing. With the fills
+   weighed, `'fillVolume_mL', [V1 V1 V1 V2 V2]` with
+   `V2 = V1 - (mPurge + m4 + m7 + m10) / 1.005` replaces it; the
+   weighed and the geometric fill differ by air and by error in the
+   dead volume, which step 1 compares.
 
 ## Session 2: one oxygen charge, about two and a half hours
 
