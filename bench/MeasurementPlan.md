@@ -253,7 +253,7 @@ no second fill is needed.
    to atmosphere, open the proximal valve, run the K path once; purge
    the hose with a short delivery at 2 MPa (the distal valve open until
    no bubbles leave the orifices; weigh the discharge, which is the purge
-   volume the hose model asks for, against the hose's 29 mL); close the
+   volume the hose model asks for, against the hose's 58 mL); close the
    distal valve with the piston stopped, run the K path again:
 
    ```matlab
@@ -368,7 +368,7 @@ state.
    is also the first commissioning delivery at 1:1. Then run the
    delivery sequence of the process: distal valve open for the purge,
    weighing the discharge until solution appears (the degassed slug the
-   hose model carries as 2 to 3 mL behind the 29 mL of virgin saline),
+   hose model carries as 2 to 3 mL behind the hose's 58 mL of virgin saline),
    closed with the piston stopped, the pause, reopened to `posStop`.
    Weigh the delivered solution. Do not run a 2:1 charge until the
    schedule is commissioned: it degasses at the opening.

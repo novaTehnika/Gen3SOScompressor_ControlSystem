@@ -156,9 +156,9 @@ convoluted); it was measured by purging the air with liquid, running the
 piston to the soft limit, opening the valves
 and drawing the liquid out of the passages into the chamber, then removing
 the liner and piston from the bottom of the cylinder, catching the liquid,
-and weighing it: 57 g of DI water. The discharge hose (3 ft of 1/4 in,
-29 mL) and the orifice tube (0.24 mL) are on top of this when the proximal
-valve is open.
+and weighing it: 57 g of DI water. The discharge hose (6 ft of 1/4 in,
+58 mL by its bore; 3 ft and 29 mL in the October runs) and the orifice
+tube (0.24 mL) are on top of this when the proximal valve is open.
 
 Then, for every liquid-only run:
 
@@ -230,28 +230,30 @@ rk.split                                    % liquid K and series stiffness (pri
 
 **Hose stiffness.** Fill and purge the hose (the proximal valve open, the
 cylinder holding the same liquid volume as in `r1`, so the piston is at
-the same position, the hose and tube liquid, 29.24 mL, on top), run the
+the same position, the hose and tube liquid `Vh` on top), run the
 path once, then again after a thorough hose purge (it carries the slug
-that degassed, 2 to 3 mL behind the 29 mL; trapped air is what the second
-run removes). The compliance the hose adds is the difference of the
+that degassed, 2 to 3 mL behind the hose's virgin saline; trapped air is
+what the second run removes). The compliance the hose adds is the difference of the
 ramps' compliances; take the liquid in the hose out to leave the wall and
 the air:
 
 ```matlab
+Vh = 58.2;                                           % mL, hose (6 ft of 1/4 in) and tube; 29.24 with the 3 ft hose
 ro1 = charRun('K300_hose', path, opts);              % valve open, hose filled
 ro2 = charRun('K300_hose_purged', path, opts);       % after the hose purge
 A = 3431;                                            % mm^2
 C = @(f, V) A / mean([getfield(charBulkModulus(f, struct('quiet', true, 'fillVolume_mL', V)), 'dPdx_MPa_mm')]) / 1000;   % mL/MPa
-Ch1 = C(ro1.file, V1 + 29.24) - C(r1.file, V1);      % mL/MPa the hose adds
-Ch2 = C(ro2.file, V1 + 29.24) - C(r1.file, V1);
-wall1 = Ch1 - 29.24 / (rk1.K_Pa / 1e6)               % mL/MPa beyond the hose liquid, before the purge
-wall2 = Ch2 - 29.24 / (rk1.K_Pa / 1e6)               % and after
+Ch1 = C(ro1.file, V1 + Vh) - C(r1.file, V1);         % mL/MPa the hose adds
+Ch2 = C(ro2.file, V1 + Vh) - C(r1.file, V1);
+wall1 = Ch1 - Vh / (rk1.K_Pa / 1e6)                  % mL/MPa beyond the hose liquid, before the purge
+wall2 = Ch2 - Vh / (rk1.K_Pa / 1e6)                  % and after
 ```
 
 A mL/MPa is 1e-12 m^3/Pa: the compliance beyond the liquid goes to
 `G_cfgPressureSchedHoseCompl` (a lower bound, so the smaller of the
 two) and to the model's `C_hose`; 0.24 mL/MPa was the 26 October value
-with the hose unpurged.
+with the 3 ft hose unpurged. The compliance scales with the hose's
+length, so a hose change needs these runs again.
 
 Start the path from about 2.5 MPa (reach it with a `pressure` step or a
 first short ramp) so the first ramp begins in the fitted range. Close the
@@ -761,10 +763,11 @@ values as fitted until the tests are repeated with the calibrated input.
 **Two dead volumes.** The proximal valve at the cylinder head is shut
 during compression and mixing and open during the delivery, so the
 chamber has two dead volumes: the cylinder passages alone, the measured
-57 mL (`masterConfig.deadVolume`), and the passages plus the hose (29 mL)
-and the tube (0.24 mL), 86 mL, during the delivery. The hose is prefilled
-with virgin saline, and the delivery's first 29 mL is that purge, which
-does not change Cd but is not solution.
+57 mL (`masterConfig.deadVolume`), and the passages plus the hose and
+the tube (0.24 mL) during the delivery: 86 mL with the 3 ft hose of
+these runs (29 mL), 115 mL with the 6 ft hose (58 mL) since. The hose is
+prefilled with virgin saline, and the delivery's first hose volume is
+that purge, which does not change Cd but is not solution.
 
 **What the hose means for the model.** A delivery runs with the hose
 open, so the compliance the loop sees is the liquid's plus a constant
@@ -807,7 +810,7 @@ the robustness ranges (see the end of this section).
 | Bulk modulus, one fill | 6.8 to 7.9 MPa/mm at 362 mL (277.6 to 278.2 mm): K effective 0.77 GPa (0.72 to 0.84); the fit's liquid term 0.88 GPa | `K300_char_20261105_172421`, `_172541`, `_172702` | Up and down agree to 0.5 %, the three runs to 1 %. The gas term, 0.2 to 0.8 mL at P0, fails the 0.3 mL tolerance; the two fills below explain the compliance without gas. |
 | Bulk modulus, two fills | liquid K 1.70 GPa in series with 46 N/um (0.26 mL/MPa, a constant compliance); 9.3 to 11.1 MPa/mm at 144 mL | the K300 runs and `K200_char_20261105_182500`, `_182604` (341.6 mm) | The compliance is V / K + A^2 / ks: the single-fill 0.72 GPa of October and 0.77 now are that sum at 350 to 360 mL. With one K for the liquid the model makes the chamber at 144 mL 18 MPa/mm instead of 10. |
 | Schedule bound (section 9) | bound over measured 1.26 to 1.48 (362 mL), 2.16 to 2.59 (144 mL), 2.15 to 2.86 (hose open) | the K300, K200 and hose runs | Passes everywhere; the loop crossover with the measured stiffness is 7.4 to 8.7 rad/s at 362 mL and 3.8 to 5.1 rad/s at 144 mL or with the hose open (configured 11). |
-| Hose compliance | the hose adds 0.65 mL/MPa before the purge and 0.61 after; beyond its own liquid, 0.60 mL/MPa of wall and 0.04 of air | `K300_hose_char_20261105_180515`, `K300_hose_purged_char_20261105_180933` | 2.5 times October's 0.24 mL/MPa, and above the robustness range (0.12 to 0.36) and the GVL's lower bound (0.12, which stays a lower bound). The cylinder's part at the hose runs' 355 mL is taken from the two-fill split (0.465 mL/MPa). |
+| Hose compliance, 6 ft hose (58 mL with the tube) | the hose adds 0.65 mL/MPa before the purge and 0.61 after; beyond its own liquid (0.03 mL/MPa at 1.7 GPa), 0.58 mL/MPa of wall and 0.04 of air: 0.097 mL/MPa per foot | `K300_hose_char_20261105_180515`, `K300_hose_purged_char_20261105_180933` | The hose is twice October's 3 ft, and its compliance per foot is 20 % above October's 0.08 (0.24 mL/MPa for 3 ft, unpurged). Above the robustness range (0.12 to 0.36) and the GVL's lower bound (0.12, which stays a lower bound). The cylinder's part at the hose runs' 355 mL is taken from the two-fill split (0.465 mL/MPa). |
 | Stopping distance under load | comp x = 0.019 s v + v^2 / (2 x 196 mm/s^2), ret 0.016 s v + v^2 / (2 x 77 mm/s^2); 6 to 12 um at 0.25 and 0.5 mm/s, 7.6 to 10.8 MPa | `stops_hp_char_20261105_175543` (6 captured stops) | Every stop within the slave's allowance (0.05 s, 50 mm/s^2; worst -7 um). The law's residual is 28 % of the stops, which are a few um, so the split between the terms is loose. `_174848` ended on the pressure guard: the path was planned on the October gas-charged stiffness. |
 | Friction at speed under load | mu 0.51 +/- 0.05, Fc not resolved | the legs of the stops run (6) | Agrees with the K300 reversal's 0.45. |
 | Friction unloaded | with the piston: Fc 5.0 +/- 0.1 kN, b 2.26e6 +/- 0.07e6 N s/m, F0 -0.05 kN, residual 0.3 kN over 0.1 to 3 mm/s; piston removed: Fc 4.5 +/- 0.1 kN, b 2.09e6 +/- 0.06e6; seals: 0.5 kN and 0.18e6 N s/m | `u1_unloaded_20261105_185217`; `bare_unloaded_20261105_190535` | Both over 295 to 326 mm. The seals are a tenth of the Coulomb term and under a tenth of the viscous one: the drive (gearbox, screw, brake) carries the rest. No Stribeck region. Breakaway not resolved (94 % of the starts within 3 samples). `u1_unloaded_20261105_184019` ended on the torque abort at the first 5 mm/s start. |
@@ -821,8 +824,12 @@ drive figures are tied to the GVL: `design/pressure-loop/test_model.py`
 holds `params.py`'s `t_dead` and `tauV` equal to
 `G_cfgPressureSchedDeadTime` and `G_cfgPressureSchedDriveLag`, so
 carrying them changes the gain schedule on the controller. The hose
-compliance is outside the robustness range. These, Cd, mr, Fc and the
-noise go over together, with the ranges of `robust.py` and the studies
+compliance is outside the robustness range, and the 6 ft hose holds
+58 mL where `params.py` (`V_hose`) and the GVL
+(`G_cfgPressureSchedHoseVol`, which errs stiff and so stays safe) carry
+29 mL: the purge before the solution doubles and the deliverable
+solution falls by 29 mL. These, Cd, mr, Fc and the noise go over
+together, with the ranges of `robust.py` and the studies
 rerun (`bench/MeasurementPlan.md`, "Carrying the results over").
 
 ## 9. Checking the pressure schedule's stiffness bound
@@ -850,7 +857,7 @@ cd bench/characterisation
 addpath ../common
 V1 = 343;                                   % mL, the weighed fill: HR9-10 (a lower bound on the true volume)
 sc  = charScheduleCheck({r1.file, r2.file, r3.file}, struct('salineVolume_mL', V1));
-sch = charScheduleCheck(ro1.file, struct('salineVolume_mL', V1 + 29.24, 'hoseOpen', true));
+sch = charScheduleCheck(ro1.file, struct('salineVolume_mL', V1 + Vh, 'hoseOpen', true));
 scg = charScheduleCheck(rc.file, struct('salineVolume_mL', V1, 'oxygenRatio', 1, 'bulk', ...
     struct('pressureRange', [0.5 11], 'minRows', 8)));          % rc: a charged run (section 3, oxygen charge)
 ```

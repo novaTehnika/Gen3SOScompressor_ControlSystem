@@ -454,8 +454,9 @@ The bench tests of 2026-10-26 (`bench/`) replaced
 the guessed parameters. The values the model now carries, with what was
 assumed before, follow. The measurement plan's runs of 2026-11-05
 (`bench/characterisation/README.md` section 8) are not yet carried over:
-they give a faster drive (7.5 ms lag after 18.2 ms dead time), a hose
-compliance of 0.60 mL/MPa, and, from two fill levels, a liquid K of
+they give a faster drive (7.5 ms lag after 18.2 ms dead time), a 6 ft
+hose in place of the 3 ft one (58 mL, 0.58 mL/MPa beyond its liquid),
+and, from two fill levels, a liquid K of
 1.70 GPa in series with a constant 0.26 mL/MPa that the chamber model
 does not have.
 
