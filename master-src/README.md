@@ -70,11 +70,15 @@ Gain block, a test point the app reads like the other Gain blocks. Each record
 carries its sequence number in the first column and again in the last (the
 guard), so the app takes only rows whose two copies agree and sees from the
 sequence numbers whether the ring overwrote records it had not read yet.
-`masterStep` and the register map are unchanged.
+The trace layout is unchanged: the raw read vector carries IR9 and IR10.
 
 The app reads `StatusCode`, `FaultCode`, `State`, `Position`,
-`Velocity`, `Pressure` (the slave's gauge transducer reading plus `atmAmbient`, atm absolute) and
-`LinkOk`. Status codes are listed in
+`Velocity`, `Pressure` (the slave's gauge transducer reading plus `atmAmbient`, atm absolute),
+`LinkOk`, `PressureBlock` and `AtEndOfTravel`. The last two are `masterStep`'s
+outputs 11 and 12, the slave's IR9 (chamber pressure above its ceiling, so it
+refuses pressurising motion; not a fault) and IR10 (the piston is within its end
+margin of the soft limit), each 0 or 1. A shell built before they existed lacks
+the two Gain blocks, so rebuild it with `buildShell` after updating. Status codes are listed in
 `masterStateMachine.m`; a fault shows as status 10 with the code in
 `FaultCode`, status 35 is shown until the slave's counter has first been
 seen, and a lost slave link as status 34 until the operator presses Stop.
@@ -93,10 +97,10 @@ slave link up and out of E-STOP.
 
 ## Operator app readouts
 
-The app shows volume (mL), absolute pressure (atm), position (mm from the end
-of travel) and flow (mL/s, positive toward the end of travel). Position targets
-in manual control are also mm from the end of travel, and pressure targets are
-atm absolute. `masterConfig` holds the end of travel (`posEOT`), bore and dead
+The app shows volume (mL), absolute pressure (psi, atm or MPa), position (mm
+from the end of travel) and flow (mL/s, positive toward the end of travel).
+Position targets in manual control are also mm from the end of travel, and
+pressure targets are absolute in the pressure unit. `masterConfig` holds the end of travel (`posEOT`), bore and dead
 volume, and the atmosphere added to the slave's gauge pressure (`atmAmbient`).
 `mLPerMm` converts position and velocity to volume and flow; `sweptVolume`,
 `mixingVolume` and `readoutText` give the volume views and the readout text.
@@ -113,6 +117,21 @@ The volume panel has three views, chosen with the buttons under the value:
   as the piston advances toward the end of travel, like the flow. It reads
   `--` until zeroed, and starting Home clears the zero because homing changes
   the position frame.
+
+The pressure panel has a unit switch (psi, atm, MPa) under the value. All
+three units are absolute (the slave's gauge reading plus `atmAmbient`), and the
+panel title and the target label say so ("Pressure (psi abs)"). `pressureConvert`
+and `pressureUnitInfo` hold the conversion (`psiPerAtm`, `atmPerMPa`) and each
+unit's decimals, format and spinner step (psi 1 decimal and step 5, atm 2 and
+0.5, MPa 3 and 0.05). The switch converts the target spinner's value and
+limits (ambient up to the lower of `pressureMax` and `pressureCeiling` minus
+`pressureCeilingHyst`), changes the procedure panel's pressure fields and
+texts, and is kept for the next session with `setpref`/`getpref`
+(`SOS_Gen3_Compressor`, `pressureUnit`). The model, the target of a running
+operation and the procedure engine stay in atm absolute. The pressure value
+turns red while `PressureBlock` is set, and the status line gets a suffix:
+"(pressure ceiling: pressurising blocked)" while it is set and "(end of
+travel)" when `AtEndOfTravel` is set during pressure control.
 
 Readouts are rounded to their display resolution before the sign is chosen, so
 a zero never reads `-0.00`, and a flow smaller than `flowDeadband` reads 0.00.
@@ -154,13 +173,16 @@ The engine is `procNew`, `procAction`, `procStep` and `procView` in `logic/`:
 pure functions on one state struct `p`, with no persistent state, no timers and
 no app handle. The app calls `procStep(p, in, dt)` on every poll with what it
 read from the model (`connected`, `statusCode`, `faultCode`, `estop`, `pressure`,
-`volume`) and executes the returned requests (`params`, `mixer`, `stop`, `op`
-with `target` and `unit`, `zeroVolume`) through its own operation requests, so
+`volume`, `pressureBlock`, `atEndOfTravel`) and executes the returned requests
+(`params`, `mixer`, `stop`, `op` with `target`, `unit` and `speed`,
+`zeroVolume`) through its own operation requests, so
 the interlocks stay in one place. `procAction` only records the operator's
 intent (start, confirm, repeat, check, setParam, pause, resume, abort, reset)
 and refuses an action the state does not allow; `procView` gives what the panel
 shows. `tests/smokeProcedureEngine.m` runs all of it against a stand-in for the
-model's status.
+model's status. `procView(p, opts)` takes the display options of
+`pressureUnitInfo` and shows pressure parameters, texts and the held pressure
+in that unit (atm absolute without them).
 
 **Start.** Start Procedure begins at step 1 when the model is running, the
 slave link is up, E-STOP is not active and the status is 0 (idle); otherwise it
@@ -182,7 +204,8 @@ copies what `procView` returns. Every operator action and every poll steps the
 engine at once, so Abort sends its stop immediately; the engine's operations go
 through the app's `requestOp`/`stopOp` and the same `motionAllowed` interlock as
 the manual buttons (the model running, the slave link up and no E-STOP). The
-procedure's volume is the swept volume of the readouts, and `Disconnect`
+procedure's volume (`in.volume`) is the swept volume of the readouts, and
+`Disconnect`
 during a procedure is left to the engine, which pauses with "Model stopped".
 The volume-zero request also zeroes the Incr view. A procedure that does not
 validate leaves the panel empty, Start Procedure disabled and the reason on the
@@ -201,6 +224,12 @@ A parameter is a struct in the procedure's `params` cell array.
 | `min`, `max` | `-Inf`, `Inf` | range, checked when entered and on confirm |
 | `format` | `'%g'` | display and `{key}` substitution in titles, texts and checks |
 | `sink` | `''` | `''`, `'SalineVolume'` or `'OxygenRatio'`: the shell Constant block that receives the value when the param step is confirmed |
+| `kind` | `''` | `''` or `'pressure'`: the value, `min` and `max` are atm absolute and shown and entered in the pressure unit; the parameter takes no `unit` of its own |
+
+A pressure parameter's `{key}` renders converted and followed by the unit label
+("114.7 psi abs"), so a text must not add a unit after it. The panel checks the
+range in the display unit; the engine's own refusal reads "<label> is out of
+range".
 
 ### Steps
 
@@ -220,8 +249,11 @@ fields it uses (`procNew` fills the defaults).
 | `repeatLabel` | confirm | `'Repeat'` | label of that button |
 | `params` | param | required | keys entered and confirmed in this step |
 | `op` | machine | required | `home`, `goHome`, `position`, `pressure` or `stop` |
-| `target` | position, pressure | required | a number, or a parameter key |
+| `target` | position, pressure | required | a number, a parameter key, or a function handle `@(values, cfg)` returning a finite scalar, evaluated whenever the step issues its operation (on entry and again on resume); `procNew` evaluates it once on the parameter defaults and rejects a failure |
 | `unit` | position | `'mm'` | `mm` from the end of travel, or `mL` chamber volume (`deadVolume` plus the swept volume); a pressure is atm absolute |
+| `speed` | position | NaN (none) | mm/s the move is capped at; the operator's speed still wins when it is lower (0 holds) |
+| `pressureMax` | machine | `Inf` | atm absolute; above it the step pauses (below) |
+| `alsoWhen` | confirm, pressure | `''` | `'endOfTravel'`: the step also completes at the end of travel (below) |
 | `until` | machine, wait | by op | the completion condition (below) |
 | `keep` | position, pressure | `false` | leave the operation running as the background operation; otherwise the engine stops it once the step completes |
 | `tolerance` | settled | `cfg.procPressureTol` | atm |
@@ -238,49 +270,78 @@ within `tolerance` of the target for `duration`; `stop` `stopped` is a status
 outside 1 to 8. A wait is timed (`duration`) or `settled` about the background
 pressure target. A step whose operation ends early (not confirmed by the slave,
 not reported stopped, left by the master) pauses with a message naming the
-status. `procNew` rejects a procedure that cannot run (unknown type, op, unit,
+status.
+
+A target function that fails when the step issues pauses it with "Step target
+could not be computed: " and the function's message, and nothing is sent; the
+oxygen fill of the seed procedure does this when the charge does not fit the
+chamber. While a machine step tracks or settles, `pressure` above its
+`pressureMax` pauses it with "Pressure above the step's limit" and
+`PressureBlock` pauses it with "Pressure ceiling reached" (every op but
+`stop`), each sending a stop for a step that does not `keep`; resume issues the
+step again. The messages carry no numbers, so the engine stays unit-free.
+`alsoWhen = 'endOfTravel'` ends a confirm step (without the click) or a
+pressure step (as its condition, then the usual stop or keep) once
+`atEndOfTravel` is set or the swept volume is at or below `cfg.procEndVolume`
+(above the slave's end margin, so it also works on a slave without the flag);
+the panel shows "<title> ended at the end of travel" as the message. In the
+app, a `speed` caps `PositionSpeed` for the step ("(step)" after the speed
+readout) and the operator's speed is restored when the operation ends.
+`procNew` rejects a procedure that cannot run (unknown type, op, unit,
 `until`; missing title or target; a key that names no parameter; duplicate id;
 a `repeatFrom` that is not an earlier step; too many checks or parameters; an
-unknown sink; `keep` on a step that cannot hold; a settled wait with no earlier
-pressure step with `keep`).
+unknown sink or kind; a pressure parameter with a unit; `keep` on a step that
+cannot hold; `speed` outside a position step or not above 0; `pressureMax` not
+above 0; an unknown `alsoWhen` or one on another step; a target function that
+fails on the defaults; a settled wait with no earlier pressure step with `keep`).
 
 ### States
 
 `idle`, `running`, `waitOperator` (confirm and param steps), `paused`,
-`aborting`, `done` (outcome `completed` or `aborted`) and `faulted`.
+`aborting` and `done` (outcome `completed` or `aborted`).
 
 - **Pause** stops the current step's own operation and keeps a `keep` pressure
   hold running; a timed wait stops counting. Resume re-issues an interrupted
   move and continues a wait or an operator step where it was.
 - **Abort** requests a stop, waits for the axis (at most `tStopMax` plus 0.5 s)
   and ends `done`/`aborted`; with the model not running it ends at once.
-- **Slave fault** (status 10) ends the procedure `faulted`, with the fault
-  code. Nothing resumes: after the fault reset the operator presses Start
-  Procedure to begin again at step 1.
-- **E-STOP, slave link lost and model stopped** pause the procedure with the
-  reason shown. The master has already stopped everything, so no stop is sent;
+- **E-STOP, slave link lost, model stopped and a slave fault** (status 10,
+  and 9 while resetting and 32 if the reset failed) pause the procedure with
+  the reason shown ("Slave fault 7"). The master has already stopped
+  everything, so no stop is sent;
   an interrupted move is issued again and a lost pressure hold re-run (and the
   step that was paused returned to, with its ticks) on resume. The timer keeps
   counting. Resume is refused while the condition holds and enabled once it
-  has cleared; Abort is always available.
+  has cleared, so after a slave fault the operator resets it (the app's
+  dialog) and then resumes; Abort is always available (at a fault it ends
+  `aborted`, the fault status not counting as busy). The mixer is left on until
+  abort or completion.
 - **A background operation that ends** (the pressure hold is left by the
   master) pauses the procedure; Resume re-runs the step that started it and
   returns to the paused step.
-- The mixer is switched off at abort, fault and completion only if the
-  procedure switched it on.
+- The mixer is switched off at abort and completion only if the procedure
+  switched it on.
 
 ### Readouts
 
 The timer runs from the step with `timerStart` to the step with `timerStop`
 (and through a pause). The volume discharged is the volume at the step with
-`zeroVolume` minus the present volume.
+`zeroVolume` minus the present volume. The message line shows the pause reason
+or the last refusal, and when empty the note of a step that ended on its own at
+the end of travel.
 
 ### Writing the SOP
 
 Edit `procedure/sopProcedure.m` (or add a file there and set `cfg.procedure` in
 `masterConfig.m`) with no code change, then run
 `tests/run_all.sh smokeProcedureEngine`: it validates the shipped procedure
-through `procNew`.
+through `procNew` and walks it against the stand-in. Pressure parameters are
+`kind = 'pressure'` in atm absolute; a pressure `{key}` renders with its unit,
+so write `Holding {dischargePressure}.` and not `... atm.`. The seed procedure
+computes the oxygen fill volume from its parameters in a function target
+(`oxygenFillVolume`, with its equation in the comment) and writes the saline
+volume and the oxygen ratio to the slave (sinks); its constants `FILL_EXCESS`,
+`PUSH_SPEED` and `PUSH_PRESSURE_MAX` are at the top of the file.
 ## Recording a trace
 
 The Trace panel (between the lamps and the Procedure panel) records what

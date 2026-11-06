@@ -47,7 +47,7 @@
        InCommandedMotion   : BOOL             (* State commands motion from the master's reference (link loss faults only here)
        InMotionWatched     : BOOL             (* State in which either overtravel switch is a fault
        InHoming            : BOOL             (* ST_HOME_LIMIT / ST_HOME_COMPLETE
-       InRecovery          : BOOL             (* ST_RECOVERY / ST_RECOVERY_POSITION / ST_RECOVERY_VELOCITY
+       InRecovery          : BOOL             (* Recovery states, and the activation states while recovery is pending (bRecoveryPending)
        InFault             : BOOL             (* ST_FAULT / ST_FAULT_IDLE
        ExitGuardTriggered  : BOOL             (* Piston exit guard triggered fault
        CommLost            : BOOL             (* Master heartbeat stale
@@ -136,9 +136,10 @@ END_IF;
    - CurrentState = ST_HOME_LIMIT (the homing sequence is running). The
      sequence legitimately drives the axis below SoftLimitMin to find the
      switch, and the coordinate frame is being re-established mid-flight.
-   - In a recovery state (InRecovery): the axis starts outside the
-     soft-limit box and is being jogged back inside; faulting on the very
-     position we are recovering from would defeat the recovery.
+   - In a recovery state (InRecovery) or on the re-power path to one: the
+     axis starts outside the soft-limit box and is being jogged back inside;
+     faulting on the very position we are recovering from would defeat the
+     recovery.
    -------------------------------------------------------------------------- *)
 
 IF (CurrentState <> E_SystemState#ST_HOME_LIMIT) AND

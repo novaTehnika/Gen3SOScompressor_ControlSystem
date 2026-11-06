@@ -10,8 +10,7 @@ function [p, ok, msg] = procAction(p, action, varargin)
 %            the current confirm step), 'setParam' (set a parameter the
 %            current param step lists), 'pause' (running or waitOperator),
 %            'resume' (paused), 'abort' (running, waitOperator or paused)
-%            and 'reset' (done or faulted: back to idle, parameter values
-%            kept)
+%            and 'reset' (done: back to idle, parameter values kept)
 %
 %   Nothing here touches the machine. The action is recorded as an intent
 %   (or, for check, setParam and reset, applied to the state) and procStep
@@ -86,8 +85,13 @@ switch action
         else
             q = p.def.params(strcmp(key, {p.def.params.key}));
             if value < q.min || value > q.max
-                msg = sprintf('%s must be between %g and %g', q.label, ...
-                    q.min, q.max);
+                if strcmp(q.kind, 'pressure')
+                    % The range is in atm; the app checks in its own unit.
+                    msg = sprintf('%s is out of range', q.label);
+                else
+                    msg = sprintf('%s must be between %g and %g', q.label, ...
+                        q.min, q.max);
+                end
             else
                 p.values.(key) = value;
                 ok = true;
@@ -115,8 +119,8 @@ switch action
             msg = 'The procedure is not active';
         end
     case 'reset'
-        if any(strcmp(p.state, {'done', 'faulted'}))
-            p = procNew(p.def, p.c, p.values);
+        if strcmp(p.state, 'done')
+            p = procNew(p.def, p.cfg, p.values);
             ok = true;
         else
             msg = 'The procedure has not ended';

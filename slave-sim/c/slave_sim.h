@@ -79,7 +79,8 @@ typedef struct {
 /* The input registers in engineering units, and the brake output pin. */
 #define Y_FIELDS(X) \
     X(heartbeatEcho) X(slaveCounter) X(confCode) X(faultCode) X(faultActive) \
-    X(inMotion) X(performanceStatus) X(homingComplete) X(actualPosition) \
+    X(inMotion) X(performanceStatus) X(homingComplete) X(pressureBlock) \
+    X(atEndOfTravel) X(actualPosition) \
     X(actualVelocity) X(actualTorque) X(commandedPosition) X(actualPressure) \
     X(brakeDisengage)
 #define Y_DECLARE(name) double name;

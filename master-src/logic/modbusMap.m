@@ -25,6 +25,8 @@ map.ir.faultActive       = 5;
 map.ir.inMotion          = 6;
 map.ir.performanceStatus = 7;
 map.ir.homingComplete    = 8;
+map.ir.pressureBlock     = 9;   % 1 = pressurising motion blocked above the ceiling
+map.ir.atEndOfTravel     = 10;  % 1 = at the end of travel (soft limit minus the end margin)
 map.ir.position          = 11;  % REAL mm (11-12)
 map.ir.velocity          = 13;  % REAL mm/s (13-14)
 map.ir.torque            = 15;  % REAL % (15-16)

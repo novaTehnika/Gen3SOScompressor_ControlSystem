@@ -18,6 +18,7 @@ end
 
 h = harnessInit(handshakeTimeout);
 E = h.sl.E;
+defSoftMax = h.sl.G.G_cfgPosSoftLimitMax;
 
 h = runFor(h, 0.5);
 assert(h.out.state == 1 && h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE);
@@ -318,7 +319,141 @@ assert(h.faultSeen == 0 && h.sl.ax.x < h.sl.G.G_cfgPosSoftLimitMax);
 assert(h.sl.ax.x >= h.mcfg.posMax - 0.5);
 fprintf('ok  soft limit\n');
 
+% The soft-limit scenario leaves a jog running; restore the limits.
+h = stopToIdle(h);
+h.sl.G.G_cfgPosSoftLimitMax = defSoftMax;
+h.mcfg.posMax = defSoftMax - 5;
+h.faultSeen = 0;
+
+% Delivery to the end of travel: the outlet drains the chamber under
+% pressure control until the end stop holds the piston, with no fault.
+x0 = chamberPosition(h.sl, 2.5);
+softMax = x0 + h.sl.ax.offset + 15;
+h.sl.G.G_cfgPosSoftLimitMax = softMax;
+h.mcfg.posMax = softMax;
+margin = h.sl.G.G_cfgPressureEndMargin;
+h.sl.ax.x = x0;
+h = runFor(h, 0.5);
+h.in.targetPressure = 3;
+h = command(h, 4);
+h = runUntil(h, 20, @(h) h.out.statusCode == 5);
+assert(h.out.statusCode == 5, 'pressure mode did not reach its target');
+h.sl.hook.outflow = 10000;                       % mm^3/s
+h.xMax = -inf;  h.faultSeen = 0;
+h = runUntil(h, 30, @(h) h.y.atEndOfTravel == 1);
+assert(h.y.atEndOfTravel == 1, 'end of travel not reached');
+h = runFor(h, 2);
+xEnd = h.sl.ax.x + h.sl.ax.offset;
+assert(h.faultSeen == 0, 'fault at the end of travel');
+assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_PRESSURE_CTRL && h.out.statusCode == 5);
+assert(h.xMax + h.sl.ax.offset <= softMax - margin + 0.6, ...
+    'travelled to %.3f mm', h.xMax + h.sl.ax.offset);
+assert(xEnd >= softMax - margin - 0.1, 'stopped short at %.3f mm', xEnd);
+assert(abs(h.sl.ax.v) < 0.01 && h.sl.G.G_sysCommandedVelocity <= 0);
+assert(h.y.atEndOfTravel == 1 && h.y.pressureBlock == 0);
+overshoot = h.xMax + h.sl.ax.offset - (softMax - margin);
+h.sl.hook.outflow = 0;
+h = stopToIdle(h);
+h.sl.G.G_cfgPosSoftLimitMax = defSoftMax;
+h.mcfg.posMax = defSoftMax - 5;
+fprintf('ok  delivery stops at the end of travel (%.3f mm past the margin, no fault)\n', overshoot);
+
+% Position move against a closed outlet: the ceiling blocks the compression
+% without a fault, and a retract is still allowed.
+ceiling = h.sl.G.G_cfgPressureCeiling;
+hyst = h.sl.G.G_cfgPressureCeilingHyst;
+h.sl.hook.valve = 0;  h.sl.hook.outflow = 0;
+h.sl.ax.x = chamberPosition(h.sl, 8);
+h = runFor(h, 0.5);
+h.in.targetPosition = chamberPosition(h.sl, 15) + h.sl.ax.offset;
+h.in.positionSpeed = h.mcfg.speedMax;
+h.faultSeen = 0;
+h.pMax = 0;
+h = command(h, 2);
+h = runUntil(h, 20, @(h) h.y.pressureBlock == 1);
+assert(h.y.pressureBlock == 1, 'ceiling did not block');
+h = runFor(h, 0.5);
+xHold = h.sl.ax.x;
+h = runFor(h, 0.5);
+assert(h.faultSeen == 0, 'fault at the ceiling');
+assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_POSITION_CTRL && h.out.statusCode == 2);
+assert(abs(h.sl.ax.v) < 0.01 && abs(h.sl.ax.x - xHold) < 0.01, 'axis not held');
+assert(h.pMax < h.sl.G.G_cfgPressureRangeMax, 'peak %.3f MPa', h.pMax);
+assert(h.y.pressureBlock == 1);
+pkOver = h.pMax - ceiling;
+h.in.targetPosition = h.sl.ax.x + h.sl.ax.offset - 5;
+h = command(h, 2);
+h = runFor(h, 0.5);
+assert(h.sl.ax.v < -0.5, 'retract refused while blocked');
+h = runUntil(h, 20, @(h) h.y.pressureBlock == 0);
+assert(h.y.pressureBlock == 0 && h.sl.ax.P < ceiling - hyst + 0.05, ...
+    'released at %.3f MPa', h.sl.ax.P);
+h = stopToIdle(h);
+fprintf('ok  pressure ceiling blocks a position move (peak %.3f MPa, %.3f over the ceiling)\n', h.pMax, pkOver);
+
+% Limit recovery after a drive-off fault: FAULT_POSITION latched in idle,
+% timed out to ST_FAULT_IDLE; a reset re-powers through the activation
+% states without a new fault and recovers by a negative jog.
+idleT0 = h.sl.G.G_cfgFaultIdleTimeout;
+h.sl.G.G_cfgFaultIdleTimeout = 1.0;
+softMax = h.sl.sim.chamberContactPos - 20;
+h.sl.G.G_cfgPosSoftLimitMax = softMax;
+h.mcfg.posMax = softMax - 5;
+h.sl.ax.x = softMax + 2 - h.sl.ax.offset;
+h.faultSeen = 0;
+h = runUntil(h, 3, @(h) h.out.statusCode == 10);
+h = runFor(h, 0.2);
+assert(h.out.statusCode == 10 && h.out.faultCode == 3, 'no position fault');
+n = h.sl.G.G_sysFaultCount;
+h = runUntil(h, 3, @(h) h.sl.G.G_sysCurrentState == E.E_SystemState.ST_FAULT_IDLE);
+h = runFor(h, 0.7);
+assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_FAULT_IDLE);
+assert(~h.sl.G.G_staPower.Status && h.y.brakeDisengage == 0, 'drive not off');
+h = command(h, 5);
+h = runUntil(h, 5, @(h) h.sl.G.G_sysCurrentState == E.E_SystemState.ST_RECOVERY);
+assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_RECOVERY, 'recovery not reached');
+assert(h.sl.G.G_sysFaultCount == n, 'fault loop: %d faults', h.sl.G.G_sysFaultCount - n);
+assert(h.y.faultActive == 0 && ~h.sl.G.G_sysBrakeEngaged && h.y.brakeDisengage == 1);
+assert(h.out.state == 1 && h.out.statusCode == 0);
+h = recoverByJog(h, softMax, n);
+h.sl.G.G_cfgFaultIdleTimeout = idleT0;
+h.sl.G.G_cfgPosSoftLimitMax = defSoftMax;
+h.mcfg.posMax = defSoftMax - 5;
+fprintf('ok  recovery from a drive-off fault re-powers without a new fault\n');
+
+% Beyond the limit at power-up, reset before the idle timeout.
+h2 = harnessInit(handshakeTimeout);
+h2.sl.G.G_cfgPosSoftLimitMax = h2.sl.ax.x - 2;
+h2.mcfg.posMax = h2.sl.G.G_cfgPosSoftLimitMax - 5;
+softMax2 = h2.sl.G.G_cfgPosSoftLimitMax;
+h2 = runUntil(h2, 3, @(h) h.out.statusCode == 10);
+h2 = runFor(h2, 0.2);
+assert(h2.out.statusCode == 10 && h2.out.faultCode == 3, 'no position fault at power-up');
+h2 = runFor(h2, 0.5);
+h2 = command(h2, 5);
+h2 = runUntil(h2, 5, @(h) h.sl.G.G_sysCurrentState == h.sl.E.E_SystemState.ST_RECOVERY);
+assert(h2.sl.G.G_sysCurrentState == h2.sl.E.E_SystemState.ST_RECOVERY);
+assert(~h2.sl.G.G_sysBrakeEngaged && h2.y.brakeDisengage == 1 && h2.sl.G.G_sysFaultCount == 1, ...
+    'brake %d, faults %d', h2.sl.G.G_sysBrakeEngaged, h2.sl.G.G_sysFaultCount);
+h2 = recoverByJog(h2, softMax2, 1);
+fprintf('ok  quick reset beyond the limit at power-up re-powers through activation\n');
+
 fprintf('all passed (slave handshake timeout %g s)\n', handshakeTimeout);
+end
+
+
+function h = recoverByJog(h, softMax, nFaults)
+% From ST_RECOVERY beyond the soft limit: a negative jog brings the axis
+% back inside with no fault, and stopping returns to idle through hold.
+h.faultSeen = 0;
+h.in.jogVelocity = -2;
+h = command(h, 3);
+h = runUntil(h, 10, @(h) h.sl.G.G_sysActualPosition < softMax - 1);
+assert(h.sl.G.G_sysActualPosition < softMax - 1, 'jog did not leave the limit');
+assert(h.sl.G.G_sysCurrentState == h.sl.E.E_SystemState.ST_RECOVERY_VELOCITY ...
+    && h.faultSeen == 0);
+h = stopToIdle(h);
+assert(h.sl.G.G_sysFaultCount == nFaults && h.faultSeen == 0);
 end
 
 
@@ -344,6 +479,7 @@ h.tick = 0;
 h.t = 0;
 h.vMax = 0;
 h.xMax = -inf;
+h.pMax = 0;
 h.faultSeen = 0;
 h.brakeEngagements = 0;
 h.prevBrake = 0;
@@ -408,6 +544,7 @@ for k = 1:round(T * 1000)
         [h.sl, h.y] = slaveStep(h.sl, h.u);
         h.vMax = max(h.vMax, abs(h.sl.ax.v));
         h.xMax = max(h.xMax, h.sl.ax.x);
+        h.pMax = max(h.pMax, h.sl.ax.P);
         h.faultSeen = max(h.faultSeen, h.y.faultActive);
         if h.prevBrake == 1 && h.y.brakeDisengage == 0
             h.brakeEngagements = h.brakeEngagements + 1;

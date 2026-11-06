@@ -119,7 +119,12 @@ When `G_mbFaultActive` (IR5) is 1, the slave is in fault state. `G_mbFaultCode` 
 drifts outside the limits while the axis is held. It is suppressed in
 `ST_HOME_LIMIT` (the homing sequence drives below the minimum to find the
 switch) and in the recovery states (the axis starts outside the limits and
-is being jogged back).
+is being jogged back), and in the activation states on the way to recovery
+(`bRecoveryPending`). Pressure mode stops positive motion
+`G_cfgPressureEndMargin` short of `G_cfgPosSoftLimitMax`, so a delivery to
+the end of travel does not raise it. Overpressure is not a fault: above
+`G_cfgPressureCeiling` pressurising motion is zeroed and `G_mbPressureBlock`
+(IR9) is set.
 
 **Symptoms**:
 - Position near or beyond expected limits
@@ -254,8 +259,14 @@ reset succeeds:
 - If the limit condition has cleared (switch released **and** position inside the
   soft limits) → normal recovery (`ST_BRAKE_HOLD`), as before.
 - If the limit is still active → the slave enters **`ST_RECOVERY`** (drive stays
-  energized, brake released). From `ST_FAULT` this is immediate; from `ST_FAULT_IDLE`
-  (slow path) the drive is re-enabled first and then lands in `ST_RECOVERY`.
+  energized, brake released) by one of two paths. Direct: from `ST_FAULT` with the
+  brake released, immediately. Re-power: from `ST_FAULT_IDLE`, or from `ST_FAULT`
+  when the fault was latched with the brake applied (from idle, during activation,
+  or at power-up beyond a limit), the slave sets `bRecoveryPending` and runs the
+  activation states (`ST_DRIVE_RESET`, `ST_DRIVE_ENABLE`, `ST_BRAKE_RELEASE`), then
+  lands in `ST_RECOVERY` at brake release. The position-limit suppression starts at
+  the reset (`InRecovery` is `bInRecovery OR bRecoveryPending`), so the slave does
+  not fault again on the way.
 
 **Operating procedure (two-step — during the reset the mode register (HR2) carries
 the fault-ack code, so the recovery mode is selected afterward):**
