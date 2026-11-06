@@ -452,7 +452,12 @@ eq. (9), holds to within 2e-9 m^3 over 6 s of compression.
 
 The bench tests of 2026-10-26 (`bench/`) replaced
 the guessed parameters. The values the model now carries, with what was
-assumed before:
+assumed before, follow. The measurement plan's runs of 2026-11-05
+(`bench/characterisation/README.md` section 8) are not yet carried over:
+they give a faster drive (7.5 ms lag after 18.2 ms dead time), a hose
+compliance of 0.60 mL/MPa, and, from two fill levels, a liquid K of
+1.70 GPa in series with a constant 0.26 mL/MPa that the chamber model
+does not have.
 
 | Parameter | Measured | Assumed before | Where |
 |---|---|---|---|

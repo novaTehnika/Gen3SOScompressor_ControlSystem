@@ -116,7 +116,14 @@ Piston in the bore, chamber open, no liquid.
    transients stay under 30 %. The steady torque at 5 mm/s is 10 to
    26 %, so the point is lost to the guard, not to the drive.
 
-   `frictionFit` on each; the difference is the seal friction. The
+   ```matlab
+   fu = frictionFit(ru.file);                        % unloaded logs are the first argument
+   fb = frictionFit(rb.file);
+   ```
+
+   The `bare` log must open with the position step (mode 2) and its
+   jogs run below the cylinder entry; one that runs in the bore is a
+   repeat of `u1`. The difference of the two is the seal friction. The
    Coulomb term is the one open question in the friction set: 6.1 kN
    from the friction bench, 4.4 kN from the loaded legs of the stops
    runs. The loaded legs of session 1 settle it.

@@ -316,7 +316,7 @@ fprintf('ok  stopping distance: D %.1f / %.1f mm/s^2 (set %.0f), T0 %.0f / %.0f 
 % reports: the inertia from the open-chamber velocity steps, the friction
 % reversal under load and the stiffness bound from the K300 ramps, and the
 % hose-open run as the contrast.
-steps26 = {fullfile(cap, 's1_cap_steps_*.csv'), fullfile(cap, 's2_cap_steps_*.csv')};
+steps26 = {fullfile(cap, 's1_cap_steps_*_20261026_*.csv'), fullfile(cap, 's2_cap_steps_*_20261026_*.csv')};
 rp = charDrivePath(steps26, struct('quiet', true));
 assert(rp.inertia.n == 74, '%d steps', rp.inertia.n);
 assert(abs(rp.inertia.J_pct_per_mm_s2 - 0.418) < 0.005 && abs(rp.inertia.mass_kg / 4.6e5 - 1) < 0.01, ...
