@@ -6,6 +6,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         TracePanel                      matlab.ui.container.Panel
         PlotTraceButton                 matlab.ui.control.Button
         TraceStatusLabel                matlab.ui.control.Label
+        IntervalDropDown                matlab.ui.control.DropDown
+        LivePlotButton                  matlab.ui.control.Button
         RecordButton                    matlab.ui.control.StateButton
         FaultActiveLamp                 matlab.ui.control.Lamp
         FaultActiveLampLabel            matlab.ui.control.Label
@@ -121,15 +123,44 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         proc = []
         procIn = struct('connected', false, 'statusCode', 0, 'faultCode', 0, ...
             'estop', false, 'pressure', 0, 'volume', 0, ...
-            'pressureBlock', false, 'atEndOfTravel', false)
+            'pressureBlock', false, 'atEndOfTravel', false, ...
+            'positionFromEOT', NaN, 'positionSpeed', Inf)
         procTick = []
         procNote = ''
 
-        % Trace recording: the buffer traceDrain fills from the model's
-        % TraceRing block while traceRecording is set.
+        % Trace stream: every poll the new records of the model's TraceRing
+        % block are drained (traceReader, which keeps no records), aligned
+        % (traceAligner) and appended to the live plot's buffer (traceLive).
+        % While traceRecording is set and not paused, the same aligned rows
+        % are combined into one row per record interval (traceDecim) and
+        % appended to trace.
+        traceReader = []        % traceStart(ring, false): newest record, missed count
+        traceAligner = []       % traceAlignNew state
+        traceLive = []          % traceLiveBuffer
+        traceDecim = []         % traceDecimateNew state of the recording
         traceRecording = false
-        trace = []              % traceStart / traceDrain buffer
+        trace = []              % traceAppend buffer of the recording
         traceStartedAt = ''     % wall-clock start, for the file's metadata
+        traceFromSeq = 0        % rows with a record number above this are taken
+        traceStartSeq = 0       % newest record number when the recording started
+        traceMissed0 = 0        % reader.missed when the recording started
+        traceInterval = 0       % s, the record interval in force (whole exchanges)
+        traceIntervalStart = 0  % s, the interval the recording started with
+        traceChoice = 0.05      % s, the operator's interval (the dropdown outside a procedure)
+        traceOwner = ''         % '' | 'operator' | 'procedure': who ends the recording
+        tracePaused = false     % a procedure step switched recording off
+        traceDeclined = false   % the operator stopped recording during this run
+        procRecord = []         % s, the procedure's last numeric record request
+        liveFig = []            % traceLiveNew struct while the live plot is open
+        livePolls = 0           % polls since the live plot was opened
+
+        % Track steps: the number the TrackSeq block holds, whether a
+        % series is being played, the procedure step the ProcStep block
+        % holds and whether the table update has been timed yet.
+        trackSeq = 0
+        trackActive = false
+        procStepShown = 0
+        trackTableTimed = false
     end
 
     properties (Access = private, Constant)
@@ -184,7 +215,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                     end
                     pause(0.05);
                 end
-                drainTrace(app);        % the records since the last poll, while the ring is readable
+                streamTrace(app);       % the records since the last poll, while the ring is readable
                 stop(app.Simulation);
                 app.wasRunning = false;     % not an unexpected stop
                 finishRecording(app, false);
@@ -206,38 +237,144 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % Show the recording's progress; the label turns red once the
         % ring has overwritten records the app did not read in time.
         function showTraceProgress(app)
-            elapsed = (app.trace.n + app.trace.missed) * app.cfg.exchangePeriod;
-            if app.trace.missed > 0
-                app.TraceStatusLabel.Text = sprintf("%d samples, %.0f s, %d missed", ...
-                    app.trace.n, elapsed, app.trace.missed);
-                app.TraceStatusLabel.FontColor = [1 0 0];
-            else
-                app.TraceStatusLabel.Text = sprintf("%d samples, %.0f s", ...
-                    app.trace.n, elapsed);
-                app.TraceStatusLabel.FontColor = [0 0 0];
+            missed = app.traceReader.missed - app.traceMissed0;
+            elapsed = (app.traceReader.lastSeq - app.traceStartSeq) * ...
+                app.cfg.exchangePeriod;
+            text = sprintf("%d records, %.0f s, every %g s", app.trace.n, ...
+                elapsed, app.traceInterval);
+            if app.tracePaused
+                text = append(text, ", paused by step");
+            end
+            color = [0 0 0];
+            if missed > 0
+                text = append(text, sprintf(", %d missed", missed));
+                color = [1 0 0];
+            end
+            setText(app, app.TraceStatusLabel, text);
+            if ~isequal(app.TraceStatusLabel.FontColor, color)
+                app.TraceStatusLabel.FontColor = color;
             end
         end
 
-        function startRecording(app)
-            app.trace = traceStart(readBlock(app, "TraceRing"));
+        % Begin a recording that combines the exchanges into rows of the
+        % interval (s; whole exchanges, at least one). The owner is who
+        % ends it: 'operator' (the Record button) or 'procedure'.
+        function startRecording(app, interval, owner)
+            streamTrace(app);
+            L = traceLayout();
+            app.trace = traceAppend([], zeros(0, L.nCol));
+            app.traceFromSeq = app.traceReader.lastSeq;
+            app.traceStartSeq = app.traceReader.lastSeq;
+            app.traceMissed0 = app.traceReader.missed;
+            n = traceIntervalExchanges(interval, app.cfg);
+            app.traceDecim = traceDecimateNew(n);
+            app.traceInterval = n * app.cfg.exchangePeriod;
+            app.traceIntervalStart = app.traceInterval;
+            app.tracePaused = false;
+            app.traceOwner = owner;
             app.traceStartedAt = datestr(now, "yyyy-mm-ddTHH:MM:SS");
             app.traceRecording = true;
             app.TraceStatusLabel.Tooltip = "";
             showTraceProgress(app);
         end
 
-        % Take the records written since the last read from the ring
-        function drainTrace(app)
-            if ~app.traceRecording || ~isRunning(app)
+        % Emit the interval being combined, complete or not, into the
+        % recording
+        function flushRecording(app)
+            L = traceLayout();
+            [app.traceDecim, out] = traceDecimate(app.traceDecim, ...
+                zeros(0, L.nCol), true);
+            app.trace = traceAppend(app.trace, out);
+        end
+
+        % Change the interval of the recording at once: the open interval
+        % is emitted and a new grid starts at the next record.
+        function setRecordInterval(app, interval)
+            streamTrace(app);
+            flushRecording(app);
+            n = traceIntervalExchanges(interval, app.cfg);
+            app.traceDecim = traceDecimateNew(n);
+            app.traceInterval = n * app.cfg.exchangePeriod;
+            showTraceProgress(app);
+        end
+
+        % Stop taking rows and keep the file (a procedure step switched
+        % recording off)
+        function pauseRecording(app)
+            streamTrace(app);
+            flushRecording(app);
+            app.tracePaused = true;
+            showTraceProgress(app);
+        end
+
+        % Take rows again from the next record, at the interval
+        function resumeRecording(app, interval)
+            streamTrace(app);
+            n = traceIntervalExchanges(interval, app.cfg);
+            app.traceFromSeq = app.traceReader.lastSeq;
+            app.traceDecim = traceDecimateNew(n);
+            app.traceInterval = n * app.cfg.exchangePeriod;
+            app.tracePaused = false;
+            showTraceProgress(app);
+        end
+
+        % Put the aligned rows that are newer than the recording's start
+        % through the decimator into the recording
+        function takeRecords(app, rows)
+            if isempty(rows)
+                return
+            end
+            L = traceLayout();
+            rows = rows(rows(:, L.col.seq) > app.traceFromSeq, :);
+            [app.traceDecim, out] = traceDecimate(app.traceDecim, rows, false);
+            app.trace = traceAppend(app.trace, out);
+        end
+
+        % Drain the ring on every poll while the model runs, recording or
+        % not: the new records are aligned and appended to the live plot's
+        % buffer, and to the recording unless it is paused.
+        function streamTrace(app)
+            if ~isRunning(app) || isempty(app.traceReader)
                 return
             end
             try
-                app.trace = traceDrain(app.trace, readBlock(app, "TraceRing"));
-                showTraceProgress(app);
+                [app.traceReader, new] = traceDrain(app.traceReader, ...
+                    readBlock(app, "TraceRing"));
+                [app.traceAligner, aligned] = traceAlign(app.traceAligner, new, false);
+                app.traceLive = traceLiveAppend(app.traceLive, aligned);
+                if app.traceRecording && ~app.tracePaused
+                    takeRecords(app, aligned);
+                end
+                if app.traceRecording
+                    showTraceProgress(app);
+                end
             catch ME
                 app.TraceStatusLabel.Text = append("Trace read failed: ", ME.message);
                 app.TraceStatusLabel.FontColor = [1 0 0];
             end
+        end
+
+        % Redraw the live plot every cfg.livePlotPeriod while it is open;
+        % a closed figure clears it.
+        function updateLivePlot(app)
+            if isempty(app.liveFig)
+                return
+            end
+            app.livePolls = app.livePolls + 1;
+            every = max(1, round(app.cfg.livePlotPeriod / app.cfg.displayPeriod));
+            if mod(app.livePolls, every) ~= 0
+                return
+            end
+            if ~traceLiveUpdate(app.liveFig, app.traceLive)
+                app.liveFig = [];
+            end
+        end
+
+        function closeLivePlot(app)
+            if ~isempty(app.liveFig) && ishghandle(app.liveFig.fig)
+                delete(app.liveFig.fig);
+            end
+            app.liveFig = [];
         end
 
         % End the recording and save it. The file is written to the
@@ -247,10 +384,25 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             if ~app.traceRecording
                 return
             end
-            drainTrace(app);
+            L = traceLayout();
+            streamTrace(app);
+            try
+                if ~app.tracePaused
+                    % The rows the aligner still holds back, without a window
+                    [~, tail] = traceAlign(app.traceAligner, zeros(0, L.nCol), true);
+                    takeRecords(app, tail);
+                end
+                flushRecording(app);
+            catch ME
+                app.TraceStatusLabel.Text = append("Trace read failed: ", ME.message);
+                app.TraceStatusLabel.FontColor = [1 0 0];
+            end
             app.traceRecording = false;     % before any file I/O or dialog
+            app.traceOwner = '';
+            app.tracePaused = false;
             app.TraceStatusLabel.Tooltip = "";
             app.TraceStatusLabel.FontColor = [0 0 0];
+            missed = app.traceReader.missed - app.traceMissed0;
             if app.trace.n == 0
                 app.TraceStatusLabel.Text = "Nothing recorded";
                 updateButtons(app);
@@ -260,7 +412,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 file = char(fullfile(capturesFolder(app), append("trace_", ...
                     datestr(now, "yyyymmdd_HHMMSS"), ".csv")));
                 traceWriteCsv(file, app.trace.data(1:app.trace.n, :), ...
-                    traceMeta(app.trace, app.cfg, app.traceStartedAt));
+                    traceMeta(struct('n', app.trace.n, 'missed', missed), ...
+                    app.cfg, app.traceStartedAt, app.traceIntervalStart));
                 if interactive
                     [name, folder] = uiputfile("*.csv", "Save trace", file);
                     figure(app.UIFigure);
@@ -273,9 +426,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 [~, base, ext] = fileparts(file);
                 app.TraceStatusLabel.Text = append("Saved ", base, ext);
                 app.TraceStatusLabel.Tooltip = string(file);
-                if app.trace.missed > 0
+                if missed > 0
                     app.TraceStatusLabel.Text = append(app.TraceStatusLabel.Text, ...
-                        sprintf(" (%d missed)", app.trace.missed));
+                        sprintf(" (%d missed)", missed));
                     app.TraceStatusLabel.FontColor = [1 0 0];
                 end
             catch ME
@@ -283,6 +436,47 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 app.TraceStatusLabel.FontColor = [1 0 0];
             end
             updateButtons(app);
+        end
+
+        % The interval dropdown's text: the interval, and its rate when
+        % faster than 1 Hz
+        function text = intervalText(~, interval)
+            text = sprintf('%g s', interval);
+            if interval < 1
+                text = sprintf('%s (%g Hz)', text, 1 / interval);
+            end
+        end
+
+        % The dropdown shows the operator's interval, or while a procedure
+        % records the interval in force (as an added item when it is not
+        % one of the presets).
+        function showInterval(app)
+            shown = app.traceChoice;
+            if procIsActive(app) && app.traceRecording && ~app.tracePaused
+                shown = app.traceInterval;
+            end
+            values = app.cfg.traceIntervalPresets(:)';
+            if ~any(abs(values - shown) < 1e-9)
+                values = [values shown];
+            end
+            dd = app.IntervalDropDown;
+            if ~isequal(dd.ItemsData, values)
+                dd.ItemsData = [];
+                dd.Items = arrayfun(@(v) intervalText(app, v), values, ...
+                    'UniformOutput', false);
+                dd.ItemsData = values;
+            end
+            [~, idx] = min(abs(values - shown));
+            if ~isequal(dd.Value, values(idx))
+                dd.Value = values(idx);
+            end
+        end
+
+        % A procedure is running, waiting for the operator, paused or
+        % aborting
+        function tf = procIsActive(app)
+            tf = ~isempty(app.proc) && any(strcmp(app.proc.state, ...
+                {'running', 'waitOperator', 'paused', 'aborting'}));
         end
 
         function p = blockPath(app, name)
@@ -375,6 +569,43 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.activeTarget = NaN;
             app.opConfirmed = false;
             setSpeedCap(app, NaN);
+            if app.trackActive
+                endTrack(app);
+            end
+        end
+
+        % Stop playing the track table: TrackMode back to 0, so the model
+        % passes the Constant targets through again.
+        function endTrack(app)
+            app.trackActive = false;
+            try
+                setBlock(app, "TrackMode", 0);
+            catch
+            end
+        end
+
+        % Replace the model workspace's trackTable. The variable-tuning
+        % API of the simulation is tried first; without it the variable
+        % is assigned and the model updated. The first update is timed on
+        % the status line.
+        function setTrackTable(app, tbl)
+            t0 = tic;
+            try
+                setVariable(app.Simulation, "trackTable", tbl, ...
+                    "Workspace", char(app.modelName));
+                path = "tuned";
+            catch
+                assignin(get_param(char(app.modelName), "ModelWorkspace"), ...
+                    "trackTable", tbl);
+                set_param(char(app.modelName), "SimulationCommand", "update");
+                path = "model update";
+            end
+            if ~app.trackTableTimed
+                app.trackTableTimed = true;
+                app.procNote = sprintf( ...
+                    "Track table set in %.2f s (%s, %d values)", toc(t0), path, numel(tbl));
+                app.StatusLabel.Text = app.procNote;
+            end
         end
 
         % The procedure step's speed cap (mm/s, NaN for none). The
@@ -487,6 +718,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             % a recording can always be ended.
             app.RecordButton.Enable = connected || app.traceRecording;
             app.RecordButton.Value = app.traceRecording;
+            app.IntervalDropDown.Enable = (connected || app.traceRecording) && ~procActive;
+            showInterval(app);
             if app.traceRecording
                 app.RecordButton.BackgroundColor = app.COLOR_STOP;
                 app.RecordButton.FontColor = [1 1 1];
@@ -571,7 +804,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             setText(app, app.PressureValue, readoutText( ...
                 app.pressureInfo.toUnit(d.pressure), app.pressureInfo.decimals, 0));
             setText(app, app.PositionValue, readoutText(app.cfg.posEOT - d.position, 2, 0));
-            drainTrace(app);
+            streamTrace(app);
+            updateLivePlot(app);
             % Positive while the piston moves toward the end of travel
             setText(app, app.FlowValue, readoutText( ...
                 mLPerMm(app.cfg) * d.velocity, 2, app.cfg.flowDeadband));
@@ -598,7 +832,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 'pressure', d.pressure, ...
                 'volume', sweptVolume(d.position, app.cfg), ...
                 'pressureBlock', d.pressureBlock, ...
-                'atEndOfTravel', d.atEndOfTravel);
+                'atEndOfTravel', d.atEndOfTravel, ...
+                'positionFromEOT', app.cfg.posEOT - d.position, ...
+                'positionSpeed', effectiveSpeed(app));
             stepProcedure(app);
             updateButtons(app);
 
@@ -677,6 +913,13 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                     p, speedFromPercent(p, app.cfg))};
             end
             setSpeedPercent(app, app.cfg.speedDefault);
+
+            % Trace stream state, so the live plot can open before the
+            % first connection; the dropdown starts at the default interval.
+            app.traceAligner = traceAlignNew();
+            app.traceLive = traceLiveBuffer(app.cfg);
+            app.traceChoice = app.cfg.traceIntervalDefault;
+            showInterval(app);
 
             createProcPools(app);
             loadProcedure(app);
@@ -990,12 +1233,22 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
             app.procTick = tic;
             [app.proc, req] = procStep(app.proc, app.procIn, dt);
+            % The step number for the trace's procStep column, written on change
+            k = 0;
+            if procIsActive(app)
+                k = app.proc.k;
+            end
+            if k ~= app.procStepShown && isRunning(app)
+                setBlock(app, "ProcStep", k);
+                app.procStepShown = k;
+            end
             executeProcRequest(app, req);
             renderProcedure(app);
         end
 
         % Turn the engine's requests into commands, in the engine's order:
-        % parameters, mixer, stop, operation, volume zero. The operation
+        % parameters, mixer, stop, track, operation, volume zero, record
+        % interval, end of recording. The operation
         % goes through the same interlock as the manual buttons; when it
         % is not allowed nothing is sent and the engine sees the cause on
         % its next poll.
@@ -1018,6 +1271,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 else
                     clearOp(app);
                 end
+            end
+            if ~isempty(req.track)
+                executeTrackRequest(app, req.track);
             end
             if req.op >= 0 && motionAllowed(app) && ~app.ManualControlButton.Value
                 switch req.op
@@ -1061,6 +1317,91 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             if req.zeroVolume
                 zeroVolume(app);
             end
+            if ~isempty(req.record)
+                executeRecordRequest(app, req.record);
+            end
+            if req.recordEnd
+                endProcedureRecording(app);
+            end
+        end
+
+        % A track step's start or end. An end is carried out whenever the
+        % model runs, so no stale series plays in the next pressure or
+        % position operation; a start only where an operation is allowed.
+        % The table is written first, then the mode, then the sequence
+        % number that restarts the playback.
+        function executeTrackRequest(app, track)
+            if strcmp(track.action, 'end')
+                endTrack(app);
+                return
+            end
+            if ~(motionAllowed(app) && ~app.ManualControlButton.Value)
+                return
+            end
+            try
+                series = track.series(:)';
+                if strcmp(track.mode, 'position')
+                    code = app.OP_POSITION;
+                    series = min(max(app.cfg.posEOT - series, app.cfg.posMin), ...
+                        app.cfg.posMax);
+                else
+                    code = app.OP_PRESSURE;
+                end
+                tbl = [series, series(end) * ones(1, app.cfg.trackTableLength - numel(series))];
+                setTrackTable(app, tbl);
+                setBlock(app, "TrackMode", code);
+                app.trackSeq = app.trackSeq + 1;
+                setBlock(app, "TrackSeq", app.trackSeq);
+                app.trackActive = true;
+            catch ME
+                app.procNote = append("Track not started: ", ME.message);
+                app.StatusLabel.Text = app.procNote;
+            end
+        end
+
+        % The procedure's record interval (s), or 'off'. A number starts a
+        % procedure-owned recording unless the operator stopped one in
+        % this run, changes the interval of a recording that runs, or
+        % resumes a paused one. 'off' pauses a recording.
+        function executeRecordRequest(app, record)
+            if ischar(record) || isstring(record)
+                if app.traceRecording && ~app.tracePaused
+                    pauseRecording(app);
+                end
+                return
+            end
+            app.procRecord = record;
+            if app.traceRecording
+                if app.tracePaused
+                    resumeRecording(app, record);
+                else
+                    setRecordInterval(app, record);
+                end
+            elseif ~app.traceDeclined && isRunning(app)
+                try
+                    startRecording(app, record, 'procedure');
+                catch ME
+                    app.traceRecording = false;
+                    app.TraceStatusLabel.Text = append("Recording not started: ", ME.message);
+                    app.TraceStatusLabel.FontColor = [1 0 0];
+                end
+            end
+        end
+
+        % The run ended. A recording the procedure started is saved
+        % without a dialog; one the operator started goes on at the
+        % operator's interval.
+        function endProcedureRecording(app)
+            if ~app.traceRecording
+                return
+            end
+            if strcmp(app.traceOwner, 'procedure')
+                finishRecording(app, false);
+            elseif app.tracePaused
+                resumeRecording(app, app.traceChoice);
+            else
+                setRecordInterval(app, app.traceChoice);
+            end
         end
 
         % Copy what procView says into the panel's components. A property
@@ -1081,7 +1422,11 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 app.ProcStepList.Value = v.listIndex;
             end
             setText(app, app.ProcHeadingLabel, v.heading);
-            setText(app, app.ProcTitleLabel, v.title);
+            title = char(v.title);
+            if ~isempty(v.stepProgress)
+                title = [title '  (' v.stepProgress ')'];
+            end
+            setText(app, app.ProcTitleLabel, title);
             if ~isequal(app.ProcTextArea.Value, {v.text})
                 app.ProcTextArea.Value = {v.text};
             end
@@ -1181,6 +1526,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 if isRunning(app)
                     app.StatusLabel.Text = "Model is already running";
                 else
+                    app.traceReader = [];
                     start(app.Simulation);
                     app.rto = struct();
                     if isRunning(app)
@@ -1191,6 +1537,15 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                         setBlock(app, "Mixer", app.MixerButton.Value);
                         setBlock(app, "PositionSpeed", speedMmPerS(app));
                         setBlock(app, "TargetVelocity", speedMmPerS(app));
+                        setBlock(app, "ProcStep", 0);
+                        setBlock(app, "TrackMode", 0);
+                        setBlock(app, "TrackSeq", 0);
+                        app.procStepShown = 0;
+                        app.trackSeq = 0;
+                        app.trackActive = false;
+                        app.traceReader = traceStart(readBlock(app, "TraceRing"), false);
+                        app.traceAligner = traceAlignNew();
+                        app.traceLive = traceLiveBuffer(app.cfg);
                         app.StatusLabel.Text = "Connected to Simulink";
                     else
                         app.StatusLabel.Text = append(...
@@ -1260,6 +1615,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 disconnect(app);
             end
             finishRecording(app, false);
+            closeLivePlot(app);
 
             if ~isempty(app.updateTimer) && isvalid(app.updateTimer)
                 stop(app.updateTimer);
@@ -1277,6 +1633,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             % A fresh run; the parameter values entered before are kept.
             app.proc = procNew(app.procDef, app.cfg, app.proc.values);
             app.procNote = '';
+            app.traceDeclined = false;
+            app.procRecord = [];
             procAct(app, 'start');
         end
 
@@ -1449,17 +1807,68 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                     app.TraceStatusLabel.FontColor = [0 0 0];
                     return
                 end
+                % During a run the recording starts at the procedure's last
+                % record interval; it is the operator's and outlives the run.
+                interval = app.IntervalDropDown.Value;
+                if procIsActive(app) && ~isempty(app.procRecord)
+                    interval = app.procRecord;
+                end
                 try
-                    startRecording(app);
+                    startRecording(app, interval, 'operator');
                 catch ME
                     app.traceRecording = false;
                     app.TraceStatusLabel.Text = append("Recording not started: ", ME.message);
                     app.TraceStatusLabel.FontColor = [1 0 0];
                 end
             else
+                % Stopping during a run keeps the procedure from starting
+                % another recording in it.
+                if procIsActive(app)
+                    app.traceDeclined = true;
+                end
                 finishRecording(app, true);
             end
             updateButtons(app);
+        end
+
+        % Value changed function: IntervalDropDown
+        % The choice is the operator's; it applies to a running recording
+        % at once, except while a procedure owns the interval.
+        function IntervalDropDownChanged(app, event)
+            if procIsActive(app)
+                showInterval(app);
+                return
+            end
+            app.traceChoice = app.IntervalDropDown.Value;
+            if app.traceRecording
+                try
+                    setRecordInterval(app, app.traceChoice);
+                catch ME
+                    app.TraceStatusLabel.Text = append("Interval not changed: ", ME.message);
+                    app.TraceStatusLabel.FontColor = [1 0 0];
+                end
+            end
+            updateButtons(app);
+        end
+
+        % Button pushed function: LivePlotButton
+        % The plot reads the stream the app drains on every poll, so it
+        % shows the last cfg.livePlotSeconds whether or not Record is on.
+        function LivePlotButtonPushed(app, event)
+            if ~isempty(app.liveFig) && ishghandle(app.liveFig.fig)
+                figure(app.liveFig.fig);
+                return
+            end
+            try
+                app.liveFig = traceLiveNew('on');
+                set(app.liveFig.fig, 'CloseRequestFcn', @(~, ~) closeLivePlot(app));
+                app.livePolls = 0;
+                traceLiveUpdate(app.liveFig, app.traceLive);
+            catch ME
+                app.liveFig = [];
+                app.TraceStatusLabel.Text = append("Live plot failed: ", ME.message);
+                app.TraceStatusLabel.FontColor = [1 0 0];
+            end
         end
 
         % Button pushed function: PlotTraceButton
@@ -1831,7 +2240,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.TracePanel = uipanel(app.UIFigure);
             app.TracePanel.Title = 'Trace';
             app.TracePanel.FontWeight = 'bold';
-            app.TracePanel.Position = [382 275 137 140];
+            app.TracePanel.Position = [382 233 137 182];
 
             % Create RecordButton
             app.RecordButton = uibutton(app.TracePanel, 'state');
@@ -1839,19 +2248,33 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.RecordButton.Tooltip = {'Record the link and the commands to a CSV file'};
             app.RecordButton.Enable = 'off';
             app.RecordButton.Text = 'Record';
-            app.RecordButton.Position = [8 82 121 30];
+            app.RecordButton.Position = [8 128 121 28];
+
+            % Create IntervalDropDown: items and values are set by applyConfig
+            app.IntervalDropDown = uidropdown(app.TracePanel);
+            app.IntervalDropDown.ValueChangedFcn = createCallbackFcn(app, @IntervalDropDownChanged, true);
+            app.IntervalDropDown.Enable = 'off';
+            app.IntervalDropDown.Tooltip = {'Record interval'};
+            app.IntervalDropDown.Position = [8 102 121 22];
 
             % Create TraceStatusLabel
             app.TraceStatusLabel = uilabel(app.TracePanel);
             app.TraceStatusLabel.WordWrap = 'on';
             app.TraceStatusLabel.VerticalAlignment = 'top';
-            app.TraceStatusLabel.Position = [8 36 121 44];
+            app.TraceStatusLabel.Position = [8 56 121 44];
             app.TraceStatusLabel.Text = 'Not recording';
+
+            % Create LivePlotButton
+            app.LivePlotButton = uibutton(app.TracePanel, 'push');
+            app.LivePlotButton.ButtonPushedFcn = createCallbackFcn(app, @LivePlotButtonPushed, true);
+            app.LivePlotButton.Tooltip = {'Pressure, position, velocity and torque of the last minutes'};
+            app.LivePlotButton.Position = [8 31 121 22];
+            app.LivePlotButton.Text = 'Live plot';
 
             % Create PlotTraceButton
             app.PlotTraceButton = uibutton(app.TracePanel, 'push');
             app.PlotTraceButton.ButtonPushedFcn = createCallbackFcn(app, @PlotTraceButtonPushed, true);
-            app.PlotTraceButton.Position = [8 8 121 23];
+            app.PlotTraceButton.Position = [8 6 121 22];
             app.PlotTraceButton.Text = 'Plot trace...';
 
             % Show the figure after all components are created

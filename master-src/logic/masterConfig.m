@@ -75,4 +75,16 @@ cfg.procSettleTime   = 2.0;  % s inside the band for "settled", default
 cfg.procEndVolume    = 5;    % mL swept: at or below this an alsoWhen 'endOfTravel' step ends (above the slave's end margin of 1.0 mm, 3.4 mL)
 cfg.procMaxChecks    = 6;    % checklist items per step (the panel's checkbox pool)
 cfg.procMaxParams    = 8;    % parameters per procedure (the panel's field pool)
+
+% Trace recorder and live plot (operator app).
+cfg.traceIntervalPresets = [0.05 0.1 0.5 1 10 60];  % s, the Trace panel's record intervals
+cfg.traceIntervalDefault = 0.05;    % s, the interval at app start (every exchange)
+cfg.livePlotSeconds      = 600;     % s of history in the live plot
+cfg.livePlotPeriod       = 0.5;     % s between live plot redraws (a multiple of displayPeriod)
+cfg.procRecordDefault    = 1;       % s, a procedure's record interval when it gives none
+
+% Track steps (procedure): the table the shell plays, one value per exchange.
+cfg.trackMaxSeconds      = 3600;    % s, longest track series
+cfg.trackTableLength     = round(cfg.trackMaxSeconds / cfg.exchangePeriod) + 1;  % values in TrackTable
+cfg.trackPressureSlopeMax = Inf;    % atm/s a pressure track may change at; Inf: not checked
 end

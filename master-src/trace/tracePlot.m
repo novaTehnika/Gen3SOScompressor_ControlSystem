@@ -17,10 +17,19 @@ function figs = tracePlot(src, varargin)
 %   figs is the row of the three figure handles:
 %     overview  pressure (atm absolute) with the window mean (steps),
 %               maximum and minimum over each master write when the file
-%               has them (format 2) and the target while the master
+%               has them (format 2 and 3) and the target while the master
 %               is in pressure mode, position from the end of travel with
 %               the command and the target while in position mode,
-%               velocity, torque, on one time axis
+%               velocity, torque, on one time axis. When the file is
+%               decimated (some row combines several exchanges, d.decimated
+%               of traceDerive) the rows are intervals: the pressure row
+%               draws the interval's mean, minimum and maximum and the
+%               target as steps from the interval's start (tStartRel_s),
+%               without the snapshot; the position, velocity and torque
+%               rows draw the interval means (posMeanFromEOT_mm,
+%               velocityMean_mm_s, torqueMean_pct) as steps, and the
+%               command is left out; an interval without a window
+%               (summaryScans 0) leaves a break
 %     delivery  swept volume, flow, and pressure against swept volume
 %     status    status code and master state, mode request and
 %               confirmation, motion flags, link and safety lines, and
@@ -73,6 +82,12 @@ if isempty(opts.savedir) && isfield(d, 'file') && ~isempty(d.file)
 end
 
 t = d.tRel_s;
+decimated = d.decimated;
+if decimated
+    tx = d.tStartRel_s;     % [s] rows are drawn from the start of their interval
+else
+    tx = t;
+end
 bands = shadeRuns(d);
 cTarget = [0.85 0.33 0.10];
 cLine = [0 0.45 0.74];
@@ -85,7 +100,15 @@ ax = zeros(1, 4);
 ax(1) = subplot(4, 1, 1);
 pTarget = maskOut(d.targetPressure_atm, d.statusCode == 5);
 hasWin = any(isfinite(d.pressureMeanAbs_atm));
-if hasWin
+if decimated
+    cWin = [0.65 0.82 0.95];
+    h = drawSeries(tx, {d.pressureMaxAbs_atm, d.pressureMinAbs_atm, ...
+        d.pressureMeanAbs_atm, pTarget}, d.gap, ...
+        {cWin, cWin, cLine2, cTarget}, {'-', '-', '-', '-'}, bands, @stairs);
+    set(h(1:2), 'LineWidth', 0.5);
+    legend(h([1 3 4]), {'interval max/min', 'interval mean', 'target'}, ...
+        'Location', 'northeast');
+elseif hasWin
     cWin = [0.65 0.82 0.95];
     h = drawSeries(t, {d.pressureMaxAbs_atm, d.pressureMinAbs_atm, ...
         d.pressureMeanAbs_atm, d.pressureAbs_atm, pTarget}, d.gap, ...
@@ -103,15 +126,31 @@ ylabel('pressure [atm abs]');
 title('Overview');
 ax(2) = subplot(4, 1, 2);
 tgt = maskOut(d.targetFromEOT_mm, d.statusCode == 2 | d.statusCode == 3);
-h = drawSeries(t, {d.posFromEOT_mm, d.commandedFromEOT_mm, tgt}, d.gap, ...
-    {cLine, cLine2, cTarget}, {'-', '--', '-'}, bands, @plot);
-legend(h, {'position', 'commanded', 'target'}, 'Location', 'northeast');
+if decimated
+    h = drawSeries(tx, {d.posMeanFromEOT_mm, tgt}, d.gap, ...
+        {cLine, cTarget}, {'-', '-'}, bands, @stairs);
+    legend(h, {'position mean', 'target'}, 'Location', 'northeast');
+else
+    h = drawSeries(t, {d.posFromEOT_mm, d.commandedFromEOT_mm, tgt}, d.gap, ...
+        {cLine, cLine2, cTarget}, {'-', '--', '-'}, bands, @plot);
+    legend(h, {'position', 'commanded', 'target'}, 'Location', 'northeast');
+end
 ylabel('from EOT [mm]');
 ax(3) = subplot(4, 1, 3);
-drawSeries(t, {d.velocity_mm_s}, d.gap, {cLine}, {'-'}, bands, @plot);
+if decimated
+    drawSeries(tx, {maskOut(d.velocityMean_mm_s, d.summaryScans > 0)}, ...
+        d.gap, {cLine}, {'-'}, bands, @stairs);
+else
+    drawSeries(t, {d.velocity_mm_s}, d.gap, {cLine}, {'-'}, bands, @plot);
+end
 ylabel('velocity [mm/s]');
 ax(4) = subplot(4, 1, 4);
-drawSeries(t, {d.torque_pct}, d.gap, {cLine}, {'-'}, bands, @plot);
+if decimated
+    drawSeries(tx, {maskOut(d.torqueMean_pct, d.summaryScans > 0)}, ...
+        d.gap, {cLine}, {'-'}, bands, @stairs);
+else
+    drawSeries(t, {d.torque_pct}, d.gap, {cLine}, {'-'}, bands, @plot);
+end
 ylabel('torque [%]');
 xlabel('time [s]');
 linkaxes(ax, 'x');

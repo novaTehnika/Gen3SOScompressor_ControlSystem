@@ -28,6 +28,14 @@ testSpeed(0.05);
 testPressureGuards(0.05);
 testAlsoWhen(0.05);
 testSeedWalk(0.1);
+testRecordField(0.05);
+testTrackValidation();
+testTrackOwn(0.05);
+testTrackBorrow(0.05);
+testTrackPauseResume(0.05);
+testTrackEntry(0.05);
+testTrackSupervision(0.05);
+testTemplate(0.1);
 testEarlyEnd(0.05);
 testBackgroundLost(0.05);
 testTimeout(0.05);
@@ -35,6 +43,7 @@ testRepeat(0.05);
 testWrongState(0.05);
 testPurity();
 testView();
+testStepProgress();
 testPressureView();
 end
 
@@ -936,6 +945,7 @@ assert(abs(mv(4, 4) - 343) < 1e-9 && mv(4, 3) == 0.5);
 assert(abs(mv(5, 4) - (343 + 343 * (1 / 7.8) * 293.15 / 273.15)) < 1e-9);
 assert(all(isnan(mv([1 3 5], 3))));
 assert(isequal(h.params{1}, struct('SalineVolume', 343, 'OxygenRatio', 1)));
+assert(isequal(h.records, {cfg.procRecordDefault}) && h.recordEnds == 1);
 fprintf('ok  the seed procedure walks to the end (%d operations)\n', size(h.events, 1));
 end
 
@@ -991,6 +1001,599 @@ assert(strcmp(mpa.pressureTargetText, sprintf('%.3f MPa abs', 3 / cfg.atmPerMPa)
 fprintf('ok  procView converts pressure parameters, ranges, texts and the held pressure\n');
 end
 
+% ===== Record and track scenarios =====
+
+function testRecordField(dt)
+conf = @(t, varargin) struct('type', 'confirm', 'title', t, varargin{:});
+% The default, an override, 'off', an unchanged value and the return to
+% the procedure's own, each emitted once, at the step's entry.
+proc = mk({conf('A'), conf('B', 'record', 5), conf('C', 'record', 'off'), ...
+    conf('D', 'record', 'off'), conf('E'), conf('F')});
+h = newHost(proc, dt);
+assert(h.p.def.record == h.cfg.procRecordDefault);
+h = walkOperator(h, 500);
+assert(strcmp(h.p.outcome, 'completed'));
+assert(isequal(h.records, {1, 5, 'off', 1}), 'records emitted at entry, not repeated');
+assert(h.recordEnds == 1);
+
+% A procedure-level value, 'off' first, and a NaN step value inheriting.
+p2 = mk({conf('A', 'record', NaN), conf('B')});
+p2.record = 2;
+h = walkOperator(newHost(p2, dt), 500);
+assert(isequal(h.records, {2}) && h.recordEnds == 1);
+p3 = mk({conf('A'), conf('B', 'record', 0.5)});
+p3.record = 'off';
+h = walkOperator(newHost(p3, dt), 500);
+assert(isequal(h.records, {'off', 0.5}));
+
+% recordEnd at abort, once.
+h = newHost(proc, dt);
+h = act(h, 'start');
+h = tick(h);
+assert(isequal(h.records, {1}) && h.recordEnds == 0);
+h = act(h, 'abort');
+h = runUntil(h, @(h) strcmp(h.p.state, 'done'), 5);
+assert(strcmp(h.p.outcome, 'aborted') && h.recordEnds == 1);
+
+% A second run emits its first record again.
+h = act(h, 'reset');
+h = act(h, 'start');
+h = tick(h);
+assert(isequal(h.records, {1, 1}));
+
+% The step that returns after a lost background step emits its own value.
+proc = mk({struct('type', 'machine', 'title', 'Hold', 'op', 'pressure', ...
+        'target', 'pTarget', 'keep', true, 'record', 2), ...
+    conf('Operator', 'record', 7, 'checks', {{'a'}})});
+h = newHost(proc, dt);
+h = act(h, 'start');
+h = runUntil(h, @(h) h.p.k == 2, 10);
+assert(isequal(h.records, {2, 7}));
+h.m.mode = 'idle';
+h.m.op = 0;
+h = runUntil(h, @(h) strcmp(h.p.state, 'paused'), 5);
+h = act(h, 'resume');
+h = tick(h);
+assert(isequal(h.records, {2, 7, 2}), 're-running the hold emits its value');
+h = runUntil(h, @(h) h.p.k == 2, 10);
+assert(isequal(h.records, {2, 7, 2, 7}), 'the return emits the paused step''s');
+
+% Invalid values at either level.
+cfg = masterConfig();
+base = mk({conf('A')});
+vals = {0, -1, 'bogus', Inf, [1 2], {1}};
+for i = 1:numel(vals)
+    q = base;
+    q.record = vals{i};
+    expectBad(q, cfg, sprintf('procedure record %d', i));
+    expectBad(setStep(base, 1, 'record', vals{i}), cfg, sprintf('step record %d', i));
+end
+q = base;
+q.record = 'off';
+procNew(q, cfg);
+procNew(setStep(base, 1, 'record', 'off'), cfg);
+fprintf('ok  record: default, override, off, no repeats, recordEnd, return, invalid values\n');
+end
+
+function testTrackValidation()
+cfg = masterConfig();
+params = {struct('key', 'dur', 'value', 5, 'min', 0, 'max', 5000), ...
+    struct('key', 'zero', 'value', 0, 'min', 0, 'max', 5000), ...
+    struct('key', 'amp', 'value', 0.5, 'min', 0, 'max', 5)};
+trk = struct('type', 'machine', 'title', 'T', 'op', 'track', ...
+    'mode', 'pressure', 'signal', @(t, v) 2 + v.amp * sin(t), 'duration', 5);
+base = mk({trk}, params);
+procNew(base, cfg);
+% Valid: functions (a column, a scalar per sample), matrices, a key, both
+% modes, relative.
+procNew(setStep(base, 1, 'signal', @(t, v) 2 + 0 * t), cfg);
+procNew(setStep(base, 1, 'signal', @(t, v) 2), cfg);
+procNew(setStep(base, 1, 'signal', [0 2; 5 3]), cfg);
+procNew(setStep(base, 1, 'signal', [0 2]), cfg);
+q = setStep(setStep(base, 1, 'signal', [0 -1; 5 1]), 1, 'relative', true);
+procNew(q, cfg);
+procNew(setStep(base, 1, 'duration', 'dur'), cfg);
+procNew(setStep(base, 1, 'duration', cfg.trackMaxSeconds), cfg);
+pos = setStep(setStep(base, 1, 'mode', 'position'), 1, 'signal', ...
+    @(t, v) 100 + 2 * sin(2 * pi * t / 20));
+procNew(pos, cfg);
+procNew(setStep(pos, 1, 'relative', true), cfg);
+% The sampled series is the one the shell will play.
+p = procNew(base, cfg);
+[raw, why, T] = procTrackSeries(p.def.steps(1), p.values, cfg);
+t = (0:100)' * cfg.exchangePeriod;
+assert(isempty(why) && T == 5 && numel(raw) == 101);
+assert(max(abs(raw - (2 + 0.5 * sin(t)))) < 1e-12);
+st = p.def.steps(1);
+st.signal = [0 2; 5 3];
+raw = procTrackSeries(st, p.values, cfg);
+assert(abs(raw(1) - 2) < 1e-12 && abs(raw(51) - 2.5) < 1e-12 && abs(raw(end) - 3) < 1e-12);
+st.signal = [1 2; 2 4];
+raw = procTrackSeries(st, p.values, cfg);
+assert(raw(1) == 2 && raw(end) == 4 && abs(raw(31) - 3) < 1e-12);
+% The check alone.
+assert(isempty(procTrackCheck([1; 2; 3], 'pressure', false, cfg, Inf)));
+assert(~isempty(procTrackCheck([0.5; 2], 'pressure', false, cfg, Inf)));
+assert(~isempty(procTrackCheck([1; 150], 'pressure', false, cfg, Inf)));
+assert(isempty(procTrackCheck([-5; 100], 'pressure', true, cfg, Inf)));
+assert(~isempty(procTrackCheck([0; 200], 'pressure', true, cfg, Inf)));
+assert(~isempty(procTrackCheck([0; 400], 'position', false, cfg, Inf)));
+assert(~isempty(procTrackCheck([0; 0.31], 'position', false, cfg, 6)));
+assert(isempty(procTrackCheck([0; 0.3], 'position', false, cfg, 6)));
+assert(~isempty(procTrackCheck([1; 3], 'pressure', false, cfg, 10)));
+
+bad = {};
+bad{end+1} = rmStepField(base, 1, 'mode');
+bad{end+1} = setStep(base, 1, 'mode', 'jog');
+bad{end+1} = rmStepField(base, 1, 'signal');
+bad{end+1} = setStep(base, 1, 'signal', 'sin');
+bad{end+1} = setStep(base, 1, 'signal', @(t, v) NaN * t);
+bad{end+1} = setStep(base, 1, 'signal', @(t, v) error('smoke:sig', 'no'));
+bad{end+1} = setStep(base, 1, 'signal', @(t, v) Inf);
+bad{end+1} = setStep(base, 1, 'signal', [0 2 3; 5 3 4]);
+bad{end+1} = setStep(base, 1, 'signal', [0 NaN; 5 3]);
+bad{end+1} = setStep(base, 1, 'signal', [0 2; 0 3]);
+bad{end+1} = setStep(base, 1, 'signal', [5 2; 1 3]);
+bad{end+1} = setStep(base, 1, 'signal', [-1 2; 5 3]);
+bad{end+1} = setStep(base, 1, 'signal', zeros(0, 2));
+bad{end+1} = rmStepField(base, 1, 'duration');
+bad{end+1} = setStep(base, 1, 'duration', 'noSuchKey');
+bad{end+1} = setStep(base, 1, 'duration', 'zero');
+bad{end+1} = setStep(base, 1, 'duration', 0);
+bad{end+1} = setStep(base, 1, 'duration', -3);
+bad{end+1} = setStep(base, 1, 'duration', Inf);
+bad{end+1} = setStep(base, 1, 'duration', cfg.trackMaxSeconds + 1);
+bad{end+1} = setStep(base, 1, 'signal', @(t, v) 200 + 0 * t);   % above the ceiling
+bad{end+1} = setStep(base, 1, 'signal', @(t, v) 0.5 + 0 * t);   % below ambient
+bad{end+1} = setStep(setStep(base, 1, 'signal', [0 0; 5 200]), 1, 'relative', true);
+bad{end+1} = setStep(pos, 1, 'signal', @(t, v) 10 * t);          % 10 mm/s
+bad{end+1} = setStep(pos, 1, 'signal', @(t, v) 400 + 0 * t);
+bad{end+1} = setStep(setStep(pos, 1, 'signal', [0 0; 1 400]), 1, 'relative', true);
+for f = {{'keep', true}, {'target', 3}, {'unit', 'mm'}, {'speed', 1}, ...
+        {'alsoWhen', 'endOfTravel'}, {'until', 'running'}}
+    bad{end+1} = setStep(base, 1, f{1}{1}, f{1}{2}); %#ok<AGROW>
+end
+bad{end+1} = setStep(base, 1, 'relative', 'yes');
+for f = {{'mode', 'pressure'}, {'signal', [0 1]}, {'relative', true}}
+    bad{end+1} = setStep(mk({struct('type', 'confirm', 'title', 'C')}, params), ...
+        1, f{1}{1}, f{1}{2}); %#ok<AGROW>
+    bad{end+1} = setStep(mk({struct('type', 'machine', 'title', 'M', ...
+        'op', 'position', 'target', 1)}, params), 1, f{1}{1}, f{1}{2}); %#ok<AGROW>
+    bad{end+1} = setStep(mk({struct('type', 'wait', 'title', 'W', ...
+        'duration', 1)}, params), 1, f{1}{1}, f{1}{2}); %#ok<AGROW>
+end
+% A timed wait's duration key, and a key where only a number fits.
+wait = mk({struct('type', 'wait', 'title', 'W', 'duration', 'dur')}, params);
+procNew(wait, cfg);
+bad{end+1} = setStep(wait, 1, 'duration', 'noSuchKey');
+bad{end+1} = setStep(wait, 1, 'duration', 'zero_missing');
+bad{end+1} = mk({struct('type', 'confirm', 'title', 'C', 'duration', 'dur')}, params);
+bad{end+1} = mk({struct('type', 'machine', 'title', 'M', 'op', 'home', ...
+    'duration', 'dur')}, params);
+bad{end+1} = mk({struct('type', 'machine', 'title', 'P', 'op', 'pressure', ...
+    'target', 3, 'keep', true), struct('type', 'wait', 'title', 'S', ...
+    'until', 'settled', 'duration', 'dur')}, params);
+for i = 1:numel(bad)
+    expectBad(bad{i}, cfg, sprintf('bad track procedure %d', i));
+end
+procNew(setStep(wait, 1, 'duration', 'zero'), cfg);   % a zero wait is fine
+fprintf('ok  track: valid signals and durations; %d invalid procedures raise procNew:bad\n', ...
+    numel(bad));
+end
+
+function testTrackOwn(dt)
+% A track with no hold of its mode requests its own operation, plays the
+% series and stops it when the series has played.
+sig = @(t, v) 2 + 0.5 * sin(2 * pi * t / 4);
+proc = mk({struct('type', 'machine', 'title', 'Track', 'op', 'track', ...
+    'mode', 'pressure', 'signal', sig, 'duration', 4), ...
+    struct('type', 'confirm', 'title', 'Done')});
+h = newHost(proc, dt);
+raw = procTrackSeries(h.p.def.steps(1), h.p.values, h.cfg);
+h = act(h, 'start');
+h = runUntil(h, @(h) ~isempty(h.tracks), 5);
+assert(size(h.events, 1) == 1 && h.events(1, 2) == 4);
+assert(abs(h.events(1, 4) - raw(1)) < 1e-12 && strcmp(h.units{1}, 'atm'));
+assert(isnan(h.events(1, 3)));
+tr = h.tracks{1}.req;
+assert(strcmp(tr.action, 'start') && strcmp(tr.mode, 'pressure'));
+assert(isequal(tr.series, raw) && ~tr.relative && tr.offset == 0 && tr.duration == 4);
+assert(abs(h.tracks{1}.t - h.events(1, 1)) < 1e-12, 'the op and the track start together');
+tOp = h.events(1, 1);
+h = runUntil(h, @(h) size(h.events, 1) == 2, 20);
+assert(h.events(2, 2) == -1 && numel(h.tracks) == 2);
+assert(strcmp(h.tracks{2}.req.action, 'end') && h.tracks{2}.t == h.events(2, 1), ...
+    'the stop and the track end go together');
+played = h.events(2, 1) - tOp;
+assert(abs(played - (4 + 0.15)) <= 2 * dt + 1e-9, 'duration plus the starting delay');
+h = runUntil(h, @(h) h.p.k == 2, 5);
+assert(h.m.status == 0 && ~h.p.trk.on);
+h = act(h, 'confirm');
+h = tick(h);
+assert(strcmp(h.p.outcome, 'completed') && h.recordEnds == 1);
+assert(size(h.events, 1) == 2, 'no stop at the end: nothing was held');
+
+% The model followed the series while it played.
+h = newHost(proc, dt);
+h = act(h, 'start');
+h = runUntil(h, @(h) h.p.trk.t >= 1, 10);
+assert(any(abs(raw - h.m.target) < 1e-12) && abs(h.m.target - raw(1)) > 1e-3);
+
+% Relative: the reading at entry is added; the position mode likewise.
+h = newHost(setStep(proc, 1, 'relative', true), dt);
+h.m.pressure = 3;
+h = act(h, 'start');
+h = runUntil(h, @(h) ~isempty(h.tracks), 5);
+tr = h.tracks{1}.req;
+assert(tr.relative && tr.offset == 3 && isequal(tr.series, raw + 3));
+assert(abs(h.events(1, 4) - (raw(1) + 3)) < 1e-12);
+assert(abs(h.p.trk.offset - 3) < 1e-12);
+procPos = mk({struct('type', 'machine', 'title', 'Track', 'op', 'track', ...
+    'mode', 'position', 'signal', @(t, v) 100 + t, 'duration', 3)});
+h = newHost(procPos, dt);
+h = act(h, 'start');
+h = runUntil(h, @(h) ~isempty(h.tracks), 5);
+assert(h.events(1, 2) == 2 && strcmp(h.units{1}, 'mm') && h.events(1, 4) == 100);
+assert(strcmp(h.tracks{1}.req.mode, 'position') && h.tracks{1}.req.series(end) == 103);
+h = runUntil(h, @(h) strcmp(h.p.state, 'done'), 20);
+assert(strcmp(h.p.outcome, 'completed') && h.events(end, 2) == -1);
+fprintf('ok  a track with no hold requests its own operation, plays and stops it (dt %.2f)\n', dt);
+end
+
+function testTrackBorrow(dt)
+% A track over a hold of its mode sends no operation, leaves the hold
+% running and the background record untouched, and the steps after it see
+% the hold's own target again.
+sig = @(t, v) 0.5 * sin(2 * pi * t / 3);
+proc = mk({struct('type', 'machine', 'title', 'Hold', 'op', 'pressure', ...
+        'target', 'pTarget', 'until', 'running', 'keep', true), ...
+    struct('type', 'wait', 'title', 'Settle', 'until', 'settled', 'duration', 1), ...
+    struct('type', 'machine', 'title', 'Track', 'op', 'track', ...
+        'mode', 'pressure', 'signal', sig, 'relative', true, 'duration', 3), ...
+    struct('type', 'wait', 'title', 'Settle again', 'until', 'settled', ...
+        'duration', 1), ...
+    struct('type', 'machine', 'title', 'End', 'op', 'stop')});
+h = newHost(proc, dt);
+h = act(h, 'start');
+h = runUntil(h, @(h) h.p.k == 3 && ~isempty(h.tracks), 30);
+assert(sum(h.events(:, 2) == 4) == 1 && size(h.events, 1) == 1, 'no op for the track');
+bg = h.p.bg;
+assert(bg.op == 4 && bg.step == 1 && bg.target == 3 && ~bg.lost);
+tr = h.tracks{1}.req;
+assert(tr.relative && abs(tr.offset - h.m.pressure) < 0.2 && abs(tr.offset - 3) < 0.3);
+assert(h.p.trk.on && h.p.trk.borrow);
+nEv = size(h.events, 1);
+while h.p.k == 3
+    h = tick(h);
+    assert(h.p.bg.op == 4 && h.p.bg.step == 1 && h.p.bg.target == 3 && ~h.p.bg.lost);
+    assert(size(h.events, 1) == nEv || h.p.k ~= 3, 'no op and no stop while tracking');
+end
+assert(numel(h.tracks) == 2 && strcmp(h.tracks{2}.req.action, 'end'));
+assert(size(h.events, 1) == nEv, 'no stop at the end of a borrowed track');
+assert(h.p.bg.op == 4 && h.p.bg.target == 3 && ~h.p.trk.on);
+assert(h.m.status == 5 && abs(h.m.target - 3) < 1e-12, 'the hold''s own target again');
+h = runUntil(h, @(h) h.p.k == 5, 20);
+assert(h.p.stepDone(4), 'the settled wait completes on the old target');
+h = runUntil(h, @(h) strcmp(h.p.state, 'done'), 10);
+assert(isequal(h.events(:, 2)', [4 -1]));
+fprintf('ok  a track over a hold borrows it: no op, no stop, background intact (dt %.2f)\n', dt);
+end
+
+function testTrackPauseResume(dt)
+sig = @(t, v) 0.5 * sin(2 * pi * t / 3);
+trk = struct('type', 'machine', 'title', 'Track', 'op', 'track', ...
+    'mode', 'pressure', 'signal', sig, 'relative', true, 'duration', 6);
+
+% Own operation: pause stops it and ends the track; resume issues both
+% again, with the offset of the first issue.
+proc = mk({trk, struct('type', 'confirm', 'title', 'Done')});
+h = newHost(proc, dt);
+h.m.pressure = 3;
+h = act(h, 'start');
+h = runUntil(h, @(h) h.p.trk.t >= 1.5, 20);
+first = h.tracks{1}.req;
+nEv = size(h.events, 1);
+h = act(h, 'pause');
+h = tick(h);
+assert(strcmp(h.p.state, 'paused') && ~h.p.trk.on);
+assert(size(h.events, 1) == nEv + 1 && h.events(end, 2) == -1);
+assert(numel(h.tracks) == 2 && strcmp(h.tracks{2}.req.action, 'end'));
+assert(h.tracks{2}.t == h.events(end, 1));
+h = runFor(h, 0.6);
+assert(h.m.status == 0);
+h.m.pressure = 4.5;     % the reading has moved since
+h = act(h, 'resume');
+h = runUntil(h, @(h) numel(h.tracks) == 3, 1);
+assert(h.events(end, 2) == 4);
+again = h.tracks{3}.req;
+assert(strcmp(again.action, 'start') && isequal(again.series, first.series));
+assert(again.offset == 3 && again.offset == first.offset, 'the offset is kept');
+assert(h.p.trk.t == 0 && h.p.trk.on && ~h.p.trk.borrow);
+h = runUntil(h, @(h) h.p.k == 2, 30);
+assert(numel(h.tracks) == 4 && strcmp(h.tracks{4}.req.action, 'end'));
+assert(h.events(end, 2) == -1);
+
+% Borrowed: pause ends the track only; the hold keeps running.
+proc = mk({struct('type', 'machine', 'title', 'Hold', 'op', 'pressure', ...
+        'target', 'pTarget', 'until', 'running', 'keep', true), trk, ...
+    struct('type', 'confirm', 'title', 'Done')});
+h = newHost(proc, dt);
+h = act(h, 'start');
+h = runUntil(h, @(h) h.p.k == 2 && h.p.trk.t >= 1.5, 30);
+first = h.tracks{1}.req;
+nEv = size(h.events, 1);
+h = act(h, 'pause');
+h = tick(h);
+assert(strcmp(h.p.state, 'paused') && ~h.p.trk.on);
+assert(size(h.events, 1) == nEv, 'no stop for a borrowed track');
+assert(numel(h.tracks) == 2 && strcmp(h.tracks{2}.req.action, 'end'));
+h = runFor(h, 0.6);
+assert(h.m.status == 5 && h.p.bg.op == 4 && ~h.p.bg.lost, 'the hold carries on');
+assert(abs(h.m.target - 3) < 1e-12, 'the hold''s target is back');
+h = act(h, 'resume');
+h = runUntil(h, @(h) numel(h.tracks) == 3, 1);
+assert(strcmp(h.tracks{3}.req.action, 'start'));
+assert(isequal(h.tracks{3}.req.series, first.series) && size(h.events, 1) == nEv);
+assert(h.p.trk.borrow && h.p.trk.t == 0);
+h = runUntil(h, @(h) h.p.k == 3, 30);
+assert(size(h.events, 1) == nEv && strcmp(h.tracks{end}.req.action, 'end'));
+
+% A pressure-ceiling pause ends the track the same way.
+proc = mk({trk});
+h = newHost(proc, dt);
+h.m.pressure = 3;
+h = act(h, 'start');
+h = runUntil(h, @(h) h.p.trk.t >= 1, 20);
+h.m.pressureBlock = true;
+h = tick(h);
+assert(strcmp(h.p.state, 'paused') && ~h.p.trk.on);
+assert(strcmp(h.tracks{end}.req.action, 'end') && h.events(end, 2) == -1);
+fprintf('ok  track pause and resume: own operation stopped, borrowed hold kept (dt %.2f)\n', dt);
+end
+
+function testTrackEntry(dt)
+cfg = masterConfig();
+sig = @(t, v) 0.5 * sin(2 * pi * t / 3);
+rel = struct('type', 'machine', 'title', 'Track', 'op', 'track', ...
+    'mode', 'pressure', 'signal', sig, 'relative', true, 'duration', 3);
+
+% The entry reading pushes the series above the maximum: a pause with a
+% message, nothing sent, and the offset taken afresh on resume.
+top = cfg.pressureMax * cfg.atmPerMPa + cfg.atmAmbient;
+h = newHost(mk({rel}), dt);
+h.m.pressure = top - 0.2;
+h = act(h, 'start');
+h = runFor(h, 0.5);
+assert(strcmp(h.p.state, 'paused') && isempty(h.p.reason));
+assert(~isempty(strfind(h.p.message, 'Track signal')) ...
+    && ~isempty(strfind(h.p.message, 'outside the pressure limits')), h.p.message);
+assert(isempty(h.events) && isempty(h.tracks) && ~h.p.trk.on && isnan(h.p.trk.offset));
+h.m.pressure = 3;
+h = act(h, 'resume');
+h = runFor(h, 0.3);
+assert(numel(h.tracks) == 1 && h.tracks{1}.req.offset == 3);
+
+% A relative position uses the position reading; the series is in mm from
+% the end of travel.
+pos = struct('type', 'machine', 'title', 'Track', 'op', 'track', ...
+    'mode', 'position', 'signal', @(t, v) 0.5 * t, 'relative', true, 'duration', 4);
+h = newHost(mk({pos}), dt);
+h = act(h, 'start');
+h = runUntil(h, @(h) ~isempty(h.tracks), 5);
+tr = h.tracks{1}.req;
+assert(tr.offset == 300 && abs(tr.series(1) - 300) < 1e-12 && abs(tr.series(end) - 302) < 1e-12);
+assert(h.events(1, 2) == 2 && h.events(1, 4) == 300 && strcmp(h.units{1}, 'mm'));
+
+% A slope above the operator's speed pauses; the same signal runs at a
+% speed that allows it, and without the reading's fields nothing is checked.
+h = newHost(mk({pos}), dt);
+h.posSpeed = 0.4;
+h = act(h, 'start');
+h = runFor(h, 0.5);
+assert(strcmp(h.p.state, 'paused') && ~isempty(strfind(h.p.message, 'faster than the axis speed')));
+assert(isempty(h.events) && isempty(h.tracks));
+h.posSpeed = 0.5;
+h = act(h, 'resume');
+h = runFor(h, 0.3);
+assert(numel(h.tracks) == 1);
+
+% A missing position reading pauses a relative track; an absolute one runs.
+h = newHost(mk({pos}), dt);
+h.omitPosition = true;
+h = act(h, 'start');
+h = runFor(h, 0.5);
+assert(strcmp(h.p.state, 'paused') && ~isempty(strfind(h.p.message, 'Position reading unavailable')));
+assert(isempty(h.events) && isempty(h.tracks));
+absolute = pos;
+absolute.relative = false;
+absolute.signal = @(t, v) 100 + 0.5 * t;
+h = newHost(mk({absolute}), dt);
+h.omitPosition = true;
+h = act(h, 'start');
+h = runFor(h, 0.5);
+assert(numel(h.tracks) == 1 && h.tracks{1}.req.offset == 0);
+
+% A signal that fails on the present values pauses with the reason.
+fn = rel;
+fn.relative = false;
+fn.signal = @(t, v) v.pTarget + 0 * t;
+h = newHost(mk({fn}), dt);
+h.p.values.pTarget = NaN;
+h = act(h, 'start');
+h = runFor(h, 0.5);
+assert(strcmp(h.p.state, 'paused') && ~isempty(strfind(h.p.message, 'Track signal')));
+assert(isempty(h.events) && isempty(h.tracks));
+h.p.values.pTarget = 3;
+h = act(h, 'resume');
+h = runFor(h, 0.3);
+assert(numel(h.tracks) == 1);
+fprintf('ok  track entry: limits, relative offsets, speed, missing reading, failing signal (dt %.2f)\n', dt);
+end
+
+function testTrackSupervision(dt)
+sig = @(t, v) 0.5 * sin(2 * pi * t / 3);
+trk = struct('type', 'machine', 'title', 'Track', 'op', 'track', ...
+    'mode', 'pressure', 'signal', sig, 'relative', true, 'duration', 4);
+proc = mk({trk, struct('type', 'confirm', 'title', 'Done')});
+
+% E-STOP ends the track, nothing else is sent; once cleared, resume runs
+% the step again and it completes.
+h = newHost(proc, dt);
+h.m.pressure = 3;
+h = act(h, 'start');
+h = runUntil(h, @(h) h.p.trk.t >= 1, 20);
+nEv = size(h.events, 1);
+h.m.mode = 'idle';
+h.m.op = 0;
+h.m.estop = true;
+h = tick(h);
+h = tick(h);
+assert(strcmp(h.p.state, 'paused') && strcmp(h.p.reason, 'E-STOP'));
+assert(numel(h.tracks) == 2 && strcmp(h.tracks{2}.req.action, 'end'));
+assert(size(h.events, 1) == nEv, 'no stop after E-STOP');
+h = runFor(h, 0.5);
+assert(numel(h.tracks) == 2);
+h = act(h, 'resume');
+h = tick(h);
+assert(strcmp(h.p.state, 'paused'), 'resume is refused while E-STOP holds');
+h.m.estop = false;
+h = tick(h);
+h = act(h, 'resume');
+h = runUntil(h, @(h) h.p.k == 2, 30);
+assert(numel(h.tracks) == 4 && strcmp(h.tracks{3}.req.action, 'start') ...
+    && strcmp(h.tracks{4}.req.action, 'end'));
+h = act(h, 'confirm');
+h = tick(h);
+assert(strcmp(h.p.outcome, 'completed'));
+
+% Abort during a track sends the stop and the track end.
+h = newHost(proc, dt);
+h.m.pressure = 3;
+h = act(h, 'start');
+h = runUntil(h, @(h) h.p.trk.t >= 1, 20);
+h = act(h, 'abort');
+h = tick(h);
+assert(strcmp(h.p.state, 'aborting') && h.events(end, 2) == -1);
+assert(numel(h.tracks) == 2 && strcmp(h.tracks{2}.req.action, 'end'));
+assert(h.tracks{2}.t == h.events(end, 1));
+h = runUntil(h, @(h) strcmp(h.p.state, 'done'), 5);
+assert(strcmp(h.p.outcome, 'aborted') && h.recordEnds == 1 && numel(h.tracks) == 2);
+
+% Abort from a pause after a track pause sends no second track end.
+h = newHost(proc, dt);
+h.m.pressure = 3;
+h = act(h, 'start');
+h = runUntil(h, @(h) h.p.trk.t >= 1, 20);
+h = act(h, 'pause');
+h = tick(h);
+h = act(h, 'abort');
+h = runUntil(h, @(h) strcmp(h.p.state, 'done'), 5);
+assert(numel(h.tracks) == 2);
+
+% A fault ends it too, and the model stopping aborts with the track ended.
+h = newHost(proc, dt);
+h.m.pressure = 3;
+h = act(h, 'start');
+h = runUntil(h, @(h) h.p.trk.t >= 1, 20);
+h.m.force = 10;
+h.m.faultCode = 7;
+h = tick(h);
+h = tick(h);
+assert(strcmp(h.p.reason, 'Slave fault 7') && strcmp(h.tracks{end}.req.action, 'end'));
+h.m.connected = false;
+h = act(h, 'abort');
+h = tick(h);
+assert(strcmp(h.p.state, 'done') && numel(h.tracks) == 2);
+
+% The hold under a borrowed track ends: the track ends, resume re-runs the
+% hold, returns to the track step and plays it again from its start.
+proc = mk({struct('type', 'machine', 'title', 'Hold', 'op', 'pressure', ...
+        'target', 'pTarget', 'until', 'running', 'keep', true), trk, ...
+    struct('type', 'confirm', 'title', 'Done')});
+h = newHost(proc, dt);
+h.m.pressure = 3;
+h = act(h, 'start');
+h = runUntil(h, @(h) h.p.k == 2 && h.p.trk.t >= 1, 30);
+h.m.mode = 'idle';
+h.m.op = 0;
+h = runUntil(h, @(h) strcmp(h.p.state, 'paused'), 5);
+assert(~h.p.trk.on && strcmp(h.tracks{end}.req.action, 'end'));
+h = act(h, 'resume');
+h = runUntil(h, @(h) h.p.k == 3, 60);
+assert(sum(h.events(:, 2) == 4) == 2);
+starts = cellfun(@(x) strcmp(x.req.action, 'start'), h.tracks);
+assert(sum(starts) == 2 && strcmp(h.tracks{end}.req.action, 'end'));
+fprintf('ok  track supervision: E-STOP, abort, fault, model stop and a lost hold (dt %.2f)\n', dt);
+end
+
+function testTemplate(dt)
+cfg = masterConfig();
+proc = experimentTemplate();
+p = procNew(proc, cfg);
+assert(numel(p.def.steps) == 11 && numel(p.def.params) == 6 && p.def.record == 1);
+h = newHost(proc, dt);
+h = walkOperator(h, 20000);
+assert(strcmp(h.p.state, 'done') && strcmp(h.p.outcome, 'completed'));
+assert(all(h.p.stepDone));
+ops = h.events(:, 2)';
+assert(isequal(ops, [1 2 -1 4 -1 6]), mat2str(ops));
+assert(isequal(h.records, {1, 0.05, 10, 1}), 'records at the entries that change it');
+assert(h.recordEnds == 1);
+starts = cellfun(@(x) strcmp(x.req.action, 'start'), h.tracks);
+assert(numel(h.tracks) == 2 && starts(1) && ~starts(2), 'one track, started and ended');
+% The track borrowed the pressure hold: its start comes after the op 4 and
+% before the stop, with no op 4 between.
+t4 = h.events(ops == 4, 1);
+tStop = h.events(find(ops == -1, 2), 1);
+assert(h.tracks{1}.t > t4 && h.tracks{1}.t < tStop(2) && h.tracks{2}.t < tStop(2));
+assert(sum(ops == 4) == 1);
+tr = h.tracks{1}.req;
+assert(tr.relative && tr.duration == 60 && numel(tr.series) == 1201);
+assert(abs(tr.offset - 5) < 0.3);
+fprintf('ok  the experiment template validates and walks to the end (%d operations)\n', ...
+    size(h.events, 1));
+end
+
+function testStepProgress()
+cfg = masterConfig();
+params = {struct('key', 'dur', 'value', 125, 'min', 0, 'max', 5000)};
+proc = mk({struct('type', 'confirm', 'title', 'C'), ...
+    struct('type', 'wait', 'title', 'W', 'duration', 'dur'), ...
+    struct('type', 'wait', 'title', 'W2', 'duration', 30), ...
+    struct('type', 'machine', 'title', 'T', 'op', 'track', 'mode', 'pressure', ...
+    'signal', @(t, v) 2 + 0 * t, 'duration', 61)}, params);
+p = procNew(proc, cfg);
+assert(isempty(procView(p).stepProgress));
+p = procAction(p, 'start');
+p = procStep(p, idleIn(), 0.05);
+assert(strcmp(procView(p).stepProgress, ''), 'a confirm step has none');
+p = procAction(p, 'confirm');
+p = procStep(p, idleIn(), 0.05);
+assert(strcmp(procView(p).stepProgress, '0:00 / 2:05'));
+p = procStep(p, idleIn(), 60);
+assert(strcmp(procView(p).stepProgress, '1:00 / 2:05'), procView(p).stepProgress);
+p = procStep(p, idleIn(), 60);
+assert(strcmp(procView(p).stepProgress, '2:00 / 2:05'));
+p.values.dur = 120;
+p = procStep(p, idleIn(), 0.05);
+assert(strcmp(p.state, 'running') || p.k == 3);
+p = procStep(p, idleIn(), 0.05);
+assert(p.k == 3 && strcmp(procView(p).stepProgress, '0:00 / 0:30'));
+% A track shows its progress once issued.
+h = newHost(proc, 0.05);
+h = act(h, 'start');
+h = tick(h);
+h = act(h, 'confirm');
+h = runUntil(h, @(h) h.p.k == 4 && ~isempty(h.tracks), 400);
+assert(strcmp(procView(h.p).stepProgress, '0:00 / 1:01'));
+h = runUntil(h, @(h) h.p.trk.t >= 10, 20);
+assert(strcmp(procView(h.p).stepProgress, '0:10 / 1:01'));
+h = act(h, 'abort');
+h = runUntil(h, @(h) strcmp(h.p.state, 'done'), 5);
+assert(isempty(procView(h.p).stepProgress));
+fprintf('ok  procView: stepProgress for a timed wait (number and key) and a track\n');
+end
+
 % ===== Fixtures =====
 
 function proc = mk(steps, params)
@@ -1007,6 +1610,43 @@ end
 
 function proc = setStep(proc, k, field, value)
 proc.steps{k}.(field) = value;
+end
+
+function proc = rmStepField(proc, k, field)
+proc.steps{k} = rmfield(proc.steps{k}, field);
+end
+
+function expectBad(proc, cfg, what)
+% procNew refuses the procedure with its own error.
+ok = false;
+try
+    procNew(proc, cfg);
+catch err
+    ok = strcmp(err.identifier, 'procNew:bad');
+    if ~ok
+        fprintf('%s raised %s: %s\n', what, err.identifier, err.message);
+    end
+end
+assert(ok, '%s was accepted or raised the wrong error', what);
+end
+
+function h = walkOperator(h, guard)
+% Start the run and confirm every operator step (ticking its checks) until
+% the run is done or the guard of ticks is spent.
+h = act(h, 'start');
+n = 0;
+while ~strcmp(h.p.state, 'done') && n < guard
+    h = tick(h);
+    n = n + 1;
+    if strcmp(h.p.state, 'waitOperator')
+        st = h.p.def.steps(h.p.k);
+        for i = 1:numel(st.checks)
+            h = act(h, 'check', i, true);
+        end
+        h = act(h, 'confirm');
+    end
+end
+assert(strcmp(h.p.state, 'done'), 'the run did not finish in %d ticks', guard);
 end
 
 function proc = setParam(proc, k, field, value)
@@ -1055,7 +1695,7 @@ end
 function m = modelInit(cfg)
 % The model's side: the status code the app reads and what drives it.
 m = struct('status', 0, 'mode', 'idle', 'tm', 0, 'op', 0, 'unit', 'mm', ...
-    'target', 0, 'd', 300, 'speed', 50, 'homeT', 1.0, 'pressure', 1, ...
+    'target', 0, 'constTarget', 0, 'trk', [], 'd', 300, 'speed', 50, 'homeT', 1.0, 'pressure', 1, ...
     'connected', true, 'estop', false, 'faultCode', 0, 'inject', '', ...
     'force', [], 'pressureBlock', false, 'atEnd', false);
 m.cfg = cfg;
@@ -1084,6 +1724,7 @@ if req.op >= 0
     else
         tgt = req.target;
     end
+    m.constTarget = tgt;
     if strcmp(m.mode, 'run') && m.op == req.op
         m.target = tgt;        % retarget live
     else
@@ -1092,6 +1733,25 @@ if req.op >= 0
         m.mode = 'starting';
         m.tm = 0;
     end
+end
+% The shell's TrackStep: a series replaces the target of its mode while
+% the operation runs, one value per 0.05 s, and the target returns to the
+% operation's own when it ends.
+if ~isempty(req.track)
+    if strcmp(req.track.action, 'start')
+        m.trk = struct('series', req.track.series, 'mode', req.track.mode, ...
+            't', 0);
+    else
+        m.trk = [];
+        m.target = m.constTarget;
+    end
+end
+if strcmp(m.mode, 'run') && ~isempty(m.trk) && ...
+        ((m.op == 4 && strcmp(m.trk.mode, 'pressure')) || ...
+        (m.op == 2 && strcmp(m.trk.mode, 'position')))
+    i = min(1 + floor(m.trk.t / 0.05 + 1e-9), numel(m.trk.series));
+    m.target = m.trk.series(i);
+    m.trk.t = m.trk.t + dt;
 end
 switch m.mode
     case 'idle'
@@ -1161,6 +1821,12 @@ h.t = 0;
 h.events = zeros(0, 4);      % [time, op code or -1 for a stop, speed, target]
 h.mixer = zeros(0, 2);       % [time, 0/1]
 h.params = {};
+h.tracks = {};               % {struct('t', time, 'req', req.track)}
+h.records = {};              % the record requests, in order
+h.recordEnds = 0;
+h.units = {};                % unit of each op request
+h.omitPosition = false;      % leave positionFromEOT and positionSpeed out of in
+h.posSpeed = Inf;
 h.zero = 0;
 h.tStart = NaN;
 h.tStop = NaN;
@@ -1173,6 +1839,10 @@ in = struct('connected', m.connected, 'statusCode', m.status, ...
     'faultCode', m.faultCode, 'estop', m.estop, 'pressure', m.pressure, ...
     'volume', mLPerMm(h.cfg) * m.d, 'pressureBlock', m.pressureBlock, ...
     'atEndOfTravel', m.atEnd);
+if ~h.omitPosition
+    in.positionFromEOT = m.d;
+    in.positionSpeed = h.posSpeed;
+end
 [h.p, req] = procStep(h.p, in, h.dt);
 h.t = h.t + h.dt;
 if ~isempty(req.params)
@@ -1186,6 +1856,16 @@ if req.stop
 end
 if req.op >= 0
     h.events(end + 1, :) = [h.t req.op req.speed req.target];
+    h.units{end + 1} = req.unit;
+end
+if ~isempty(req.track)
+    h.tracks{end + 1} = struct('t', h.t, 'req', req.track);
+end
+if ~isempty(req.record)
+    h.records{end + 1} = req.record;
+end
+if req.recordEnd
+    h.recordEnds = h.recordEnds + 1;
 end
 if req.zeroVolume
     h.zero = h.zero + 1;

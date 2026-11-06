@@ -1,10 +1,13 @@
 function traceCsvPlot()
 %TRACECSVPLOT Trace CSV writer and reader, derived quantities and plots.
 %
-%   The end-to-end scenario records a stand-in slave through masterStep
-%   and traceStep, drains it at irregular polls and round-trips the
-%   result through a CSV file. The other scenarios use a synthetic record
-%   matrix with a gap, a fault, a link loss and an E-STOP. The stand-in
+%   The end-to-end scenarios record a stand-in slave through masterStep
+%   and traceStep, drain it at irregular polls and round-trip the result
+%   through a CSV file, once as drained (a record per exchange) and once
+%   aligned and decimated to 1 s. The other scenarios use a synthetic
+%   record matrix with a gap, a fault, a link loss and an E-STOP, as the
+%   ring holds it (format 2 reads the summary two records late) and
+%   aligned (format 3), and fixtures of formats 1 and 2. The stand-in
 %   stops short of the slave simulator, so the test is fast.
 %
 %   Run from the repository root:
@@ -15,7 +18,7 @@ L = traceLayout();
 cfg = masterConfig();
 names = traceColumnNames();
 tmp = tempname();
-cleanup = onCleanup(@() deleteIfExists([tmp '.csv'], [tmp '_gap.csv'], [tmp '_empty.csv'], [tmp '_f1.csv']));
+cleanup = onCleanup(@() deleteIfExists([tmp '.csv'], [tmp '_gap.csv'], [tmp '_empty.csv'], [tmp '_f1.csv'], [tmp '_f2.csv'], [tmp '_iv.csv'], [tmp '_a3.csv']));
 
 % End to end: stand-in slave, irregular drain, CSV, read back.
 clear masterStep masterStateMachine traceStep
@@ -32,7 +35,12 @@ for k = 1:L.nCol
     x = buf.data(1:buf.n, k);
     assert(all(abs(d.(names{k}) - x) <= 1e-9 * max(1, abs(x))));
 end
-assert(isnumeric(d.meta.format) && d.meta.format == 2);
+assert(isnumeric(d.meta.format) && d.meta.format == 3);
+assert(d.meta.recordInterval_s == cfg.exchangePeriod);
+assert(find(strcmp(fieldnames(d.meta), 'recordInterval_s')) == ...
+    find(strcmp(fieldnames(d.meta), 'exchangePeriod_s')) + 1);
+mI = traceMeta(buf, cfg, '2026-01-02T03:04:05', 1);
+assert(mI.recordInterval_s == 1);
 assert(ischar(d.meta.started) && strcmp(d.meta.started, '2026-01-02T03:04:05'));
 assert(strcmp(d.meta.source, 'SOS_Gen3_Compressor_Interface'));
 assert(d.meta.records == buf.n && d.meta.missed == buf.missed);
@@ -42,6 +50,7 @@ assert(ischar(d.meta.referenceUnits));
 assert(strcmp(strjoin(fieldnames(d.meta)', ','), strjoin(fieldnames(meta)', ',')));
 assert(strcmp(d.file, file));
 delete(file);
+assert(all(d.procStep == 0) && all(d.nExchanges == 1));
 fprintf('ok  recorded trace round-trips through the CSV\n');
 
 % A header-only file reads back as empty columns.
@@ -131,7 +140,9 @@ fprintf('ok  derived quantities, file geometry and gap flags\n');
 % row k takes the summary of record k+2. It is missing where record k+2 is
 % missing (the last two rows), across the gap (the two rows before it) and
 % where the slave had published no window yet (summaryScans == 0).
-traceWriteCsv(gapFile, data, meta);
+meta2 = meta;
+meta2.format = 2;
+traceWriteCsv(gapFile, data, meta2);
 d = traceDerive(traceReadCsv(gapFile));
 conv = @(x) x * cfg.atmPerMPa + cfg.atmAmbient;     % [MPa gauge -> atm absolute]
 expectNaN = false(n, 1);
@@ -150,17 +161,39 @@ assert(max(abs(d.pressureMeanAbs_atm(ok) - d.pressureAbs_atm(ok))) < 1e-6);
 assert(all(d.pressureMinAbs_atm(ok) < d.pressureMeanAbs_atm(ok)));
 assert(all(d.pressureMaxAbs_atm(ok) > d.pressureMeanAbs_atm(ok)));
 % The file's atmAmbient is used for the summary as for the snapshot
-traceWriteCsv(gapFile, data, meta300);
+meta2_300 = meta300;
+meta2_300.format = 2;
+traceWriteCsv(gapFile, data, meta2_300);
 d3 = traceDerive(traceReadCsv(gapFile));
 assert(max(abs(d3.pressureMeanAbs_atm(ok) - (data(ok + 2, L.col.pressureMeanGauge_MPa) ...
     * cfg.atmPerMPa + 1.5))) < 1e-6);
-fprintf('ok  window summary aligned to the write that opened it, %d of %d rows\n', numel(ok), n);
+assert(all(isnan(d.posMeanFromEOT_mm)));
+fprintf('ok  format 2: window summary taken from record k+2, %d of %d rows\n', numel(ok), n);
+
+% Format 3: the summary is on the row of its window (traceAlign), so the
+% derived means are those of the same row, NaN where summaryScans is 0
+[~, aligned] = traceAlign(traceAlignNew(), data, true);
+assert(isequal(size(aligned), size(data)));
+a3File = [tmp '_a3.csv'];
+traceWriteCsv(a3File, aligned, meta);
+d = traceDerive(traceReadCsv(a3File));
+assert(~d.decimated && all(d.interval_s == cfg.exchangePeriod));
+assert(isequal(isnan(d.pressureMeanAbs_atm), expectNaN));
+assert(isequal(isnan(d.posMeanFromEOT_mm), expectNaN));
+assert(max(abs(d.pressureMeanAbs_atm(ok) - conv(aligned(ok, L.col.pressureMeanGauge_MPa)))) < 1e-7);
+assert(max(abs(d.pressureMinAbs_atm(ok) - conv(aligned(ok, L.col.pressureMinGauge_MPa)))) < 1e-7);
+assert(max(abs(d.pressureMaxAbs_atm(ok) - conv(aligned(ok, L.col.pressureMaxGauge_MPa)))) < 1e-7);
+assert(max(abs(d.pressureMeanAbs_atm(ok) - d.pressureAbs_atm(ok))) < 1e-6);
+assert(max(abs(d.posMeanFromEOT_mm(ok) - (cfg.posEOT - aligned(ok, L.col.positionMean_mm)))) < 1e-9);
+assert(isequal(d.gap, expectGap) && max(abs(d.tStartRel_s - d.tRel_s)) == 0);
+assert(isequal(d.procStep, zeros(n, 1)));
+fprintf('ok  format 3 at 0.05 s: summary columns are the row''s own\n');
 
 % A format 1 file (columns 1-34) still reads: the summary columns derive
 % as NaN, and the plot draws without them.
 f1File = [tmp '_f1.csv'];
-traceWriteCsv(gapFile, data, meta);
-writeFormat1(gapFile, f1File, 34);
+traceWriteCsv(gapFile, data, meta2);
+writeFormat1(gapFile, f1File, 34, 1);
 d1 = traceReadCsv(f1File);
 assert(d1.meta.format == 1 && numel(d1.names) == 34 && size(d1.data, 2) == 34);
 assert(isequal(d1.names, names(1:34)) && ~isfield(d1, 'summarySeq'));
@@ -173,11 +206,65 @@ if graphicsUsable()
     assert(numel(figs) == 3 && all(ishghandle(figs)));
     close(figs);
 end
-fprintf('ok  format 1 file reads, derives NaN summary columns and plots\n');
+assert(all(d1.nExchanges == 1) && all(d1.procStep == 0) && ~d1.decimated);
+assert(all(isnan(d1.posMeanFromEOT_mm)));
+
+% A format 2 file (columns 1-42) still reads and derives by the k+2 rule
+f2File = [tmp '_f2.csv'];
+writeFormat1(gapFile, f2File, 42, 2);
+d2 = traceReadCsv(f2File);
+assert(d2.meta.format == 2 && numel(d2.names) == 42 && ~isfield(d2, 'nExchanges'));
+d2 = traceDerive(d2);
+assert(all(d2.nExchanges == 1) && all(d2.procStep == 0) && ~d2.decimated);
+assert(isequal(isnan(d2.pressureMeanAbs_atm), expectNaN));
+assert(isequal(d2.gap, expectGap) && isequal(d2.tStartRel_s, d2.tRel_s));
+if graphicsUsable()
+    figs = tracePlot(f2File, 'visible', 'off');
+    assert(numel(figs) == 3 && all(ishghandle(figs)));
+    close(figs);
+end
+fprintf('ok  format 2 and format 1 files read, derive (nExchanges 1, procStep 0) and plot\n');
+
+% End to end at 1 s: the drained records are aligned, decimated to 20
+% exchanges with 10 records cut out, written, read and derived.
+clear masterStep masterStateMachine traceStep
+[buf, ~] = recordStandIn(1200, 100);
+raw = buf.data(1:buf.n, :);
+cutAt = 130:139;
+cutSeq = raw(cutAt, L.col.seq);
+raw(cutAt, :) = [];
+[~, al] = traceAlign(traceAlignNew(), raw, true);
+assert(size(al, 1) == size(raw, 1));
+[dec, rowsIv] = traceDecimate(traceDecimateNew(traceIntervalExchanges(1, cfg)), al, true);
+assert(dec.count == 0);
+assert(sum(rowsIv(:, L.col.nExchanges)) == size(al, 1));
+assert(all(rowsIv(:, L.col.nExchanges) <= 20) && any(rowsIv(:, L.col.nExchanges) < 20));
+bufIv = struct('n', size(rowsIv, 1), 'missed', buf.missed);
+ivFile = [tmp '_iv.csv'];
+traceWriteCsv(ivFile, rowsIv, traceMeta(bufIv, cfg, '2026-01-02T03:04:05', 1));
+di = traceReadCsv(ivFile);
+assert(di.meta.format == 3 && di.meta.recordInterval_s == 1);
+di = traceDerive(di);
+assert(di.decimated && all(isfinite(di.pressureMeanAbs_atm(di.summaryScans > 0))));
+assert(all(di.summaryScans(1:end - 1) > 0) && di.summaryScans(end) > 0);
+assert(all(isfinite(di.posMeanFromEOT_mm(di.summaryScans > 0))));
+assert(nnz(di.gap) == 1);
+g = find(di.gap);
+assert(di.seq(g) > max(cutSeq) && di.seq(g - 1) < min(cutSeq));
+assert(max(abs(di.interval_s - di.nExchanges * cfg.exchangePeriod)) < 1e-12);
+assert(max(abs(di.tStartRel_s - (di.tRel_s - (di.nExchanges - 1) * cfg.exchangePeriod))) < 1e-12);
+assert(abs(di.tStartRel_s(1) + 19 * cfg.exchangePeriod) < 1e-9);
+assert(all(di.pressureMinAbs_atm <= di.pressureMeanAbs_atm + 1e-9) ...
+    && all(di.pressureMaxAbs_atm >= di.pressureMeanAbs_atm - 1e-9));
+fprintf('ok  interval file: aligned, decimated to 1 s, written, read and derived (%d rows, one gap)\n', numel(di.seq));
 
 % Plot.
 if graphicsUsable()
-    traceWriteCsv(gapFile, data, meta);
+    figs = tracePlot(ivFile, 'visible', 'off');
+    assert(numel(figs) == 3 && all(ishghandle(figs)));
+    assert(~isempty(get(figs(1), 'Children')));
+    close(figs);
+    traceWriteCsv(gapFile, aligned, meta);
     figs = tracePlot(gapFile, 'visible', 'off');
     assert(numel(figs) == 3);
     for k = 1:3
@@ -241,9 +328,9 @@ for k = 1:numel(varargin)
 end
 end
 
-function writeFormat1(src, dst, nKeep)
+function writeFormat1(src, dst, nKeep, format)
 %WRITEFORMAT1 Copy of a trace CSV with only its first nKeep columns and
-%   format 1 in its header, as the recorder wrote it before the summary.
+%   the given format in its header, as an earlier recorder wrote it.
 txt = fileread(src);
 lines = strsplit(txt, "\n");
 for k = 1:numel(lines)
@@ -254,7 +341,7 @@ for k = 1:numel(lines)
     if ln(1) == '#'
         tok = regexp(ln, '^(#\s*format:\s*)\d+', 'tokens', 'once');
         if ~isempty(tok)
-            lines{k} = [tok{1} '1'];
+            lines{k} = [tok{1} sprintf('%d', format)];
         end
     else
         f = strsplit(strtrim(ln), ',');
@@ -305,6 +392,7 @@ data(:, c.torqueMean_pct) = 10 * sin(0.05 * (seq - 3));
 data(:, c.positionMean_mm) = 100 + 0.5 * 0.05 * (seq - 3);
 data(:, c.summaryScans) = 12;
 data(:, c.summarySeq) = mod(seq, 65536);
+data(:, c.nExchanges) = 1;
 data(30:33, c.summaryScans) = 0;        % no window yet: rows 28-31 have no summary
 data(:, c.modeCode) = 2;
 data(:, c.motionEnable) = 1;
@@ -382,7 +470,7 @@ for step = 0:nSteps - 1
     [mbWrite, doSafety, ~, ~, ~, ~, statusCode, faultCode, state, linkOk] = ...
         masterStep(mbRead, 0, 0, 250, 0, 0, 20, 0, 0, speedFromPercent(cfg.speedDefault, cfg));
     ring = traceStep(mbRead, mbWrite, doSafety, statusCode, faultCode, state, ...
-        linkOk, 0, 0, 250, 20, 0, 0);
+        linkOk, 0, 0, 250, 20, 0, 0, 0);
     if step == startStep
         buf = traceStart(ring);
     end

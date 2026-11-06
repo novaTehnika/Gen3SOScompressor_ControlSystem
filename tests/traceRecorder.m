@@ -56,7 +56,11 @@ for i = 1:L.depth
     assert(ring(i, L.col.position_mm) == pos);
     assert(pos == double(single(100 + 0.5 * step * cfg.dt)));
     assert(isequal(ring(i, 1:L.nCol), expectedRecord(h, step, seq(i))));
+    assert(ring(i, L.col.procStep) == floor(step / 100));
+    assert(ring(i, L.col.nExchanges) == 1);
 end
+assert(L.nCol == 44 && L.width == 45 && L.col.procStep == 43 && L.col.nExchanges == 44);
+assert(numel(unique(ring(:, L.col.procStep))) > 3);
 fprintf('ok  sampling, phase and ring addressing\n');
 
 % Irregular drain.
@@ -77,6 +81,42 @@ assert(buf.lastSeq == d(end, L.col.seq));
 assert(isequal(d, expectedRecords(h, d(:, L.col.seq))));
 assert(numel(unique(h.pollGaps)) > 10);
 fprintf('ok  irregular drain, %d records in %d polls\n', buf.n, numel(h.pollGaps));
+
+% Keep false: the same records come back as new rows, none are stored.
+clear masterStep masterStateMachine traceStep
+h = newRig();
+h = runPolled(h, [], 100, false);
+newKeep = zeros(0, L.nCol);
+newDrop = zeros(0, L.nCol);
+bufDrop = traceStart(h.ring, false);
+bufKeep = traceStart(h.ring);
+assert(bufKeep.keep && ~bufDrop.keep);
+while h.k < 1900
+    h = stepRig(h);
+    if mod(h.k, 17) == 0
+        [bufKeep, nk] = traceDrain(bufKeep, h.ring);
+        [bufDrop, nd] = traceDrain(bufDrop, h.ring);
+        newKeep = [newKeep; nk]; %#ok<AGROW>
+        newDrop = [newDrop; nd]; %#ok<AGROW>
+    end
+end
+assert(isequal(newKeep, newDrop) && size(newKeep, 1) > 700);
+assert(isequal(newKeep, bufKeep.data(1:bufKeep.n, :)));
+assert(bufDrop.n == 0 && bufDrop.lastSeq == bufKeep.lastSeq);
+assert(bufDrop.missed == bufKeep.missed && isequal(bufDrop.gaps, bufKeep.gaps));
+[bufDrop, ~] = traceDrain(bufDrop, h.ring);
+[~, none] = traceDrain(bufDrop, h.ring);
+assert(isequal(size(none), [0 L.nCol]));
+fprintf('ok  keep false returns the rows and stores none\n');
+
+% traceAppend creates and grows a buffer.
+ba = traceAppend([], expectedMakeRing(1:3));
+assert(ba.n == 3 && ba.missed == 0 && isequal(size(ba.gaps), [0 2]));
+assert(size(ba.data, 1) == 1024 && isequal(ba.data(1:3, :), expectedMakeRing(1:3)));
+ba = traceAppend(ba, expectedMakeRing(4:3000));
+assert(ba.n == 3000 && size(ba.data, 1) == 4096);
+assert(isequal(ba.data(1:3000, :), expectedMakeRing(1:3000)));
+fprintf('ok  traceAppend\n');
 
 % Overrun: one poll gap longer than the ring holds.
 clear masterStep masterStateMachine traceStep
@@ -205,7 +245,7 @@ h.freezeFrom = Inf;
 h.freezeTo = Inf;
 h.logR = zeros(nMax, nRead);          % mbRead of each step
 h.logW = zeros(nMax, 12);           % mbWrite
-h.logO = zeros(nMax, 11);           % masterStep outputs and app values
+h.logO = zeros(nMax, 12);           % masterStep outputs and app values
 h.logT = zeros(nMax, 13);           % stand-in's true feedback and summary
 h.buf = [];
 h.nextPoll = 0;
@@ -232,6 +272,7 @@ targetPosition = 50;
 targetPressure = 5;
 estop = 0;
 mixer = double(k >= 200);
+procStep = floor(k / 100);              % steps through 0, 1, 2, ...
 
 truth = [100 + 0.5 * t, 0.5, 10 * sin(t), 100 + 0.5 * t, 2 + sin(t)];
 if mod(k, 2) == 0
@@ -261,12 +302,12 @@ end
     estop, mixer, speedFromPercent(cfg.speedDefault, cfg), cfg.salineVolume, cfg.oxygenRatio);
 h.lastHb = mbWrite(1);
 h.ring = traceStep(h.mbRead, mbWrite, doSafety, statusCode, faultCode, ...
-    state, linkOk, op, cmdSeq, targetPosition, targetPressure, estop, mixer);
+    state, linkOk, op, cmdSeq, targetPosition, targetPressure, estop, mixer, procStep);
 
 h.logR(k + 1, :) = h.mbRead;
 h.logW(k + 1, :) = mbWrite;
 h.logO(k + 1, :) = [doSafety, statusCode, faultCode, state, linkOk, op, ...
-    cmdSeq, targetPosition, targetPressure, estop, mixer];
+    cmdSeq, targetPosition, targetPressure, estop, mixer, procStep];
 h.logT(k + 1, :) = h.truth;
 h.k = k + 1;
 end
@@ -341,6 +382,8 @@ e(L.col.targetPosition_mm) = o(8);
 e(L.col.targetPressure_atm) = o(9);
 e(L.col.estop) = o(10);
 e(L.col.mixer) = o(11);
+e(L.col.procStep) = o(12);
+e(L.col.nExchanges) = 1;
 end
 
 function e = expectedRecords(h, seq)
