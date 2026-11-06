@@ -235,6 +235,19 @@ The volume-zero request also zeroes the Incr view. A procedure that does not
 validate leaves the panel empty, Start Procedure disabled and the reason on the
 status line.
 
+**Selection.** At start the app loads the procedure named by `cfg.procedure`
+(the SOP). The **Procedure** menu lists, after **Open...** and **Reload**, every
+`.m` file of `procedure/`, sorted by name, with a check mark on the loaded one;
+choosing an item loads that function. **Open...** takes any `.m` file (its folder is added to the path and
+the function is loaded by name, listed and checked in the menu while it is
+the loaded one) and **Reload** loads the current choice again, for a file just
+edited. A choice is validated through `procNew` at once: on success the status
+line reads `Procedure loaded: <name>` and the panel shows the new procedure; on
+a failure the previously loaded procedure and its check mark stay, and the
+status line gives the reason. Nothing is remembered between sessions. The whole
+menu is disabled while a procedure is active (running, waiting for the
+operator, paused or aborting).
+
 ### Parameters
 
 A parameter is a struct in the procedure's `params` cell array.
@@ -486,6 +499,10 @@ walks them against the stand-in.
 
 The Trace panel (between the lamps and the Procedure panel) holds **Record**, an
 interval dropdown, a status label, **Live plot** and **Plot trace...**.
+
+The **Trace** menu has the same three actions: Record (Stop recording while
+recording, Ctrl+R), Plot trace... (Ctrl+P) and Live plot (Ctrl+L), enabled as
+their buttons are.
 
 **Record** is available while connected. The dropdown chooses the record
 interval: `cfg.traceIntervalPresets` (0.05 s (20 Hz), 0.1 s (10 Hz), 0.5 s

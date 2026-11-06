@@ -3,6 +3,14 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
     % Properties that correspond to app components
     properties (Access = public)
         UIFigure                        matlab.ui.Figure
+        ProcedureMenu                   matlab.ui.container.Menu
+        ProcedureFileMenus              matlab.ui.container.Menu
+        ProcedureOpenMenu               matlab.ui.container.Menu
+        ProcedureReloadMenu             matlab.ui.container.Menu
+        TraceMenu                       matlab.ui.container.Menu
+        TraceRecordMenu                 matlab.ui.container.Menu
+        TracePlotMenu                   matlab.ui.container.Menu
+        TraceLiveMenu                   matlab.ui.container.Menu
         TracePanel                      matlab.ui.container.Panel
         PlotTraceButton                 matlab.ui.control.Button
         TraceStatusLabel                matlab.ui.control.Label
@@ -121,6 +129,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % last refused operator action.
         procDef = []
         proc = []
+        procName = ''           % function of the loaded procedure ('' when none loaded)
         procIn = struct('connected', false, 'statusCode', 0, 'faultCode', 0, ...
             'estop', false, 'pressure', 0, 'volume', 0, ...
             'pressureBlock', false, 'atEndOfTravel', false, ...
@@ -718,16 +727,22 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             % a recording can always be ended.
             app.RecordButton.Enable = connected || app.traceRecording;
             app.RecordButton.Value = app.traceRecording;
+            app.TraceRecordMenu.Enable = app.RecordButton.Enable;
+            app.TracePlotMenu.Enable = app.PlotTraceButton.Enable;
+            app.TraceLiveMenu.Enable = app.LivePlotButton.Enable;
+            app.ProcedureMenu.Enable = ~procActive;
             app.IntervalDropDown.Enable = (connected || app.traceRecording) && ~procActive;
             showInterval(app);
             if app.traceRecording
                 app.RecordButton.BackgroundColor = app.COLOR_STOP;
                 app.RecordButton.FontColor = [1 1 1];
                 app.RecordButton.Text = "Stop recording";
+                app.TraceRecordMenu.Text = "Stop recording";
             else
                 app.RecordButton.BackgroundColor = app.COLOR_IDLE;
                 app.RecordButton.FontColor = [0 0 0];
                 app.RecordButton.Text = "Record";
+                app.TraceRecordMenu.Text = "Record";
             end
 
             % STOP shows the master's E-STOP state, and a request the
@@ -923,6 +938,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
             createProcPools(app);
             loadProcedure(app);
+            buildProcedureMenu(app);
         end
 
         % The procedure panel's checkbox and parameter-field pools, sized
@@ -969,21 +985,65 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
         end
 
-        % Read the procedure and build the engine state. A procedure that
-        % does not validate leaves the panel empty and Start disabled.
-        function loadProcedure(app)
+        % Read the procedure of the given function (default cfg.procedure)
+        % and build the engine state. A procedure that does not validate
+        % leaves a loaded one in place, or the panel empty and Start
+        % disabled when none is loaded, and puts the reason on the status
+        % line.
+        function loadProcedure(app, name)
+            if nargin < 2
+                name = app.cfg.procedure;
+            end
             try
-                p = procNew(feval(app.cfg.procedure), app.cfg);
+                p = procNew(feval(name), app.cfg);
             catch ME
-                app.proc = [];
-                app.procDef = [];
-                app.ProcMessageLabel.Text = ['Procedure not loaded: ' ME.message];
+                if isempty(app.proc)
+                    app.procDef = [];
+                    app.ProcMessageLabel.Text = ['Procedure not loaded: ' ME.message];
+                end
                 app.StatusLabel.Text = append("Procedure not loaded: ", ME.message);
                 return
             end
+            app.procName = name;
             app.procDef = p.def;
             app.proc = p;
             renderProcedure(app);
+            showProcedureChoice(app);
+            app.StatusLabel.Text = append("Procedure loaded: ", name);
+        end
+
+        % The Procedure menu: Open... and Reload, then one item per .m file
+        % of master-src/procedure, sorted, then the file the operator
+        % opened from elsewhere, if it is the loaded one. Only the file
+        % items are made again when the list can change; Open... and
+        % Reload stay, so no item is deleted from inside its own callback.
+        function buildProcedureMenu(app)
+            delete(app.ProcedureFileMenus(isvalid(app.ProcedureFileMenus)));
+            folder = fullfile(fileparts(mfilename("fullpath")), "procedure");
+            files = dir(fullfile(folder, "*.m"));
+            names = sort(string({files.name}));
+            names = erase(names, ".m");
+            if ~isempty(app.procName) && ~any(names == string(app.procName))
+                names(end + 1) = string(app.procName);
+            end
+            app.ProcedureFileMenus = matlab.ui.container.Menu.empty;
+            for k = 1:numel(names)
+                m = uimenu(app.ProcedureMenu);
+                m.Text = char(names(k));
+                m.UserData = char(names(k));
+                m.Separator = matlab.lang.OnOffSwitchState(k == 1);
+                m.MenuSelectedFcn = createCallbackFcn(app, @ProcedureFileSelected, true);
+                app.ProcedureFileMenus(k) = m;
+            end
+            showProcedureChoice(app);
+        end
+
+        % Check the item of the loaded procedure
+        function showProcedureChoice(app)
+            for k = 1:numel(app.ProcedureFileMenus)
+                m = app.ProcedureFileMenus(k);
+                m.Checked = strcmp(m.UserData, app.procName);
+            end
         end
 
         % Set the operator speed (percent of cfg.speedMax). While the
@@ -1831,6 +1891,56 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             updateButtons(app);
         end
 
+        % Menu selected function: TraceRecordMenu
+        % The same path as pressing the Record button.
+        function TraceRecordMenuSelected(app, event)
+            app.RecordButton.Value = ~app.traceRecording;
+            RecordButtonChanged(app, event);
+        end
+
+        % Menu selected function: TraceLiveMenu
+        function TraceLiveMenuSelected(app, event)
+            LivePlotButtonPushed(app, event);
+        end
+
+        % Menu selected function: TracePlotMenu
+        function TracePlotMenuSelected(app, event)
+            PlotTraceButtonPushed(app, event);
+        end
+
+        % Menu selected function: ProcedureFileMenus
+        function ProcedureFileSelected(app, event)
+            loadProcedure(app, event.Source.UserData);
+        end
+
+        % Menu selected function: ProcedureOpenMenu
+        % Any .m file; its folder joins the path and the function is
+        % loaded by name.
+        function ProcedureOpenSelected(app, event)
+            [name, folder] = uigetfile("*.m", "Open a procedure", ...
+                append(fullfile(fileparts(mfilename("fullpath")), "procedure"), filesep));
+            figure(app.UIFigure);
+            if isequal(name, 0)
+                return
+            end
+            addpath(folder);
+            [~, fn] = fileparts(name);
+            loadProcedure(app, fn);
+            buildProcedureMenu(app);
+        end
+
+        % Menu selected function: ProcedureReloadMenu
+        % The current choice again, for a file just edited; the SOP when
+        % none is loaded.
+        function ProcedureReloadSelected(app, event)
+            name = app.procName;
+            if isempty(name)
+                name = app.cfg.procedure;
+            end
+            loadProcedure(app, name);
+            buildProcedureMenu(app);
+        end
+
         % Value changed function: IntervalDropDown
         % The choice is the operator's; it applies to a running recording
         % at once, except while a procedure owns the interval.
@@ -1990,6 +2100,44 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.UIFigure.Position = [100 100 1208 432];
             app.UIFigure.Name = 'SOS Gen3 Compressor';
             app.UIFigure.CloseRequestFcn = createCallbackFcn(app, @UIFigureCloseRequest, true);
+
+            % Create ProcedureMenu: the choice of procedure. The file items
+            % are made in buildProcedureMenu, once the configuration is read.
+            app.ProcedureMenu = uimenu(app.UIFigure);
+            app.ProcedureMenu.Text = 'Procedure';
+
+            % Create ProcedureOpenMenu
+            app.ProcedureOpenMenu = uimenu(app.ProcedureMenu);
+            app.ProcedureOpenMenu.MenuSelectedFcn = createCallbackFcn(app, @ProcedureOpenSelected, true);
+            app.ProcedureOpenMenu.Text = 'Open...';
+
+            % Create ProcedureReloadMenu
+            app.ProcedureReloadMenu = uimenu(app.ProcedureMenu);
+            app.ProcedureReloadMenu.MenuSelectedFcn = createCallbackFcn(app, @ProcedureReloadSelected, true);
+            app.ProcedureReloadMenu.Text = 'Reload';
+
+            % Create TraceMenu
+            app.TraceMenu = uimenu(app.UIFigure);
+            app.TraceMenu.Text = 'Trace';
+
+            % Create TraceRecordMenu
+            app.TraceRecordMenu = uimenu(app.TraceMenu);
+            app.TraceRecordMenu.MenuSelectedFcn = createCallbackFcn(app, @TraceRecordMenuSelected, true);
+            app.TraceRecordMenu.Accelerator = 'R';
+            app.TraceRecordMenu.Enable = 'off';
+            app.TraceRecordMenu.Text = 'Record';
+
+            % Create TracePlotMenu
+            app.TracePlotMenu = uimenu(app.TraceMenu);
+            app.TracePlotMenu.MenuSelectedFcn = createCallbackFcn(app, @TracePlotMenuSelected, true);
+            app.TracePlotMenu.Accelerator = 'P';
+            app.TracePlotMenu.Text = 'Plot trace...';
+
+            % Create TraceLiveMenu
+            app.TraceLiveMenu = uimenu(app.TraceMenu);
+            app.TraceLiveMenu.MenuSelectedFcn = createCallbackFcn(app, @TraceLiveMenuSelected, true);
+            app.TraceLiveMenu.Accelerator = 'L';
+            app.TraceLiveMenu.Text = 'Live plot';
 
             % Create ProcedurePanel: the walk-through of the procedure, in the
             % place of the old tabs. The checkbox and parameter pools are
