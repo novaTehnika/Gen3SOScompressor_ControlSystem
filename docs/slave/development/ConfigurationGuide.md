@@ -152,16 +152,16 @@ When `G_cfgPressureScheduleEnable` is TRUE on entry to pressure mode, `FB_Pressu
 | `G_cfgPressureSchedPistonArea` | 3431.0 | mm² | Piston area (2.602 in bore). |
 | `G_cfgPressureSchedEndOfTravel` | 367.0 | mm | Position at the end of travel, where the chamber is down to the passages (the same frame as `G_cfgPosSoftLimitMax`). The chamber volume is the swept volume from the piston to this position plus the passages and, when open, the hose. |
 | `G_cfgPressureSchedPassagesVol` | 57.0 | mL | Cylinder passages: chamber volume at the end of travel without the hose, measured with the present fittings. Must be at or below the true value; re-measure when the fittings change. |
-| `G_cfgPressureSchedHoseVol` | 29.0 | mL | Hose between the cylinder head and the outlet, measured. Counted only while `G_cfgPressureSchedHoseOpen` is TRUE. Must be at or below the true value. |
-| `G_cfgPressureSchedHoseCompl` | 1.2E-13 | m³/Pa | Hose compliance beyond its liquid (wall and any trapped air), a lower bound on the measured 0.24 mL/MPa. Counted only while `G_cfgPressureSchedHoseOpen` is TRUE. |
+| `G_cfgPressureSchedHoseVol` | 57.9 | mL | Hose between the cylinder head and the outlet: 6 ft of 1/4 in bore. Counted only while `G_cfgPressureSchedHoseOpen` is TRUE. Must be at or below the true value. |
+| `G_cfgPressureSchedHoseCompl` | 1.2E-13 | m³/Pa | Hose compliance beyond its liquid (wall and any trapped air), a lower bound on the measured 0.58 mL/MPa of the 6 ft hose. Counted only while `G_cfgPressureSchedHoseOpen` is TRUE. |
 | `G_cfgPressureSchedHoseOpen` | FALSE | BOOL | The proximal valve is open during the compression, so the hose volume and compliance are part of the chamber. Leave FALSE while the valve opens after mixing; set TRUE for a procedure that opens it before the compression. The measured hose values above do not change with it. |
-| `G_cfgPressureSchedBulkModulus` | 1.0E9 | Pa | Saline bulk modulus. Must be at or above the true value. |
+| `G_cfgPressureSchedBulkModulus` | 1.0E9 | Pa | Effective bulk modulus of the filled chamber: the saline (1.70 GPa) in series with the cylinder's compliance (0.26 mL/MPa), which the schedule does not model. Must be at or above the effective value, (V / K + C_series)^-1 V, at every chamber volume V; 1.0 GPa is, up to 620 mL. |
 | `G_cfgPressureSchedHenry` | 1.22E-5 | mol/(m³·Pa) | Henry constant of oxygen in 0.9 % saline. |
 | `G_cfgPressureSchedGasTemp` | 293.0 | K | Gas temperature. |
 | `G_cfgPressureSchedPatm` | 101325.0 | Pa | Atmospheric pressure. |
 | `G_cfgPressureSchedArriveBand` | 0.5 | MPa | |error| at which the integrator is first released; it is held at zero until then. |
-| `G_cfgPressureSchedDeadTime` | 0.0228 | s | Drive dead time from command to response, measured on the bench (`bench/characterisation`) with `Y_DirectControl`'s FilterTimeConstant as wired. Re-measure if that pin changes. |
-| `G_cfgPressureSchedDriveLag` | 0.0182 | s | Drive velocity-loop time constant, measured as above. |
+| `G_cfgPressureSchedDeadTime` | 0.0182 | s | Drive dead time from command to response, measured on the bench (`bench/characterisation`) with `Y_DirectControl`'s FilterTimeConstant at `G_cfgDirectCtrlFilterTime` 0.02 s. Re-measure if that setting changes. |
+| `G_cfgPressureSchedDriveLag` | 0.0075 | s | Drive velocity-loop time constant, measured as above. |
 
 ---
 
@@ -197,5 +197,5 @@ The transducer is a 4-20 mA loop read as the voltage across a shunt on the contr
 | `G_cfgPressureTargetMax` | 15.0 | MPa gauge | Highest target accepted from the master. The effective limit is `MIN(G_cfgPressureTargetMax, G_cfgPressureCeiling - G_cfgPressureCeilingHyst)`. |
 | `G_cfgPressureCeiling` | 12.0 | MPa gauge | Mechanical pressure ceiling. Above it `PRG_Main` zeroes every command in the pressurising (positive) direction in every motion state (`G_sysPressureBlock`, IR9). No fault. Also caps the pressure target at Ceiling − Hyst. |
 | `G_cfgPressureCeilingHyst` | 0.5 | MPa | The block releases below Ceiling − Hyst. Well above the filtered transducer noise and the PI ripple, so the block does not chatter, and small against the 4 MPa headroom to the 16 MPa transducer range. |
-| `G_cfgPressureEndMargin` | 1.0 | mm | Pressure mode stops positive motion at `G_cfgPosSoftLimitMax` minus this, so a delivery ends at the end of travel without `FAULT_POSITION` (`G_sysAtEndOfTravel`, IR10). Stopping from `G_cfgPressureVelMax` takes about 0.45 mm (0.25 mm at `G_cfgPressureAccel`, 0.11 mm in the 22.8 ms dead time, 0.09 mm in the 18.2 ms lag), so 1.0 mm leaves at least 0.5 mm to the soft limit and costs 3.4 mL of deliverable volume. |
+| `G_cfgPressureEndMargin` | 1.0 | mm | Pressure mode stops positive motion at `G_cfgPosSoftLimitMax` minus this, so a delivery ends at the end of travel without `FAULT_POSITION` (`G_sysAtEndOfTravel`, IR10). Stopping from `G_cfgPressureVelMax` takes about 0.45 mm (0.25 mm at `G_cfgPressureAccel`, 0.11 mm in the 22.8 ms dead time, 0.09 mm in the 18.2 ms lag measured with the 0.05 s command filter; less with the present 0.02 s), so 1.0 mm leaves at least 0.5 mm to the soft limit and costs 3.4 mL of deliverable volume. |
 | `G_cfgPressureInBand` | 0.1 | MPa | `|actual - target|` below which the in-band status bit (`G_sysPerformanceStatus`, IR7) is set. |

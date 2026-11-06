@@ -665,7 +665,7 @@ means the leg does not fit the budget with the stiffness the plan assumes.
 The plan assumes the 2:1 air charge in 343 mL (`chargeRatio`,
 `fillVolume_mL`, the proximal valve shut). For a liquid-only chamber add
 `'chargeRatio', 0` (7.2 MPa/mm with the valve shut) and, with the hose
-open, `'C_hose_m3_Pa', 2.4e-13` as well (4.8 MPa/mm). Whatever the chamber,
+open, `'C_hose_m3_Pa', 6.2e-13` as well (3.1 MPa/mm with the 6 ft hose). With the hose shut,
 the 0.5 mm/s leg at 10 MPa is skipped: its stop alone, over the bench's
 latency, takes more than the 0.7 MPa left under the guard, and the
 0.25 mm/s leg there is 0.03 to 0.1 mm. The budget at 10 MPa is 0.7 MPa
@@ -801,7 +801,7 @@ the robustness ranges (see the end of this section).
 | Parameter | Result | Runs | Notes |
 |---|---|---|---|
 | Sensor noise and zero | 0.73 mV rms, 1.73 kPa per sample; zero +0.003 MPa vented | `idle_20261105_183515` (250 samples at 4 ms) | The 0.8 mV of the shunt capacitor, so the capacitor is in place. |
-| Drive response at the motor | 7.5 +/- 0.05 ms lag after 18.2 ms dead time (t63 28 ms), the same at 0.3, 1 and 2.5 mm/s and in both directions; closed chamber at 7 to 10 MPa/mm the same, 7.6 ms after 18.2 ms | `s1_steps_20261105_183700`, `s2_steps_20261105_183819` (48 captures); `lag_wet_char_20261105_173826` (10) | **Faster than on 26 October** (18.2 ms after 22.8 ms with the same fit: 41 ms in all against 26 ms now), with a spread of 0.1 ms over the captures of either day. The cause is not known; a change of the drive's tuning would give it. `G_cfgPressureSchedDeadTime` and `DriveLag` still carry the October values. The `s3` run with `G_cfgDirectCtrlAccel` at 1 mm/s^2 was not made. |
+| Drive response at the motor | 7.5 +/- 0.05 ms lag after 18.2 ms dead time (t63 28 ms), the same at 0.3, 1 and 2.5 mm/s and in both directions; closed chamber at 7 to 10 MPa/mm the same, 7.6 ms after 18.2 ms | `s1_steps_20261105_183700`, `s2_steps_20261105_183819` (48 captures); `lag_wet_char_20261105_173826` (10) | **Faster than on 26 October** (18.2 ms after 22.8 ms with the same fit: 41 ms in all against 26 ms now), with a spread of 0.1 ms over the captures of either day. `Y_DirectControl`'s FilterTimeConstant, a filter on the command it sends the drive, was hard-wired at 0.05 s in the October LD and is now `G_cfgDirectCtrlFilterTime`, 0.02 s: that is the change. `G_cfgPressureSchedDeadTime` and `DriveLag` still carry the October values. The `s3` run with `G_cfgDirectCtrlAccel` at 1 mm/s^2 was not made. |
 | Lag at the piston | not resolved: 21.9 +/- 8.9 ms including the dead time from the pressure of the captures, below the motor's 25.7 ms | `lag_wet_char_20261105_173826` | The sensor chain hides the split; the piston follows the motor within what it resolves. |
 | Reflected inertia | 0.447 % of rated torque per mm/s^2 (0.441, 0.445 and 0.457 at steps of 0.3, 1 and 2.5 mm/s): 4.9e5 kg at the piston, lossless | the 48 step captures and the reversals | 7 % above October's 0.418. |
 | Backlash and motor-side friction, open chamber | no backlash: the torque reverses within 8 um of motor travel; reversal 9.5, 14.3 and 20.3 % at 0.3, 1 and 2.5 mm/s | `rev_char_20261105_183927` (21 captures, 15 analysed) | The motor-side friction is not separated from the seals' (no flat segment). |
@@ -816,21 +816,15 @@ the robustness ranges (see the end of this section).
 | Friction unloaded | with the piston: Fc 5.0 +/- 0.1 kN, b 2.26e6 +/- 0.07e6 N s/m, F0 -0.05 kN, residual 0.3 kN over 0.1 to 3 mm/s; piston removed: Fc 4.5 +/- 0.1 kN, b 2.09e6 +/- 0.06e6; seals: 0.5 kN and 0.18e6 N s/m | `u1_unloaded_20261105_185217`; `bare_unloaded_20261105_190535` | Both over 295 to 326 mm. The seals are a tenth of the Coulomb term and under a tenth of the viscous one: the drive (gearbox, screw, brake) carries the rest. No Stribeck region. Breakaway not resolved (94 % of the starts within 3 samples). `u1_unloaded_20261105_184019` ended on the torque abort at the first 5 mm/s start. |
 | Orifice Cd | 0.839 (0.833 to 0.848), exponent 0.48; 4.75 mL/s at 10 MPa, piston 1.38 mm/s | `Q4_char_20261105_182916`, `Q10_char_20261105_181759`; 34 and 131 g | `Q7_char_20261105_182952` (33 g) has no steady 3 s window. Collected against swept: +5.0 % (Q4), +3.4 % (Q10), +16.7 % (Q7). The first Q4 and Q7 (`_181511`, `_181710`) were not weighed. Agrees with October's 0.85. |
 
-**Not yet carried over.** The model's chamber has one K for the liquid
-and a hose compliance only when the hose is open; the two fills ask for a
-constant series compliance as well, which `models/plant.py` and
-`models/c/plant.c` do not have, and for K the liquid value with it. The
-drive figures are tied to the GVL: `design/pressure-loop/test_model.py`
-holds `params.py`'s `t_dead` and `tauV` equal to
-`G_cfgPressureSchedDeadTime` and `G_cfgPressureSchedDriveLag`, so
-carrying them changes the gain schedule on the controller. The hose
-compliance is outside the robustness range, and the 6 ft hose holds
-58 mL where `params.py` (`V_hose`) and the GVL
-(`G_cfgPressureSchedHoseVol`, which errs stiff and so stays safe) carry
-29 mL: the purge before the solution doubles and the deliverable
-solution falls by 29 mL. These, Cd, mr, Fc and the noise go over
-together, with the ranges of `robust.py` and the studies
-rerun (`bench/MeasurementPlan.md`, "Carrying the results over").
+**Carried over.** `models/params.py` takes the liquid K (1.70 GPa) and
+the series compliance as a new term of the chamber model
+(`C_series`, eq. (49) of `models/README.md`), the 6 ft hose (`V_hose`
+57.9 mL, `C_hose` 0.58 mL/MPa), Cd 0.84, the drive (18.2 ms and
+7.5 ms), mr 4.9e5 kg, Fc 5.0 kN, b 2.26e6 N s/m and the noise
+(1.7 kPa); `design/pressure-loop/robust.py` spans the new values; and
+the GVL's gain schedule takes the drive figures and the hose volume
+(`G_cfgPressureSchedDeadTime`, `DriveLag`, `HoseVol`), which the
+controller needs rebuilt for.
 
 ## 9. Checking the pressure schedule's stiffness bound
 

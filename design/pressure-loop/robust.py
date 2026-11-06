@@ -69,28 +69,31 @@ class Uncertain:
 # in torque mode, which the slave does not use. A, R, T, Patm and kH are
 # geometry or physical constants. The oxygen ratio is a study variable,
 # not an uncertainty.
-# The ranges are the measured values of 2026-10-26 with their spread
+# The ranges are the measured values of 2026-11-05 with their spread
 # (bench/characterisation, bench/friction, bench/pressure), except the
 # dissolution time constant and the supply pressure, which are not
 # measured.
 UNCERTAIN = [
-    Uncertain('K', 0.6e9, 1.0e9, True, 1e-9, 'GPa',
-              'measured 0.72, segments 0.67 to 0.78, gas-corrected 0.81'),
+    Uncertain('K', 1.4e9, 2.2e9, True, 1e-9, 'GPa',
+              'liquid, 1.70 from two fill levels; water is 2.2'),
+    Uncertain('C_series', 2.0e-13, 3.2e-13, True, 1e12, 'mL/MPa',
+              'series compliance, 0.26 mL/MPa from two fill levels'),
     Uncertain('Vl0', 320e-6, 360e-6, False, 1e6, 'mL',
               'fill at the 280 mm start, 343 mL from the geometry'),
     Uncertain('V_passages', 52e-6, 62e-6, False, 1e6, 'mL',
               'cylinder-head passages, measured 57 mL with the hose shut'),
-    Uncertain('C_hose', 1.2e-13, 3.6e-13, True, 1e12, 'mL/MPa',
-              'hose compliance, 0.24 mL/MPa by difference of two K runs'),
+    Uncertain('C_hose', 4.5e-13, 7.5e-13, True, 1e12, 'mL/MPa',
+              '6 ft hose, 0.58 purged and 0.62 unpurged by difference '
+              'of K runs'),
     Uncertain('tauDiss', 10.0, 100.0, True, 1.0, 's',
               'gas dissolution time constant'),
-    Uncertain('tauV', 0.010, 0.050, True, 1e3, 'ms',
-              'drive lag: 18.2 ms at the motor, 10 to 50 ms for the '
-              'piston side, which is not resolved'),
+    Uncertain('tauV', 0.005, 0.030, True, 1e3, 'ms',
+              'drive lag: 7.5 ms at the motor; the piston side is not '
+              'resolved beyond it'),
     Uncertain('noise', 1.5e3, 5e3, True, 1e-3, 'kPa',
               'transducer plus ADC noise, 1.8 to 4.6 kPa rms per sample'),
     Uncertain('Cd', 0.8, 0.9, False, 1.0, '',
-              'orifice discharge coefficient, measured 0.84 to 0.87'),
+              'orifice discharge coefficient, measured 0.83 to 0.87'),
     Uncertain('P_supply', 0.52e6, 1.38e6, False, 1e-6, 'MPa',
               'oxygen supply, 75 to 200 psi with the cylinder charge'),
 ]

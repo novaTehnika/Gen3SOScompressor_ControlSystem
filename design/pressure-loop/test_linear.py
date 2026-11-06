@@ -64,7 +64,8 @@ from studyparams import StudyParams  # noqa: E402
 # response to a step, and the offset would shift the true pressure
 # against which the step is measured.
 PAR = StudyParams().with_(noise=0.0, P_offset=0.0)
-K_LIQ = PAR.A * PAR.K / PAR.Vl0     # [Pa/m] liquid-only chamber stiffness
+# [Pa/m] Liquid-only chamber stiffness, eqs. (4), (10) and (49)
+K_LIQ = PAR.A / (PAR.Vl0 / PAR.K + PAR.C_series)
 CFG = PAR.cfg()
 
 
@@ -123,7 +124,7 @@ def check_margins():
     b = lin.margins(lin.loop(PAR, 2 * K_LIQ, G_cfgPressureKp=kp / 2,
                              G_cfgPressureKi=0.2 * kp)['L'])
     assert abs(a['pm'] - b['pm']) < 1e-6 and abs(a['gm'] - b['gm']) < 1e-6
-    ok(f'margins at the GVL gains, K = 1 GPa: GM {m["gm_db"]:.1f} dB, '
+    ok(f'margins at the GVL gains, liquid chamber: GM {m["gm_db"]:.1f} dB, '
        f'PM {m["pm"]:.1f} deg at {m["wc"]:.2f} rad/s, '
        f'DM {m["dm"] * 1e3:.0f} ms; gain scaling reaches the unit circle; '
        f'L depends on Kp k')
@@ -221,7 +222,7 @@ def check_v2_boundary():
                    f'{w:.2f} rad/s (linear {pw:.2f})')
     lp_max = lin.loop(PAR, K_LIQ, G_cfgPressureKp=kmax)
     wpc = lin.margins(lp_max['L'])['wpc']
-    ok(f'V2 boundary: Kp max {kmax:.3f} mm/s/MPa (K = 1 GPa, '
+    ok(f'V2 boundary: Kp max {kmax:.3f} mm/s/MPa (liquid, '
        f'{K_LIQ / 1e9:.1f} MPa/mm), phase crossover {wpc:.2f} rad/s; sim '
        + '; '.join(out))
 
