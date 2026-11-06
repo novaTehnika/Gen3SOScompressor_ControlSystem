@@ -3,7 +3,9 @@
 Open items after the step probe, position speed, configuration and cleanup
 work (PR #21), the simulator, models and link timing work (PR #22), and
 the pressure-loop design, bench and scheduled-controller work (PR #17 and
-the scheduled pressure controller), and the pressure input calibration.
+the scheduled pressure controller), the pressure input calibration, and
+the 5 November characterisation with its carry-over into the models, the
+GVL and the design studies (PR #38).
 Grouped by where they have to be done. Settled: the mechanical pressure
 ceiling is 12 MPa; the saline volume and oxygen charge reach the slave in
 holding registers.
@@ -15,6 +17,12 @@ build predates the step probe's 4096-record ring and the declarations
 below, so rebuild with them (the `.st` headers and the GVL reference are
 the reference for each) and confirm:
 
+- [ ] Rebuild with the gain schedule's measured drive and hose
+      (`G_cfgPressureSchedDeadTime` 0.0182 s, `G_cfgPressureSchedDriveLag`
+      0.0075 s, `G_cfgPressureSchedHoseVol` 57.9 mL; PR #38). The
+      schedule is off by default, so nothing else changes until it is
+      enabled; they were measured with `G_cfgDirectCtrlFilterTime` at
+      0.02 s, so remeasure the drive if that setting changes.
 - [ ] Rebuild with the current `FB_Probe` (the 4096-record ring, 16 s;
       HR111-114, IR401-524) and `G_cfgProbeEnable`,
       `G_cfgProbeFillPerScan`.
@@ -273,38 +281,46 @@ specified here; the implementation plan decides the files.
       registers inside the group that the program does not use, passed as
       `writeStart`. If the same-tick share falls with the register count,
       make `pNextTick` depend on the count too.
-- [ ] Repeat the characterisation (`bench/characterisation/README.md`) on
-      the calibrated pressure input (`G_cfgPressureShuntOhms` 421.4) at
-      the 4 ms scan. `bench/MeasurementPlan.md` sequences every model
-      measurement, these included, into three sessions on two fills:
-  - [ ] Fill, weigh the fill against the geometry, and purge until they
-        agree to a few mL. The October fits' gas-law term (0.65 mL at
-        the ramps' mean pressure, about 40 mL at atmosphere as gas) is
-        more air than the machine holds, so its origin is open: the
-        weighed fill, the hold at 10 MPa (gas dissolves, a compliance
-        does not) and the second fill level decide. If it persists with
-        no gas, give `charBulkModulus` a pressure-dependent series term
-        in place of the gas law. The transducer passage's air (`V_air`,
-        about 0.1 mL by the geometry) is the floor of the gas term; note
-        the passage's bore and length.
-  - [ ] Bulk modulus with the proximal valve shut: `K300` three times,
-        then a second fill level so `charBulkModulus` separates the liquid
-        from the series compliance.
-  - [ ] Hose stiffness: the same path with the valve open, then again
-        after a thorough hose purge.
-  - [ ] Drive response: the open-chamber velocity steps (`s1`, `s2`)
-        again now that `FilterTimeConstant` is wired, and the closed,
-        liquid-filled `lag_wet` path with the probe armed for the lag at
-        the piston.
-  - [ ] Optionally a Cd check at two or three held pressures.
-- [ ] Carry the results into `models/params.py` (`K`, `Cd`, `t_dead`,
-      `tauV`) and rerun the studies (`study_robust`, `study_compare`,
-      `study_delivery`). Until then `K` 0.72 GPa and `Cd` 0.85 are the
-      26 October fits as logged; refitted on the calibrated scale
-      (`opts.logShuntOhms = 434`) they are 0.74 GPa and 0.83. Run the
-      scenarios with the settled hose procedure (`hose_before` False): the
-      design README's results passage ("Every result below is for the
-      first remedy") still reports the hose-before remedy; relabel it.
+- [x] Characterisation on the calibrated input at the 4 ms scan,
+      `bench/MeasurementPlan.md` sessions 0 and 1 (5 November; results in
+      `bench/characterisation/README.md` section 8) and its carry-over
+      into `models/params.py` (with the series compliance of eq. (49)),
+      `robust.py`, the GVL's gain schedule and the design studies.
+- [ ] Measurement plan session 2, the oxygen charge: the dissolution
+      time constant `tauDiss` (a position hold at 10 MPa), the stiffness
+      with free gas, the hose opening at pressure under the probe, and
+      the supply pressure. The liquid-only hold at 10 MPa of session 1
+      step 1, the leak baseline it subtracts, was not logged: log one on
+      the next liquid fill.
+- [ ] The parts of sessions 0 and 1 not run on 5 November:
+  - [ ] Weigh a fill against the geometry. Every 5 November volume is
+        the geometry's (A (x_EOT - x) + 57 mL), and the dead volume of
+        the passages with the present fittings is assumed unchanged.
+  - [ ] The `s3` steps with `G_cfgDirectCtrlAccel` at 1 mm/s² (whether
+        the `Acceleration` input limits the drive; see below).
+  - [ ] Weigh the first Q4 and Q7 deliveries' discharge next time; Q7
+        at 7 MPa gave no steady window, so Cd rests on 4 and 10 MPa.
+- [ ] The K ramps' gas-law term is still 0.2 to 0.8 mL at the ramps'
+      mean pressure after the two fills separated the constant series
+      compliance, more than the transducer pocket (`V_air`, 0.1 mL). A
+      hold at 10 MPa says whether it is gas (the pressure decays at
+      constant position) or a compliance that falls with pressure; if
+      the latter, give `charBulkModulus` and the plant a
+      pressure-dependent series term.
+- [ ] The drive changed between the October and November benches
+      because `Y_DirectControl`'s FilterTimeConstant went from a
+      hard-wired 0.05 s to `G_cfgDirectCtrlFilterTime` 0.02 s. Decide the
+      setting (a lag inside the pressure loop: shorter raises the
+      scheduled controller's margin) and remeasure the drive with
+      `frictionRun('s1', 'steps')` whenever it changes.
+- [ ] `frictionRun`'s 90 % torque abort trips on the inertia of a 5 mm/s
+      start or stop (80 to 100 % for tens of ms), so the unloaded sets
+      stop at 3 mm/s. If the 5 mm/s point is wanted, make the abort act
+      only on a torque held over a few exchanges, as a stall would, and
+      run `frictionRunSim` before using it.
+- [ ] `charStopPath` plans on a gas charge with one K for the liquid; give
+      it the series compliance (or take `charBulkModulus`'s stiffness)
+      so that a liquid-only plan needs no hand-set `stiffness`.
 - [ ] Verify every assumed position against the machine, in the homed
       frame, and correct each copy:
   - [ ] Positive overtravel switch trip point (just past 367 mm, not
@@ -325,37 +341,44 @@ specified here; the implementation plan decides the files.
         exchange of travel at full speed (0.35 mm at 7 mm/s), then set
         `posMax` < `G_cfgPosSoftLimitMax` < the switch.
 - [ ] Measure what the models still assume (`design/pressure-loop/README.md`,
-      "Open questions"): the dissolution time constant `tauDiss`, the lag
-      at the piston, and how much of the hose's compliance is wall and how
-      much trapped air.
-- [ ] Stopping distance under load at 8 to 10 MPa with scan-rate captures
-      (`bench/characterisation/README.md` test 4, `charStopPath` with
-      `levels_MPa [8 10]`, speeds 0.25 and 0.5 mm/s, probe armed for the
-      stops). The 50 ms log gave 0.031 s times the speed from 2 to 10 MPa
-      with no load dependence; the captures confirm it at the scan rate
-      and settle the delay term. Then set the slave's allowance from the
-      fit (`charStopDistance`: `r.T0_s`, `r.D_mm_s2`). Today the bench
-      compares against 0.05 s (`charStopDistance` `opts.lag_s`, not a
-      GVL setting) and `G_cfgPressureDecel` 50 mm/s², conservative by
-      three to four times at 5 mm/s; the slave's unscheduled stop law has
-      no delay term, and `FB_PressureSchedule` computes its own `Lag`.
+      "Open questions"): the dissolution time constant `tauDiss`
+      (session 2). The lag at the piston is not resolved beyond the
+      motor's; the hose's compliance is mostly wall (0.58 of 0.62 mL/MPa
+      after a purge).
+- [x] Stopping distance under load at 8 to 10 MPa with scan-rate
+      captures (`stops_hp_char_20261105_175543`): 0.019 s times the
+      speed plus v²/(2 × 196 mm/s²) compressing, 0.016 s and 77 mm/s²
+      returning, every stop within the slave's allowance.
+- [ ] Decide whether to tighten the stop law's allowance to the fit
+      (`G_cfgPressureDecel` 50 mm/s² against the measured 77 or more;
+      the unscheduled stop law has no delay term, and
+      `FB_PressureSchedule` computes its own `Lag`). The fit's residual
+      is 28 % of stops a few µm long, so a second run at 0.5 and 1 mm/s
+      would pin the two terms better.
 - [ ] Confirm that `Y_DirectControl`'s `Acceleration` input limits the
       drive in VelocityTLMode: velocity steps at 1 and at 100 mm/s². The
       bench saw every step complete in 60 ms whatever its size
       (`bench/characterisation/README.md` section 8), which says it does
       not.
+- [ ] Hose length: the hose is now 6 ft (58 mL, 0.58 mL/MPa). Opening the
+      proximal valve at 10 MPa drops the chamber to 4.3 MPa in one scan
+      (6.4 with the 3 ft hose), so with the present procedure only 1:1 is
+      deliverable, and in 69 % of the plausible cases; the purge and the
+      dead volume each take 58 mL, leaving 217 mL of solution from a
+      343 mL fill. Decide between the 6 ft hose, the 3 ft one, or
+      keeping the 6 ft one with one of the remedies below.
 - [ ] Hose procedure: the proximal valve stays shut during the
       compression and opens after mixing; a switched bypass orifice is
-      deferred. Opening the proximal valve at 10 MPa drops the chamber to
-      6.4 MPa in one scan and degasses any charge above about 1.8:1, so
-      until the bypass is fitted, keep oxygen runs at or below that charge
-      or accept the degassed slug. The bypass, when fitted, is a metering
-      orifice of 0.3 mm or less (Cv about 0.003) opened ahead of the ball
-      valve (`study_hose_opening.py`). The purge must carry the slug that
-      degassed entering the hose, 2 to 3 mL behind the 29 mL of virgin
-      saline.
+      deferred. With the 6 ft hose, keep oxygen runs at 1:1 or accept
+      the degassed slug. The remedies: open the proximal valve before
+      the compression (the scheduled controller then delivers 2:1 at
+      10 MPa in every plausible case), or fit a bypass metering orifice
+      of 0.2 mm (Cv about 0.0013, five seconds to fill the hose) opened
+      ahead of the ball valve (`study_hose_opening.py`). The purge must
+      carry the slug that degassed entering the hose, 4 to 6 mL behind
+      the 58 mL of virgin saline.
 - [ ] The hose model's inputs that only the procedure can give: whether
-      the whole 29 mL is purged, the pause between purge and delivery,
+      the whole 58 mL is purged, the pause between purge and delivery,
       whether the tube drains in it (`Scenario.tube_refills` in
       `scenarios.py`), and how fast the distal valve is shut
       (`StudyParams.Tclose`).
@@ -390,9 +413,9 @@ specified here; the implementation plan decides the files.
       HR9-12). Commission it in this order: the stiffness estimate against
       the measured slope on the characterisation bench; a water-only
       delivery with the full valve sequence, comparing the opening dip and
-      the purge-closing rise with the model's 0.9 and 1.1 MPa at the
+      the purge-closing rise with the model's 0.8 and 0.9 MPa at the
       11 rad/s crossover; oxygen at 1:1, then 2:1. The GVL gains let the
-      purge closing reach 12.3 MPa in every plausible case; until the
+      purge closing reach 12.1 MPa in every plausible case; until the
       schedule is on, stop the piston before shutting the distal valve.
 - [ ] An on-line stiffness estimate (dP against dx while the piston moves)
       as a monitor beside the configured bound, logging its value and
@@ -405,12 +428,21 @@ specified here; the implementation plan decides the files.
       the outflow and the valve state (the flow feedforward the studies
       carry as a bound, limited by the loop's 50 ms); a transducer at the
       distal end of the hose gives no usable lead (the pressure wave
-      crosses the hose in 2.8 ms). Decide whether the extra input is worth
+      crosses the 6 ft hose in 6 ms). Decide whether the extra input is worth
       it.
+- [ ] Port the stop-law floor policy (the switched floor with the
+      forward stop, `design/pressure-loop/README.md` "Stop-law floor
+      study") into `FB_PressureController` or a block ahead of it. On the
+      GVL gains it removes the purge-closing peak through the ceiling; on
+      the scheduled controller at 11 rad/s it takes 2.5:1 at 11 MPa from
+      81 % to every plausible case.
 - [ ] Decide the schedule's default switch and crossover once it has run
-      on the machine: `G_cfgPressureSchedCrossover` 11 rad/s overshoots a
-      gas-dominated chamber by 1 MPa with the measured drive lag, 6 rad/s
-      by 0.06 MPa (the figures are in the message of commit b457360;
+      on the machine. With the November drive, 11 rad/s keeps 46° of
+      phase margin and 16 rad/s 29°; 2.5:1 at 11 MPa needs 16 rad/s or
+      the floor policy above. With the October drive,
+      `G_cfgPressureSchedCrossover` 11 rad/s overshot a gas-dominated
+      chamber by 1 MPa and 6 rad/s by 0.06 MPa (the figures are in the
+      message of commit b457360; rerun that case with the November drive;
       `design/pressure-loop/test_model.py` checks only the 6 rad/s case,
       overshoot below 0.3 MPa).
 - [ ] The probe's record index wraps after 2^32 scans (about 200 days at
