@@ -15,7 +15,7 @@ sequences them and says what each run is for.
 | Sensor noise `noise` | 0 | `pressureNoiseProbe('idle')`, and any capture later |
 | Drive dead time `t_dead` and lag `tauV` at the motor | 0 | `frictionRun('s1', 'steps')` |
 | Whether the drive slews (`slew_limited`) | 0 | the same steps with `G_cfgDirectCtrlAccel` at 1 mm/s² |
-| Friction `Fc`, `b`, breakaway | 0 | `frictionRun` unloaded, in the bore and withdrawn |
+| Friction `Fc`, `b`, breakaway | 0 | `frictionRun` unloaded, in the bore and with the piston removed |
 | Reflected inertia `mr` | 0 | the same steps, `charDrivePath` |
 | Backlash and motor-side friction of the drive path | 0 | direct reversals in the open chamber, `charDriveRecipe('reversal')` |
 | Fill and dead volume `Vl0`, `V_passages` | 1 | the fill weighed against the geometry |
@@ -105,7 +105,7 @@ Piston in the bore, chamber open, no liquid.
    ```matlab
    uo = struct('speeds', [0.1 0.3 1 3], 'tSteady', [60 40 20 10]);   % no 5 mm/s point (below)
    ru = frictionRun('u1', 'unloaded', setfield(uo, 'probe', true));
-   rb = frictionRun('bare', 'unloaded', setfield(uo, 'startPosition', 60));   % withdrawn below the cylinder entry
+   rb = frictionRun('bare', 'unloaded', uo);         % piston removed, the same positions
    ```
 
    The set's default speeds end at 5 mm/s, and starting or stopping at
@@ -121,9 +121,9 @@ Piston in the bore, chamber open, no liquid.
    fb = frictionFit(rb.file);
    ```
 
-   The `bare` log must open with the position step (mode 2) and its
-   jogs run below the cylinder entry; one that runs in the bore is a
-   repeat of `u1`. The difference of the two is the seal friction. The
+   Run `bare` with the piston removed from the actuator and from where
+   `u1` started, so that both cover the same part of the screw. The
+   difference of the two is the seal friction. The
    Coulomb term is the one open question in the friction set: 6.1 kN
    from the friction bench, 4.4 kN from the loaded legs of the stops
    runs. The loaded legs of session 1 settle it.
