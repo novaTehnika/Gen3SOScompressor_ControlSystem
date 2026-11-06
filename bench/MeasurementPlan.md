@@ -103,9 +103,18 @@ Piston in the bore, chamber open, no liquid.
    with the probe so the breakaway and the stick time are captured:
 
    ```matlab
-   ru = frictionRun('u1', 'unloaded', struct('probe', true));
-   rb = frictionRun('bare', 'unloaded', struct('startPosition', 60));   % withdrawn below the cylinder entry
+   uo = struct('speeds', [0.1 0.3 1 3], 'tSteady', [60 40 20 10]);   % no 5 mm/s point (below)
+   ru = frictionRun('u1', 'unloaded', setfield(uo, 'probe', true));
+   rb = frictionRun('bare', 'unloaded', setfield(uo, 'startPosition', 60));   % withdrawn below the cylinder entry
    ```
+
+   The set's default speeds end at 5 mm/s, and starting or stopping at
+   that speed takes 80 to 100 % of rated torque for a few tens of ms:
+   the reflected inertia (0.42 % per mm/s^2) at the acceleration of the
+   drive, which does not slew. The run's 90 % torque abort cannot tell
+   that from a stall, so the 5 mm/s jogs end the run; at 3 mm/s the
+   transients stay under 30 %. The steady torque at 5 mm/s is 10 to
+   26 %, so the point is lost to the guard, not to the drive.
 
    `frictionFit` on each; the difference is the seal friction. The
    Coulomb term is the one open question in the friction set: 6.1 kN
