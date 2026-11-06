@@ -335,7 +335,7 @@ The open loop is eq. (29):
 
 - `C(z)` is the PI law of `FB_PressureController`, eq. (27).
 - `z^-(1+n_dead)` is the scan between computing a command and applying
-  it, plus the drive's six scans of dead time.
+  it, plus the drive's five scans of dead time.
 - `Gd(z)` is the drive velocity loop and the chamber integrator,
   eq. (26).
 - `z^-4` is the median of 5 (two scans for a slowly varying signal) and
@@ -361,28 +361,25 @@ the limits (`THRESH`), the requirements and the sampler.
 
 | Parameter | Range | Sampling | Basis |
 |---|---|---|---|
-| K | 0.6–1.0 GPa | log | measured 0.72 (segments 0.67–0.78, gas-corrected 0.81) |
+| K | 1.4–2.2 GPa | log | the liquid, 1.70 GPa from two fill levels; water is 2.2 |
+| C_series | 0.20–0.32 mL/MPa | log | series compliance of the seals, cylinder and frame, 0.26 mL/MPa from the same fits |
 | Vl0 | 320–360 mL | linear | fill at the 280 mm start, 343 mL from the geometry |
 | passages | 52–62 mL | linear | measured 57 mL with the hose shut |
-| hose compliance | 0.12–0.36 mL/MPa | log | 0.24 mL/MPa by difference of two bulk-modulus runs |
+| hose compliance | 0.45–0.75 mL/MPa | log | 6 ft hose: 0.58 purged, 0.62 unpurged, by difference of bulk-modulus runs |
 | tauDiss | 10–100 s | log | not measured |
-| tauV | 10–50 ms | log | 18.2 ms at the motor; the piston side is not resolved |
-| sensor noise | 1.5–5 kPa rms | log | measured 1.8 (with capacitor) to 4.6 kPa |
-| orifice Cd | 0.8–0.9 | linear | measured 0.84–0.87 |
+| tauV | 5–30 ms | log | 7.5 ms at the motor; the piston side is not resolved beyond it |
+| sensor noise | 1.5–5 kPa rms | log | measured 1.7 (with capacitor) to 4.6 kPa |
+| orifice Cd | 0.8–0.9 | linear | measured 0.83–0.87 |
 | supply pressure | 0.52–1.38 MPa | linear | 75–200 psi with the cylinder's charge |
 
-The ranges are the bench measurements of 2026-10-26 with their spread
+The ranges are the bench measurements of 2026-11-05 with their spread
 (`bench/characterisation/README.md` section 8, `bench/friction`,
 `bench/pressure`). `mr`, `b`, `Fc` and `mu` act only in torque mode and
 the stall, so they are not varied; the dead time is fixed at its
-measured 22.8 ms. The air pocket at the pressure transducer, `V_air`,
+measured 18.2 ms. The air pocket at the pressure transducer, `V_air`,
 is explicit in the model (eq. (46) of `models/README.md`) and is held at
 its default, 0.1 mL; it is not sampled, since its compliance is below
-0.1 % of the liquid's above 1 MPa. The K range above is the effective
-value of runs whose compliance curved with pressure; the liquid K the
-fits give (0.81 GPa with the curvature removed, 2026-10-26) replaces it
-once the runs at two fill levels have settled what the curvature is.
-Each sample runs compress and deliver and checks these requirements:
+0.1 % of the liquid's above 1 MPa. Each sample runs compress and deliver and checks these requirements:
 
 - The pressure never exceeds the ceiling, 12 MPa (`StudyParams.P_ceiling`).
   The machine's mechanical limit is to be confirmed; 15 MPa may break
@@ -409,7 +406,7 @@ the four most influential parameters, then a Latin hypercube sample
 are the GVL (the 20 ms filter and StopVelMin 2 mm/s, which passes the
 1.4 mm/s the measured outflow needs); the earlier StopVelMin of 0.5 mm/s
 as a reference; the scheduled controller at wc = 6, 11 and 16 rad/s with
-the measured bounds (K_cfg 1.0 GPa, dead volume 81 mL, hose compliance
+the measured bounds (K_cfg 1.0 GPa, dead volume 109 mL, hose compliance
 0.12 mL/MPa); and wc = 11 with VelMax 7 mm/s. `--hose-before` runs the
 proposed procedure (the hose opened before the compression). Every
 configuration sees the same samples and noise seeds.

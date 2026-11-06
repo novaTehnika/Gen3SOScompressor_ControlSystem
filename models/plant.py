@@ -588,10 +588,10 @@ class Plant:
         """[m^3] System volume minus the volume of its contents, eq. (9).
 
         The system is the cylinder and its dilation, eq. (49), plus,
-        with the hose open, the hose and its dilation; the contents are the stressed liquid, the free
-        gas and the air pocket (eq. (46)); dissolved gas takes no
-        volume. The result is zero up to the integration error when
-        liquid_depletes is set.
+        with the hose open, the hose and its dilation; the contents are
+        the stressed liquid, the free gas and the air pocket (eq. (46));
+        dissolved gas takes no volume. The result is zero up to the
+        integration error when liquid_depletes is set.
         """
         x, v, P, n_dis, n_tot, V_l, n_out, V_out, V_vir, V_in = self.y
         system = self.chamber_volume + self.C_series * P

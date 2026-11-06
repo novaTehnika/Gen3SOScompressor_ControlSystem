@@ -75,7 +75,7 @@ import studyutil
 # %% ===== STUDY ARMS ====================================================
 # Arms as robust.ControllerSpec, so the Monte Carlo can run them. The
 # scheduled arms use the measured bounds of study_delivery.py.
-SCHED = {'V_dead_cfg': 81e-6, 'K_cfg': 1.0e9, 'C_hose_cfg': 1.2e-13,
+SCHED = {'V_dead_cfg': 109e-6, 'K_cfg': 1.0e9, 'C_hose_cfg': 1.2e-13,
          'wc': 11.0}
 SW_FS = {'mode': 'switched', 'forward_stop': True}
 ARMS = [

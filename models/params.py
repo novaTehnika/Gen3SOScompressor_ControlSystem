@@ -274,14 +274,14 @@ class Params:
     # [kg] Motor and gearbox inertia reflected to the piston. Measured
     # 4.9e5 (0.447 % rated torque per mm/s^2 of piston acceleration, the
     # torque excess of 54 open-chamber velocity steps against the
-    # motor's acceleration; 0.418 % on 2026-10-26) through the lossless torque constant Fcap:
-    # the drivetrain's efficiency is not applied, and a torque that is
-    # partly lost in the gearbox would lower it by that factor. The
-    # model carries no compliance between the motor and the piston: the
-    # drive path's stiffness is above 3.9 kN/um (an up/down offset of the
-    # motor position at the same pressure of about 6 um through a 25 kN
-    # friction reversal), and no backlash shows in direct reversals or
-    # in a dither under load.
+    # motor's acceleration; 0.418 % on 2026-10-26) through the lossless
+    # torque constant Fcap: the drivetrain's efficiency is not applied,
+    # and a torque that is partly lost in the gearbox would lower it by
+    # that factor. The model carries no compliance between the motor
+    # and the piston: the drive path's stiffness is above 3.9 kN/um (an
+    # up/down offset of the motor position at the same pressure of about
+    # 6 um through a 25 kN friction reversal), and no backlash shows in
+    # direct reversals or in a dither under load.
     mr: float = 4.9e5
     # [N s/m] Viscous friction coefficient. Measured 2.26e6 over 0.1 to
     # 3 mm/s, of which the seals take 0.18e6 (a run with the piston

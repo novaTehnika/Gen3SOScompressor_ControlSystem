@@ -306,7 +306,7 @@ def check_throttled_opening():
     # it lies right behind the virgin saline; the purge is sized to it.
     q = par.with_(ratio=2.0, d_prox=0.3e-3, Topen_prox=0.5)
     r = sim.run(q, scenarios.deliver(q), ctl.ScheduledSlaveController(
-        's', wc=16.0, V_dead_cfg=81e-6, C_hose_cfg=1.2e-13))
+        's', wc=16.0, V_dead_cfg=109e-6, C_hose_cfg=1.2e-13))
     P_sat = r.P_sat[0]
     V_expect = P_sat * (q.C_hose + q.V_hose / q.K)          # [m^3]
     assert abs(r['V_degas'] / (V_expect * 1e6) - 1) < 0.1, \
@@ -701,7 +701,7 @@ def check_closed_loop():
     # moving piston; the scheduled loop keeps it below.
     q = par.with_(hose_before=True, V_passages=52e-6)
     relaxed = ctl.SlaveController('r')
-    sched = ctl.ScheduledSlaveController('s', wc=11.0, V_dead_cfg=81e-6,
+    sched = ctl.ScheduledSlaveController('s', wc=11.0, V_dead_cfg=109e-6,
                                          C_hose_cfg=1.2e-13)
     r1 = sim.run(q, scenarios.deliver(q), relaxed)
     r2 = sim.run(q, scenarios.deliver(q), sched)
@@ -713,7 +713,8 @@ def check_closed_loop():
     assert r2['V_ok'] == r2['V_delivered']
     assert r1['ripple'] < 0.001 and r2['ripple'] < 0.001
     assert math.isnan(r1['tSettle']) is False and r1['rmsErr'] < 0.01
-    ok(f'delivery to a 81 mL dead volume: the hose compliance caps the '
+    ok(f'delivery to a {(q.V_dead - q.V_tube) * 1e6:.0f} mL dead volume: '
+       f'the hose compliance caps the '
        f'end stiffness at {r1.stiffness[-1] / 1e9:.0f} MPa/mm, both '
        f'loops reach the limit switch in band; the purge closing peaks '
        f'at {r1["P_max"]:.2f} MPa (GVL) and {r2["P_max"]:.2f} MPa '

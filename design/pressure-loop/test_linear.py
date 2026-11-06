@@ -124,7 +124,8 @@ def check_margins():
     b = lin.margins(lin.loop(PAR, 2 * K_LIQ, G_cfgPressureKp=kp / 2,
                              G_cfgPressureKi=0.2 * kp)['L'])
     assert abs(a['pm'] - b['pm']) < 1e-6 and abs(a['gm'] - b['gm']) < 1e-6
-    ok(f'margins at the GVL gains, liquid chamber: GM {m["gm_db"]:.1f} dB, '
+    ok(f'margins at the GVL gains, liquid chamber: '
+       f'GM {m["gm_db"]:.1f} dB, '
        f'PM {m["pm"]:.1f} deg at {m["wc"]:.2f} rad/s, '
        f'DM {m["dm"] * 1e3:.0f} ms; gain scaling reaches the unit circle; '
        f'L depends on Kp k')

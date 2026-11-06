@@ -51,15 +51,23 @@ def marks(par):
     """Return the named stiffness values [Pa/m] marked on every plot.
 
       gas-rich          the gas-rich chamber at the start of compress
-      liquid K=1 GPa    the liquid-only chamber, k = A K / Vl0, at the
-                        nominal bulk modulus
-      liquid K=2.2 GPa  the same with the bulk modulus of water
+      hose open         the liquid-only chamber of Vl0 with the hose,
+                        k = A / ((Vl0 + V_hose) / K + C_series + C_hose)
+      hose shut         the same without the hose,
+                        k = A / (Vl0 / K + C_series)
+      limit switch      the hose-open chamber down to its dead volume
       stop-law          the stiffness the slave's stop law assumes
     """
     cfg = par.cfg()
+    # Chamber stiffness from the liquid, the series compliance and the
+    # hose, eqs. (4), (10), (42) and (49)
+    C_open = par.C_series + par.C_hose                      # [m^3/Pa]
     return {'gas-rich': 0.002 * MPA_MM,
-            'liquid K=1 GPa': par.A * 1e9 / par.Vl0,
-            'liquid K=2.2 GPa': par.A * 2.2e9 / par.Vl0,
+            'hose open': par.A / ((par.Vl0 + par.V_hose) / par.K
+                                  + C_open),
+            'hose shut': par.A / (par.Vl0 / par.K + par.C_series),
+            'limit switch': par.A / ((par.V_dead - par.V_tube) / par.K
+                                     + C_open),
             'stop-law': cfg['G_cfgPressureStopStiffness'] * MPA_MM}
 
 
@@ -177,8 +185,8 @@ def study_boundary(par, out, m):
     # With Ki = ratio Kp the loop depends only on Kp k, which
     # approximates the gain crossover [rad/s] (Kp in (mm/s)/MPa, k in
     # MPa/mm). A stiffness-scheduled gain is therefore Kp = wc / k.
-    k0 = m['liquid K=1 GPa'] / MPA_MM                       # [MPa/mm]
-    s0 = sched['liquid K=1 GPa']
+    k0 = m['hose shut'] / MPA_MM                       # [MPa/mm]
+    s0 = sched['hose shut']
     print(f'Kp k product (rad/s, nominal crossover), Ki = r Kp: '
           f'stability limit {s0[2] * k0:.3g}, 45 deg {s0[5] * k0:.3g}, '
           f'60 deg {s0[6] * k0:.3g}')
@@ -224,7 +232,7 @@ def study_bode(par, out, m):
     cfg = par.cfg()
     Ts, Kp = cfg['G_cfgScanTime'], cfg['G_cfgPressureKp']
     Q = 1e-6                                    # [m^3/s] outflow step
-    names = ['liquid K=1 GPa', 'liquid K=2.2 GPa', 'stop-law']
+    names = ['hose open', 'limit switch', 'stop-law']
     ks = {'1 MPa/mm': 1.0 * MPA_MM, **{n: m[n] for n in names}}
     w = lin.freq_grid(Ts, 1500, 1e-2)                       # [rad/s]
     n = int(8.0 / Ts)                           # [-] 8 s of samples
@@ -275,7 +283,7 @@ def study_bode(par, out, m):
 
     # Range of validity: the error amplitudes at which the clamp and the
     # slew limit, which the linear model omits, start to act
-    lp = lin.loop(par, m['liquid K=1 GPa'])
+    lp = lin.loop(par, m['hose shut'])
     wc = lin.margins(lp['L'])['wc']
     print('\nwhere the nonlinear limits the model ignores bind '
           '(GVL gains):')
@@ -287,7 +295,7 @@ def study_bode(par, out, m):
           f'{lin.slew_step_error(cfg, Kp):.2f} MPa makes the one-scan '
           f'command jump reach the accel limit '
           f'({cfg["G_cfgPressureAccel"]:g} mm/s^2)')
-    for name in ('liquid K=1 GPa', 'stop-law'):
+    for name in ('hose shut', 'stop-law'):
         lpn = lin.loop(par, m[name])
         wcn = lin.margins(lpn['L'])['wc']
         amp = float(lin.slew_amplitude(cfg, lpn, wcn))
@@ -304,7 +312,7 @@ def study_lags(par, out, m):
           'filter and drive lag')
     taus = [0.0, 0.01, 0.02, 0.05, 0.1]         # [s] filter
     tvs = [0.005, 0.01, 0.02, 0.04, 0.08]       # [s] drive lag
-    for name in ('liquid K=1 GPa', 'liquid K=2.2 GPa'):
+    for name in ('hose open', 'limit switch'):
         k = m[name]
         print(f'{name} (k {k / MPA_MM:.1f} MPa/mm): rows filter tau (s), '
               f'columns tauV (s)')
@@ -316,7 +324,7 @@ def study_lags(par, out, m):
             print(f'{tf:8g}' + ''.join(f'{x:9.3g}' for x in kps))
 
     # Contribution of each lag at the nominal liquid-only stiffness
-    k = m['liquid K=1 GPa']
+    k = m['hose shut']
     base = lin.max_stable_kp(par, k)
     no_filter = lin.max_stable_kp(par, k, G_cfgAnalogFilterTimeConst=0.0)
     fast_drive = lin.max_stable_kp(par.with_(tauV=1e-3), k)
