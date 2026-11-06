@@ -87,8 +87,9 @@ COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
 # dead volume at the low end of its range (a lower bound keeps the
 # stiffness estimate an upper bound), the bulk modulus at the top of its
 # measured range, and the saline volume and charge as configured for
-# the run.
-SCHED = {'V_dead_cfg': 81e-6, 'K_cfg': 1.0e9, 'C_hose_cfg': 1.2e-13}
+# the run: the passages' low end, 52 mL, and the 6 ft hose, 57.9 mL,
+# rounded down.
+SCHED = {'V_dead_cfg': 109e-6, 'K_cfg': 1.0e9, 'C_hose_cfg': 1.2e-13}
 CONFIGS = {
     'GVL': ControllerSpec('GVL'),
     'vmin0.5': ControllerSpec('vmin0.5', {'StopVelMin': 0.5}),

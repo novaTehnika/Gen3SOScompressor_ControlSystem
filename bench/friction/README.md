@@ -158,10 +158,13 @@ r = frictionRun('u1');
 r = frictionRun('u1', 'unloaded', struct('startPosition', 235));   % position step first
 ```
 
-Run it a second time with the piston withdrawn below the cylinder entry
-(below 200 mm, for example from 60 mm) with the label `bare`: that log is
-the gearbox, screw and brake drag without the seals, and the difference
-between the two unloaded fits is the seal friction.
+Run it a second time with the label `bare` and the piston removed from
+the actuator, over the same positions: that log is the gearbox, screw
+and brake drag without the seals, and the difference between the two
+unloaded fits is the seal friction. With the piston in place, the same
+run withdrawn below the cylinder entry (below 200 mm, for example
+`'startPosition', 60`) also takes the seals out, but over another part
+of the screw.
 
 ### 4.2 Under a gas charge
 

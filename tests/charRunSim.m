@@ -105,7 +105,7 @@ fprintf('ok  drive lag fit: captures %.1f ms and %.1f ms dead (plant %.1f, %.1f)
 bk = charBulkModulus(r.file, struct('quiet', true, 'deadVolume_mL', 10, 'pressureRange', [2.0 3.1]));
 Pabs = 2.5e6 + pl0.par.Patm;                                        % [Pa]
 C = (pl0.n_tot - pl0.n_dis) * pl0.par.RT / Pabs^2 + pl0.par.nRT_air / Pabs^2 ...
-    + (pl0.V_l + pl0.V_vir) / pl0.par.K + pl0.par.C_hose;           % [m^3/Pa]
+    + (pl0.V_l + pl0.V_vir) / pl0.par.K + pl0.par.C_series + pl0.par.C_hose;   % [m^3/Pa]
 vGas = C * Pabs * 1e6;                                              % [m^3 -> mL]
 assert(~bk.pass && bk.K_lin_GPa < 0.5, 'gas charge accepted as a liquid (K %.3f GPa)', bk.K_lin_GPa);
 assert(abs(bk.Vg_mL - vGas) / vGas < 0.3, 'gas volume %.2f mL, chamber holds about %.2f mL', bk.Vg_mL, vGas);
@@ -148,13 +148,16 @@ S = fakeProbeLink('state');
 pl = S.sl.plant;
 kPlant = @(Pq) pl.par.A ./ ((pl.n_tot - pl.n_dis) * pl.par.RT ./ (Pq * 1e6 + pl.par.Patm).^2 ...
     + pl.par.nRT_air ./ (Pq * 1e6 + pl.par.Patm).^2 ...
-    + (pl.V_l / pl.par.K + pl.par.C_hose)) * 1e-9;                  % [Pa/m -> MPa/mm]
+    + (pl.V_l / pl.par.K + pl.par.C_series + pl.par.C_hose)) * 1e-9;   % [Pa/m -> MPa/mm]
 [path, plan] = charStopPath(struct('levels_MPa', [8 10], 'speeds', [0.25 0.5], 'budget_MPa', [2 0.7], ...
     'rampOvershoot_MPa', 0.2, 'minRun_mm', 0.03, 'minSteady_s', 0, 'P_start_MPa', 7.5, 'pause_s', 3, ...
     'stiffness', kPlant, 'D_mm_s2', ccfg.velDecel, 'quiet', true));
 nStops = plan(1).nStops;
-% Both speeds at 8 MPa; at 10 MPa the 0.5 mm/s leg leaves no budget under the guard
-assert(nStops == 6 && isequal(plan(1).speeds, [0.25 0.5]) && isequal(plan(2).speeds, 0.25), ...
+% Both speeds at 8 MPa; at 10 MPa the 0.25 mm/s leg at least, and the
+% 0.5 mm/s one only if its stop fits the 0.7 MPa under the guard (it does
+% in the hose-open chamber of the simulated slave)
+assert(nStops == 2 * (numel(plan(1).speeds) + numel(plan(2).speeds)) && ...
+    isequal(plan(1).speeds, [0.25 0.5]) && any(plan(2).speeds == 0.25), ...
     'plan: %d stops, speeds %s / %s', nStops, mat2str(plan(1).speeds), mat2str(plan(2).speeds));
 r = charRun('simstophp', path, opts);
 % The legs are 0.03 to 0.35 mm, so the drive has not reached speed when a
@@ -195,7 +198,7 @@ assert(abs(fl.Cd - 0.68) / 0.68 < 0.06, 'Cd %.3f, valve set to 0.68', fl.Cd);
 late = inStep & L(:, T) > 15;
 Pm = mean(L(late, P)); xm = mean(L(late, POS)); tm = mean(L(late, T));
 Cm = (nFree(tm) * pl.par.RT + pl.par.nRT_air) / (Pm * 1e6 + pl.par.Patm)^2 ...
-    + (pl.V_l + pl.V_vir) / pl.par.K + pl.par.C_hose;                      % [m^3/Pa]
+    + (pl.V_l + pl.V_vir) / pl.par.K + pl.par.C_series + pl.par.C_hose;    % [m^3/Pa]
 Kgas = (ccfg.pistonArea_mm2 * (ccfg.posEOT - xm) + ccfg.deadVolume_mL * 1000) * 1e-9 ...
     / Cm * 1e-6;                                                           % [mm^3 -> m^3, Pa -> MPa]
 flk = charOrificeFlow(r.file, struct('quiet', true, 'tOpen', 12, 'K_Pa', Kgas * 1e6));

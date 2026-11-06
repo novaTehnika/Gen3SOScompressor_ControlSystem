@@ -125,6 +125,9 @@ class Plant:
         # eq. (46). The amount is fixed; it never dissolves or leaves.
         self.nRT_air = par.Patm * par.V_air
         self.K = par.K                  # [Pa]
+        # [m^3/Pa] Series compliance of the seals, the cylinder and the
+        # actuator frame, eq. (49): the system volume grows by C_series P
+        self.C_series = par.C_series
         self.kH = par.kH                # [mol/(m^3 Pa)]
         self.tauDiss = par.tauDiss      # [s]
         self.Ts = par.Ts                # [s] scan time
@@ -181,11 +184,14 @@ class Plant:
         self.Q = 0.0                            # [m^3/s] last outflow
 
         # [m^3] Cylinder volume at x = 0 (passages and swept volume, not
-        # the hose). The contents fill it, so it equals the stressed
-        # liquid plus the free gas and the air pocket (eq. (9)).
+        # the hose) at zero gauge pressure. The contents fill it and its
+        # dilation, so it equals the stressed liquid plus the free gas
+        # and the air pocket less the dilation C_series P0 (eqs. (9)
+        # and (49)).
         self.Vch0 = (par.Vl0 * (1 - P0 / par.K)
                      + ng0 * self.RT / (P0 + par.Patm)
-                     + self.nRT_air / (P0 + par.Patm))
+                     + self.nRT_air / (P0 + par.Patm)
+                     - par.C_series * P0)
         if self.hose_open:
             # The hose is already part of the system: its virgin saline
             # is at the chamber pressure and its wall is dilated, so the
@@ -218,9 +224,10 @@ class Plant:
 
     # ----- Hose ---------------------------------------------------------
     def liquid_capacitance(self, V_l, V_vir):
-        """[m^3/Pa] Liquid part of the capacitance: the saline and, with
-        the hose open, the hose's compliance, eq. (42)."""
-        C = (V_l + V_vir) / self.K
+        """[m^3/Pa] Liquid part of the capacitance: the saline, the
+        series compliance of eq. (49) and, with the hose open, the
+        hose's compliance, eq. (42)."""
+        C = (V_l + V_vir) / self.K + self.C_series
         if self.hose_open:
             C += self.C_hose
         return C
@@ -233,7 +240,8 @@ class Plant:
         The contents must fill the cylinder and the hose, so the new
         pressure P1 solves
           (V_l + V_vir + V_hose)(1 - P1/K) + n_g R T / (P1 + Patm)
-            + Patm V_air / (P1 + Patm) = V_cyl + V_hose + C_hose P1
+            + Patm V_air / (P1 + Patm)
+            = V_cyl + C_series P1 + V_hose + C_hose P1
         where V_cyl is the cylinder volume now; it is found by bisection.
         The solution that moved into the hose to stress its saline and
         fill its dilation is logged as one parcel that met the hose at
@@ -294,7 +302,8 @@ class Plant:
         P_abs = P + self.Patm
         C_ch = ((y[iy_ntot] - y[iy_ndis]) * self.RT / P_abs**2
                 + self.nRT_air / P_abs**2
-                + (y[iy_Vl] - V_in) / self.K)               # [m^3/Pa]
+                + (y[iy_Vl] - V_in) / self.K
+                + self.C_series)                            # [m^3/Pa]
         C_h = self.C_hose + (self.V_hose + V_in) / self.K   # [m^3/Pa]
         dV_eq = dP / (1 / C_ch + 1 / C_h)                   # [m^3]
         return min(Q, dV_eq / self.Ts)
@@ -370,9 +379,9 @@ class Plant:
         r_dis = (n_eq - n_dis) / self.tauDiss               # [mol/s]
 
         # Chamber capacitance [m^3/Pa], the volume change per unit
-        # pressure change of the free gas, the air pocket and the
-        # liquid and, with the hose open, its compliance, eqs. (4), (42)
-        # and (46)
+        # pressure change of the free gas, the air pocket, the liquid,
+        # the series compliance and, with the hose open, the hose's,
+        # eqs. (4), (42), (46) and (49)
         C = ((n_tot - n_dis) * self.RT / P_abs**2
              + self.nRT_air / P_abs**2
              + self.liquid_capacitance(V_l - V_in, V_vir))
@@ -381,6 +390,12 @@ class Plant:
         if self.velocity_mode:
             # Drive velocity loop as a first-order lag, eq. (12)
             dv = (u_act - v) / self.tauV                    # [m/s^2]
+            # At the torque limit, eq. (13), the drive cannot
+            # accelerate the piston further into the load
+            P_stall = ((self.Fcap - self.Fc - self.b * max(v, 0.0))
+                       / (self.A * (1.0 + self.mu)))        # [Pa]
+            if P >= P_stall and v >= 0.0 and dv > 0.0:
+                dv = 0.0
         else:
             # Force balance on the reflected mass, eq. (14). The Coulomb
             # and load-dependent friction are smoothed over |v| < veps.
@@ -548,7 +563,7 @@ class Plant:
 
     def capacitance(self):
         """[m^3/Pa] chamber capacitance at the present state, eqs. (4),
-        (42) and (46)"""
+        (42), (46) and (49)"""
         x, v, P, n_dis, n_tot, V_l, n_out, V_out, V_vir, V_in = self.y
         P_abs = P + self.Patm
         return ((n_tot - n_dis) * self.RT / P_abs**2
@@ -572,14 +587,14 @@ class Plant:
     def volume_closure(self):
         """[m^3] System volume minus the volume of its contents, eq. (9).
 
-        The system is the cylinder plus, with the hose open, the hose
-        and its dilation; the contents are the stressed liquid, the free
-        gas and the air pocket (eq. (46)); dissolved gas takes no
-        volume. The result is zero up to the integration error when
-        liquid_depletes is set.
+        The system is the cylinder and its dilation, eq. (49), plus,
+        with the hose open, the hose and its dilation; the contents are
+        the stressed liquid, the free gas and the air pocket (eq. (46));
+        dissolved gas takes no volume. The result is zero up to the
+        integration error when liquid_depletes is set.
         """
         x, v, P, n_dis, n_tot, V_l, n_out, V_out, V_vir, V_in = self.y
-        system = self.chamber_volume
+        system = self.chamber_volume + self.C_series * P
         if self.hose_open:
             system += self.V_hose + self.C_hose * P
         contents = ((V_l - V_in + V_vir) * (1 - P / self.K)

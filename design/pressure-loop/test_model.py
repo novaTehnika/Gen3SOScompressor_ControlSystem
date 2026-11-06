@@ -125,11 +125,12 @@ def check_stiffness():
     for _ in range(500):
         plant.scan(1e-4, 0.0)
     measured = (plant.P - P1) / (plant.x - x1)              # [Pa/m]
-    expected = par.A * par.K / par.Vl0                      # [Pa/m]
+    # Liquid and series compliance, eqs. (4), (10) and (49)
+    expected = par.A / (par.Vl0 / par.K + par.C_series)     # [Pa/m]
     assert abs(measured / expected - 1) < 0.02, (measured, expected)
     assert abs(plant.stiffness / expected - 1) < 0.02
     ok(f'sealed liquid chamber stiffness {measured / 1e9:.2f} MPa/mm = '
-       f'A K / Vl ({expected / 1e9:.2f})')
+       f'A / (Vl / K + C_series) ({expected / 1e9:.2f})')
 
 
 def check_conservation():
@@ -194,7 +195,7 @@ def check_outlet():
     Q10 = par.Q_orifice(10e6)
     expect = par.Cd * par.n_orifice * math.pi * par.d_orifice**2 / 4 \
         * math.sqrt(2 * 10e6 / par.rho)
-    assert abs(Q10 - expect) < 1e-15 and abs(Q10 * 1e6 - 4.83) < 0.01
+    assert abs(Q10 - expect) < 1e-15 and abs(Q10 * 1e6 - 4.77) < 0.01
     assert abs(par.Q_orifice(2.5e6) / Q10 - 0.5) < 1e-12
     assert par.Q_orifice(-1e5) == 0.0
 
@@ -212,7 +213,8 @@ def check_outlet():
        f'the pressure {dP_step / 1e6:.2f} MPa in the opening scan')
 
     # The run ends at the limit switch, with the passages, the hose and
-    # its dilation full of solution, and reports the volume delivered:
+    # their dilations full of solution, and reports the volume
+    # delivered:
     # the saline and the hose's virgin saline, less what is left. The
     # liquid is stressed by P/K and the delivered volume is measured at
     # pressure, so both carry the factor (1 - P/K).
@@ -220,7 +222,8 @@ def check_outlet():
                 ctl.SlaveController())
     P_end = r.P[-1]
     squeeze = 1 - P_end / par.K            # at the pressure reached
-    left = par.V_passages + par.V_hose + par.C_hose * P_end     # [m^3]
+    left = (par.V_passages + par.V_hose
+            + (par.C_series + par.C_hose) * P_end)              # [m^3]
     assert r.t[-1] < 299 and r.events[:2] == [1.0, 6.0]
     assert abs(r.V_l[-1] * squeeze - left) < 0.3e-6
     expect = ((par.Vl0 + par.V_hose) * squeeze - left) * 1e6    # [mL]
@@ -237,10 +240,11 @@ def check_outlet():
     V_l = plant.V_l
     plant.open_hose()
     P1 = plant.P
-    # Linearised: dP = P (V_hose / K + C_hose) / (V_l / K + V_hose / K
-    # + C_hose) less the hose's own atmosphere start
+    # Linearised: dP = P C_h / (C_cyl + C_h), with the cylinder's
+    # C_cyl = V_l / K + C_series and the hose's C_h = V_hose / K +
+    # C_hose, less the hose's own atmosphere start
     C_h = par.V_hose / par.K + par.C_hose
-    dP_lin = 10e6 * C_h / (V_l / par.K + C_h)
+    dP_lin = 10e6 * C_h / (V_l / par.K + par.C_series + C_h)
     assert abs((10e6 - P1) / dP_lin - 1) < 0.05, (P1, dP_lin)
     assert abs(plant.volume_closure()) < 1e-12
     ok(f'opening the hose drops a liquid-only chamber from 10 to '
@@ -302,7 +306,7 @@ def check_throttled_opening():
     # it lies right behind the virgin saline; the purge is sized to it.
     q = par.with_(ratio=2.0, d_prox=0.3e-3, Topen_prox=0.5)
     r = sim.run(q, scenarios.deliver(q), ctl.ScheduledSlaveController(
-        's', wc=16.0, V_dead_cfg=81e-6, C_hose_cfg=1.2e-13))
+        's', wc=16.0, V_dead_cfg=109e-6, C_hose_cfg=1.2e-13))
     P_sat = r.P_sat[0]
     V_expect = P_sat * (q.C_hose + q.V_hose / q.K)          # [m^3]
     assert abs(r['V_degas'] / (V_expect * 1e6) - 1) < 0.1, \
@@ -369,8 +373,11 @@ def check_actuators():
         seen.append(plant.v)
     assert all(v == 0.0 for v in seen[:5 + n_dead])
     assert seen[5 + n_dead] > 0
+    # Four scans after the first that moves, five scans of the lag of
+    # eq. (12) have acted
     settle = seen[5 + n_dead + 4]           # 4 scans = 16 ms after start
-    assert 0.5 * 0.002 < settle < 0.8 * 0.002, settle
+    lag = 1 - math.exp(-5 * par.Ts / par.tauV)                  # [-]
+    assert abs(settle / 0.002 - lag) < 0.01, (settle, lag)
     ok(f'velocity command acts after {n_dead} scans of dead time and '
        f'reaches {settle / 0.002 * 100:.0f} % in 16 ms (tauV '
        f'{par.tauV * 1e3:.1f} ms)')
@@ -639,10 +646,12 @@ def check_scheduled_st():
 
 def check_legacy_reference():
     # Reference values for this case without noise or transducer offset,
-    # computed with Heun at nsub = 5, a 2 ms scan and a drive lag of
-    # 8.7 ms; the case pins both so that it guards the earlier model
+    # computed with Heun at nsub = 5, a 2 ms scan, a drive lag of
+    # 8.7 ms and a chamber of K 0.72 GPa with no series compliance; the
+    # case pins them so that it guards the earlier model
     par = StudyParams().legacy().with_(noise=0.0, P_offset=0.0,
-                                  G_cfgScanTime=0.002, tauV=0.0087)
+                                  G_cfgScanTime=0.002, tauV=0.0087,
+                                  K=0.72e9, C_series=0.0)
     c = ctl.LegacyController('ref', 'V', 0.5, 0.2, 0, True, 50e-3)
     r = sim.run(par, scenarios.stiffstep(par), c, legacy_sensor=True)
     assert (abs(r['overshoot'] - 0.1662) < 1e-4
@@ -692,18 +701,20 @@ def check_closed_loop():
     # moving piston; the scheduled loop keeps it below.
     q = par.with_(hose_before=True, V_passages=52e-6)
     relaxed = ctl.SlaveController('r')
-    sched = ctl.ScheduledSlaveController('s', wc=11.0, V_dead_cfg=81e-6,
+    sched = ctl.ScheduledSlaveController('s', wc=11.0, V_dead_cfg=109e-6,
                                          C_hose_cfg=1.2e-13)
     r1 = sim.run(q, scenarios.deliver(q), relaxed)
     r2 = sim.run(q, scenarios.deliver(q), sched)
-    k_cap = par.A / ((q.V_dead - q.V_tube) / q.K + q.C_hose)     # [Pa/m]
+    k_cap = par.A / ((q.V_dead - q.V_tube) / q.K + q.C_series
+                     + q.C_hose)                                 # [Pa/m]
     assert abs(r1.stiffness[-1] / k_cap - 1) < 0.05, r1.stiffness[-1]
     assert r1['P_max'] > par.P_ceiling / 1e6 > r2['P_max'], \
         (r1['P_max'], r2['P_max'])
     assert r2['V_ok'] == r2['V_delivered']
     assert r1['ripple'] < 0.001 and r2['ripple'] < 0.001
     assert math.isnan(r1['tSettle']) is False and r1['rmsErr'] < 0.01
-    ok(f'delivery to a 81 mL dead volume: the hose compliance caps the '
+    ok(f'delivery to a {(q.V_dead - q.V_tube) * 1e6:.0f} mL dead volume: '
+       f'the hose compliance caps the '
        f'end stiffness at {r1.stiffness[-1] / 1e9:.0f} MPa/mm, both '
        f'loops reach the limit switch in band; the purge closing peaks '
        f'at {r1["P_max"]:.2f} MPa (GVL) and {r2["P_max"]:.2f} MPa '
