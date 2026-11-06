@@ -15,7 +15,9 @@ function figs = tracePlot(src, varargin)
 %   'saveDir'  folder for the saved figures (default: the CSV's folder)
 %
 %   figs is the row of the three figure handles:
-%     overview  pressure (atm absolute) with the target while the master
+%     overview  pressure (atm absolute) with the window mean (steps),
+%               maximum and minimum over each master write when the file
+%               has them (format 2) and the target while the master
 %               is in pressure mode, position from the end of travel with
 %               the command and the target while in position mode,
 %               velocity, torque, on one time axis
@@ -82,9 +84,21 @@ f1 = newFigure('overview', opts.visible);
 ax = zeros(1, 4);
 ax(1) = subplot(4, 1, 1);
 pTarget = maskOut(d.targetPressure_atm, d.statusCode == 5);
-h = drawSeries(t, {d.pressureAbs_atm, pTarget}, d.gap, ...
-    {cLine, cTarget}, {'-', '-'}, bands, @plot);
-legend(h, {'pressure', 'target'}, 'Location', 'northeast');
+hasWin = any(isfinite(d.pressureMeanAbs_atm));
+if hasWin
+    cWin = [0.65 0.82 0.95];
+    h = drawSeries(t, {d.pressureMaxAbs_atm, d.pressureMinAbs_atm, ...
+        d.pressureMeanAbs_atm, d.pressureAbs_atm, pTarget}, d.gap, ...
+        {cWin, cWin, cLine2, cLine, cTarget}, {'-', '-', '-', '-', '-'}, ...
+        bands, {@plot, @plot, @stairs, @plot, @plot});
+    set(h(1:2), 'LineWidth', 0.5);
+    legend(h([1 3 4 5]), {'window max/min', 'window mean', ...
+        'pressure', 'target'}, 'Location', 'northeast');
+else
+    h = drawSeries(t, {d.pressureAbs_atm, pTarget}, d.gap, ...
+        {cLine, cTarget}, {'-', '-'}, bands, @plot);
+    legend(h, {'pressure', 'target'}, 'Location', 'northeast');
+end
 ylabel('pressure [atm abs]');
 title('Overview');
 ax(2) = subplot(4, 1, 2);
@@ -237,7 +251,9 @@ end
 
 function h = drawSeries(x, ys, gap, colors, styles, bands, plotFcn, markGaps)
 %DRAWSERIES Draw the bands, the dashed gap markers and the series on the
-%   current axes; returns the handles of the series for the legend. The
+%   current axes; returns the handles of the series for the legend.
+%   plotFcn is one plot function handle for all series or a cell with one
+%   per series. The
 %   y limits are fixed from the data before the bands are drawn, so the
 %   bands span the axes without taking part in the autoscale. markGaps
 %   is false when x is not time.
@@ -270,9 +286,13 @@ for g = 1:numel(gx)
     plot([gx(g) gx(g)], lim, 'k--', 'HandleVisibility', 'off');
 end
 h = zeros(1, numel(ys));
+fcn = plotFcn;
+if ~iscell(fcn)
+    fcn = repmat({plotFcn}, 1, numel(ys));
+end
 for k = 1:numel(ys)
     [xx, yy] = breakAtGaps(x, ys{k}, gap);
-    h(k) = plotFcn(xx, yy, 'Color', colors{k}, 'LineStyle', styles{k});
+    h(k) = fcn{k}(xx, yy, 'Color', colors{k}, 'LineStyle', styles{k});
 end
 set(gca, 'YLim', lim);
 if numel(x) > 1 && max(x) > min(x)

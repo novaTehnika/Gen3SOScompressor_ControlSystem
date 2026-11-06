@@ -15,7 +15,7 @@ function meta = traceMeta(buf, cfg, startedAt)
 %   are frozen in the file so a later change of masterConfig does not
 %   alter an old trace.
 
-meta.format            = 1;
+meta.format            = 2;
 meta.source            = 'SOS_Gen3_Compressor_Interface';
 meta.started           = startedAt;
 meta.records           = buf.n;

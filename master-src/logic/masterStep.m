@@ -9,7 +9,7 @@ function [mbWrite, doSafety, doMixer, position, velocity, pressure, ...
 %   displayed values out. Called once per model step (cfg.dt). The Modbus
 %   blocks run every cfg.exchangePeriod and hold their values in between.
 %
-%   mbRead        input registers IR1..IR20 as read by the Modbus Client
+%   mbRead        input registers IR1..IR34 as read by the Modbus Client
 %                 Read block (modbusMap, raw 16-bit values as doubles)
 %   op, cmdSeq, targetPosition, targetVelocity, jogDirection,
 %   targetPressure, estop, mixer, positionSpeed

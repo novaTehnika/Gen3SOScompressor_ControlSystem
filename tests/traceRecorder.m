@@ -7,8 +7,8 @@ function traceRecorder()
 %
 %   The stand-in answers every second step with a new input-register
 %   vector (scan counter + 1, the heartbeat echoed, smooth position,
-%   velocity, torque and pressure) and holds it in between, as the
-%   Modbus Read block does. Each 25 ms step calls masterStep, then
+%   velocity, torque and pressure, and the eight summary registers
+%   IR21-34) and holds it in between, as the Modbus Read block does. Each 25 ms step calls masterStep, then
 %   traceStep with its outputs, as the shell does.
 %
 %   Run from the repository root:
@@ -197,14 +197,16 @@ nMax = 4000;
 h.k = 0;                            % next step
 h.counter = 100;
 h.lastHb = 0;
-h.mbRead = zeros(1, 20);
-h.ring = zeros(512, 35);
+nRead = modbusMap().nRead;
+L = traceLayout();
+h.mbRead = zeros(1, nRead);
+h.ring = zeros(L.depth, L.width);
 h.freezeFrom = Inf;
 h.freezeTo = Inf;
-h.logR = zeros(nMax, 20);           % mbRead of each step
+h.logR = zeros(nMax, nRead);          % mbRead of each step
 h.logW = zeros(nMax, 12);           % mbWrite
 h.logO = zeros(nMax, 11);           % masterStep outputs and app values
-h.logT = zeros(nMax, 5);            % stand-in's true feedback
+h.logT = zeros(nMax, 13);           % stand-in's true feedback and summary
 h.buf = [];
 h.nextPoll = 0;
 h.pollGaps = [];
@@ -237,9 +239,21 @@ if mod(k, 2) == 0
     if ~frozen
         h.counter = mod(h.counter + 1, 65536);
     end
+    % Summary of the stand-in's window: mean, min = mean - 0.1 and max =
+    % mean + 0.1 of the pressure, the means of velocity, torque and
+    % position, 12 or 13 scans and the window number
+    pm = 2 + 0.5 * cos(t);
+    summary = [pm, pm - 0.1, pm + 0.1, 0.4 + 0.1 * sin(t), 5 * cos(t), 90 + 0.5 * t];
+    nScans = 12 + mod(k / 2, 2);
+    nSeq = mod(k / 2, 65536);
+    truth = [truth, summary, nScans, nSeq];
     h.mbRead = [h.lastHb, h.counter, 0, 0, 0, double(mod(floor(t), 2) == 1), ...
         1, 1, 0, 0, modbusPack(truth(1)), modbusPack(truth(2)), ...
-        modbusPack(truth(3)), modbusPack(truth(4)), modbusPack(truth(5))];
+        modbusPack(truth(3)), modbusPack(truth(4)), modbusPack(truth(5)), ...
+        modbusPack(summary(1)), modbusPack(summary(2)), modbusPack(summary(3)), ...
+        modbusPack(summary(4)), modbusPack(summary(5)), modbusPack(summary(6)), ...
+        nScans, nSeq];
+    h.truth = truth;
 end
 
 [mbWrite, doSafety, ~, ~, ~, ~, statusCode, faultCode, state, linkOk] = ...
@@ -253,7 +267,7 @@ h.logR(k + 1, :) = h.mbRead;
 h.logW(k + 1, :) = mbWrite;
 h.logO(k + 1, :) = [doSafety, statusCode, faultCode, state, linkOk, op, ...
     cmdSeq, targetPosition, targetPressure, estop, mixer];
-h.logT(k + 1, :) = truth;
+h.logT(k + 1, :) = h.truth;
 h.k = k + 1;
 end
 
@@ -301,6 +315,14 @@ e(L.col.velocity_mm_s) = double(single(T(2)));
 e(L.col.torque_pct) = double(single(T(3)));
 e(L.col.commandedPosition_mm) = double(single(T(4)));
 e(L.col.pressureGauge_MPa) = double(single(T(5)));
+e(L.col.pressureMeanGauge_MPa) = double(single(T(6)));
+e(L.col.pressureMinGauge_MPa) = double(single(T(7)));
+e(L.col.pressureMaxGauge_MPa) = double(single(T(8)));
+e(L.col.velocityMean_mm_s) = double(single(T(9)));
+e(L.col.torqueMean_pct) = double(single(T(10)));
+e(L.col.positionMean_mm) = double(single(T(11)));
+e(L.col.summaryScans) = T(12);
+e(L.col.summarySeq) = T(13);
 e(L.col.modeCode) = w(2);
 e(L.col.motionEnable) = w(3);
 e(L.col.faultReset) = w(4);

@@ -37,7 +37,11 @@ STEPS_LONG = {'FB_Probe': 12000}     # past its ring depth of 4096, so the overr
 # BOOL inputs that follow a schedule of the call number instead of toggling at
 # random: the probe is on except for calls 3000-3099, so its recording runs long
 # enough to reach the ring depth.
-SCHEDULE = {('FB_Probe', 'Enable'): lambda k: not 3000 <= k < 3100}
+# The summary block's heartbeat advances every 12th call, the master's write
+# every twelve scans, and holds for calls 400-599, so a window runs long.
+SCHEDULE = {('FB_Probe', 'Enable'): lambda k: not 3000 <= k < 3100,
+            ('FB_ExchangeSummary', 'Heartbeat'):
+                lambda k: 33 if 400 <= k < 600 else (k // 12) % 65536}
 BIG = 1024                  # arrays longer than this are compared once, after the last call
 CORE = {'FB_PressureController', 'FB_AnalogInputFilter', 'FB_PressureInput',
         'FB_PositionPathShaper', 'FB_DigitalInputFilter',

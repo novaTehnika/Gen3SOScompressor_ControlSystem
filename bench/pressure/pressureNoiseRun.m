@@ -2,7 +2,7 @@ function r = pressureNoiseRun(label, path, opts)
 %PRESSURENOISERUN Drive the axis along a path and measure the noise on the
 %   transducer input while it moves. The script is the master for the run:
 %   one Modbus TCP connection carries the protocol exchange (HR1-12 out,
-%   IR1-20 back, every 50 ms, sequenced by masterStep as in the shell) and,
+%   IR1-34 back, every 50 ms, sequenced by masterStep as in the shell) and,
 %   between exchanges, the slave's step probe (FB_Probe, read by
 %   benchProbe), which records the raw pressure input every scan. The
 %   shell model must not be running: a second client on the controller

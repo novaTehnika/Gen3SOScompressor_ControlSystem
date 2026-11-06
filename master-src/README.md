@@ -31,7 +31,7 @@ SOS_Gen3_Compressor_Interface      % then press "Connect to Compressor"
 
 `buildShell` sets everything: the Modbus blocks' register rows (the Write
 block writes as many registers as its input is wide, so its row has no
-count; the Read row reads 20) and the Modbus client (`ModbusClient`, TCP/IP,
+count; the Read row reads 34) and the Modbus client (`ModbusClient`, TCP/IP,
 controller IP and port, 0.5 s timeout, byte order big-endian, word order
 little-endian) in Configuration Parameters > Modbus. The controller IP and
 the timeout are `MODBUS_SETUP` at the top of the script. After a build,
@@ -70,7 +70,7 @@ Gain block, a test point the app reads like the other Gain blocks. Each record
 carries its sequence number in the first column and again in the last (the
 guard), so the app takes only rows whose two copies agree and sees from the
 sequence numbers whether the ring overwrote records it had not read yet.
-The trace layout is unchanged: the raw read vector carries IR9 and IR10.
+The raw read vector carries IR1-34, so the trace records the slave's per-write summary (IR21-34) with the rest. `masterStep`'s logic is unchanged; its read grows to IR34.
 
 The app reads `StatusCode`, `FaultCode`, `State`, `Position`,
 `Velocity`, `Pressure` (the slave's gauge transducer reading plus `atmAmbient`, atm absolute),
@@ -374,7 +374,7 @@ alone.
 
 | Metadata key | Meaning |
 |--------------|---------|
-| `format` | File format version (1). |
+| `format` | File format version (2; a format 1 file has no summary columns and still reads and plots). |
 | `source` | Writer of the file. |
 | `started` | Wall-clock start, `yyyy-mm-ddTHH:MM:SS`. |
 | `records`, `missed` | Rows written and records lost to ring overruns. |
@@ -398,6 +398,12 @@ alone.
 | `torque_pct` | IR15-16 | % rated |
 | `commandedPosition_mm` | IR17-18 | mm |
 | `pressureGauge_MPa` | IR19-20, as the slave reports it | MPa gauge |
+| `pressureMeanGauge_MPa`, `pressureMinGauge_MPa`, `pressureMaxGauge_MPa` | IR21-22, IR23-24, IR25-26: pressure over the scans of the last closed window | MPa gauge |
+| `velocityMean_mm_s` | IR27-28 | mm/s |
+| `torqueMean_pct` | IR29-30 | % rated |
+| `positionMean_mm` | IR31-32 | mm |
+| `summaryScans` | IR33, scans in the window; 0 before the first window | count |
+| `summarySeq` | IR34, window number, wraps at 65536 | count |
 | `modeCode`, `motionEnable`, `faultReset` | HR2 to HR4 as sent | code, 0/1, 0/1 |
 | `reference` | HR5-6 as sent | mm (position), mm/s (jog), MPa gauge (pressure) |
 | `positionSpeed_mm_s` | HR7-8 as sent | mm/s |
@@ -410,19 +416,27 @@ alone.
 | `targetPressure_atm` | `TargetPressure` block | atm absolute |
 | `estop`, `mixer` | `ESTOP`, `Mixer` blocks | 0/1 |
 
+The slave closes a window on each change of the master's heartbeat, so a window
+spans the scans of one master write, and publishes it with a lag: the summary
+read in record n describes the window opened by the write of record n-2.
+`traceDerive` therefore gives row k the summary of record k+2
+(`pressureMeanAbs_atm`, `pressureMinAbs_atm`, `pressureMaxAbs_atm`), NaN where
+that record is missing, is not exactly two records later, reports
+`summaryScans` 0, or the file is format 1.
+
 `traceLayout.m` defines the columns and `traceColumnNames` gives the header.
 Read and plot a file from MATLAB or Octave (with `master-src/logic` and
 `master-src/trace` on the path):
 
 ```matlab
 d = traceReadCsv(file);     % d.meta, d.names, d.data and one column vector per name
-d = traceDerive(d);         % adds posFromEOT_mm, sweptVolume_mL, mixingVolume_mL, flow_mL_s, pressureAbs_atm, gap, tRel_s, ...
+d = traceDerive(d);         % adds posFromEOT_mm, sweptVolume_mL, mixingVolume_mL, flow_mL_s, pressureAbs_atm, pressureMeanAbs_atm, pressureMinAbs_atm, pressureMaxAbs_atm, gap, tRel_s, ...
 figs = tracePlot(file);     % a file name, the struct from traceReadCsv, or [] to choose a file
 figs = tracePlot(d, 'visible', 'off', 'save', true, 'saveDir', folder);
 ```
 
-`tracePlot` returns three figures: `overview` (pressure, position, velocity
-and torque against time), `delivery` (swept volume, flow, and pressure against
+`tracePlot` returns three figures: `overview` (pressure with the window mean, maximum and
+minimum when the file has them, position, velocity and torque against time), `delivery` (swept volume, flow, and pressure against
 swept volume) and `status` (status and mode codes, the operation flags, link state
 and link health). Fault, link-down and E-STOP intervals are shaded and lines
 break where records were missed. With `'save'` on, each figure is saved as

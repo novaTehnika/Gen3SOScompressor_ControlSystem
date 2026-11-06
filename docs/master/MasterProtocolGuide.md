@@ -15,8 +15,8 @@ This document provides step-by-step guidance for implementing the Simulink Deskt
 +-------------------+      Modbus TCP, port 502        +-------------------+
 |                   |  == HR1-12: heartbeat, mode, ==> |                   |
 |  Simulink DTRT    | enable, reset, ref, speed, fill  |  MP2600iec Slave  |
-|  Master           |  <= IR1-20: echo, counter, ===== |  (Modbus server)  |
-|                   |  confirm, fault, status, feedback|                   |
+|  Master           |  <= IR1-34: echo, counter, ===== |  (Modbus server)  |
+|                   |  confirm, fault, status, summary |                   |
 +-------------------+                                  +-------------------+
          |  P0.0 safety relay (DAQ, hardwired)                  ^
          +------------------------------------------------------+
@@ -68,6 +68,8 @@ the wiring.
 | IR10 | `G_mbAtEndOfTravel` | 1 at or beyond `G_cfgPosSoftLimitMax - G_cfgPressureEndMargin` (every state) | |
 | IR11-18 | `G_mbActual*`, `G_mbCommandedPosition` | REAL position, velocity, torque, commanded position | |
 | IR19-20 | `G_mbActualPressure` | REAL pressure (MPa gauge) | |
+| IR21-32 | `G_mbSum*` | REAL mean, minimum and maximum pressure (MPa gauge), mean velocity, torque and position of the last exchange window | |
+| IR33-34 | `G_mbSumScans`, `G_mbSumSeq` | Scans in that window (0 before the first), windows closed (wraps) | |
 
 **Note**: The slave's `G_doBrakeDisengage` output drives the brake circuit
 directly and is **not carried by the link**; the master has no brake status
@@ -85,6 +87,26 @@ not treat 0 during operation as loss of mode.
 
 A dropped TCP connection stops the Simulink model, which sets the DAQ
 outputs to their final values (safety relay off).
+
+### Exchange Summary (informational)
+
+Because the master reads every 50 ms and the slave scans every 4 ms, IR19-20
+is one scan's pressure out of about twelve. IR21-34 carry the statistics of
+all the scans between two master writes: a window runs from one change of
+HR1 to the next, so there is one window per write and it holds about 12 scans.
+`Scans` (IR33) is the count in the window, 0 until the first window closes
+(the other values are 0 then), and `Seq` (IR34) the number of windows closed,
+wrapping 65535 to 0. The summary trails the IR19-20 snapshot by one to two
+exchanges, because the slave cannot see the master's reads: the window read at
+exchange n was opened by write n-2 and closed by write n-1. A late or missed
+write gives one longer window; a merged late exchange can read the same
+window twice (`Seq` repeats). During a link loss the window keeps
+accumulating until it reaches 65535 scans (about 262 s) and closes; the first
+write after recovery closes the open window. The protocol does not change: no
+master state, handshake or timeout depends on these registers, and the
+master still reads IR1-34 in one FC04 read, which requires the slave's input
+group to reach IR34. Details are in [ModbusRegisterMap.md](ModbusRegisterMap.md),
+section 3.
 
 ### Step Probe (optional side channel)
 

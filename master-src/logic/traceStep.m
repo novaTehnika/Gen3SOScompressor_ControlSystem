@@ -6,7 +6,7 @@ function traceRing = traceStep(mbRead, mbWrite, doSafety, statusCode, faultCode,
 %   which it does not touch; the app reads the ring while recording
 %   (traceStart / traceDrain) and writes it to a CSV.
 %
-%   mbRead        input registers IR1..IR20 as read by the Modbus Client
+%   mbRead        input registers IR1..IR34 as read by the Modbus Client
 %                 Read block (modbusMap, raw 16-bit values as doubles)
 %   mbWrite       holding registers HR1..HR12 as masterStep returned them
 %                 and the Modbus Client Write block sends them
@@ -65,6 +65,14 @@ if mod(stepCount, stepsPerExchange) == 0
     rec(L.col.torque_pct)           = modbusUnpack(r(map.ir.torque), r(map.ir.torque + 1));
     rec(L.col.commandedPosition_mm) = modbusUnpack(r(map.ir.commandedPosition), r(map.ir.commandedPosition + 1));
     rec(L.col.pressureGauge_MPa)    = modbusUnpack(r(map.ir.pressure), r(map.ir.pressure + 1));
+    rec(L.col.pressureMeanGauge_MPa) = modbusUnpack(r(map.ir.pressureMean), r(map.ir.pressureMean + 1));
+    rec(L.col.pressureMinGauge_MPa) = modbusUnpack(r(map.ir.pressureMin), r(map.ir.pressureMin + 1));
+    rec(L.col.pressureMaxGauge_MPa) = modbusUnpack(r(map.ir.pressureMax), r(map.ir.pressureMax + 1));
+    rec(L.col.velocityMean_mm_s)    = modbusUnpack(r(map.ir.velocityMean), r(map.ir.velocityMean + 1));
+    rec(L.col.torqueMean_pct)       = modbusUnpack(r(map.ir.torqueMean), r(map.ir.torqueMean + 1));
+    rec(L.col.positionMean_mm)      = modbusUnpack(r(map.ir.positionMean), r(map.ir.positionMean + 1));
+    rec(L.col.summaryScans)         = r(map.ir.summaryScans);
+    rec(L.col.summarySeq)           = r(map.ir.summarySeq);
     rec(L.col.modeCode)             = w(map.hr.modeCode);
     rec(L.col.motionEnable)         = w(map.hr.motionEnable);
     rec(L.col.faultReset)           = w(map.hr.faultReset);

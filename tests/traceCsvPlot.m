@@ -15,7 +15,7 @@ L = traceLayout();
 cfg = masterConfig();
 names = traceColumnNames();
 tmp = tempname();
-cleanup = onCleanup(@() deleteIfExists([tmp '.csv'], [tmp '_gap.csv'], [tmp '_empty.csv']));
+cleanup = onCleanup(@() deleteIfExists([tmp '.csv'], [tmp '_gap.csv'], [tmp '_empty.csv'], [tmp '_f1.csv']));
 
 % End to end: stand-in slave, irregular drain, CSV, read back.
 clear masterStep masterStateMachine traceStep
@@ -32,7 +32,7 @@ for k = 1:L.nCol
     x = buf.data(1:buf.n, k);
     assert(all(abs(d.(names{k}) - x) <= 1e-9 * max(1, abs(x))));
 end
-assert(isnumeric(d.meta.format) && d.meta.format == 1);
+assert(isnumeric(d.meta.format) && d.meta.format == 2);
 assert(ischar(d.meta.started) && strcmp(d.meta.started, '2026-01-02T03:04:05'));
 assert(strcmp(d.meta.source, 'SOS_Gen3_Compressor_Interface'));
 assert(d.meta.records == buf.n && d.meta.missed == buf.missed);
@@ -127,6 +127,54 @@ d4 = traceDerive(rmfield(traceReadCsv(gapFile), 'meta'));
 assert(max(abs(d4.posFromEOT_mm - (cfg.posEOT - pos))) < 1e-9);
 fprintf('ok  derived quantities, file geometry and gap flags\n');
 
+% The window summary lines up with the row whose write opened the window:
+% row k takes the summary of record k+2. It is missing where record k+2 is
+% missing (the last two rows), across the gap (the two rows before it) and
+% where the slave had published no window yet (summaryScans == 0).
+traceWriteCsv(gapFile, data, meta);
+d = traceDerive(traceReadCsv(gapFile));
+conv = @(x) x * cfg.atmPerMPa + cfg.atmAmbient;     % [MPa gauge -> atm absolute]
+expectNaN = false(n, 1);
+expectNaN([n - 1, n]) = true;
+expectNaN([gapAt - 2, gapAt - 1]) = true;
+expectNaN(28:31) = true;
+assert(isequal(isnan(d.pressureMeanAbs_atm), expectNaN));
+assert(isequal(isnan(d.pressureMinAbs_atm), expectNaN));
+assert(isequal(isnan(d.pressureMaxAbs_atm), expectNaN));
+ok = find(~expectNaN);
+assert(max(abs(d.pressureMeanAbs_atm(ok) - conv(data(ok + 2, L.col.pressureMeanGauge_MPa)))) < 1e-6);
+assert(max(abs(d.pressureMinAbs_atm(ok) - conv(data(ok + 2, L.col.pressureMinGauge_MPa)))) < 1e-6);
+assert(max(abs(d.pressureMaxAbs_atm(ok) - conv(data(ok + 2, L.col.pressureMaxGauge_MPa)))) < 1e-6);
+% In the synthetic data row k's window mean is the pressure of row k itself
+assert(max(abs(d.pressureMeanAbs_atm(ok) - d.pressureAbs_atm(ok))) < 1e-6);
+assert(all(d.pressureMinAbs_atm(ok) < d.pressureMeanAbs_atm(ok)));
+assert(all(d.pressureMaxAbs_atm(ok) > d.pressureMeanAbs_atm(ok)));
+% The file's atmAmbient is used for the summary as for the snapshot
+traceWriteCsv(gapFile, data, meta300);
+d3 = traceDerive(traceReadCsv(gapFile));
+assert(max(abs(d3.pressureMeanAbs_atm(ok) - (data(ok + 2, L.col.pressureMeanGauge_MPa) ...
+    * cfg.atmPerMPa + 1.5))) < 1e-6);
+fprintf('ok  window summary aligned to the write that opened it, %d of %d rows\n', numel(ok), n);
+
+% A format 1 file (columns 1-34) still reads: the summary columns derive
+% as NaN, and the plot draws without them.
+f1File = [tmp '_f1.csv'];
+traceWriteCsv(gapFile, data, meta);
+writeFormat1(gapFile, f1File, 34);
+d1 = traceReadCsv(f1File);
+assert(d1.meta.format == 1 && numel(d1.names) == 34 && size(d1.data, 2) == 34);
+assert(isequal(d1.names, names(1:34)) && ~isfield(d1, 'summarySeq'));
+d1 = traceDerive(d1);
+assert(numel(d1.pressureMeanAbs_atm) == n && all(isnan(d1.pressureMeanAbs_atm)));
+assert(all(isnan(d1.pressureMinAbs_atm)) && all(isnan(d1.pressureMaxAbs_atm)));
+assert(max(abs(d1.pressureAbs_atm - d.pressureAbs_atm)) < 1e-9);
+if graphicsUsable()
+    figs = tracePlot(f1File, 'visible', 'off');
+    assert(numel(figs) == 3 && all(ishghandle(figs)));
+    close(figs);
+end
+fprintf('ok  format 1 file reads, derives NaN summary columns and plots\n');
+
 % Plot.
 if graphicsUsable()
     traceWriteCsv(gapFile, data, meta);
@@ -193,6 +241,31 @@ for k = 1:numel(varargin)
 end
 end
 
+function writeFormat1(src, dst, nKeep)
+%WRITEFORMAT1 Copy of a trace CSV with only its first nKeep columns and
+%   format 1 in its header, as the recorder wrote it before the summary.
+txt = fileread(src);
+lines = strsplit(txt, "\n");
+for k = 1:numel(lines)
+    ln = lines{k};
+    if isempty(strtrim(ln))
+        continue
+    end
+    if ln(1) == '#'
+        tok = regexp(ln, '^(#\s*format:\s*)\d+', 'tokens', 'once');
+        if ~isempty(tok)
+            lines{k} = [tok{1} '1'];
+        end
+    else
+        f = strsplit(strtrim(ln), ',');
+        lines{k} = strjoin(f(1:nKeep), ',');
+    end
+end
+fid = fopen(dst, 'w');
+fprintf(fid, '%s', strjoin(lines, "\n"));
+fclose(fid);
+end
+
 function m = setAt(m, i, j, v)
 m(i, j) = v;
 end
@@ -221,6 +294,18 @@ data(:, c.velocity_mm_s) = 0.5;
 data(:, c.torque_pct) = 10 * sin(t);
 data(:, c.commandedPosition_mm) = 100 + 0.5 * t;
 data(:, c.pressureGauge_MPa) = 2 + sin(t);
+% The summary of row i describes the window opened by the write of row
+% i-2, so it is the pressure of that row's time (seq - 2)
+pw = 2 + sin(0.05 * (seq - 3));
+data(:, c.pressureMeanGauge_MPa) = pw;
+data(:, c.pressureMinGauge_MPa) = pw - 0.1;
+data(:, c.pressureMaxGauge_MPa) = pw + 0.1;
+data(:, c.velocityMean_mm_s) = 0.5;
+data(:, c.torqueMean_pct) = 10 * sin(0.05 * (seq - 3));
+data(:, c.positionMean_mm) = 100 + 0.5 * 0.05 * (seq - 3);
+data(:, c.summaryScans) = 12;
+data(:, c.summarySeq) = mod(seq, 65536);
+data(30:33, c.summaryScans) = 0;        % no window yet: rows 28-31 have no summary
 data(:, c.modeCode) = 2;
 data(:, c.motionEnable) = 1;
 data(:, c.confCode) = 2;
@@ -283,6 +368,16 @@ for step = 0:nSteps - 1
         mbRead(map.ir.torque:map.ir.torque + 1) = modbusPack(10 * sin(t));
         mbRead(map.ir.commandedPosition:map.ir.commandedPosition + 1) = modbusPack(pos);
         mbRead(map.ir.pressure:map.ir.pressure + 1) = modbusPack(2 + sin(t));
+        % Summary registers IR21-34: mean, min, max, velocity, torque and
+        % position means, scans in the window, window number
+        mbRead(map.ir.pressureMean:map.ir.pressureMean + 1) = modbusPack(2 + sin(t));
+        mbRead(map.ir.pressureMin:map.ir.pressureMin + 1) = modbusPack(1.9 + sin(t));
+        mbRead(map.ir.pressureMax:map.ir.pressureMax + 1) = modbusPack(2.1 + sin(t));
+        mbRead(map.ir.velocityMean:map.ir.velocityMean + 1) = modbusPack(0.5);
+        mbRead(map.ir.torqueMean:map.ir.torqueMean + 1) = modbusPack(10 * sin(t));
+        mbRead(map.ir.positionMean:map.ir.positionMean + 1) = modbusPack(pos);
+        mbRead(map.ir.summaryScans) = 12;
+        mbRead(map.ir.summarySeq) = mod(counter, 65536);
     end
     [mbWrite, doSafety, ~, ~, ~, ~, statusCode, faultCode, state, linkOk] = ...
         masterStep(mbRead, 0, 0, 250, 0, 0, 20, 0, 0, speedFromPercent(cfg.speedDefault, cfg));

@@ -59,7 +59,8 @@ stops**, and the four Modbus groups assigned to the cyclic task that runs
 `PRG_Main` (MotionWorks IEC 3 Express has only that one task), so the
 registers update once per scan. Every register in the groups is copied
 every scan, so the groups are sized to the registers in use (the step
-probe of section 6 extends them to IR524 and HR114). The controller services the
+probe of section 6 extends them to IR524 and HR114; the exchange summary
+of section 3 makes the input group IR34 at least). The controller services the
 connection on a 4 ms tick, so a transaction takes 1 to 8 ms regardless of the
 task interval.
 
@@ -104,9 +105,45 @@ task interval.
 | 15–16 | `%QD73820` | REAL | `G_mbActualTorque` | `G_sysActualTorque` (% of rated) |
 | 17–18 | `%QD73824` | REAL | `G_mbCommandedPosition` | `G_sysCommandedPosition` (mm) |
 | 19–20 | `%QD73828` | REAL | `G_mbActualPressure` | `G_sysActualPressure` (MPa gauge): the transducer on the slave's analog input, scaled by `FB_PressureInput`. Valid in every mode; below zero or above range when the loop current is out of range |
+| 21–22 | `%QD73832` | REAL | `G_mbSumPressureMean` | Mean pressure of the last closed exchange window (MPa gauge) |
+| 23–24 | `%QD73836` | REAL | `G_mbSumPressureMin` | Minimum pressure of that window (MPa gauge) |
+| 25–26 | `%QD73840` | REAL | `G_mbSumPressureMax` | Maximum pressure of that window (MPa gauge) |
+| 27–28 | `%QD73844` | REAL | `G_mbSumVelocityMean` | Mean velocity of that window (mm/s) |
+| 29–30 | `%QD73848` | REAL | `G_mbSumTorqueMean` | Mean torque of that window (% of rated) |
+| 31–32 | `%QD73852` | REAL | `G_mbSumPositionMean` | Mean position of that window (mm) |
+| 33 | `%QW73856` | UINT | `G_mbSumScans` | Scans in that window; 0 until the first window closes |
+| 34 | `%QW73858` | UINT | `G_mbSumSeq` | Windows closed, wraps 65535 → 0 |
 | 101–108 | | | | Bench area (`bench/modbus`): not loaded with the main program in service |
 | 109–400 | | | | Free |
 | 401–524 | | | | Step probe, the next table (section 6) |
+
+**Exchange summary (IR21-34).** `FB_ExchangeSummary` summarises the scans
+between two master writes, because the master samples the registers every 50
+ms and the slave scans every 4 ms, so IR19-20 is one scan's value out of
+about twelve. A window is the run of scans from one change of the heartbeat
+(HR1) to the next: the scan in which HR1 differs from the previous scan's
+closes the open window, publishes it and opens a new one that starts with
+that scan. There is one window per master write, so a window holds about 12
+scans (`Scans`). A late or missed write gives one longer window; a late
+exchange that is merged with the next can read the same window twice, which
+`Seq` shows. The values change only in the scan a window closes, and they
+are copied to the registers with the rest of the group, once per scan, so a
+read is self-consistent.
+
+- Before the first window closes every value is 0 and `Scans` is 0; `Scans` = 0
+  is the "no window yet" marker.
+- Lag: the slave does not see the master's reads. The window read at
+  exchange n was opened by write n-2 and closed by write n-1, so the summary
+  trails the IR19-20 snapshot by one to two exchanges. A record that wants
+  the summary of the interval its own write opened takes it from the record
+  two exchanges later.
+- Link loss: the window keeps accumulating until it reaches 65535 scans
+  (about 262 s), when it closes without a heartbeat change; the first write
+  after the link returns closes the window open at that time.
+- `Seq` counts closed windows and wraps 65535 → 0; a master that sees it
+  repeat has read the same window twice.
+- The master reads IR1-34 in one FC04 read (34 registers, 68 bytes). The
+  input group must extend to at least IR34.
 
 ---
 
@@ -148,7 +185,7 @@ reads as a counter frozen at 0.
 - The controller's only analog input, `G_aiPressure`, reads the pressure
   transducer's loop shunt; `FB_PressureInput` scales it to MPa gauge for
   IR19-20 and for the slave's pressure loop (mode 7).
-- On the master, `masterStep` takes the 20-register read vector and returns
+- On the master, `masterStep` takes the 34-register read vector and returns
   the 12-register write vector; `modbusMap.m` holds the indices and
   `modbusPack.m` / `modbusUnpack.m` the REAL packing (low word first). The
   Simulink blocks handle plain `uint16`.
@@ -171,7 +208,7 @@ the master and slave behave identically. It is read in its own FC04 read
 between the protocol's exchanges, never in them. The input group must extend
 to IR524 and the holding group to HR114. A group is copied every scan over its
 whole span, so these spans (gaps included) are the probe's standing cost; a
-project that does not use the probe keeps the groups at IR20 and HR12 (the
+project that does not use the probe keeps the groups at IR34 and HR12 (the
 protocol's registers) and `G_cfgProbeEnable` FALSE. Every 32-bit value is on
 a 4-byte boundary except the request at HR112, which is two UINT registers,
 low word first.

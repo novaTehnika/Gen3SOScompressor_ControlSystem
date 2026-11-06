@@ -18,6 +18,15 @@ the reference for each) and confirm:
 - [ ] Rebuild with the current `FB_Probe` (the 4096-record ring, 16 s;
       HR111-114, IR401-524) and `G_cfgProbeEnable`,
       `G_cfgProbeFillPerScan`.
+- [ ] Exchange summary (IR21-34): add the `FB_ExchangeSummary` block;
+      the eight `G_mbSum*` globals (`G_mbSumPressureMean AT %QD73832`,
+      `G_mbSumPressureMin AT %QD73836`, `G_mbSumPressureMax AT %QD73840`,
+      `G_mbSumVelocityMean AT %QD73844`, `G_mbSumTorqueMean AT %QD73848`,
+      `G_mbSumPositionMean AT %QD73852`, all `REAL`; `G_mbSumScans AT
+      %QW73856` and `G_mbSumSeq AT %QW73858`, `UINT`); the eight
+      `G_sysSum*` globals (six `LREAL := 0.0`, two `UINT := UINT#0`); the
+      `fbExchangeSummary : FB_ExchangeSummary` instance in `PRG_Main`; and
+      the input register group (FC04) extended to at least IR34.
 - [ ] LD POU: delete the `MC_MoveVelocity` instance if it is still
       there (no recaptured screenshot shows it), with `G_cmdMoveVelocity`,
       `G_staMoveVelocity`, their two types and `G_sysCycleCount`.
@@ -69,6 +78,12 @@ the reference for each) and confirm:
 
 ## Lab PC
 
+- [ ] Rebuild the controller with the exchange summary (MotionWorks
+      project, above) before `buildShell` or a bench: the shell's Read row
+      becomes 34 registers, and a controller whose input group ends at
+      IR20 answers it with an error and the model stops.
+- [ ] Measure the per-register term of the link with `modbusCountSweep`
+      at 20 and at 34 registers, and enter it in `modbusLinkConfig.m`.
 - [ ] Relaunch the operator app and check the procedure panel (it replaces
       the old tabs): it fits the figure beside the readouts; the step
       list, heading, instruction, checklist and the parameter fields (two
