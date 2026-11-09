@@ -65,13 +65,16 @@ A_HOSE = math.pi * (6.35e-3)**2 / 4
 
 
 def controller_set():
-    """Return the controllers compared: the slave as configured and the
-    scheduled controller at two crossovers with the measured bounds."""
+    """Return the controllers compared: the slave as configured, the
+    slave with its earlier gains (Kp 0.5, Ki 0.2, a stop-law stiffness
+    of 100 MPa/mm) and, as a comparison that is not in the slave, the
+    scheduled controller at 11 rad/s with the measured bounds."""
     sched = dict(V_dead_cfg=109e-6, K_cfg=1.0e9, C_hose_cfg=1.2e-13)
     return [
         ctl.SlaveController('slave (GVL)'),
+        ctl.SlaveController('slave earlier gains', Kp=0.5, Ki=0.2,
+                            StopStiffness=100.0),
         ctl.ScheduledSlaveController('sched wc11', wc=11.0, **sched),
-        ctl.ScheduledSlaveController('sched wc16', wc=16.0, **sched),
     ]
 
 

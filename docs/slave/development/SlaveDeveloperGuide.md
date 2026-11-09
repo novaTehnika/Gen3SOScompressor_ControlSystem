@@ -146,7 +146,7 @@ MotionWorks IEC Express fails native code generation with `E2001: circular assem
 
 ### Changing a block's gains between scans
 
-A POU never writes another block's internal `VAR` (IEC 61131-3 forbids it), so a state that must change when its inputs change is rescaled by the block itself: `FB_PressureController` takes `IntegScale` (old Ki / new Ki on the scan Ki changes, otherwise 1) and `FB_PressureSchedule` computes it. Every input of a block is passed on its one call in `PRG_Main`, because an omitted input keeps its previous value.
+A POU never writes another block's internal `VAR` (IEC 61131-3 forbids it), so logic that needs a block's internal state belongs in that block: the stop law's floor reads the pressure controller's clamp state and output of the previous scan, so it is part of `FB_PressureController`. Every input of a block is passed on its one call in `PRG_Main`, because an omitted input keeps its previous value.
 
 ---
 

@@ -27,9 +27,8 @@ cfg.pressureCeiling     = 12.0;   % MPa gauge, the slave's G_cfgPressureCeiling:
 cfg.pressureCeilingHyst = 0.5;    % MPa, the slave's G_cfgPressureCeilingHyst (keep equal to the GVL)
 cfg.psiPerAtm   = 14.696;   % psi per atm, for the pressure display units
 
-% Fill description sent to the slave for its pressure gain schedule. The
-% saline volume and the charge must be at or below the true values (see
-% docs/slave/development/ConfigurationGuide.md, section 8).
+% Fill description sent to the slave in HR9-12, which receives it and does
+% not use it.
 cfg.salineVolume = 343;     % mL, saline volume of the fill including the dead volume
 cfg.oxygenRatio  = 1.0;     % oxygen charge as STP volume per saline volume (1.0 for 1:1)
 
