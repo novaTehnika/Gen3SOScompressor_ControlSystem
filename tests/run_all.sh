@@ -27,6 +27,7 @@ tests/charRunSim.m
 tests/closedLoopMasterSlave.m
 tests/closedLoopModbusStep.m
 tests/slavePressureMode.m
+tests/slaveExitGuard.m
 tests/charFitsSynthetic.m
 tests/pressureNoiseRunSim.m
 tests/benchProbeSim.m

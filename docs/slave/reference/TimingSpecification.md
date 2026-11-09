@@ -217,7 +217,7 @@ operational mode handled by `FB_PressureController`, not a homing mode.
 | Drive Fault | 1 scan (4 ms) | Direct from drive status (includes encoder alarms A.810/A.CC0/A.830) |
 | Overtravel Switch | 1 scan + 10 ms debounce | Unexpected activation |
 | Position Limit | 1 scan | Software limit exceeded |
-| Piston Exit | 1 scan | Guard condition met |
+| Piston Exit | `G_cfgExitGuardRetreat` of travel (0.5 mm: 71 ms at 7 mm/s) + 1 scan | Retreat inside the guard band with the chamber pressurised |
 | Handshake Timeout | 500 ms | No confirmation received |
 
 ### Fault Response
