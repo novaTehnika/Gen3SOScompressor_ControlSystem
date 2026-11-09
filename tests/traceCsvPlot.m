@@ -470,7 +470,7 @@ for step = 0:nSteps - 1
     [mbWrite, doSafety, ~, ~, ~, ~, statusCode, faultCode, state, linkOk] = ...
         masterStep(mbRead, 0, 0, 250, 0, 0, 20, 0, 0, speedFromPercent(cfg.speedDefault, cfg));
     ring = traceStep(mbRead, mbWrite, doSafety, statusCode, faultCode, state, ...
-        linkOk, 0, 0, 250, 20, 0, 0, 0);
+        linkOk, 0, 0, 250, 20, 0, 0, 0, cfg.salineVolume, cfg.oxygenRatio);
     if step == startStep
         buf = traceStart(ring);
     end

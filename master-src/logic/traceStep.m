@@ -1,5 +1,6 @@
 function traceRing = traceStep(mbRead, mbWrite, doSafety, statusCode, faultCode, ...
-    state, linkOk, op, cmdSeq, targetPosition, targetPressure, estop, mixer, procStep)
+    state, linkOk, op, cmdSeq, targetPosition, targetPressure, estop, mixer, procStep, ...
+    salineVolume, oxygenRatio)
 %TRACESTEP Entry point for the Simulink shell's TraceStep MATLAB Function
 %   block: keeps a ring of one record per Modbus exchange and returns the
 %   whole ring. Called once per model step (cfg.dt) next to masterStep,
@@ -8,14 +9,17 @@ function traceRing = traceStep(mbRead, mbWrite, doSafety, statusCode, faultCode,
 %
 %   mbRead        input registers IR1..IR34 as read by the Modbus Client
 %                 Read block (modbusMap, raw 16-bit values as doubles)
-%   mbWrite       holding registers HR1..HR12 as masterStep returned them
+%   mbWrite       holding registers HR1..HR8 as masterStep returned them
 %                 and the Modbus Client Write block sends them
 %   doSafety, statusCode, faultCode, state, linkOk
 %                 masterStep outputs of the same step
-%   op, cmdSeq, targetPosition, targetPressure, estop, mixer, procStep
+%   op, cmdSeq, targetPosition, targetPressure, estop, mixer, procStep,
+%   salineVolume, oxygenRatio
 %                 values of the Constant blocks the app writes;
 %                 targetPressure in atm absolute, procStep the running
-%                 procedure step (0 outside a procedure)
+%                 procedure step (0 outside a procedure), salineVolume
+%                 (mL) and oxygenRatio (STP volume per saline volume) the
+%                 fill, which a procedure's param step writes (sink)
 %
 %   traceRing     traceLayout().depth x traceLayout().width matrix, one
 %                 record per row. Record n (n = 1, 2, ... since the first
@@ -81,8 +85,8 @@ if mod(stepCount, stepsPerExchange) == 0
     rec(L.col.faultReset)           = w(map.hr.faultReset);
     rec(L.col.reference)            = modbusUnpack(w(map.hr.reference), w(map.hr.reference + 1));
     rec(L.col.positionSpeed_mm_s)   = modbusUnpack(w(map.hr.positionSpeed), w(map.hr.positionSpeed + 1));
-    rec(L.col.salineVolume_mL)      = modbusUnpack(w(map.hr.salineVolume), w(map.hr.salineVolume + 1));
-    rec(L.col.oxygenRatio)          = modbusUnpack(w(map.hr.oxygenRatio), w(map.hr.oxygenRatio + 1));
+    rec(L.col.salineVolume_mL)      = salineVolume;
+    rec(L.col.oxygenRatio)          = oxygenRatio;
     rec(L.col.statusCode)           = statusCode;
     rec(L.col.faultCode)            = faultCode;
     rec(L.col.state)                = state;

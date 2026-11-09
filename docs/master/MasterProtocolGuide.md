@@ -13,8 +13,8 @@ This document provides step-by-step guidance for implementing the Simulink Deskt
 
 ```
 +-------------------+      Modbus TCP, port 502        +-------------------+
-|                   |  == HR1-12: heartbeat, mode, ==> |                   |
-|  Simulink DTRT    | enable, reset, ref, speed, fill  |  MP2600iec Slave  |
+|                   |  == HR1-8: heartbeat, mode, ===> |                   |
+|  Simulink DTRT    | enable, reset, ref and speed     |  MP2600iec Slave  |
 |  Master           |  <= IR1-34: echo, counter, ===== |  (Modbus server)  |
 |                   |  confirm, fault, status, summary |                   |
 +-------------------+                                  +-------------------+
@@ -43,8 +43,6 @@ This document provides step-by-step guidance for implementing the Simulink Deskt
 | HR4 | `G_mbFaultReset` | 1 = FaultReset (level) |
 | HR5-6 | `G_mbReference` | REAL reference: mm, mm/s or % by mode |
 | HR7-8 | `G_mbPositionSpeed` | REAL operator speed, mm/s: position moves and Go Home (0 holds a position move; Go Home does not start) |
-| HR9-10 | `G_mbSalineVolume` | REAL saline volume of the fill, mL (received, not used by the slave) |
-| HR11-12 | `G_mbOxygenRatio` | REAL oxygen charge as STP volume per saline volume (received, not used by the slave) |
 
 The slave debounces HR2 (`G_cfgDebounceTimeMode`, 50 ms) and HR3 and HR4
 (`G_cfgDebounceTimeCommand`, 20 ms for both) before acting on them. The master DAQ drives P0.0 (safety control relay
@@ -359,7 +357,7 @@ FAULT_PERSISTENT:
 ### Operator Speed (Master to Slave): HR7-8
 
 **Signal**: `G_mbPositionSpeed`, a REAL in mm/s, copied to `G_sysPositionSpeed` by
-`PRG_Input`. The master writes it every exchange, with HR1-12 in the same FC16 write.
+`PRG_Input`. The master writes it every exchange, with HR1-8 in the same FC16 write.
 The slave evaluates `rOperatorSpeed := LIMIT(0, G_sysPositionSpeed, G_cfgVelLimitMax)`
 every scan. It applies to:
 
@@ -379,16 +377,6 @@ configured speeds (`G_cfgHomeLim*Vel`). The master limits the speed to `0` to
 speed control. The master does not count the start timeout of a Go Home
 (`cfg.tGoHomeStartMax`) while the speed is 0 and the move has not yet begun; once
 it has moved, the rest that ends it counts at any speed.
-
-### Fill description (Master to Slave): HR9-12
-
-**Signals**: `G_mbSalineVolume` (mL) and `G_mbOxygenRatio` (oxygen charge as
-STP volume per saline volume), REALs copied to `G_sysSalineVolume` and
-`G_sysOxygenRatio` by `PRG_Input`. The master writes `cfg.salineVolume` and
-`cfg.oxygenRatio` in every exchange (the shell's `SalineVolume` and
-`OxygenRatio` Constant blocks, which `masterStep` takes as its last two
-inputs). The slave receives them and uses them for nothing: the pressure loop
-runs on fixed gains and needs no description of the fill.
 
 The reference is read by the slave at most every 50 ms plus one 4 ms
 service tick. The master sends the next value with the same write that

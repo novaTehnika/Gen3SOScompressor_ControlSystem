@@ -16,7 +16,8 @@ function proc = sopProcedure()
 %   oxygen fill (retract to the volume that holds the oxygen at the loading
 %   pressure, load it from the regulator) and the pressurize and discharge
 %   steps. The saline volume and the oxygen ratio are also written to the
-%   slave (sinks), which receives them.
+%   shell's SalineVolume and OxygenRatio blocks (sinks), which the trace
+%   records.
 %
 %   See the "Procedure (non-manual mode)" section of master-src/README.md
 %   for the fields of a parameter and of a step.

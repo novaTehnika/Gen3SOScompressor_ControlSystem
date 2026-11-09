@@ -1,7 +1,7 @@
 function out = fakeProbeLink(cmd, varargin)
 %FAKEPROBELINK Stand-in for the bench runs' Modbus link and clock: the
 %   simulated slave's own registers behind the protocol registers (IR1-34,
-%   HR1-12) and, behind the step probe registers (HR111-114, IR401-524),
+%   HR1-8) and, behind the step probe registers (HR111-114, IR401-524),
 %   the slave's own FB_Probe. The slave's
 %   registers are packed and unpacked by its register map (the GVL's AT
 %   addresses, readInputRegisters / writeHoldingRegisters), so the ring,
