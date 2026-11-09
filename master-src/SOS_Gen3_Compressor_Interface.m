@@ -2673,7 +2673,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             % Create TraceStatusLabel
             app.TraceStatusLabel = uilabel(app.ControlsGrid);
             app.TraceStatusLabel.Layout.Row = 3;
-            app.TraceStatusLabel.Layout.Column = [7 9];
+            app.TraceStatusLabel.Layout.Column = [8 9];   % right-aligned under Record and the interval
+            app.TraceStatusLabel.HorizontalAlignment = 'right';
             app.TraceStatusLabel.WordWrap = 'on';
             app.TraceStatusLabel.FontSize = 11;
             app.TraceStatusLabel.VerticalAlignment = 'center';
