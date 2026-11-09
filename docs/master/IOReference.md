@@ -72,9 +72,9 @@ master has no brake status input.
 | Input Range | -10 V to +10 V |
 | Filtering | `FB_AnalogInputFilter`: median (`G_cfgAnalogMedianSize`) then IIR low-pass (`G_cfgAnalogFilterTimeConst`) |
 | Scaling | `FB_PressureInput`: loop current from the shunt, then `G_cfgPressureZeroMa`/`G_cfgPressureSpanMa` over `G_cfgPressureRangeMin`..`G_cfgPressureRangeMax` (MPa gauge) |
-| Supervision | Loop current outside `G_cfgPressureSensorMinMa`..`G_cfgPressureSensorMaxMa` for `G_cfgPressureSensorFaultTime` raises `FAULT_PRESSURE_SENSOR` in pressure mode |
+| Supervision | Loop current outside `G_cfgPressureSensorMinMa`..`G_cfgPressureSensorMaxMa` for `G_cfgPressureSensorFaultTime` raises `FAULT_PRESSURE_SENSOR` in pressure mode, and in any mode when the piston backs out of the bore inside the exit guard band |
 
-The scaled pressure is `G_sysActualPressure`, published in IR19-20.
+The scaled pressure is `G_sysActualPressure`, published in IR19-20. The slave uses it for the pressure loop (mode 7), the pressure ceiling and the piston exit guard.
 
 ---
 

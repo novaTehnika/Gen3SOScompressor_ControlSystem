@@ -45,7 +45,9 @@ These define the safe operating envelope of the machine.
 | `G_cfgPosSoftLimitMax` | 367.0 | mm | Software-enforced maximum extension position. A `FAULT_POSITION` occurs if exceeded. |
 | `G_cfgPosSoftLimitMin` | -2.5 | mm | Software-enforced minimum retraction position. It sits between position 0 (the homed retract endpoint) and the negative overtravel switch at `-G_cfgHomeLimRetractDist`; keep it bracketed by the two if `G_cfgHomeLimRetractDist` changes. A `FAULT_POSITION` occurs if exceeded. |
 | `G_cfgPosCylinderEntry` | 176.0 | mm | Physical cylinder-entry position in the homed frame. Below it the piston is leaving the cylinder bore; the exit guard's boundary is this value plus `G_cfgPosExitGuardMargin`. **Tuning:** Measure on the machine and set to the actual mechanical entry point. |
-| `G_cfgPosExitGuardMargin`| 20.0 | mm | Safety margin for the piston exit guard. The guard's torque/velocity danger-zone monitoring is active below `G_cfgPosCylinderEntry + G_cfgPosExitGuardMargin`. |
+| `G_cfgPosExitGuardMargin`| 20.0 | mm | Safety margin for the piston exit guard: the guard watches every position at or below `G_cfgPosCylinderEntry + G_cfgPosExitGuardMargin`. It must exceed the travel after a trip, `G_cfgExitGuardRetreat` plus the stopping distance `v^2 / (2 * G_cfgStopDecel)` (3 mm at `G_cfgVelLimitMax`), with room for the error of `G_cfgPosCylinderEntry`. |
+| `G_cfgExitGuardPressure` | 0.1 | MPa gauge | Chamber pressure above which the guard counts the chamber as pressurised. Inside the guard band a retreat of more than `G_cfgExitGuardRetreat` at this pressure raises `FAULT_PISTON_EXIT`. **Tuning:** as low as the transducer allows; it must stay above the reading's zero error at a vented chamber (0.01 MPa after the calibration of `bench/pressure/README.md` section 6), or a vented retract trips. |
+| `G_cfgExitGuardRetreat` | 0.5 | mm | Distance the piston may back out from its innermost position while the guard is armed. It rides through the motion about a held position (a servo hold, the pressure loop at its target). 0 trips on any retreat. Each acknowledged fault allows this distance again, plus the stop. |
 | `G_cfgVelLimitMax` | 7.0 | mm/s | The one axis speed ceiling: `stCurrentLimits.VelMax` in velocity, torque and velocity recovery, and the upper bound of the operator speed (HR7-8). The mode speeds (`G_cfgGoHomeVelocity`, the three `G_cfgHomeLim*Vel`, `G_cfgPressureVelMax`) reach their blocks through `MIN(.., G_cfgVelLimitMax)`, and the Go Home velocity is `MIN(operator speed, G_cfgGoHomeVelocity)` with the operator speed already limited to this ceiling, so none can exceed it, and `masterConfig.speedMax` must not either (checked in `tests/closedLoopMasterSlave.m`). `Y_DirectControl` does no path shaping in PositionMode (the position command reaches the drive as given), so its `Velocity` and `Acceleration` inputs set no limits there; `FB_PositionPathShaper` does the path shaping, and its `VelMax` and `AccelMax` (`G_cfgPosShaperAccelMax`) limit a position move. `VelMax` is the operator speed (HR7-8, `G_mbPositionSpeed`) limited to `0..G_cfgVelLimitMax` (`rOperatorSpeed`), evaluated every scan; a speed of 0 brakes the command to rest and holds. `Y_DirectControl`'s `Velocity` input is given the same value in position mode, so the two never disagree. |
 | `G_cfgStopDecel` | 10.0 | mm/s² | The one `MC_Stop` deceleration: hold, fault, recovery and the Go Home abort. |
 | `G_cfgInMotionVelThreshold`| 0.1 | mm/s | The velocity above which the `G_sysInMotion` flag is set. **Tuning:** Increase if motor vibration at rest causes the flag to flicker. |
@@ -81,7 +83,6 @@ These parameters control the force applied by the motor.
 |---|---|---|---|
 | `G_cfgTorqueLimitMax` | 110.0 | % | Absolute maximum torque allowed. This is a primary safety limit to prevent mechanical damage. |
 | `G_cfgTorqueLimitNormal`| 100.0 | % | Torque limit used during standard Position and Velocity control modes. |
-| `G_cfgTorqueStallThreshold` | 60.0 | % | Torque above which the piston exit guard counts the motor as pushing into the cylinder (`FB_PistonExitGuard`'s `TorqueThreshold`). Inside the guard band, this torque with the piston still moving out raises `FAULT_PISTON_EXIT`. |
 
 ---
 
@@ -172,7 +173,7 @@ The transducer is a 4-20 mA loop read as the voltage across a shunt on the contr
 | `G_cfgPressureRangeMax` | 16.0 | MPa gauge | Pressure at `G_cfgPressureZeroMa + G_cfgPressureSpanMa`. |
 | `G_cfgPressureSensorMinMa` | 3.6 | mA | Loop current below this means an open loop or an unpowered transducer. |
 | `G_cfgPressureSensorMaxMa` | 20.5 | mA | Loop current above this means over range or a shorted shunt. |
-| `G_cfgPressureSensorFaultTime` | T#100MS | ms | An out-of-range current must persist this long before `FAULT_PRESSURE_SENSOR` (raised only while the loop is closed on the sensor). |
+| `G_cfgPressureSensorFaultTime` | T#100MS | ms | An out-of-range current must persist this long before the transducer counts as failed. That raises `FAULT_PRESSURE_SENSOR` while the pressure loop is closed on the sensor, and when the piston exit guard trips on it. |
 
 ### Loop
 

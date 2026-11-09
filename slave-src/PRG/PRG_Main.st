@@ -24,6 +24,10 @@
    homing moves lie below G_cfgPosCylinderEntry, so a positive move there
    happens only with the chamber open and at ambient pressure.
 
+   Piston exit: a retract inside the guard band above G_cfgPosCylinderEntry
+   with the chamber pressurised is FAULT_PISTON_EXIT in every state
+   (fbPistonExitGuard, which detects and does not alter a command).
+
    Every user-defined FB is called exactly once at the end of this file.
    The step probe (fbProbe) is called last, after the state of the scan is
    final, so its record and its fault mark see the scan's end state.
@@ -1230,15 +1234,17 @@ fbHomeLimit(
 );
 
 (* Safety monitors *)
+(* Piston exit guard: in every state, on the pressure and the transducer
+   status of this scan (fbPressureInput is called above). *)
 fbPistonExitGuard(
     Enable := TRUE,
     ActualPosition := G_sysActualPosition,
-    ActualVelocity := G_sysActualVelocity,
-    ActualTorque := G_sysActualTorque,
+    Pressure := fbPressureInput.PressureMPa,
+    SensorFault := fbPressureInput.SensorFault,
     CylinderEntry := G_cfgPosCylinderEntry,
     GuardMargin := G_cfgPosExitGuardMargin,
-    VelocityThreshold := G_cfgInMotionVelThreshold,
-    TorqueThreshold := G_cfgTorqueStallThreshold
+    PressureThreshold := G_cfgExitGuardPressure,
+    RetreatMax := G_cfgExitGuardRetreat
 );
 
 (* Master link supervision *)
@@ -1346,8 +1352,8 @@ END_IF;
    Runs after FB calls so safety FBs have fresh outputs.
    -------------------------------------------------------------------------- *)
 
-G_sysExitGuardActive := fbPistonExitGuard.GuardActive;
-G_sysInCylinderZone := NOT fbPistonExitGuard.InDangerZone;
+G_sysExitGuardActive := fbPistonExitGuard.Armed;
+G_sysInCylinderZone := fbPistonExitGuard.InCylinder;
 
 IF fbSafetyMonitor.FaultDetected AND NOT bInFault THEN
     IF NOT (G_sysCurrentState = E_SystemState#ST_DRIVE_RESET AND

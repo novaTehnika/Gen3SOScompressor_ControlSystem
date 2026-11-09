@@ -156,10 +156,19 @@
                                                           default -5.0 mm). Adjust if RetractDist changes so the
                                                           soft limit stays bracketed by 0 and the switch. *)
 
-     (* Piston exit guard margin *)
-     G_cfgPosExitGuardMargin   : LREAL := 20.0        (* Safety margin above cylinder entry (mm). Position
-                                                          within this band of G_cfgPosCylinderEntry triggers
-                                                          torque/velocity danger-zone monitoring. *)
+     (* Piston exit guard (FB_PistonExitGuard): at or below G_cfgPosCylinderEntry
+        + G_cfgPosExitGuardMargin, with the chamber above G_cfgExitGuardPressure
+        (or the transducer failed and the piston in the bore), a retreat of more
+        than G_cfgExitGuardRetreat is FAULT_PISTON_EXIT *)
+     G_cfgPosExitGuardMargin   : LREAL := 20.0        (* Safety margin above cylinder entry (mm). Must exceed the
+                                                          travel after a trip, G_cfgExitGuardRetreat plus the stop
+                                                          v^2/(2*G_cfgStopDecel): 3 mm at G_cfgVelLimitMax *)
+     G_cfgExitGuardPressure    : LREAL := 0.1         (* Chamber pressure above which the guard arms (MPa gauge).
+                                                          Above the reading's zero error at a vented chamber
+                                                          (0.01 MPa, bench/pressure/README.md section 6) *)
+     G_cfgExitGuardRetreat     : LREAL := 0.5         (* Distance the piston may back out from its innermost
+                                                          position while the guard is armed (mm): rides through
+                                                          the motion about a held position. 0 trips on any retreat *)
 
 
      (* ========================================================================
@@ -225,7 +234,6 @@
 
      G_cfgTorqueLimitMax       : LREAL := 110.0       (* Maximum torque limit *)
      G_cfgTorqueLimitNormal    : LREAL := 100.0       (* Normal operating torque *)
-     G_cfgTorqueStallThreshold : LREAL := 60.0        (* Torque threshold for piston exit guard *)
 
 
      (* ========================================================================
@@ -397,7 +405,8 @@
                                     G_cfgHomeLimRetractDist positive of the switch.
    - G_cfgPosCylinderEntry        : Physical cylinder-entry point. Below this the
                                     piston is leaving the cylinder bore; the exit
-                                    guard monitors torque/velocity here.
+                                    guard faults a retreat under pressure in the
+                                    band above it.
    - G_cfgPosSoftLimitMax         : Software ceiling; end-of-stroke in compression
                                     direction.
 
@@ -408,8 +417,9 @@
 
      G_cfgPosCylinderEntry     : LREAL := 176.0       (* Physical cylinder-entry position (mm).
                                                           Below this the piston is leaving the
-                                                          cylinder — exit guard fires regardless
-                                                          of soft-limit value. Measure and set to
+                                                          cylinder. The exit guard's band starts
+                                                          G_cfgPosExitGuardMargin above it, whatever
+                                                          the soft limits. Measure and set to
                                                           the actual mechanical entry point. *)
    END_VAR
 
@@ -486,8 +496,8 @@
      G_sysOvertravelPosActive  : BOOL := FALSE    (* Positive overtravel switch triggered *)
 
      (* Safety status *)
-     G_sysExitGuardActive      : BOOL := FALSE    (* Piston exit prevention active *)
-     G_sysInCylinderZone       : BOOL := FALSE    (* Piston is inside cylinder *)
+     G_sysExitGuardActive      : BOOL := FALSE    (* Piston exit guard armed: in its band with the chamber pressurised or the pressure unknown *)
+     G_sysInCylinderZone       : BOOL := FALSE    (* Piston is inside the cylinder: at or above G_cfgPosCylinderEntry *)
 
      (* Brake status *)
      G_sysBrakeEngaged         : BOOL := TRUE     (* Brake is engaged (spring-applied) *)

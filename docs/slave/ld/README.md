@@ -181,7 +181,7 @@ keep the table to what the picture shows.
 | Busy | out | not wired | |
 | Error | out | not wired | |
 | ErrorID | out | not wired | |
-| ActualVelocity | out | `G_sysActualVelocity` | mm/s; `G_sysInMotion`, the exit guard and the probe read it, published in IR13-14. |
+| ActualVelocity | out | `G_sysActualVelocity` | mm/s; `G_sysInMotion` and the probe read it, published in IR13-14. |
 
 ## fbReadActualTorque
 
@@ -196,7 +196,7 @@ keep the table to what the picture shows.
 | Busy | out | not wired | |
 | Error | out | not wired | |
 | ErrorID | out | not wired | |
-| ActualTorque | out | `G_sysActualTorque` | % of rated; the exit guard and the probe read it, published in IR15-16. |
+| ActualTorque | out | `G_sysActualTorque` | % of rated; the probe reads it, published in IR15-16. |
 
 ## fbReadStatus
 

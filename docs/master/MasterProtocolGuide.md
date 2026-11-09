@@ -240,10 +240,10 @@ When `G_mbFaultActive == 1`, read IR4 as the fault code:
 | 2 | Drive | Servo amplifier fault | Check drive, reset |
 | 3 | Position | Software limit exceeded | Command safe position; if still out, jog in via ST_RECOVERY |
 | 4 | Comm | Master heartbeat stopped | Restore the link, then reset |
-| 5 | Piston Exit | Safety guard triggered | Reduce force, check pressure |
+| 5 | Piston Exit | Piston backing out near the cylinder exit with the chamber pressurised | Vent the chamber before retracting, or move in |
 | 6 | Limit Switch | Unexpected limit activation | Check mechanics; if still on switch, jog off via ST_RECOVERY |
 | 7 | Encoder | Reserved - encoder alarms arrive as Drive (2) | Re-home (Mode 110) after an encoder alarm |
-| 8 | Pressure Sensor | Transducer loop current out of range during pressure control | Check the transducer loop; reset once IR19-20 reads a plausible pressure |
+| 8 | Pressure Sensor | Transducer loop current out of range during pressure control, or while the piston backs out of the bore near the cylinder exit | Check the transducer loop; reset once IR19-20 reads a plausible pressure |
 
 ### Fault Reset Handshake
 
@@ -396,8 +396,9 @@ command is zeroed there or by the pressure ceiling, the loop's integrator
 is held at zero. Dropping MotionEnable halts the axis as in
 velocity mode. A transducer loop current out of range for
 `G_cfgPressureSensorFaultTime` raises `FAULT_PRESSURE_SENSOR` (8) in this
-mode only; the master should check IR19-20 for a plausible pressure before
-requesting the mode.
+mode (and, in any mode, when the piston backs out of the bore near the
+cylinder exit, see Piston Exit Guard below); the master should check
+IR19-20 for a plausible pressure before requesting the mode.
 
 ### Pressure Ceiling (every mode)
 
@@ -412,6 +413,28 @@ is active. A retract (negative) command is always allowed. The master
 should treat IR9 as "pressurising refused" and not as a reason to reset.
 Go Home and the homing moves are not blocked: they lie below
 `G_cfgPosCylinderEntry`, where the chamber is open.
+
+### Piston Exit Guard (every mode)
+
+Below `G_cfgPosCylinderEntry` (176 mm) the piston has left the cylinder
+bore, and a chamber that is still pressurised would empty through the
+opening. The slave therefore watches the band at and below
+`G_cfgPosCylinderEntry + G_cfgPosExitGuardMargin` (196 mm) in every state.
+While the pressure reads above `G_cfgExitGuardPressure` (0.1 MPa gauge)
+there, the piston may not back out more than `G_cfgExitGuardRetreat`
+(0.5 mm) from the innermost position it has reached: beyond that the slave
+raises `FAULT_PISTON_EXIT` (5) and stops the axis, whatever commanded the
+retract (a jog, a position target, Go Home, homing, or the pressure loop
+lowering the pressure) and however slow it is. Motion into the cylinder is
+never refused, and at rest the fault resets with the chamber still
+pressurised. With the transducer loop out of range the pressure is unknown
+and counts as present while the piston is in the bore; the trip is then
+reported as `FAULT_PRESSURE_SENSOR` (8).
+
+The guard is a fault and not a block, so it has no status register. The
+master should vent the chamber (IR19-20 below the threshold) before it
+retracts below the boundary, and should not offer Go Home or homing on a
+charged chamber.
 
 ### Position Mode: Entry Requirement and Command Shaping
 

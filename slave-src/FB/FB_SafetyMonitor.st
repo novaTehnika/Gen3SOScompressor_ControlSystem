@@ -15,7 +15,8 @@
    - Overtravel faults (unexpected switch triggers; positive switch never expected)
    - Position limit violations (beyond soft limits)
    - Pressure sensor faults (loop current out of range, from
-     FB_PressureInput) while the pressure loop is closed on the sensor
+     FB_PressureInput) while the pressure loop is closed on the sensor, or
+     when the piston exit guard trips on the failed reading
    - Piston exit guard faults (from FB_PistonExitGuard)
 
    The caller classifies the state once per scan (PRG_Main, State Properties)
@@ -49,7 +50,7 @@
        InHoming            : BOOL             (* ST_HOME_LIMIT / ST_HOME_COMPLETE
        InRecovery          : BOOL             (* Recovery states, and the activation states while recovery is pending (bRecoveryPending)
        InFault             : BOOL             (* ST_FAULT / ST_FAULT_IDLE
-       ExitGuardTriggered  : BOOL             (* Piston exit guard triggered fault
+       ExitGuardTriggered  : BOOL             (* Piston exit guard tripped this scan (FB_PistonExitGuard.FaultTriggered)
        CommLost            : BOOL             (* Master heartbeat stale
        PressureSensorFault : BOOL             (* Transducer loop current out of range (from FB_PressureInput)
      VAR_OUTPUT:
@@ -58,7 +59,7 @@
      VAR:
        bFaultLimitSwitch   : BOOL             (* Limit switch fault detected this scan
        bFaultPosition      : BOOL             (* Position limit exceeded this scan
-       bFaultPressureSensor: BOOL             (* Pressure sensor fault while in pressure control this scan
+       bFaultPressureSensor: BOOL             (* Pressure sensor fault while the reading is acted on this scan
        bLatchedFault       : BOOL
        eLatchedFaultCode   : E_FaultCode
    ============================================================================ *)
@@ -152,13 +153,17 @@ END_IF;
 
 (* --------------------------------------------------------------------------
    PRESSURE SENSOR MONITORING
-   Only while the pressure loop is closed on the sensor. In every other
-   state a bad reading is visible to the master in the pressure register and
-   drives nothing.
+   A fault where the reading is acted on: while the pressure loop is closed
+   on the sensor, and when the piston exit guard trips with the sensor
+   failed (the guard takes the unknown pressure to be present, so the trip
+   is the sensor's and is reported as such; this code has priority over
+   FAULT_PISTON_EXIT below). Everywhere else a bad reading is visible to
+   the master in the pressure register and drives nothing.
    -------------------------------------------------------------------------- *)
 
 bFaultPressureSensor := PressureSensorFault AND
-                       (CurrentState = E_SystemState#ST_PRESSURE_CTRL);
+                       ((CurrentState = E_SystemState#ST_PRESSURE_CTRL) OR
+                        ExitGuardTriggered);
 
 (* --------------------------------------------------------------------------
    FAULT PRIORITY AND OUTPUT
@@ -170,7 +175,8 @@ bFaultPressureSensor := PressureSensorFault AND
 (* Priority order: Drive > Comm > LimitSwitch > Position > PressureSensor > PistonExit.
    Drive: the servo amplifier has detected an issue (DriveFault).
    Comm: the link is lost while motion is commanded.
-   PistonExit: triggered by FB_PistonExitGuard (ExitGuardTriggered). *)
+   PistonExit: triggered by FB_PistonExitGuard (ExitGuardTriggered) on a
+   measured pressure; with the sensor failed the trip is PressureSensor. *)
 IF DriveFault THEN
     FaultDetected := TRUE;
     FaultCode := E_FaultCode#FAULT_DRIVE;

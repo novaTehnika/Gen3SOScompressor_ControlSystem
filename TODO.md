@@ -72,6 +72,16 @@ the reference for each) and confirm:
       `G_mbPressureBlock AT %QW73808 : UINT`,
       `G_mbAtEndOfTravel AT %QW73810 : UINT`; `PRG_Main` locals
       `bPosBlockReset` and `bPressureCmdBlocked` (`BOOL`).
+- [ ] Declarations for the pressure-based piston exit guard (the header
+      of `FB_PistonExitGuard.st` is the reference): redeclare the block
+      (inputs `Pressure`, `SensorFault`, `PressureThreshold` and
+      `RetreatMax` replace `ActualVelocity`, `ActualTorque`,
+      `VelocityThreshold` and `TorqueThreshold`; outputs `Armed` and
+      `InCylinder` replace `GuardActive` and `InDangerZone`; locals
+      `bInBand`, `bArmedNow` and `rAnchor` replace `rGuardBoundary`); GVL:
+      add `G_cfgExitGuardPressure : LREAL := 0.1` and
+      `G_cfgExitGuardRetreat : LREAL := 0.5`, delete
+      `G_cfgTorqueStallThreshold`.
 - [ ] Enable the cyclic task's watchdog, at the 4 ms interval. The 2 ms
       task overran for weeks (about 2.5 ms of work a scan) and ran on
       every second motion cycle with nothing reported.
@@ -256,6 +266,14 @@ specified here; the implementation plan decides the files.
 
 ## Checks on the machine
 
+- [ ] Commission the piston exit guard (`TestPlanOutline.md` 3.5): a jog
+      out through 196 mm on a gas charge that reads above
+      `G_cfgExitGuardPressure` there must fault and stop about 3 mm inside
+      the boundary, at the highest and the lowest jog speed; the same jog
+      on a vented chamber must pass; an open transducer loop in the band
+      must give code 8. Read the vented transducer through a full retract
+      first: `G_cfgExitGuardPressure` (0.1 MPa) must clear that reading.
+      The guard is only as good as `G_cfgPosCylinderEntry` (below).
 - [ ] Measure the stop distance at the end margin (pressure mode at
       `G_cfgPressureVelMax` toward the end of travel; the model gives
       about 0.45 mm against the 1.0 mm `G_cfgPressureEndMargin`), and the

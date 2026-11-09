@@ -172,39 +172,57 @@ clear. If the master itself lost the link it is latched in its own
 
 ### FAULT_PISTON_EXIT (5)
 
-**Description**: Piston exit prevention guard triggered.
+**Description**: The piston backed out toward the cylinder exit while the
+chamber was pressurised.
 
 **Triggered When**:
 All three at once, evaluated by `FB_PistonExitGuard` every scan in every state:
 - Position at or below the exit boundary, `G_cfgPosCylinderEntry` +
   `G_cfgPosExitGuardMargin` (176 + 20 = 196 mm). This boundary is above the
-  cylinder entry, not at the soft limit (`G_cfgPosSoftLimitMin`)
-- Actual torque above `G_cfgTorqueStallThreshold` (60 %): the motor is pushing
-  the piston into the cylinder
-- Actual velocity below -`G_cfgInMotionVelThreshold` (-0.1 mm/s): the piston is
-  nevertheless moving out, so external pressure is overcoming the motor
+  cylinder entry, not at the soft limit (`G_cfgPosSoftLimitMin`), and the
+  band below it has no lower edge
+- Chamber pressure (IR19-20) above `G_cfgExitGuardPressure` (0.1 MPa gauge)
+- The piston has backed out more than `G_cfgExitGuardRetreat` (0.5 mm) from
+  the innermost position it reached since the first two became true
+
+The retreat is a distance, so the speed does not matter: a slow creep trips
+as a fast move does, and small motion about a held position does not. The
+motor torque plays no part. A transducer fault counts as pressure while the
+piston is in the bore, and the trip is then reported as
+`FAULT_PRESSURE_SENSOR` (8), not as this code.
+
+The guard only detects. The fault's `MC_Stop` (`G_cfgStopDecel`) arrests
+the axis: from the fastest move (`G_cfgVelLimitMax`, 7 mm/s) the piston
+comes to rest about 3 mm inside the boundary, 17 mm short of the entry.
 
 **Symptoms**:
-- Motion halted in the band below 196 mm
-- In torque mode: position drifting toward exit despite the commanded torque
+- A retract (jog, position move, Go Home, homing, or the pressure loop
+  lowering the pressure) halted just below 196 mm
+- IR19-20 reads above 0.1 MPa
 
 **Master Recovery**:
 ```
 1. Read fault code from IR4 (5)
-2. CRITICAL: Check if cylinder is pressurized
+2. Read the pressure in IR19-20: the chamber is pressurised
 3. Set MotionEnable (HR3) = 0
 4. Mirror code: HR2 = 5
 5. Hold FaultReset (HR4) = 1 (level-based, not a pulse)
-6. After clear: command position away from exit
+6. After clear: vent the chamber before retracting, or move the piston in
 ```
 
-**Investigation**:
-- Check cylinder pressure
-- Verify piston seal integrity
-- Reduce commanded torque/force
-- Check for mechanical binding
+The fault is an event, not a state: once the axis is at rest it resets with
+the chamber still pressurised, and motion into the cylinder is never
+refused. A further retract under pressure trips again, each time after at
+most `G_cfgExitGuardRetreat` plus the stopping distance.
 
-**Safety Note**: This fault indicates a potentially dangerous condition. The piston was approaching or being pushed toward the cylinder exit. Investigate before resuming operation.
+**Investigation**:
+- Why the chamber held pressure during a retract: a valve left shut, an
+  oxygen charge larger than the chamber holds at ambient pressure at the
+  entry, or a pressure target the loop can only reach beyond the exit
+- Whether the pressure reading is true (compare IR19-20 at a vented chamber)
+- `G_cfgPosCylinderEntry` against the machine
+
+**Safety Note**: This fault indicates a potentially dangerous condition. The piston was moving toward the cylinder exit with the chamber pressurised; had the seal left the bore, the contents would have sprayed out. Investigate before resuming operation.
 
 ---
 
@@ -302,12 +320,14 @@ The enum value is retained in `E_FaultCode` for protocol stability but is not cu
 
 ### FAULT_PRESSURE_SENSOR (8)
 
-**Description**: The pressure transducer's loop current is out of range while the slave's pressure loop is closed on it.
+**Description**: The pressure transducer's loop current is out of range while the slave depends on the reading: the pressure loop is closed on it, or the piston is backing out of the bore near the cylinder exit.
 
 **Triggered When**:
-- In `ST_PRESSURE_CTRL` only
 - Loop current below `G_cfgPressureSensorMinMa` (3.6 mA: open loop, unpowered transducer, broken wire) or above `G_cfgPressureSensorMaxMa` (20.5 mA: shorted shunt, transducer over range)
 - For longer than `G_cfgPressureSensorFaultTime` (100 ms) after the median and low-pass filters
+- And either of:
+  - the state is `ST_PRESSURE_CTRL`
+  - in any state, the piston is in the bore inside the exit guard band (`G_cfgPosCylinderEntry` to `G_cfgPosCylinderEntry` + `G_cfgPosExitGuardMargin`, 176 to 196 mm) and backs out more than `G_cfgExitGuardRetreat` (0.5 mm): the piston exit guard cannot tell whether the chamber is pressurised and takes it to be (see `FAULT_PISTON_EXIT`)
 
 **Symptoms**:
 - `G_mbActualPressure` (IR19-20) reads below zero or above the transducer range
@@ -318,7 +338,7 @@ The enum value is retained in `E_FaultCode` for protocol stability but is not cu
 2. Check the transducer supply, the shunt and the analog input wiring
 3. Reset through the normal handshake once IR19-20 reads a plausible pressure
 
-**Notes**: Outside pressure control a bad reading does not fault; it is visible in IR19-20 and the master should refuse to start pressure control on it.
+**Notes**: Elsewhere a bad reading does not fault: at rest, moving into the cylinder, anywhere above the guard band, and below the cylinder entry, where the cylinder is open (so the axis can still be homed and parked). It is visible in IR19-20 and the master should refuse to start pressure control on it. With the transducer failed the piston cannot be withdrawn from the bore through the guard band; restore the reading first. The fault resets with the loop still open once the axis is at rest.
 
 ---
 
@@ -446,9 +466,9 @@ After reset, determine appropriate next action:
 - Monitor position feedback during motion
 
 ### Piston Exit Faults
-- Avoid commanding toward exit boundary under load
-- Monitor cylinder pressure
-- Use appropriate force limits in torque mode
+- Vent the chamber (IR19-20 below `G_cfgExitGuardPressure`) before retracting below the exit boundary
+- Do not request Go Home or homing with a charged chamber
+- Keep the pressure target above what the charge holds at the exit boundary
 
 ### Limit Switch Faults
 - Verify position tracking after homing
@@ -480,7 +500,7 @@ After reset, determine appropriate next action:
 | 2 | Drive | Check drive |
 | 3 | Position | Jog back in (ST_RECOVERY) |
 | 4 | Comm | Restore the link, then reset |
-| 5 | Piston Exit | Check pressure |
+| 5 | Piston Exit | Vent the chamber, or move in |
 | 6 | Limit Switch | Investigate; jog off (ST_RECOVERY) |
 | 7 | Encoder | Reserved (see Drive) |
 | 8 | Pressure Sensor | Check the transducer loop and shunt |

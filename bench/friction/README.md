@@ -75,7 +75,7 @@ values below are the ones at the time of writing.
 | `G_cfgDirectCtrlAccel` | 10 mm/s² | `Y_DirectControl`'s `Acceleration` (the block has no deceleration input). The drive does not slew the command at this value (steps complete in about 60 ms whatever their size, `bench/characterisation/README.md` section 8); the run's step durations still allow `v / 10 mm/s²` for the ramp, 0.5 s at 5 mm/s |
 | `G_cfgTorqueLimitNormal`, `G_cfgPressureTorqueLimit` | 100 % | The axis stalls there, which is 29 MPa on a sealed chamber; the run stops the axis at 90 % (`torqueAbort`) |
 | `G_cfgPosSoftLimitMax` / `Min` | 367 / -2.5 mm | `FAULT_POSITION` beyond them. Keep every step, with its slew, inside |
-| `G_cfgPosCylinderEntry` + `G_cfgPosExitGuardMargin` | 196 mm | Below this, positive torque above 60 % while moving out is `FAULT_PISTON_EXIT`. Loaded steps stay above it |
+| `G_cfgPosCylinderEntry` + `G_cfgPosExitGuardMargin` | 196 mm | At or below this, backing out more than `G_cfgExitGuardRetreat` (0.5 mm) with the chamber above `G_cfgExitGuardPressure` (0.1 MPa) is `FAULT_PISTON_EXIT`. Loaded steps stay above it |
 | `G_cfgHoldPositionTimeout` | 2 min | The slave returns to idle between steps only after this; the run's stops are seconds, so it does not apply |
 
 The slave has no pressure ceiling of its own in velocity mode. The run
