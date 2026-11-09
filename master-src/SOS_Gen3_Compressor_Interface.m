@@ -551,8 +551,11 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % Read the output of one of the model's named Gain blocks,
         % through the cached RuntimeObject; a handle that no longer reads
         % is fetched again.
-        function value = readBlock(app, name)
+        function [value, live] = readBlock(app, name)
+            % live is false when the block has no runtime object yet (the
+            % model has not stepped since it started) and value is 0.
             key = matlab.lang.makeValidName(name);
+            live = true;
             if isfield(app.rto, key)
                 try
                     value = app.rto.(key).OutputPort(1).Data;
@@ -563,6 +566,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             rto = get_param(blockPath(app, name), "RuntimeObject");
             if isempty(rto)
                 value = 0;
+                live = false;
             else
                 app.rto.(key) = rto;
                 value = rto.OutputPort(1).Data;
@@ -572,8 +576,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % The values shown on every poll, each block read once. The fault
         % code is read only while the status reports a fault.
         function d = readDisplay(app)
-            d.statusCode = readBlock(app, "StatusCode");
-            d.position = readBlock(app, "Position");
+            [d.statusCode, liveStatus] = readBlock(app, "StatusCode");
+            [d.position, livePosition] = readBlock(app, "Position");
+            d.live = liveStatus && livePosition;    % the model has stepped
             d.velocity = readBlock(app, "Velocity");
             d.pressure = readBlock(app, "Pressure");
             d.pressureBlock = readBlock(app, "PressureBlock") ~= 0;
@@ -861,8 +866,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.linkReady = statusCode ~= app.STATUS_LINK_LOST && ...
                 statusCode ~= app.STATUS_LINK_WAIT;
             trackOp(app, statusCode);
-            if app.targetFromPiston && app.linkReady && isfinite(d.position) ...
-                    && app.activeOp ~= app.OP_POSITION
+            if app.targetFromPiston && d.live && app.linkReady ...
+                    && isfinite(d.position) && app.activeOp ~= app.OP_POSITION
                 % The first position reading of the connection becomes the
                 % manual target when the piston is inside the cylinder;
                 % a piston outside it leaves the in-cylinder default.
