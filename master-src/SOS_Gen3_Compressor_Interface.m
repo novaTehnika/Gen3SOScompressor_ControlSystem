@@ -11,11 +11,23 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         TraceRecordMenu                 matlab.ui.container.Menu
         TracePlotMenu                   matlab.ui.container.Menu
         TraceLiveMenu                   matlab.ui.container.Menu
-        TracePanel                      matlab.ui.container.Panel
-        PlotTraceButton                 matlab.ui.control.Button
+        ViewMenu                        matlab.ui.container.Menu
+        ViewSideBySideMenu              matlab.ui.container.Menu
+        ViewSecondMonitorMenu           matlab.ui.container.Menu
+        ViewDefaultSizeMenu             matlab.ui.container.Menu
+        MainGrid                        matlab.ui.container.GridLayout
+        ReadoutGrid                     matlab.ui.container.GridLayout
+        LampGrid                        matlab.ui.container.GridLayout
+        ControlsGrid                    matlab.ui.container.GridLayout
+        SpeedGrid                       matlab.ui.container.GridLayout
+        ProcedureGrid                   matlab.ui.container.GridLayout
+        ProcLeftGrid                    matlab.ui.container.GridLayout
+        ProcContentGrid                 matlab.ui.container.GridLayout
+        ProcChecksGrid                  matlab.ui.container.GridLayout
+        ProcParamsGrid                  matlab.ui.container.GridLayout
+        ProcButtonsGrid                 matlab.ui.container.GridLayout
         TraceStatusLabel                matlab.ui.control.Label
         IntervalDropDown                matlab.ui.control.DropDown
-        LivePlotButton                  matlab.ui.control.Button
         RecordButton                    matlab.ui.control.StateButton
         FaultActiveLamp                 matlab.ui.control.Lamp
         FaultActiveLampLabel            matlab.ui.control.Label
@@ -170,6 +182,11 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         trackActive = false
         procStepShown = 0
         trackTableTimed = false
+
+        % Height in pixels of the checklist and parameter pools when shown
+        % (rows 4 and 5 of ProcContentGrid; 0 when the step has none)
+        procChecksHeight = 0
+        procParamsHeight = 0
     end
 
     properties (Access = private, Constant)
@@ -186,6 +203,20 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         STATUS_ESTOP     = 20
         STATUS_LINK_LOST = 34
         STATUS_LINK_WAIT = 35
+
+        % Window geometry in pixels: the drawable size of a new window and
+        % of the smallest one before the grid scrolls, the heights of the
+        % readout and controls bands, the grid's padding and spacing, the
+        % bottom margin of a monitor's work area, and the window
+        % decorations (left, bottom, right, top) used before they can be
+        % measured
+        DEFAULT_SIZE    = [940 900]
+        MIN_SIZE        = [900 680]
+        READOUT_HEIGHT  = 190
+        CONTROLS_HEIGHT = 128
+        MAIN_PAD        = 6
+        TASKBAR_MARGIN  = 48
+        DECO_FALLBACK   = [8 8 8 90]
 
         COLOR_IDLE     = [0.96 0.96 0.96]
         COLOR_STARTING = [1 0.8 0.3]
@@ -376,6 +407,25 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
             if ~traceLiveUpdate(app.liveFig, app.traceLive)
                 app.liveFig = [];
+            end
+        end
+
+        % Open the live plot, or bring it forward when open
+        function openLivePlot(app)
+            if ~isempty(app.liveFig) && ishghandle(app.liveFig.fig)
+                figure(app.liveFig.fig);
+                return
+            end
+            try
+                app.liveFig = traceLiveNew('on');
+                set(app.liveFig.fig, 'CloseRequestFcn', @(~, ~) closeLivePlot(app));
+                app.liveFig.fig.Units = 'pixels';
+                app.livePolls = 0;
+                traceLiveUpdate(app.liveFig, app.traceLive);
+            catch ME
+                app.liveFig = [];
+                app.TraceStatusLabel.Text = append("Live plot failed: ", ME.message);
+                app.TraceStatusLabel.FontColor = [1 0 0];
             end
         end
 
@@ -728,8 +778,6 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.RecordButton.Enable = connected || app.traceRecording;
             app.RecordButton.Value = app.traceRecording;
             app.TraceRecordMenu.Enable = app.RecordButton.Enable;
-            app.TracePlotMenu.Enable = app.PlotTraceButton.Enable;
-            app.TraceLiveMenu.Enable = app.LivePlotButton.Enable;
             app.ProcedureMenu.Enable = ~procActive;
             app.IntervalDropDown.Enable = (connected || app.traceRecording) && ~procActive;
             showInterval(app);
@@ -914,12 +962,16 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             % preset (the count comes from the configuration) and the
             % typed field, starting at the default.
             app.SpeedPresetButtons = matlab.ui.control.Button.empty;
-            for k = 1:numel(app.cfg.speedPresets)
+            nPresets = numel(app.cfg.speedPresets);
+            app.SpeedGrid.ColumnWidth = [{'fit', 48}, repmat({30}, 1, nPresets), {'1x'}];
+            app.SpeedMmsLabel.Layout.Column = nPresets + 3;
+            for k = 1:nPresets
                 p = app.cfg.speedPresets(k);
-                app.SpeedPresetButtons(k) = uibutton(app.ControlsPanel, 'push');
+                app.SpeedPresetButtons(k) = uibutton(app.SpeedGrid, 'push');
+                app.SpeedPresetButtons(k).Layout.Row = 1;
+                app.SpeedPresetButtons(k).Layout.Column = k + 2;
                 app.SpeedPresetButtons(k).ButtonPushedFcn = ...
                     createCallbackFcn(app, @SpeedPresetPushed, true);
-                app.SpeedPresetButtons(k).Position = [990 + (k - 1) * 35, 9, 33, 22];
                 app.SpeedPresetButtons(k).Text = num2str(p);
                 app.SpeedPresetButtons(k).UserData = p;
                 app.SpeedPresetButtons(k).FontSize = 11;
@@ -942,45 +994,64 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         end
 
         % The procedure panel's checkbox and parameter-field pools, sized
-        % by the configuration. Each callback finds its index in UserData.
+        % by the configuration, each in a grid in a row of ProcContentGrid.
+        % Each callback finds its index in UserData.
         function createProcPools(app)
-            panel = app.ProcedurePanel;
             nChecks = app.cfg.procMaxChecks;
+            nRows = max(nChecks, 1);
+            app.ProcChecksGrid = uigridlayout(app.ProcContentGrid, [nRows 1]);
+            app.ProcChecksGrid.Layout.Row = 4;
+            app.ProcChecksGrid.Layout.Column = 1;
+            app.ProcChecksGrid.RowHeight = repmat({20}, 1, nRows);
+            app.ProcChecksGrid.ColumnWidth = {'1x'};
+            app.ProcChecksGrid.Padding = [0 0 0 0];
+            app.ProcChecksGrid.RowSpacing = 2;
+            app.procChecksHeight = 20 * nRows + 2 * (nRows - 1);
             app.ProcChecks = matlab.ui.control.CheckBox.empty;
             for k = 1:nChecks
-                c = uicheckbox(panel);
+                c = uicheckbox(app.ProcChecksGrid);
+                c.Layout.Row = k;
+                c.Layout.Column = 1;
                 c.ValueChangedFcn = createCallbackFcn(app, @ProcCheckChanged, true);
                 c.Text = '';
                 c.UserData = k;
                 c.Visible = 'off';
-                c.Position = [214, 160 - 21 * (k - 1), 454, 20];
                 app.ProcChecks(k) = c;
             end
 
-            % Two columns of parameters; each label wraps onto two lines.
+            % Two columns of parameters, filled down the first column and
+            % then the second; each label wraps onto two lines.
             nParams = app.cfg.procMaxParams;
-            rows = ceil(nParams / 2);
-            pitch = min(32, floor(128 / rows));
+            rows = max(ceil(nParams / 2), 1);
+            app.ProcParamsGrid = uigridlayout(app.ProcContentGrid, [rows 4]);
+            app.ProcParamsGrid.Layout.Row = 5;
+            app.ProcParamsGrid.Layout.Column = 1;
+            app.ProcParamsGrid.RowHeight = repmat({28}, 1, rows);
+            app.ProcParamsGrid.ColumnWidth = {'1x', 70, '1x', 70};
+            app.ProcParamsGrid.Padding = [0 0 0 0];
+            app.ProcParamsGrid.RowSpacing = 4;
+            app.ProcParamsGrid.ColumnSpacing = 6;
+            app.procParamsHeight = 28 * rows + 4 * (rows - 1);
             app.ProcParamLabels = matlab.ui.control.Label.empty;
             app.ProcParamFields = matlab.ui.control.NumericEditField.empty;
             for k = 1:nParams
-                col = ceil(k / rows) - 1;
-                row = mod(k - 1, rows);
-                x = 214 + col * 228;
-                y = 150 - pitch * row;
-                l = uilabel(panel);
+                r = mod(k - 1, rows) + 1;
+                col = 2 * (ceil(k / rows) - 1) + 1;
+                l = uilabel(app.ProcParamsGrid);
+                l.Layout.Row = r;
+                l.Layout.Column = col;
                 l.HorizontalAlignment = 'right';
                 l.WordWrap = 'on';
                 l.FontSize = 10;
                 l.Text = '';
                 l.Visible = 'off';
-                l.Position = [x, y, 150, 28];
                 app.ProcParamLabels(k) = l;
-                e = uieditfield(panel, 'numeric');
+                e = uieditfield(app.ProcParamsGrid, 'numeric');
+                e.Layout.Row = r;
+                e.Layout.Column = col + 1;
                 e.ValueChangedFcn = createCallbackFcn(app, @ProcParamChanged, true);
                 e.UserData = k;
                 e.Visible = 'off';
-                e.Position = [x + 154, y + 3, 66, 22];
                 app.ProcParamFields(k) = e;
             end
         end
@@ -1528,6 +1599,23 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 end
             end
 
+            % The pools' rows take their height while shown and none
+            % otherwise; the grid is written only when a height changes.
+            hChecks = 0;
+            if ~isempty(v.checks.labels)
+                hChecks = app.procChecksHeight;
+            end
+            hParams = 0;
+            if showParams && ~isempty(v.params.keys)
+                hParams = app.procParamsHeight;
+            end
+            rh = app.ProcContentGrid.RowHeight;
+            if ~isequal(rh{4}, hChecks) || ~isequal(rh{5}, hParams)
+                rh{4} = hChecks;
+                rh{5} = hParams;
+                app.ProcContentGrid.RowHeight = rh;
+            end
+
             app.ProcConfirmButton.Visible = v.confirm.visible;
             app.ProcConfirmButton.Enable = v.confirm.enable;
             setText(app, app.ProcConfirmButton, v.confirm.label);
@@ -1552,6 +1640,82 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             setText(app, app.ProcMessageLabel, text);
             app.ProcMessageLabel.Tooltip = {text};
         end
+
+        % Monitors in pixels, one row [x y width height] each with the
+        % primary first, and their work areas: the monitor without a
+        % margin along its bottom edge for the taskbar.
+        function [mons, work] = monitorAreas(app)
+            root = groot;
+            units = root.Units;
+            root.Units = 'pixels';
+            mons = root.MonitorPositions;
+            root.Units = units;
+            work = mons + [0 app.TASKBAR_MARGIN 0 -app.TASKBAR_MARGIN];
+        end
+
+        % Row of mons holding the centre of fig, else the nearest one
+        function k = monitorOf(~, fig, mons)
+            p = fig.Position;
+            c = [p(1) + p(3) / 2, p(2) + p(4) / 2];
+            inside = c(1) >= mons(:, 1) & c(1) < mons(:, 1) + mons(:, 3) & ...
+                c(2) >= mons(:, 2) & c(2) < mons(:, 2) + mons(:, 4);
+            k = find(inside, 1);
+            if isempty(k)
+                centres = [mons(:, 1) + mons(:, 3) / 2, mons(:, 2) + mons(:, 4) / 2];
+                [~, k] = min(sum((centres - c) .^ 2, 2));
+            end
+        end
+
+        % Window decorations [left bottom right top] in pixels: the
+        % outer position minus the position of a visible figure, else
+        % (or when implausible) DECO_FALLBACK.
+        function d = decorations(app, fig)
+            d = app.DECO_FALLBACK;
+            if ~strcmp(char(fig.Visible), 'on')
+                return
+            end
+            try
+                drawnow;
+                op = fig.OuterPosition;
+                ip = fig.Position;
+                m = [ip(1) - op(1), ip(2) - op(2), ...
+                    op(1) + op(3) - ip(1) - ip(3), op(2) + op(4) - ip(2) - ip(4)];
+                if all(m >= 0 & m <= 150)
+                    d = m;
+                end
+            catch
+            end
+        end
+
+        % Put the outer window rectangle rect = [x y width height] on fig:
+        % the position is the rectangle less the decorations.
+        function placeOuter(app, fig, rect)
+            if ~strcmp(string(fig.WindowState), "normal")
+                fig.WindowState = 'normal';
+                drawnow;
+            end
+            d = decorations(app, fig);
+            fig.Position = [rect(1) + d(1), rect(2) + d(2), ...
+                rect(3) - d(1) - d(3), rect(4) - d(2) - d(4)];
+        end
+
+        % Restore the default size, keeping the top-left corner, inside
+        % the work area of the monitor the window is on
+        function setDefaultSize(app)
+            fig = app.UIFigure;
+            if ~strcmp(string(fig.WindowState), "normal")
+                fig.WindowState = 'normal';
+                drawnow;
+            end
+            [mons, work] = monitorAreas(app);
+            a = work(monitorOf(app, fig, mons), :);
+            d = decorations(app, fig);
+            sz = min(app.DEFAULT_SIZE, [a(3) - d(1) - d(3), a(4) - d(2) - d(4)]);
+            p = fig.Position;
+            x = min(max(p(1), a(1) + d(1)), a(1) + a(3) - d(3) - sz(1));
+            y = min(max(p(2) + p(4) - sz(2), a(2) + d(2)), a(2) + a(4) - d(4) - sz(2));
+            fig.Position = [x y sz];
+        end
     end
 
 
@@ -1563,6 +1727,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.modelName = string(app.Simulation.ModelName);
 
             applyConfig(app);
+            setDefaultSize(app);
+            app.UIFigure.Visible = 'on';
 
             app.updateTimer = timer( ...
                 ExecutionMode="fixedRate", ...
@@ -1899,13 +2065,99 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         end
 
         % Menu selected function: TraceLiveMenu
+        % The plot reads the stream the app drains on every poll, so it
+        % shows the last cfg.livePlotSeconds whether or not Record is on.
         function TraceLiveMenuSelected(app, event)
-            LivePlotButtonPushed(app, event);
+            openLivePlot(app);
         end
 
         % Menu selected function: TracePlotMenu
         function TracePlotMenuSelected(app, event)
-            PlotTraceButtonPushed(app, event);
+            [name, folder] = uigetfile("*.csv", "Plot a trace", ...
+                append(capturesFolder(app), filesep));
+            figure(app.UIFigure);
+            if isequal(name, 0)
+                return
+            end
+            try
+                tracePlot(fullfile(folder, name));
+                app.TraceStatusLabel.Text = append("Plotted ", name);
+                app.TraceStatusLabel.FontColor = [0 0 0];
+            catch ME
+                app.TraceStatusLabel.Text = append("Plot failed: ", ME.message);
+                app.TraceStatusLabel.FontColor = [1 0 0];
+            end
+        end
+
+        % Menu selected function: ViewSideBySideMenu
+        % The app takes the left half of the monitor it is on, at least
+        % its minimum width, and the live plot the rest.
+        function ViewSideBySideSelected(app, event)
+            [mons, work] = monitorAreas(app);
+            a = work(monitorOf(app, app.UIFigure, mons), :);
+            wApp = min(max(round(a(3) / 2), app.MIN_SIZE(1) + 16), a(3));
+            placeOuter(app, app.UIFigure, [a(1) a(2) wApp a(4)]);
+            openLivePlot(app);
+            if ~isempty(app.liveFig) && ishghandle(app.liveFig.fig)
+                if a(3) - wApp >= 200
+                    placeOuter(app, app.liveFig.fig, ...
+                        [a(1) + wApp, a(2), a(3) - wApp, a(4)]);
+                else
+                    app.StatusLabel.Text = "No room for the live plot beside the app";
+                end
+            end
+            figure(app.UIFigure);
+        end
+
+        % Menu selected function: ViewSecondMonitorMenu
+        % The live plot fills the largest monitor the app is not on.
+        function ViewSecondMonitorSelected(app, event)
+            [mons, work] = monitorAreas(app);
+            if size(mons, 1) < 2
+                app.StatusLabel.Text = "Only one monitor";
+                return
+            end
+            others = setdiff(1:size(mons, 1), monitorOf(app, app.UIFigure, mons));
+            [~, largest] = max(mons(others, 3) .* mons(others, 4));
+            openLivePlot(app);
+            if ~isempty(app.liveFig) && ishghandle(app.liveFig.fig)
+                placeOuter(app, app.liveFig.fig, work(others(largest), :));
+                drawnow;
+                app.liveFig.fig.WindowState = 'maximized';
+            end
+            figure(app.UIFigure);
+        end
+
+        % Menu selected function: ViewDefaultSizeMenu
+        function ViewDefaultSizeSelected(app, event)
+            setDefaultSize(app);
+        end
+
+        % Size changed function: UIFigure
+        % Below the minimum size the grid keeps its minimum extent and
+        % scrolls; above it the grid fills the window.
+        function UIFigureSizeChanged(app, event)
+            if isempty(app.MainGrid) || ~isvalid(app.MainGrid)
+                return
+            end
+            sz = app.UIFigure.Position(3:4);
+            width = {'1x'};
+            if sz(1) < app.MIN_SIZE(1)
+                width = {app.MIN_SIZE(1) - 2 * app.MAIN_PAD};
+            end
+            height = '1x';
+            if sz(2) < app.MIN_SIZE(2)
+                height = app.MIN_SIZE(2) - app.READOUT_HEIGHT - ...
+                    app.CONTROLS_HEIGHT - 4 * app.MAIN_PAD;
+            end
+            if ~isequal(app.MainGrid.ColumnWidth, width)
+                app.MainGrid.ColumnWidth = width;
+            end
+            rh = app.MainGrid.RowHeight;
+            if ~isequal(rh{3}, height)
+                rh{3} = height;
+                app.MainGrid.RowHeight = rh;
+            end
         end
 
         % Menu selected function: ProcedureFileMenus
@@ -1960,145 +2212,125 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
             updateButtons(app);
         end
-
-        % Button pushed function: LivePlotButton
-        % The plot reads the stream the app drains on every poll, so it
-        % shows the last cfg.livePlotSeconds whether or not Record is on.
-        function LivePlotButtonPushed(app, event)
-            if ~isempty(app.liveFig) && ishghandle(app.liveFig.fig)
-                figure(app.liveFig.fig);
-                return
-            end
-            try
-                app.liveFig = traceLiveNew('on');
-                set(app.liveFig.fig, 'CloseRequestFcn', @(~, ~) closeLivePlot(app));
-                app.livePolls = 0;
-                traceLiveUpdate(app.liveFig, app.traceLive);
-            catch ME
-                app.liveFig = [];
-                app.TraceStatusLabel.Text = append("Live plot failed: ", ME.message);
-                app.TraceStatusLabel.FontColor = [1 0 0];
-            end
-        end
-
-        % Button pushed function: PlotTraceButton
-        function PlotTraceButtonPushed(app, event)
-            [name, folder] = uigetfile("*.csv", "Plot a trace", ...
-                append(capturesFolder(app), filesep));
-            figure(app.UIFigure);
-            if isequal(name, 0)
-                return
-            end
-            try
-                tracePlot(fullfile(folder, name));
-                app.TraceStatusLabel.Text = append("Plotted ", name);
-                app.TraceStatusLabel.FontColor = [0 0 0];
-            catch ME
-                app.TraceStatusLabel.Text = append("Plot failed: ", ME.message);
-                app.TraceStatusLabel.FontColor = [1 0 0];
-            end
-        end
     end
 
     % Component initialization
     methods (Access = private)
 
-        % A titled panel holding one large numeric value
-        function [panel, value] = createReadout(app, title, position, fontSize)
-            panel = uipanel(app.UIFigure);
+        % A titled panel in the readout band's cell (1, column), holding one
+        % large numeric value in a grid of its own
+        function [panel, value, grid] = createReadout(app, title, column, fontSize)
+            panel = uipanel(app.ReadoutGrid);
+            panel.Layout.Row = 1;
+            panel.Layout.Column = column;
             panel.Title = title;
             panel.FontWeight = 'bold';
-            panel.Position = position;
-            value = uilabel(panel);
+            grid = uigridlayout(panel, [1 1]);
+            grid.Padding = [4 2 4 2];
+            grid.RowSpacing = 4;
+            grid.ColumnSpacing = 4;
+            value = uilabel(grid);
+            value.Layout.Row = 1;
+            value.Layout.Column = 1;
             value.HorizontalAlignment = 'center';
             value.FontSize = fontSize;
             value.FontWeight = 'bold';
-            value.Position = [5 10 position(3) - 10 position(4) - 45];
             value.Text = '--';
         end
 
-        % The volume panel's view selector and Zero button
-        function createVolumeControls(app)
-            app.VolumeValue.Position = [5 38 160 62];
-            app.VolumeValue.FontSize = 36;
+        % The volume panel's view selector and Zero button, in the panel's
+        % grid under the value
+        function createVolumeControls(app, grid)
+            grid.RowHeight = {'1x', 26};
+            grid.ColumnWidth = {124, '1x'};
+            app.VolumeValue.Layout.Column = [1 2];
 
-            app.VolumeViewGroup = uibuttongroup(app.VolumePanel);
+            app.VolumeViewGroup = uibuttongroup(grid);
+            app.VolumeViewGroup.Layout.Row = 2;
+            app.VolumeViewGroup.Layout.Column = 1;
             app.VolumeViewGroup.BorderType = 'none';
             app.VolumeViewGroup.SelectionChangedFcn = ...
                 createCallbackFcn(app, @VolumeViewChanged, true);
-            app.VolumeViewGroup.Position = [4 4 122 30];
 
             app.VolumeSweptButton = uitogglebutton(app.VolumeViewGroup);
             app.VolumeSweptButton.Text = 'Swept';
             app.VolumeSweptButton.Tag = 'swept';
             app.VolumeSweptButton.FontSize = 10;
             app.VolumeSweptButton.Tooltip = {'Swept volume: the saline still deliverable, without the dead volume'};
-            app.VolumeSweptButton.Position = [2 4 38 22];
+            app.VolumeSweptButton.Position = [2 0 38 26];
 
             app.VolumeMixingButton = uitogglebutton(app.VolumeViewGroup);
             app.VolumeMixingButton.Text = 'Mix';
             app.VolumeMixingButton.Tag = 'mixing';
             app.VolumeMixingButton.FontSize = 10;
             app.VolumeMixingButton.Tooltip = {'Mixing volume: the swept volume plus the dead volume that takes part in mixing'};
-            app.VolumeMixingButton.Position = [42 4 38 22];
+            app.VolumeMixingButton.Position = [42 0 38 26];
 
             app.VolumeSinceZeroButton = uitogglebutton(app.VolumeViewGroup);
             app.VolumeSinceZeroButton.Text = 'Incr';
             app.VolumeSinceZeroButton.Tag = 'sinceZero';
             app.VolumeSinceZeroButton.FontSize = 10;
             app.VolumeSinceZeroButton.Tooltip = {'Volume delivered since Zero was pressed; -- until then'};
-            app.VolumeSinceZeroButton.Position = [82 4 38 22];
+            app.VolumeSinceZeroButton.Position = [82 0 38 26];
 
-            app.VolumeZeroButton = uibutton(app.VolumePanel, 'push');
+            app.VolumeZeroButton = uibutton(grid, 'push');
+            app.VolumeZeroButton.Layout.Row = 2;
+            app.VolumeZeroButton.Layout.Column = 2;
             app.VolumeZeroButton.ButtonPushedFcn = ...
                 createCallbackFcn(app, @VolumeZeroButtonPushed, true);
             app.VolumeZeroButton.Text = 'Zero';
             app.VolumeZeroButton.FontSize = 10;
             app.VolumeZeroButton.Enable = 'off';
             app.VolumeZeroButton.Tooltip = {'Zero the incremental volume at the present position'};
-            app.VolumeZeroButton.Position = [128 8 38 22];
         end
 
-        % The pressure panel's unit selector
-        function createPressureControls(app)
-            app.PressureValue.Position = [5 38 160 62];
-            app.PressureValue.FontSize = 36;
+        % The pressure panel's unit selector, in the panel's grid under
+        % the value
+        function createPressureControls(app, grid)
+            grid.RowHeight = {'1x', 26};
+            grid.ColumnWidth = {124, '1x'};
+            app.PressureValue.Layout.Column = [1 2];
 
-            app.PressureUnitGroup = uibuttongroup(app.PressurePanel);
+            app.PressureUnitGroup = uibuttongroup(grid);
+            app.PressureUnitGroup.Layout.Row = 2;
+            app.PressureUnitGroup.Layout.Column = 1;
             app.PressureUnitGroup.BorderType = 'none';
             app.PressureUnitGroup.SelectionChangedFcn = ...
                 createCallbackFcn(app, @PressureUnitChanged, true);
-            app.PressureUnitGroup.Position = [4 4 122 30];
 
             app.PressureUnitPsiButton = uitogglebutton(app.PressureUnitGroup);
             app.PressureUnitPsiButton.Text = 'psi';
             app.PressureUnitPsiButton.Tag = 'psi';
             app.PressureUnitPsiButton.FontSize = 10;
             app.PressureUnitPsiButton.Tooltip = {'Show pressures in psi, absolute'};
-            app.PressureUnitPsiButton.Position = [2 4 38 22];
+            app.PressureUnitPsiButton.Position = [2 0 38 26];
 
             app.PressureUnitAtmButton = uitogglebutton(app.PressureUnitGroup);
             app.PressureUnitAtmButton.Text = 'atm';
             app.PressureUnitAtmButton.Tag = 'atm';
             app.PressureUnitAtmButton.FontSize = 10;
             app.PressureUnitAtmButton.Tooltip = {'Show pressures in atm, absolute'};
-            app.PressureUnitAtmButton.Position = [42 4 38 22];
+            app.PressureUnitAtmButton.Position = [42 0 38 26];
 
             app.PressureUnitMPaButton = uitogglebutton(app.PressureUnitGroup);
             app.PressureUnitMPaButton.Text = 'MPa';
             app.PressureUnitMPaButton.Tag = 'MPa';
             app.PressureUnitMPaButton.FontSize = 10;
             app.PressureUnitMPaButton.Tooltip = {'Show pressures in MPa, absolute'};
-            app.PressureUnitMPaButton.Position = [82 4 38 22];
+            app.PressureUnitMPaButton.Position = [82 0 38 26];
         end
 
         % Create UIFigure and components
         function createComponents(app)
 
-            % Create UIFigure and hide until all components are created
+            % Create UIFigure and hide until startupFcn has sized it. The
+            % children are laid out by grids, so the figure's resize
+            % callback only adjusts the grid below the minimum size.
             app.UIFigure = uifigure('Visible', 'off');
-            app.UIFigure.Position = [100 100 1208 432];
+            app.UIFigure.Position = [100 60 app.DEFAULT_SIZE];
             app.UIFigure.Name = 'SOS Gen3 Compressor';
+            app.UIFigure.AutoResizeChildren = 'off';
+            app.UIFigure.SizeChangedFcn = createCallbackFcn(app, @UIFigureSizeChanged, true);
             app.UIFigure.CloseRequestFcn = createCallbackFcn(app, @UIFigureCloseRequest, true);
 
             % Create ProcedureMenu: the choice of procedure. The file items
@@ -2137,296 +2369,422 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.TraceLiveMenu = uimenu(app.TraceMenu);
             app.TraceLiveMenu.MenuSelectedFcn = createCallbackFcn(app, @TraceLiveMenuSelected, true);
             app.TraceLiveMenu.Accelerator = 'L';
+            app.TraceLiveMenu.Tooltip = 'Pressure, position, velocity and torque of the last minutes';
             app.TraceLiveMenu.Text = 'Live plot';
 
-            % Create ProcedurePanel: the walk-through of the procedure, in the
-            % place of the old tabs. The checkbox and parameter pools are
-            % created in applyConfig, sized by the configuration.
-            app.ProcedurePanel = uipanel(app.UIFigure);
-            app.ProcedurePanel.Title = 'Procedure';
-            app.ProcedurePanel.FontWeight = 'bold';
-            app.ProcedurePanel.Position = [524 120 676 308];
+            % Create ViewMenu: window placement
+            app.ViewMenu = uimenu(app.UIFigure);
+            app.ViewMenu.Text = 'View';
 
-            app.ProcStepList = uilistbox(app.ProcedurePanel);
-            app.ProcStepList.ValueChangedFcn = createCallbackFcn(app, @ProcStepListChanged, true);
-            app.ProcStepList.FontSize = 10;
-            app.ProcStepList.Position = [8 84 196 190];
+            % Create ViewSideBySideMenu
+            app.ViewSideBySideMenu = uimenu(app.ViewMenu);
+            app.ViewSideBySideMenu.MenuSelectedFcn = createCallbackFcn(app, @ViewSideBySideSelected, true);
+            app.ViewSideBySideMenu.Text = 'Side by side';
 
-            app.ProcTimerLabel = uilabel(app.ProcedurePanel);
-            app.ProcTimerLabel.FontSize = 10;
-            app.ProcTimerLabel.Position = [8 56 196 22];
-            app.ProcTimerLabel.Text = '--';
+            % Create ViewSecondMonitorMenu
+            app.ViewSecondMonitorMenu = uimenu(app.ViewMenu);
+            app.ViewSecondMonitorMenu.MenuSelectedFcn = createCallbackFcn(app, @ViewSecondMonitorSelected, true);
+            app.ViewSecondMonitorMenu.Enable = size(get(groot, 'MonitorPositions'), 1) > 1;
+            app.ViewSecondMonitorMenu.Text = 'Live plot on second monitor';
 
-            app.ProcVolumeLabel = uilabel(app.ProcedurePanel);
-            app.ProcVolumeLabel.FontSize = 10;
-            app.ProcVolumeLabel.Position = [8 32 196 22];
-            app.ProcVolumeLabel.Text = '--';
+            % Create ViewDefaultSizeMenu
+            app.ViewDefaultSizeMenu = uimenu(app.ViewMenu);
+            app.ViewDefaultSizeMenu.MenuSelectedFcn = createCallbackFcn(app, @ViewDefaultSizeSelected, true);
+            app.ViewDefaultSizeMenu.Separator = 'on';
+            app.ViewDefaultSizeMenu.Text = 'Default size';
 
-            app.ProcPressureTargetLabel = uilabel(app.ProcedurePanel);
-            app.ProcPressureTargetLabel.FontSize = 10;
-            app.ProcPressureTargetLabel.Position = [8 8 196 22];
-            app.ProcPressureTargetLabel.Text = 'Held pressure: --';
+            % Create MainGrid: the readout band, the controls band and the
+            % procedure panel, which takes the remaining height
+            app.MainGrid = uigridlayout(app.UIFigure, [3 1]);
+            app.MainGrid.RowHeight = {app.READOUT_HEIGHT, app.CONTROLS_HEIGHT, '1x'};
+            app.MainGrid.ColumnWidth = {'1x'};
+            app.MainGrid.Padding = repmat(app.MAIN_PAD, 1, 4);
+            app.MainGrid.RowSpacing = app.MAIN_PAD;
+            app.MainGrid.Scrollable = 'on';
 
-            app.ProcHeadingLabel = uilabel(app.ProcedurePanel);
-            app.ProcHeadingLabel.FontWeight = 'bold';
-            app.ProcHeadingLabel.FontSize = 12;
-            app.ProcHeadingLabel.Position = [214 252 454 22];
-            app.ProcHeadingLabel.Text = '';
+            % Create ReadoutGrid: four readouts, the status line and lamps
+            % under them, STOP at the right
+            app.ReadoutGrid = uigridlayout(app.MainGrid, [2 5]);
+            app.ReadoutGrid.Layout.Row = 1;
+            app.ReadoutGrid.Layout.Column = 1;
+            app.ReadoutGrid.RowHeight = {'1x', 24};
+            app.ReadoutGrid.ColumnWidth = {'1x', '1x', '1x', '1x', 120};
+            app.ReadoutGrid.Padding = [0 0 0 0];
+            app.ReadoutGrid.ColumnSpacing = 8;
+            app.ReadoutGrid.RowSpacing = 4;
 
-            app.ProcTitleLabel = uilabel(app.ProcedurePanel);
-            app.ProcTitleLabel.FontSize = 12;
-            app.ProcTitleLabel.Position = [214 230 454 22];
-            app.ProcTitleLabel.Text = '';
+            % Create readouts
+            [app.VolumePanel, app.VolumeValue, grid] = createReadout(app, ...
+                'Swept volume (mL)', 1, 44);
+            createVolumeControls(app, grid);
+            [app.PressurePanel, app.PressureValue, grid] = createReadout(app, ...
+                'Pressure (atm abs)', 2, 44);
+            createPressureControls(app, grid);
+            [app.PositionPanel, app.PositionValue] = createReadout(app, ...
+                'Position from EOT (mm)', 3, 44);
+            [app.FlowPanel, app.FlowValue] = createReadout(app, ...
+                'Flow (mL/s)', 4, 44);
 
-            app.ProcTextArea = uitextarea(app.ProcedurePanel);
-            app.ProcTextArea.Editable = 'off';
-            app.ProcTextArea.Position = [214 184 454 44];
+            % Create StatusLabel
+            app.StatusLabel = uilabel(app.ReadoutGrid);
+            app.StatusLabel.Layout.Row = 2;
+            app.StatusLabel.Layout.Column = [1 3];
+            app.StatusLabel.Text = 'Idle';
 
-            app.ProcMessageLabel = uilabel(app.ProcedurePanel);
-            app.ProcMessageLabel.FontSize = 10;
-            app.ProcMessageLabel.Position = [214 34 454 18];
-            app.ProcMessageLabel.Text = '';
+            % Create LampGrid
+            app.LampGrid = uigridlayout(app.ReadoutGrid, [1 5]);
+            app.LampGrid.Layout.Row = 2;
+            app.LampGrid.Layout.Column = 4;
+            app.LampGrid.RowHeight = {18};
+            app.LampGrid.ColumnWidth = {'1x', 'fit', 18, 'fit', 18};
+            app.LampGrid.Padding = [0 3 0 3];
+            app.LampGrid.ColumnSpacing = 6;
 
-            app.ProcConfirmButton = uibutton(app.ProcedurePanel, 'push');
-            app.ProcConfirmButton.ButtonPushedFcn = createCallbackFcn(app, @ProcConfirmButtonPushed, true);
-            app.ProcConfirmButton.Visible = 'off';
-            app.ProcConfirmButton.Position = [214 6 110 26];
-            app.ProcConfirmButton.Text = 'Confirm';
+            % Create FaultActiveLampLabel
+            app.FaultActiveLampLabel = uilabel(app.LampGrid);
+            app.FaultActiveLampLabel.Layout.Row = 1;
+            app.FaultActiveLampLabel.Layout.Column = 2;
+            app.FaultActiveLampLabel.HorizontalAlignment = 'right';
+            app.FaultActiveLampLabel.Text = 'Fault Active';
 
-            app.ProcRepeatButton = uibutton(app.ProcedurePanel, 'push');
-            app.ProcRepeatButton.ButtonPushedFcn = createCallbackFcn(app, @ProcRepeatButtonPushed, true);
-            app.ProcRepeatButton.Visible = 'off';
-            app.ProcRepeatButton.Position = [330 6 110 26];
-            app.ProcRepeatButton.Text = 'Repeat';
+            % Create FaultActiveLamp
+            app.FaultActiveLamp = uilamp(app.LampGrid);
+            app.FaultActiveLamp.Layout.Row = 1;
+            app.FaultActiveLamp.Layout.Column = 3;
+            app.FaultActiveLamp.Color = [0.6 0.6 0.6];
 
-            app.ProcPauseButton = uibutton(app.ProcedurePanel, 'push');
-            app.ProcPauseButton.ButtonPushedFcn = createCallbackFcn(app, @ProcPauseButtonPushed, true);
-            app.ProcPauseButton.Enable = 'off';
-            app.ProcPauseButton.Position = [446 6 100 26];
-            app.ProcPauseButton.Text = 'Pause';
+            % Create MixerOnLampLabel
+            app.MixerOnLampLabel = uilabel(app.LampGrid);
+            app.MixerOnLampLabel.Layout.Row = 1;
+            app.MixerOnLampLabel.Layout.Column = 4;
+            app.MixerOnLampLabel.HorizontalAlignment = 'right';
+            app.MixerOnLampLabel.Text = 'Mixer On';
 
-            app.ProcAbortButton = uibutton(app.ProcedurePanel, 'push');
-            app.ProcAbortButton.ButtonPushedFcn = createCallbackFcn(app, @ProcAbortButtonPushed, true);
-            app.ProcAbortButton.Enable = 'off';
-            app.ProcAbortButton.Position = [552 6 100 26];
-            app.ProcAbortButton.Text = 'Abort';
+            % Create MixerOnLamp
+            app.MixerOnLamp = uilamp(app.LampGrid);
+            app.MixerOnLamp.Layout.Row = 1;
+            app.MixerOnLamp.Layout.Column = 5;
 
-            % Create ControlsPanel
-            app.ControlsPanel = uipanel(app.UIFigure);
+            % Create ESTOP
+            app.ESTOP = uibutton(app.ReadoutGrid, 'state');
+            app.ESTOP.Layout.Row = [1 2];
+            app.ESTOP.Layout.Column = 5;
+            app.ESTOP.ValueChangedFcn = createCallbackFcn(app, @ESTOPPushed, true);
+            app.ESTOP.Text = 'STOP';
+            app.ESTOP.FontSize = 22;
+            app.ESTOP.FontWeight = 'bold';
+            app.ESTOP.BackgroundColor = [1 0 0];
+            app.ESTOP.FontColor = [1 1 1];
+
+            % Create ControlsPanel: three rows of controls
+            app.ControlsPanel = uipanel(app.MainGrid);
+            app.ControlsPanel.Layout.Row = 2;
+            app.ControlsPanel.Layout.Column = 1;
             app.ControlsPanel.Title = 'Controls';
-            app.ControlsPanel.Position = [1 22 1207 94];
+
+            % Create ControlsGrid
+            app.ControlsGrid = uigridlayout(app.ControlsPanel, [3 9]);
+            app.ControlsGrid.RowHeight = {26, 26, 26};
+            app.ControlsGrid.ColumnWidth = {146, 130, 84, 52, 78, 72, 64, '1x', 120};
+            app.ControlsGrid.Padding = [8 6 8 6];
+            app.ControlsGrid.RowSpacing = 6;
+            app.ControlsGrid.ColumnSpacing = 6;
 
             % Create ConnectToCompressorButton
-            app.ConnectToCompressorButton = uibutton(app.ControlsPanel, 'push');
+            app.ConnectToCompressorButton = uibutton(app.ControlsGrid, 'push');
+            app.ConnectToCompressorButton.Layout.Row = 1;
+            app.ConnectToCompressorButton.Layout.Column = 1;
             app.ConnectToCompressorButton.ButtonPushedFcn = createCallbackFcn(app, @ConnectButtonPushed, true);
-            app.ConnectToCompressorButton.Position = [12 39 142 23];
             app.ConnectToCompressorButton.Text = 'Connect to Compressor';
 
             % Create StartProcedureButton
-            app.StartProcedureButton = uibutton(app.ControlsPanel, 'push');
+            app.StartProcedureButton = uibutton(app.ControlsGrid, 'push');
+            app.StartProcedureButton.Layout.Row = 2;
+            app.StartProcedureButton.Layout.Column = 1;
             app.StartProcedureButton.ButtonPushedFcn = createCallbackFcn(app, @StartProcedureButtonPushed, true);
-            app.StartProcedureButton.Position = [12 11 142 23];
             app.StartProcedureButton.Text = 'Start Procedure';
 
             % Create ManualControlButton
-            app.ManualControlButton = uibutton(app.ControlsPanel, 'state');
+            app.ManualControlButton = uibutton(app.ControlsGrid, 'state');
+            app.ManualControlButton.Layout.Row = 3;
+            app.ManualControlButton.Layout.Column = 1;
             app.ManualControlButton.ValueChangedFcn = createCallbackFcn(app, @ManualControlButtonPressed, true);
             app.ManualControlButton.Text = 'Manual Control';
-            app.ManualControlButton.Position = [264 40 130 23];
-
-            % Create HomeButton
-            app.HomeButton = uibutton(app.ControlsPanel, 'push');
-            app.HomeButton.ButtonPushedFcn = createCallbackFcn(app, @HomeButtonPushed, true);
-            app.HomeButton.Enable = 'off';
-            app.HomeButton.Tooltip = {'Home to the negative overtravel switch and reset the zero'};
-            app.HomeButton.Position = [264 12 62 23];
-            app.HomeButton.Text = 'Home';
-
-            % Create GoHomeButton
-            app.GoHomeButton = uibutton(app.ControlsPanel, 'push');
-            app.GoHomeButton.ButtonPushedFcn = createCallbackFcn(app, @GoHomeButtonPushed, true);
-            app.GoHomeButton.Enable = 'off';
-            app.GoHomeButton.Tooltip = {'Move to the home position'};
-            app.GoHomeButton.Position = [332 12 62 23];
-            app.GoHomeButton.Text = 'Go Home';
 
             % Create TargetPositionmmSpinnerLabel
-            app.TargetPositionmmSpinnerLabel = uilabel(app.ControlsPanel);
+            app.TargetPositionmmSpinnerLabel = uilabel(app.ControlsGrid);
+            app.TargetPositionmmSpinnerLabel.Layout.Row = 1;
+            app.TargetPositionmmSpinnerLabel.Layout.Column = 2;
             app.TargetPositionmmSpinnerLabel.HorizontalAlignment = 'right';
             app.TargetPositionmmSpinnerLabel.Enable = 'off';
-            app.TargetPositionmmSpinnerLabel.Position = [396 40 128 22];
             app.TargetPositionmmSpinnerLabel.Text = 'Target from EOT (mm)';
 
             % Create TargetPositionSpinner
-            app.TargetPositionSpinner = uispinner(app.ControlsPanel);
+            app.TargetPositionSpinner = uispinner(app.ControlsGrid);
+            app.TargetPositionSpinner.Layout.Row = 1;
+            app.TargetPositionSpinner.Layout.Column = 3;
             app.TargetPositionSpinner.ValueChangedFcn = createCallbackFcn(app, @TargetSpinnerChanged, true);
             app.TargetPositionSpinner.Step = 5;
             app.TargetPositionSpinner.RoundFractionalValues = 'on';
             app.TargetPositionSpinner.Enable = 'off';
-            app.TargetPositionSpinner.Position = [539 40 100 22];
 
             % Create PositionGoButton
-            app.PositionGoButton = uibutton(app.ControlsPanel, 'push');
+            app.PositionGoButton = uibutton(app.ControlsGrid, 'push');
+            app.PositionGoButton.Layout.Row = 1;
+            app.PositionGoButton.Layout.Column = 4;
             app.PositionGoButton.ButtonPushedFcn = createCallbackFcn(app, @PositionGoButtonPushed, true);
             app.PositionGoButton.Enable = 'off';
-            app.PositionGoButton.Position = [657 40 100 23];
             app.PositionGoButton.Text = 'Go';
 
+            % Create TargetPressureatmSpinnerLabel
+            app.TargetPressureatmSpinnerLabel = uilabel(app.ControlsGrid);
+            app.TargetPressureatmSpinnerLabel.Layout.Row = 2;
+            app.TargetPressureatmSpinnerLabel.Layout.Column = 2;
+            app.TargetPressureatmSpinnerLabel.HorizontalAlignment = 'right';
+            app.TargetPressureatmSpinnerLabel.Enable = 'off';
+            app.TargetPressureatmSpinnerLabel.Text = 'Target (atm abs)';
+
+            % Create TargetPressureSpinner
+            app.TargetPressureSpinner = uispinner(app.ControlsGrid);
+            app.TargetPressureSpinner.Layout.Row = 2;
+            app.TargetPressureSpinner.Layout.Column = 3;
+            app.TargetPressureSpinner.ValueChangedFcn = createCallbackFcn(app, @TargetSpinnerChanged, true);
+            app.TargetPressureSpinner.Limits = [1 100];   % replaced by applyConfig
+            app.TargetPressureSpinner.Enable = 'off';
+            app.TargetPressureSpinner.Value = 1;
+
+            % Create PressureGoButton
+            app.PressureGoButton = uibutton(app.ControlsGrid, 'push');
+            app.PressureGoButton.Layout.Row = 2;
+            app.PressureGoButton.Layout.Column = 4;
+            app.PressureGoButton.ButtonPushedFcn = createCallbackFcn(app, @PressureGoButtonPushed, true);
+            app.PressureGoButton.Enable = 'off';
+            app.PressureGoButton.Text = 'Go';
+
+            % Create JogUpButton
+            app.JogUpButton = uibutton(app.ControlsGrid, 'state');
+            app.JogUpButton.Layout.Row = 1;
+            app.JogUpButton.Layout.Column = 5;
+            app.JogUpButton.ValueChangedFcn = createCallbackFcn(app, @JogUpButtonPushed, true);
+            app.JogUpButton.Enable = 'off';
+            app.JogUpButton.Text = 'Jog Up';
+
+            % Create JogDownButton
+            app.JogDownButton = uibutton(app.ControlsGrid, 'state');
+            app.JogDownButton.Layout.Row = 2;
+            app.JogDownButton.Layout.Column = 5;
+            app.JogDownButton.ValueChangedFcn = createCallbackFcn(app, @JogDownButtonPushed, true);
+            app.JogDownButton.Enable = 'off';
+            app.JogDownButton.Text = 'Jog Down';
+
+            % Create HomeButton
+            app.HomeButton = uibutton(app.ControlsGrid, 'push');
+            app.HomeButton.Layout.Row = 1;
+            app.HomeButton.Layout.Column = 6;
+            app.HomeButton.ButtonPushedFcn = createCallbackFcn(app, @HomeButtonPushed, true);
+            app.HomeButton.Enable = 'off';
+            app.HomeButton.Tooltip = {'Home to the negative overtravel switch and reset the zero'};
+            app.HomeButton.Text = 'Home';
+
+            % Create GoHomeButton
+            app.GoHomeButton = uibutton(app.ControlsGrid, 'push');
+            app.GoHomeButton.Layout.Row = 2;
+            app.GoHomeButton.Layout.Column = 6;
+            app.GoHomeButton.ButtonPushedFcn = createCallbackFcn(app, @GoHomeButtonPushed, true);
+            app.GoHomeButton.Enable = 'off';
+            app.GoHomeButton.Tooltip = {'Move to the home position'};
+            app.GoHomeButton.Text = 'Go Home';
+
+            % Create MixerButton
+            app.MixerButton = uibutton(app.ControlsGrid, 'state');
+            app.MixerButton.Layout.Row = 1;
+            app.MixerButton.Layout.Column = 7;
+            app.MixerButton.ValueChangedFcn = createCallbackFcn(app, @MixerButtonPushed, true);
+            app.MixerButton.Enable = 'off';
+            app.MixerButton.Text = 'Mixer';
+
+            % Create SpeedGrid: the speed label and field, then a button
+            % per preset (added by applyConfig) and the speed in mm/s
+            app.SpeedGrid = uigridlayout(app.ControlsGrid, [1 3]);
+            app.SpeedGrid.Layout.Row = 3;
+            app.SpeedGrid.Layout.Column = [2 6];
+            app.SpeedGrid.RowHeight = {'1x'};
+            app.SpeedGrid.ColumnWidth = {'fit', 48, '1x'};
+            app.SpeedGrid.Padding = [0 0 0 0];
+            app.SpeedGrid.ColumnSpacing = 4;
+
             % Create SpeedLabel
-            app.SpeedLabel = uilabel(app.ControlsPanel);
+            app.SpeedLabel = uilabel(app.SpeedGrid);
+            app.SpeedLabel.Layout.Row = 1;
+            app.SpeedLabel.Layout.Column = 1;
             app.SpeedLabel.HorizontalAlignment = 'right';
             app.SpeedLabel.Enable = 'off';
-            app.SpeedLabel.Position = [990 40 60 22];
             app.SpeedLabel.Text = 'Speed (%)';
 
             % Create SpeedField
-            app.SpeedField = uieditfield(app.ControlsPanel, 'numeric');
+            app.SpeedField = uieditfield(app.SpeedGrid, 'numeric');
+            app.SpeedField.Layout.Row = 1;
+            app.SpeedField.Layout.Column = 2;
             app.SpeedField.ValueChangedFcn = createCallbackFcn(app, @SpeedFieldChanged, true);
             app.SpeedField.Limits = [0 100];
             app.SpeedField.ValueDisplayFormat = '%g';
             app.SpeedField.Enable = 'off';
             app.SpeedField.Tooltip = {'Percent of the maximum speed for jog, moves, Go Home and homing; 0 holds'};
-            app.SpeedField.Position = [1055 40 50 22];
             app.SpeedField.Value = 100;
 
             % Create SpeedMmsLabel
-            app.SpeedMmsLabel = uilabel(app.ControlsPanel);
+            app.SpeedMmsLabel = uilabel(app.SpeedGrid);
+            app.SpeedMmsLabel.Layout.Row = 1;
+            app.SpeedMmsLabel.Layout.Column = 3;
             app.SpeedMmsLabel.Enable = 'off';
-            app.SpeedMmsLabel.Position = [1108 40 98 22];
             app.SpeedMmsLabel.Text = '';
 
-            % Create JogUpButton
-            app.JogUpButton = uibutton(app.ControlsPanel, 'state');
-            app.JogUpButton.ValueChangedFcn = createCallbackFcn(app, @JogUpButtonPushed, true);
-            app.JogUpButton.Enable = 'off';
-            app.JogUpButton.Text = 'Jog Up';
-            app.JogUpButton.Position = [768 38 100 23];
-
-            % Create JogDownButton
-            app.JogDownButton = uibutton(app.ControlsPanel, 'state');
-            app.JogDownButton.ValueChangedFcn = createCallbackFcn(app, @JogDownButtonPushed, true);
-            app.JogDownButton.Enable = 'off';
-            app.JogDownButton.Text = 'Jog Down';
-            app.JogDownButton.Position = [768 9 100 23];
-
-            % Create MixerButton
-            app.MixerButton = uibutton(app.ControlsPanel, 'state');
-            app.MixerButton.ValueChangedFcn = createCallbackFcn(app, @MixerButtonPushed, true);
-            app.MixerButton.Enable = 'off';
-            app.MixerButton.Text = 'Mixer';
-            app.MixerButton.Position = [879 38 100 23];
-
-            % Create TargetPressureatmSpinnerLabel
-            app.TargetPressureatmSpinnerLabel = uilabel(app.ControlsPanel);
-            app.TargetPressureatmSpinnerLabel.HorizontalAlignment = 'right';
-            app.TargetPressureatmSpinnerLabel.Enable = 'off';
-            app.TargetPressureatmSpinnerLabel.Position = [406 13 118 22];
-            app.TargetPressureatmSpinnerLabel.Text = 'Target (atm abs)';
-
-            % Create TargetPressureSpinner
-            app.TargetPressureSpinner = uispinner(app.ControlsPanel);
-            app.TargetPressureSpinner.ValueChangedFcn = createCallbackFcn(app, @TargetSpinnerChanged, true);
-            app.TargetPressureSpinner.Limits = [1 100];   % replaced by applyConfig
-            app.TargetPressureSpinner.Enable = 'off';
-            app.TargetPressureSpinner.Position = [539 13 100 22];
-            app.TargetPressureSpinner.Value = 1;
-
-            % Create PressureGoButton
-            app.PressureGoButton = uibutton(app.ControlsPanel, 'push');
-            app.PressureGoButton.ButtonPushedFcn = createCallbackFcn(app, @PressureGoButtonPushed, true);
-            app.PressureGoButton.Enable = 'off';
-            app.PressureGoButton.Position = [657 11 100 23];
-            app.PressureGoButton.Text = 'Go';
-
-            % Create ESTOP
-            app.ESTOP = uibutton(app.ControlsPanel, 'state');
-            app.ESTOP.ValueChangedFcn = createCallbackFcn(app, @ESTOPPushed, true);
-            app.ESTOP.Text = 'STOP';
-            app.ESTOP.BackgroundColor = [1 0 0];
-            app.ESTOP.FontColor = [1 1 1];
-            app.ESTOP.Position = [164 13 90 49];
-
-            % Create StatusLabel
-            app.StatusLabel = uilabel(app.UIFigure);
-            app.StatusLabel.Position = [5 1 439 22];
-            app.StatusLabel.Text = 'Idle';
-
-            % Create readouts
-            [app.VolumePanel, app.VolumeValue] = createReadout(app, ...
-                'Swept volume (mL)', [15 275 170 140], 40);
-            createVolumeControls(app);
-            [app.PressurePanel, app.PressureValue] = createReadout(app, ...
-                'Pressure (atm abs)', [200 275 170 140], 40);
-            createPressureControls(app);
-            [app.PositionPanel, app.PositionValue] = createReadout(app, ...
-                'Position from EOT (mm)', [15 125 170 140], 28);
-            [app.FlowPanel, app.FlowValue] = createReadout(app, ...
-                'Flow (mL/s)', [200 125 170 140], 28);
-
-            % Create MixerOnLampLabel
-            app.MixerOnLampLabel = uilabel(app.UIFigure);
-            app.MixerOnLampLabel.HorizontalAlignment = 'right';
-            app.MixerOnLampLabel.Position = [395 207 54 22];
-            app.MixerOnLampLabel.Text = 'Mixer On';
-
-            % Create MixerOnLamp
-            app.MixerOnLamp = uilamp(app.UIFigure);
-            app.MixerOnLamp.Position = [464 207 20 20];
-
-            % Create FaultActiveLampLabel
-            app.FaultActiveLampLabel = uilabel(app.UIFigure);
-            app.FaultActiveLampLabel.HorizontalAlignment = 'right';
-            app.FaultActiveLampLabel.Position = [382 162 67 22];
-            app.FaultActiveLampLabel.Text = 'Fault Active';
-
-            % Create FaultActiveLamp
-            app.FaultActiveLamp = uilamp(app.UIFigure);
-            app.FaultActiveLamp.Position = [464 162 20 20];
-            app.FaultActiveLamp.Color = [0.6 0.6 0.6];
-
-            % Create TracePanel
-            app.TracePanel = uipanel(app.UIFigure);
-            app.TracePanel.Title = 'Trace';
-            app.TracePanel.FontWeight = 'bold';
-            app.TracePanel.Position = [382 233 137 182];
-
             % Create RecordButton
-            app.RecordButton = uibutton(app.TracePanel, 'state');
+            app.RecordButton = uibutton(app.ControlsGrid, 'state');
+            app.RecordButton.Layout.Row = 1;
+            app.RecordButton.Layout.Column = 9;
             app.RecordButton.ValueChangedFcn = createCallbackFcn(app, @RecordButtonChanged, true);
             app.RecordButton.Tooltip = {'Record the link and the commands to a CSV file'};
             app.RecordButton.Enable = 'off';
             app.RecordButton.Text = 'Record';
-            app.RecordButton.Position = [8 128 121 28];
 
             % Create IntervalDropDown: items and values are set by applyConfig
-            app.IntervalDropDown = uidropdown(app.TracePanel);
+            app.IntervalDropDown = uidropdown(app.ControlsGrid);
+            app.IntervalDropDown.Layout.Row = 2;
+            app.IntervalDropDown.Layout.Column = 9;
             app.IntervalDropDown.ValueChangedFcn = createCallbackFcn(app, @IntervalDropDownChanged, true);
             app.IntervalDropDown.Enable = 'off';
             app.IntervalDropDown.Tooltip = {'Record interval'};
-            app.IntervalDropDown.Position = [8 102 121 22];
 
             % Create TraceStatusLabel
-            app.TraceStatusLabel = uilabel(app.TracePanel);
+            app.TraceStatusLabel = uilabel(app.ControlsGrid);
+            app.TraceStatusLabel.Layout.Row = 3;
+            app.TraceStatusLabel.Layout.Column = [7 9];
             app.TraceStatusLabel.WordWrap = 'on';
-            app.TraceStatusLabel.VerticalAlignment = 'top';
-            app.TraceStatusLabel.Position = [8 56 121 44];
+            app.TraceStatusLabel.FontSize = 11;
+            app.TraceStatusLabel.VerticalAlignment = 'center';
             app.TraceStatusLabel.Text = 'Not recording';
 
-            % Create LivePlotButton
-            app.LivePlotButton = uibutton(app.TracePanel, 'push');
-            app.LivePlotButton.ButtonPushedFcn = createCallbackFcn(app, @LivePlotButtonPushed, true);
-            app.LivePlotButton.Tooltip = {'Pressure, position, velocity and torque of the last minutes'};
-            app.LivePlotButton.Position = [8 31 121 22];
-            app.LivePlotButton.Text = 'Live plot';
+            % Create ProcedurePanel: the walk-through of the procedure. The
+            % checkbox and parameter pools are created in applyConfig,
+            % sized by the configuration.
+            app.ProcedurePanel = uipanel(app.MainGrid);
+            app.ProcedurePanel.Layout.Row = 3;
+            app.ProcedurePanel.Layout.Column = 1;
+            app.ProcedurePanel.Title = 'Procedure';
+            app.ProcedurePanel.FontWeight = 'bold';
 
-            % Create PlotTraceButton
-            app.PlotTraceButton = uibutton(app.TracePanel, 'push');
-            app.PlotTraceButton.ButtonPushedFcn = createCallbackFcn(app, @PlotTraceButtonPushed, true);
-            app.PlotTraceButton.Position = [8 6 121 22];
-            app.PlotTraceButton.Text = 'Plot trace...';
+            % Create ProcedureGrid: step list and times at the left, the
+            % current step at the right
+            app.ProcedureGrid = uigridlayout(app.ProcedurePanel, [1 2]);
+            app.ProcedureGrid.RowHeight = {'1x'};
+            app.ProcedureGrid.ColumnWidth = {220, '1x'};
+            app.ProcedureGrid.Padding = [8 8 8 8];
+            app.ProcedureGrid.ColumnSpacing = 10;
 
-            % Show the figure after all components are created
-            app.UIFigure.Visible = 'on';
+            % Create ProcLeftGrid
+            app.ProcLeftGrid = uigridlayout(app.ProcedureGrid, [4 1]);
+            app.ProcLeftGrid.Layout.Row = 1;
+            app.ProcLeftGrid.Layout.Column = 1;
+            app.ProcLeftGrid.RowHeight = {'1x', 22, 22, 22};
+            app.ProcLeftGrid.ColumnWidth = {'1x'};
+            app.ProcLeftGrid.Padding = [0 0 0 0];
+            app.ProcLeftGrid.RowSpacing = 4;
+
+            app.ProcStepList = uilistbox(app.ProcLeftGrid);
+            app.ProcStepList.Layout.Row = 1;
+            app.ProcStepList.Layout.Column = 1;
+            app.ProcStepList.ValueChangedFcn = createCallbackFcn(app, @ProcStepListChanged, true);
+            app.ProcStepList.FontSize = 12;
+
+            app.ProcTimerLabel = uilabel(app.ProcLeftGrid);
+            app.ProcTimerLabel.Layout.Row = 2;
+            app.ProcTimerLabel.Layout.Column = 1;
+            app.ProcTimerLabel.FontSize = 12;
+            app.ProcTimerLabel.Text = '--';
+
+            app.ProcVolumeLabel = uilabel(app.ProcLeftGrid);
+            app.ProcVolumeLabel.Layout.Row = 3;
+            app.ProcVolumeLabel.Layout.Column = 1;
+            app.ProcVolumeLabel.FontSize = 12;
+            app.ProcVolumeLabel.Text = '--';
+
+            app.ProcPressureTargetLabel = uilabel(app.ProcLeftGrid);
+            app.ProcPressureTargetLabel.Layout.Row = 4;
+            app.ProcPressureTargetLabel.Layout.Column = 1;
+            app.ProcPressureTargetLabel.FontSize = 12;
+            app.ProcPressureTargetLabel.Text = 'Held pressure: --';
+
+            % Create ProcContentGrid: rows 4 and 5 hold the checklist and
+            % parameter pools and are 0 high while a step has none
+            app.ProcContentGrid = uigridlayout(app.ProcedureGrid, [7 1]);
+            app.ProcContentGrid.Layout.Row = 1;
+            app.ProcContentGrid.Layout.Column = 2;
+            app.ProcContentGrid.RowHeight = {22, 22, '1x', 0, 0, 18, 28};
+            app.ProcContentGrid.ColumnWidth = {'1x'};
+            app.ProcContentGrid.Padding = [0 0 0 0];
+            app.ProcContentGrid.RowSpacing = 4;
+
+            app.ProcHeadingLabel = uilabel(app.ProcContentGrid);
+            app.ProcHeadingLabel.Layout.Row = 1;
+            app.ProcHeadingLabel.Layout.Column = 1;
+            app.ProcHeadingLabel.FontWeight = 'bold';
+            app.ProcHeadingLabel.FontSize = 12;
+            app.ProcHeadingLabel.Text = '';
+
+            app.ProcTitleLabel = uilabel(app.ProcContentGrid);
+            app.ProcTitleLabel.Layout.Row = 2;
+            app.ProcTitleLabel.Layout.Column = 1;
+            app.ProcTitleLabel.FontSize = 12;
+            app.ProcTitleLabel.Text = '';
+
+            app.ProcTextArea = uitextarea(app.ProcContentGrid);
+            app.ProcTextArea.Layout.Row = 3;
+            app.ProcTextArea.Layout.Column = 1;
+            app.ProcTextArea.Editable = 'off';
+
+            app.ProcMessageLabel = uilabel(app.ProcContentGrid);
+            app.ProcMessageLabel.Layout.Row = 6;
+            app.ProcMessageLabel.Layout.Column = 1;
+            app.ProcMessageLabel.FontSize = 10;
+            app.ProcMessageLabel.Text = '';
+
+            % Create ProcButtonsGrid
+            app.ProcButtonsGrid = uigridlayout(app.ProcContentGrid, [1 5]);
+            app.ProcButtonsGrid.Layout.Row = 7;
+            app.ProcButtonsGrid.Layout.Column = 1;
+            app.ProcButtonsGrid.RowHeight = {'1x'};
+            app.ProcButtonsGrid.ColumnWidth = {120, 110, 100, 100, '1x'};
+            app.ProcButtonsGrid.Padding = [0 0 0 0];
+            app.ProcButtonsGrid.ColumnSpacing = 6;
+
+            app.ProcConfirmButton = uibutton(app.ProcButtonsGrid, 'push');
+            app.ProcConfirmButton.Layout.Row = 1;
+            app.ProcConfirmButton.Layout.Column = 1;
+            app.ProcConfirmButton.ButtonPushedFcn = createCallbackFcn(app, @ProcConfirmButtonPushed, true);
+            app.ProcConfirmButton.Visible = 'off';
+            app.ProcConfirmButton.Text = 'Confirm';
+
+            app.ProcRepeatButton = uibutton(app.ProcButtonsGrid, 'push');
+            app.ProcRepeatButton.Layout.Row = 1;
+            app.ProcRepeatButton.Layout.Column = 2;
+            app.ProcRepeatButton.ButtonPushedFcn = createCallbackFcn(app, @ProcRepeatButtonPushed, true);
+            app.ProcRepeatButton.Visible = 'off';
+            app.ProcRepeatButton.Text = 'Repeat';
+
+            app.ProcPauseButton = uibutton(app.ProcButtonsGrid, 'push');
+            app.ProcPauseButton.Layout.Row = 1;
+            app.ProcPauseButton.Layout.Column = 3;
+            app.ProcPauseButton.ButtonPushedFcn = createCallbackFcn(app, @ProcPauseButtonPushed, true);
+            app.ProcPauseButton.Enable = 'off';
+            app.ProcPauseButton.Text = 'Pause';
+
+            app.ProcAbortButton = uibutton(app.ProcButtonsGrid, 'push');
+            app.ProcAbortButton.Layout.Row = 1;
+            app.ProcAbortButton.Layout.Column = 4;
+            app.ProcAbortButton.ButtonPushedFcn = createCallbackFcn(app, @ProcAbortButtonPushed, true);
+            app.ProcAbortButton.Enable = 'off';
+            app.ProcAbortButton.Text = 'Abort';
         end
     end
 

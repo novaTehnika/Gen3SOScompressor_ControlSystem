@@ -15,7 +15,7 @@ reading over the link.
 | `shell/buildShell.m` | Generates `shell/SOS_Gen3_Master_Shell.slx`: Modbus Client blocks at the 50 ms exchange, DAQ blocks, one MATLAB Function block calling `masterStep`, a second one (`TraceStep`) calling `traceStep`, a third (`TrackStep`) calling `trackStep`, the Constant blocks the app writes and the Gain blocks it reads. The model holds no logic and is rebuilt from this script, not edited by hand. |
 | `shell/modbusShellDiscover.m` | Prints the Modbus block and client settings of a hand-configured shell so they can be pasted into `buildShell.m`. |
 | `shell/addDaq.m` | Creates one Simulink Desktop Real-Time DAQ block. Holds the board setup (PCI-6221, driver options, missed-tick limit) and the digital channel numbering. |
-| `SOS_Gen3_Compressor_Interface.m` | Operator app (programmatic App Designer export). Starts the shell model, writes operator requests to its Constant blocks and polls its outputs. Takes its position target range, speed presets and cylinder geometry from `masterConfig.m` at startup. |
+| `SOS_Gen3_Compressor_Interface.m` | Operator app (programmatic App Designer export). Starts the shell model, writes operator requests to its Constant blocks and polls its outputs. Takes its position target range, speed presets and cylinder geometry from `masterConfig.m` at startup. Laid out with nested `uigridlayout`s. |
 | `legacy/`, `SOS_Gen3_Compressor_Master.slx` | Earlier Stateflow-based app model and its `.mlapp`, and the hand-built `SimulinkMaster.slx` bench model with manual mode control, kept for reference. |
 
 ## Running on the lab PC
@@ -117,6 +117,40 @@ the E-stop, which also clears a lost-link status once the link is back. The
 mode buttons are enabled only in manual control, while connected with the
 slave link up and out of E-STOP.
 
+## Operator app layout
+
+The window is a `MainGrid` of three bands, in nested `uigridlayout`s:
+
+- The readout band (190 px) holds the four readouts (volume, pressure,
+  position, flow) of equal width, the status line and the Fault Active and
+  Mixer On lamps under them, and the STOP button pinned at the top right,
+  120 px wide over the band's height.
+- The Controls band (128 px) holds three rows: connect, mode and target
+  controls, the speed row (label, field, presets and the speed in mm/s) and, at
+  the right, Record, the interval dropdown and the trace status.
+- The Procedure panel takes the remaining height, so a taller window lengthens
+  only its instruction text.
+
+A new window is 940 x 900 px (drawable area); the minimum is 900 x 680. Below
+the minimum the grid keeps its minimum extent and the window scrolls.
+
+The **View** menu places the windows. The app's monitor is the one containing
+the centre of its window. A monitor's work area is its area less a 48 px margin
+along the bottom, for the taskbar.
+
+- **Side by side** puts the app on the left half of its monitor's work area (at
+  least its minimum width) and the live plot on the right half, opening the
+  plot when it is closed; with under 200 px left for the plot it is not placed.
+  The app is brought to the front.
+- **Live plot on second monitor** maximises the live plot on the largest other
+  monitor. It is disabled with one monitor.
+- **Default size** restores 940 x 900 from maximised or side by side, keeping the
+  window's top-left corner and clamping it into the monitor's work area.
+
+The window decorations are measured from the figure's outer position and
+position when visible, and otherwise taken as 8, 8, 8 and 90 px (left, bottom,
+right, top).
+
 ## Operator app readouts
 
 The app shows volume (mL), absolute pressure (psi, atm or MPa), position (mm
@@ -215,7 +249,7 @@ Manual control and the procedure exclude each other: the mode buttons work only
 in manual control and Start Procedure only out of it, and manual control is not
 available while a procedure is active, paused included.
 
-**Panel.** The Procedure panel (`ProcedurePanel`, right of the readouts) holds
+**Panel.** The Procedure panel (`ProcedurePanel`, below the controls and taking the window's remaining height) holds
 the step list (display only: done steps marked `[x]`, the current one `>`), the
 step's heading, title and instruction, its checklist (a pool of
 `cfg.procMaxChecks` checkboxes) or, in a param step, its parameter fields (a
@@ -223,7 +257,8 @@ pool of `cfg.procMaxParams` fields in two columns, editable only while the step
 waits for the operator), Confirm (with the step's label), Repeat where the step
 has one, Pause/Resume and Abort, and the readouts: the procedure timer, the
 volume discharged, the held pressure target and a message line with the engine's
-state and the reason for a pause or the last refused action. The panel only
+state and the reason for a pause or the last refused action. The checklist
+and parameter rows collapse to no height when the step has none. The panel only
 copies what `procView` returns. Every operator action and every poll steps the
 engine at once, so Abort sends its stop immediately; the engine's operations go
 through the app's `requestOp`/`stopOp` and the same `motionAllowed` interlock as
@@ -434,7 +469,7 @@ value differs from the last one asked, and always on the first step, and asks
   procedure's last requested interval; later requests still set its interval, and
   it outlives the run.
 
-The Trace panel's dropdown is disabled during a run and shows the interval in
+The interval dropdown is disabled during a run and shows the interval in
 force; it returns to the operator's choice when the run ends.
 
 ### States
@@ -497,12 +532,10 @@ walks them against the stand-in.
 
 ## Recording a trace
 
-The Trace panel (between the lamps and the Procedure panel) holds **Record**, an
-interval dropdown, a status label, **Live plot** and **Plot trace...**.
-
-The **Trace** menu has the same three actions: Record (Stop recording while
-recording, Ctrl+R), Plot trace... (Ctrl+P) and Live plot (Ctrl+L), enabled as
-their buttons are.
+**Record**, the interval dropdown and the trace status are at the right of the
+Controls band. The **Trace** menu has Record (Stop recording while recording,
+Ctrl+R; enabled as the button is), Plot trace... (Ctrl+P) and Live plot
+(Ctrl+L); the last two are only in the menu and always enabled.
 
 **Record** is available while connected. The dropdown chooses the record
 interval: `cfg.traceIntervalPresets` (0.05 s (20 Hz), 0.1 s (10 Hz), 0.5 s
@@ -519,7 +552,7 @@ ends the recording, writes the file at once to
 path: choosing another name or folder moves the file there, and cancelling keeps
 it in `captures/`. Recording also ends, without a dialog, when the model stops (a
 lost Modbus connection, for example), when **Disconnect** is pressed and when the
-app is closed; the file is then saved to `captures/` and the panel names it.
+app is closed; the file is then saved to `captures/` and the trace status names it.
 **Plot trace...** opens a file chooser in `captures/` and plots the file chosen.
 
 During a procedure the interval belongs to the procedure (`record`, see
@@ -543,7 +576,7 @@ poll) are not captured; pressing **Disconnect** reads the ring once more before
 stopping. The first rows of a recording start about two exchanges after the
 button, because the alignment holds the newest two records back.
 
-**Live plot** opens a figure with four stacked axes over the last
+**Live plot** (Trace > Live plot; View > Side by side places it) opens a figure with four stacked axes over the last
 `cfg.livePlotSeconds` (600 s): the pressure (the snapshot, and the window mean
 with its minimum and maximum), the position from the end of travel, the velocity
 and the torque, against the time before now. The aligned 20 Hz stream goes into
