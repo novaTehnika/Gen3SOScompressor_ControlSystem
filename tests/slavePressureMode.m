@@ -4,15 +4,11 @@ function slavePressureMode()
 %   for the master: handshake into mode 7, hold and step the target, ride
 %   through an outflow disturbance, clamp an excessive target, leave the
 %   mode, fault on a broken transducer loop only while the loop is
-%   closed on it and, with the gain schedule
-%   (G_cfgPressureScheduleEnable), compress to 10 MPa with the gains
-%   following the stiffness bound.
+%   closed on it and, with the stop-law floor (G_cfgPressureFloorEnable),
+%   latch on outflow and release at a closing.
 %   Run from the repository root after  addpath slave-sim; buildSlaveSim
 %     addpath slave-sim slave-sim/generated tests
-%   Depends on: slave-src slave-sim tools models bench/characterisation
-
-here = fileparts(mfilename('fullpath'));
-addpath(fullfile(here, '..', 'bench', 'characterisation'));
+%   Depends on: slave-src slave-sim tools models
 
 MODE_PRESSURE = 7;
 FAULT_PRESSURE_SENSOR = 8;
@@ -156,79 +152,51 @@ assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_BRAKE_HOLD && h.sl.ax.v ==
 assert(h.y.faultActive == 0 && h.y.brakeDisengage == 0);
 fprintf('ok  sensor fault in pressure mode, mirror and reset\n');
 
-% Gain schedule on the simulated chamber (the design model's plant, 343 mL
-% of saline with a 1:1 oxygen charge): the master describes that fill in
-% holding registers HR9-12, the gains follow wc / k_est, the integrator is
-% held until the first arrival, the pressure settles in band below the
-% ceiling, and the switch and the fill are latched on entry.
-h.sl.G.G_cfgPressureScheduleEnable = true;
-h.sl.G.G_mbSalineVolume = 343;                        % mL
-h.sl.G.G_mbOxygenRatio = 1;
-h.sl.ax.x = chamberPosition(h.sl, 0.5);
-h = enterMode(h, MODE_PRESSURE, 10);
-assert(h.sl.s.bPressureSchedActive && h.sl.s.fbPressureSched.IntegHold);
-assert(h.sl.s.rSchedSaline == 343 && h.sl.s.rSchedOxygenRatio == 1);
-h.pMax = 0;
-t0 = h.t;
-% The bench's copy of the bound (bench/characterisation/charScheduleBound,
-% which charScheduleCheck compares with a log) is held equal to the block's
-% KEst and KEstTarget, sampled every 100 ms through the compression
-gSched = h.sl.G;
-fillSched = struct('saline_mL', 343, 'oxygenRatio', 1, 'hoseOpen', logical(gSched.G_cfgPressureSchedHoseOpen));
-trackBound([], [], [], true);
-h = runUntil(h, 30, @(h) trackBound(h, gSched, fillSched, false) || settled(h));
-assert(settled(h), 'scheduled loop did not settle in the target band');
-[~, boundGap, boundSamples] = trackBound([], [], [], false);
-assert(boundSamples > 20 && boundGap < 1e-9, 'the bench''s bound differs from the block''s by %.2g (%d samples)', ...
-    boundGap, boundSamples);
-fprintf('ok  bench stiffness bound equals the block''s KEst and KEstTarget (%d samples, relative difference %.1e)\n', ...
-    boundSamples, boundGap);
-t1 = h.t - t0;
-h = runFor(h, 3);
-sc = h.sl.s.fbPressureSched;
-assert(isfinite(sc.KEst) && sc.KEst > 0 && sc.KEstTarget >= sc.KEst);
-wc = h.sl.G.G_cfgPressureSchedCrossover;
-kSched = max(sc.KEst, sc.KEstTarget);
-assert(abs(sc.Kp - min(max(wc / kSched, h.sl.G.G_cfgPressureSchedKpMin), ...
-    h.sl.G.G_cfgPressureSchedKpMax)) < 1e-12);
-assert(h.sl.s.fbPressureCtrl.Kp == sc.Kp && h.sl.s.fbPressureCtrl.Stiffness == sc.Stiffness);
-assert(~sc.IntegHold && ~sc.ParamError);
-assert(abs(h.sl.ax.P - 10) <= G.G_cfgPressureInBand && h.y.performanceStatus == 1);
-assert(h.pMax < P_CEILING, 'peak %.3f MPa', h.pMax);
-% The switch and the fill are latched on entry: turning the switch off or
-% rewriting the registers mid-run changes nothing.
-kp = sc.Kp;
-h.sl.G.G_cfgPressureScheduleEnable = false;
-h.sl.G.G_mbSalineVolume = 100;
-h.sl.G.G_mbOxygenRatio = 2;
-h = runFor(h, 0.5);
-assert(h.sl.s.bPressureSchedActive && abs(h.sl.s.fbPressureCtrl.Kp - kp) < 0.05 * kp);
-assert(h.sl.s.rSchedSaline == 343 && h.sl.s.rSchedOxygenRatio == 1);
-h.u.motionEnable = 0;
-h = runFor(h, 1);
-h.u.modeCode = 0;
-h.u.reference = 0;
-h = runUntil(h, 5, @(h) h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE);
-assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE && h.y.faultActive == 0);
-fprintf('ok  scheduled gains: 10 MPa in %.1f s, k_est %.2f MPa/mm, Kp %.3f, max %.3f MPa\n', ...
-    t1, sc.KEst, sc.Kp, h.pMax);
-
-% A fill that was never written (zero saline volume) is a ParamError of the
-% schedule, and the loop runs on the configured gains.
-h.sl.G.G_cfgPressureScheduleEnable = true;
-h.sl.G.G_mbSalineVolume = 0;
-h.sl.G.G_mbOxygenRatio = 0;
-h.sl.ax.x = chamberPosition(h.sl, 0.5);
-h = enterMode(h, MODE_PRESSURE, 10);
-h = runFor(h, 1);
-assert(h.sl.s.bPressureSchedActive && h.sl.s.fbPressureSched.ParamError && ~h.sl.s.bPressureSchedUsed);
-assert(h.sl.s.fbPressureCtrl.Kp == h.sl.G.G_cfgPressureKp && h.sl.s.fbPressureCtrl.Ki == h.sl.G.G_cfgPressureKi);
-h.u.motionEnable = 0;
-h = runFor(h, 1);
-h.u.modeCode = 0;
-h.u.reference = 0;
-h = runUntil(h, 5, @(h) h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE);
-fprintf('ok  unwritten fill -> schedule ParamError, configured gains\n');
+% Stop-law floor (G_cfgPressureFloorEnable): at the target with the outlet
+% shut the floor is G_cfgPressureFloorVelLow; an outflow the piston must
+% follow (4.8 mL/s, the orifice bank at 10 MPa) latches it at
+% G_cfgPressureStopVelMin; shutting the outlet abruptly under the moving
+% piston releases it, and the forward stop holds the pressure down. With
+% the floor off the same closing peaks higher.
+peak = zeros(1, 2);
+for on = [true false]
+    h.sl.G.G_cfgPressureFloorEnable = on;
+    h.sl.ax.x = chamberPosition(h.sl, 0.5);
+    h = enterMode(h, MODE_PRESSURE, 10);
+    h = runUntil(h, 30, settled);
+    h = runFor(h, 2);
+    pc = h.sl.s.fbPressureCtrl;
+    assert(pc.FloorEnable == on && ~pc.FloorError && ~pc.Latched);
+    if on
+        assert(pc.rFloor == h.sl.G.G_cfgPressureFloorVelLow);
+    else
+        assert(pc.rFloor == h.sl.G.G_cfgPressureStopVelMin);
+    end
+    h.sl.hook.outflow = 4800;            % mm^3/s
+    h = runFor(h, 4);
+    if on
+        pc = h.sl.s.fbPressureCtrl;
+        assert(pc.Latched && pc.rFloor == h.sl.G.G_cfgPressureStopVelMin, 'outflow not latched');
+    end
+    assert(abs(h.sl.ax.P - 10) < 1.5 && h.sl.ax.v > 1, 'loop did not follow the outflow');
+    h.sl.hook.outflow = 0;               % the outlet shuts under the moving piston
+    h.pMax = 0;
+    h = runFor(h, 3);
+    peak(2 - on) = h.pMax;
+    if on
+        assert(~h.sl.s.fbPressureCtrl.Latched, 'latch not released at the closing');
+    end
+    h.u.motionEnable = 0;
+    h = runFor(h, 1);
+    h.u.modeCode = 0;
+    h.u.reference = 0;
+    h = runUntil(h, 5, @(h) h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE);
+end
+h.sl.G.G_cfgPressureFloorEnable = false;
+assert(peak(1) < peak(2) && peak(1) < 10.6, 'closing peak %.2f MPa with the floor, %.2f without', ...
+    peak(1), peak(2));
+fprintf('ok  stop-law floor: latched on outflow, released at the closing, peak %.2f MPa (%.2f without)\n', ...
+    peak(1), peak(2));
 
 fprintf('all passed\n');
 end
@@ -285,31 +253,4 @@ for k = 1:round(T / dt)
         return;
     end
 end
-end
-
-
-function [done, worst, count] = trackBound(h, g, fill, reset)
-% Compare charScheduleBound with the block's KEst and KEstTarget on the
-% scan just run, one scan in 25; returns the largest relative difference
-% and the number of scans compared so far. Never ends a run (done false).
-persistent w n k
-done = false;
-if reset
-    w = 0; n = 0; k = 0;
-elseif ~isempty(h)
-    k = k + 1;
-    if mod(k, 25) == 0
-        sc = h.sl.s.fbPressureSched;
-        if ~sc.ParamError && sc.KEst > 0
-            % The block's own inputs of the scan: the formula is held equal,
-            % not the signals that feed it
-            pRef = (sc.rPRef - g.G_cfgPressureSchedPatm) / 1e6;     % [Pa -> MPa]
-            [kEst, kEstTarget] = charScheduleBound(sc.Actual, sc.Position, pRef, sc.Target, fill, g);
-            w = max([w, abs(kEst - sc.KEst) / sc.KEst, abs(kEstTarget - sc.KEstTarget) / sc.KEstTarget]);
-            n = n + 1;
-        end
-    end
-end
-worst = w;
-count = n;
 end

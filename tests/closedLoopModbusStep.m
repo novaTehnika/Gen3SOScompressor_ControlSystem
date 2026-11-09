@@ -206,11 +206,10 @@ h = command(h, 4);
 h = runUntil(h, 10, @(h) h.m.statusCode == 5);
 assert(h.m.statusCode == 5 && h.sl.G.G_mbModeCode == 7);
 assert(abs(h.sl.G.G_mbReference - 20 / cfg.atmPerMPa) < 1e-3);
-% The fill description rides in the same exchange and is latched by the
-% slave on entry to the mode.
+% The fill description rides in the same exchange; the slave receives it.
 assert(h.sl.G.G_mbSalineVolume == single(cfg.salineVolume) && h.sl.G.G_mbOxygenRatio == single(cfg.oxygenRatio));
-assert(h.sl.s.rSchedSaline == single(cfg.salineVolume) && h.sl.s.rSchedOxygenRatio == single(cfg.oxygenRatio), ...
-    'fill not latched by the slave');
+assert(h.sl.G.G_sysSalineVolume == single(cfg.salineVolume) && h.sl.G.G_sysOxygenRatio == single(cfg.oxygenRatio), ...
+    'fill not received by the slave');
 h = runUntil(h, 30, @(h) h.y.performanceStatus == 1);
 assert(h.y.performanceStatus == 1, 'pressure target not reached');
 % Let the loop settle, so that the display (filtered on the master and

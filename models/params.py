@@ -90,15 +90,17 @@ class Params:
     T: float = 293.0
     # [Pa] Atmospheric pressure, the reference for gauge pressure
     Patm: float = 101325.0
-    # [Pa] Effective bulk modulus of the saline-filled chamber. Water
-    # alone is 2.2 GPa; the seals, hoses and residual gas lower it.
-    # Measured 0.72 GPa (0.67 to 0.78 over the segments, 0.81 with the
-    # gas-like curvature removed) on 2026-10-26, bench/characterisation.
-    # It is the effective value of those runs, whose x(P) curved as a
-    # gas would (the fits' gas-law term); the liquid-only term of the
-    # fits, 0.81 GPa, is the value once the origin of the curvature is
-    # known (the runs at two fill levels of the measurement plan).
-    K: float = 0.72e9
+    # [Pa] Bulk modulus of the saline. Measured 1.70 GPa on 2026-11-05
+    # (bench/characterisation) from the K ramps at two fill levels,
+    # 362 and 144 mL: their compliances fit V / K plus a constant, the
+    # series compliance below. A single fill gives the two together as
+    # an effective modulus, 0.77 GPa at 362 mL (0.72 GPa on 2026-10-26).
+    K: float = 1.70e9
+    # [m^3/Pa] Series compliance of the seals, the cylinder and the
+    # actuator frame: the system volume grows by C_series P whatever
+    # the fill, eq. (49). Measured with K: a series stiffness of
+    # 46 N/um at the piston, A^2 / 46e6 N/m.
+    C_series: float = 2.56e-13
     # [m^3] Saline volume at the start of a run, including the dead
     # volume: the fill at the 280 mm start position of the bench runs
     Vl0: float = 343e-6
@@ -142,9 +144,10 @@ class Params:
     n_orifice: int = 32
     # [m] Orifice diameter
     d_orifice: float = 40e-6
-    # [-] Orifice discharge coefficient. Measured 0.85 (0.84 to 0.87
-    # over 1.6 to 8.3 MPa, exponent 0.48): 4.8 mL/s at 10 MPa.
-    Cd: float = 0.85
+    # [-] Orifice discharge coefficient. Measured 0.84 (0.833 to 0.848
+    # over 3.9 to 10 MPa, exponent 0.48; 0.85 on 2026-10-26): 4.75 mL/s
+    # at 10 MPa.
+    Cd: float = 0.84
     # [m^3] Volume of the tube between the valve and the orifices. It
     # holds air at atmosphere before the valve opens, so the chamber loses
     # this volume of liquid in the scan the valve opens, eq. (37).
@@ -158,18 +161,19 @@ class Params:
     V_passages: float = 57e-6
 
     # ----- Hose ----------------------------------------------------------
-    # A 3 ft hose of 1/4 in bore joins the cylinder head to the orifice
+    # A 6 ft hose of 1/4 in bore joins the cylinder head to the orifice
     # tube, with a ball valve at each end. It is prefilled with virgin
     # saline at atmosphere, the proximal valve is shut while the charge
     # is compressed and dissolved, and it is opened before the delivery.
     # Its liquid, its own compliance and the saline it holds then join
     # the chamber, eqs. (42) and (43).
-    # [m^3] Hose bore volume, 0.914 m of 6.35 mm bore
-    V_hose: float = 29e-6
-    # [m^3/Pa] Hose compliance (wall dilation and any air it traps),
-    # measured by difference between K runs with the hose shut and
-    # open: 0.24 mL per MPa
-    C_hose: float = 2.4e-13
+    # [m^3] Hose bore volume, 1.829 m of 6.35 mm bore
+    V_hose: float = 57.9e-6
+    # [m^3/Pa] Hose compliance beyond its liquid (wall dilation and any
+    # air it traps), measured by difference between K runs with the
+    # hose shut and open: 0.58 mL per MPa after a purge, 0.62 before
+    # (0.097 mL/MPa per foot of hose)
+    C_hose: float = 5.8e-13
     # ----- Proximal valve ------------------------------------------------
     # The proximal valve throttles the solution that fills the hose when
     # it is opened at pressure, eqs. (44) and (45). Its area rises to the
@@ -185,7 +189,7 @@ class Params:
     @property
     def V_dead(self):
         """[m^3] Dead volume with the hose open: passages, hose and
-        tube, about 86 mL"""
+        tube, about 115 mL"""
         return self.V_passages + self.V_hose + self.V_tube
 
     @property
@@ -243,17 +247,18 @@ class Params:
 
     # ----- Actuator ------------------------------------------------------
     # The drive's response to a velocity command was measured on
-    # 2026-10-26 (bench/friction, bench/characterisation): the command is
+    # 2026-11-05 (bench/friction, bench/characterisation): the command is
     # not slewed at the configured accel, and the motor velocity follows
-    # it after a dead time of 22.8 ms with a first-order lag of 18.2 ms,
-    # the same for 0.3 to 2.5 mm/s steps in both directions, fitted at
-    # the 4 ms row spacing of the slave scan. The lag at the piston
-    # (behind the gearbox and screw) was not resolved.
+    # it after a dead time of 18.2 ms with a first-order lag of 7.5 ms,
+    # the same for 0.3 to 2.5 mm/s steps in both directions and in the
+    # closed chamber, fitted at the 4 ms row spacing of the slave scan
+    # (22.8 and 18.2 ms on 2026-10-26). The lag at the piston (behind
+    # the gearbox and screw) is not resolved beyond the motor's.
     # [s] Dead time between the velocity command and the start of the
-    # response, applied in whole scans (6 scans of 4 ms)
-    t_dead: float = 0.0228
+    # response, applied in whole scans (5 scans of 4 ms)
+    t_dead: float = 0.0182
     # [s] Time constant of the drive's velocity loop
-    tauV: float = 0.0182
+    tauV: float = 0.0075
     # True if the drive slews the velocity command at the accel and
     # decel limits. The drive does not; the option keeps the earlier
     # model available.
@@ -267,31 +272,34 @@ class Params:
     # pushing against the load is 1 / (1 + mu). Measured 0.45.
     mu: float = 0.45
     # [kg] Motor and gearbox inertia reflected to the piston. Measured
-    # 4.6e5 (0.42 % rated torque per mm/s^2 of piston acceleration, the
-    # torque excess of 74 open-chamber velocity steps against the
-    # motor's acceleration) through the lossless torque constant Fcap:
-    # the drivetrain's efficiency is not applied, and a torque that is
-    # partly lost in the gearbox would lower it by that factor. The
-    # model carries no compliance between the motor and the piston: the
-    # drive path's stiffness is above 4.7 kN/um (an up/down offset of the
-    # motor position at the same pressure within 5 um of a 25 kN
-    # friction reversal), 200 times the chamber's.
-    mr: float = 4.6e5
-    # [N s/m] Viscous friction coefficient. Measured 2.3e6 (11 kN at
-    # 5 mm/s).
-    b: float = 2.3e6
+    # 4.9e5 (0.447 % rated torque per mm/s^2 of piston acceleration, the
+    # torque excess of 54 open-chamber velocity steps against the
+    # motor's acceleration; 0.418 % on 2026-10-26) through the lossless
+    # torque constant Fcap: the drivetrain's efficiency is not applied,
+    # and a torque that is partly lost in the gearbox would lower it by
+    # that factor. The model carries no compliance between the motor
+    # and the piston: the drive path's stiffness is above 3.9 kN/um (an
+    # up/down offset of the motor position at the same pressure of about
+    # 6 um through a 25 kN friction reversal), and no backlash shows in
+    # direct reversals or in a dither under load.
+    mr: float = 4.9e5
+    # [N s/m] Viscous friction coefficient. Measured 2.26e6 over 0.1 to
+    # 3 mm/s, of which the seals take 0.18e6 (a run with the piston
+    # removed).
+    b: float = 2.26e6
     # [N] Coulomb friction of the seals, screw and gearbox. Measured
-    # 6.1 kN; the breakaway from rest is about 24 kN.
-    Fc: float = 6.1e3
+    # 5.0 kN, of which the seals take 0.5 kN (6.1 kN on 2026-10-26); the
+    # breakaway from rest is about 24 kN.
+    Fc: float = 5.0e3
     # [m/s] Velocity over which the Coulomb friction is smoothed from
     # -Fc to +Fc, which avoids a discontinuity at zero velocity
     veps: float = 1e-5
 
     # ----- Sensor --------------------------------------------------------
-    # [Pa] RMS noise per sample, referred to pressure. Measured 2.0 mV
-    # rms across the shunt (4.6 kPa) bare and 0.8 mV (1.8 kPa) with
-    # a 4.7 uF capacitor across the shunt; broadband, no lines.
-    noise: float = 4.6e3
+    # [Pa] RMS noise per sample, referred to pressure, with the 4.7 uF
+    # capacitor across the shunt: 0.73 mV rms (1.73 kPa) at rest. Bare,
+    # 2.0 mV (4.6 kPa); broadband, no lines.
+    noise: float = 1.7e3
     # [Pa] Transducer zero offset: the reading with the chamber open.
     # The loop regulates the reading, so the true pressure sits above
     # the target by minus this much. Zero with the input calibrated

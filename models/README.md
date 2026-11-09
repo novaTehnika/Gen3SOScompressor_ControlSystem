@@ -44,14 +44,18 @@ linear-model equations (19) to (33) and (39) to (41).
 
 
 **Chamber.** A piston of area A compresses a volume that holds saline of
-effective bulk modulus K and the oxygen charge, admitted at the supply
+bulk modulus K and the oxygen charge, admitted at the supply
 pressure. The gas is isothermal and dissolves into the saline according
 to Henry's law with a first-order time constant. The chamber's compliance is the
-gas term plus the liquid term, so its stiffness dP/dx rises from about
-0.002 MPa/mm when gas-rich to 10 to 25 MPa/mm once the gas has dissolved.
+gas term plus the liquid term plus a constant series compliance
+C_series of the seals, the cylinder and the actuator frame, eq. (49),
+so its stiffness dP/dx rises from about 0.002 MPa/mm when gas-rich to
+7 to 13 MPa/mm once the gas has dissolved; the series term caps it at
+A/C_series, 13 MPa/mm, however little liquid is left.
 The piston position is integrated, and the chamber volume is the initial
-volume minus A times the position. The contents fill the chamber, so the
-stressed liquid plus the free gas and the air pocket equals that volume.
+volume minus A times the position. The contents fill the chamber and its
+dilation C_series P, so the stressed liquid plus the free gas and the
+air pocket equals that volume.
 Every run reports the stroke used, so it can be checked against the axis
 travel.
 
@@ -77,19 +81,19 @@ bedding, the liner in its housing, lost motion in the drive) curves x(P)
 the same way, so the term's origin is open; a pressure that decays at
 constant position is gas dissolving, a compliance is not, and the fits
 at two fill levels give the series term. K is the bulk modulus of the
-liquid alone, which the fits' liquid term gives.
+liquid alone; the fits at two fill levels separate it from C_series.
 
 The outflow Q removes saline. The saline volume falls with the outflow,
 the compliance uses the present saline volume, and the gas dissolved in
 the saline leaves in proportion, so the chamber stiffens as it empties:
-the liquid-only stiffness A·K/V_l is 11 MPa/mm with 300 mL left and
-140 MPa/mm with 25 mL left (K = 1 GPa). The piston cannot sweep the
+the liquid-only stiffness A/(V_l/K + C_series) is 7.9 MPa/mm with
+300 mL left and 12.7 MPa/mm with 25 mL left. The piston cannot sweep the
 passages of the cylinder head, 57 mL; it reaches the limit switch
 there, the machine halts, and the delivery ends. With the hose open
-the dead volume is the passages, the hose and the tube, 86 mL, so the
-deliverable solution is the saline volume less 86 mL (and the hose's
-own 29 mL of virgin saline, which is purged, is not solution): about
-249 mL.
+the dead volume is the passages, the hose and the tube, 115 mL, so the
+deliverable solution is the saline volume less 115 mL (and the hose's
+own 58 mL of virgin saline, which is purged, is not solution): about
+228 mL.
 
 **Oxygen charge and saturation.** The charge is given as the ratio of
 its STP volume to the saline volume (1:1, 2:1, ...) and is admitted at
@@ -102,7 +106,7 @@ a margin from the moment the target is reached until the delivery ends.
 At 10 MPa the saline holds a 2.9:1 charge; a 3:1 charge leaves free gas
 in the chamber and has no margin at all.
 
-**Hose and procedure.** A 3 ft hose of ¼" bore (29 mL) joins the
+**Hose and procedure.** A 6 ft hose of ¼" bore (58 mL) joins the
 cylinder head to the outlet, with a ball valve at each end. In the
 present procedure the proximal valve is shut while the charge is
 compressed and mixed, and the hose holds virgin saline at atmosphere.
@@ -232,11 +236,11 @@ the dissolution rate:
     (3)  r_dis = (n_eq - n_dis) / tauDiss
 
 Chamber capacitance, the volume change of the contents per unit pressure
-change, from the isothermal free gas, the air pocket of eq. (46) and the
-liquid:
+change, from the isothermal free gas, the air pocket of eq. (46), the
+liquid and the series compliance of eq. (49):
 
     (4)  C = (n_tot - n_dis) R T / P_abs^2 + Patm V_air / P_abs^2
-             + V_l / K
+             + V_l / K + C_series
 
 Chamber pressure from continuity. The piston adds the volume flow A v;
 the outflow and the gas leaving the free phase remove volume:
@@ -259,13 +263,13 @@ balances:
          dn_dis/dt = r_dis - r_out,   dn_tot/dt = -r_out,
          dn_out/dt = r_out
 
-Volume closure. The chamber volume equals the stressed liquid plus the
-free gas and the air pocket; dissolved gas takes no volume. The model
-does not impose this identity, so it serves as a check on the
-integration:
+Volume closure. The chamber volume and its dilation, eq. (49), equal
+the stressed liquid plus the free gas and the air pocket; dissolved gas
+takes no volume. The model does not impose this identity, so it serves
+as a check on the integration:
 
-    (9)  V_ch0 - A x = V_l (1 - P/K) + (n_tot - n_dis) R T / P_abs
-                       + Patm V_air / P_abs
+    (9)  V_ch0 - A x + C_series P = V_l (1 - P/K)
+                       + (n_tot - n_dis) R T / P_abs + Patm V_air / P_abs
 
 Chamber stiffness:
 
@@ -286,11 +290,13 @@ in whole scans before it becomes the reference:
 
     (12) v_ref(t) = u(t - t_dead),   dv/dt = (v_ref - v) / tauV
 
-Stall at the torque limit, applied after each step. The drive must
-supply the pressure force, the load-dependent friction mu P A, the
-Coulomb friction and the viscous friction:
+Stall at the torque limit. The drive must supply the pressure force,
+the load-dependent friction mu P A, the Coulomb friction and the viscous
+friction; at the limit it stops the piston after each step, and within
+a step it cannot accelerate it further into the load:
 
     (13) if P A (1 + mu) + Fc + b v > Fcap and v > 0:  v = 0, v_ref = 0
+         if P A (1 + mu) + Fc + b v >= Fcap and v >= 0:  dv/dt <= 0
 
 Torque mode, with the Coulomb and load-dependent friction smoothed over
 |v| < veps and the velocity clamped to |v| <= vmax after each step:
@@ -345,10 +351,10 @@ Saturation pressure of n_dis moles of oxygen dissolved in V_l of saline
 
 Liquid part of the chamber compliance with the hose open: the saline
 V_l, the virgin saline V_vir still in the system, and the hose wall. It
-replaces the liquid term V_l / K of eq. (4). With the hose shut the
-virgin saline is not in the system and C_hose does not apply:
+replaces the liquid terms V_l / K + C_series of eq. (4). With the hose
+shut the virgin saline is not in the system and C_hose does not apply:
 
-    (42) C_liq = (V_l + V_vir) / K + C_hose
+    (42) C_liq = (V_l + V_vir) / K + C_series + C_hose
 
 Pressure P1 after the proximal valve opens on a cylinder of volume
 V_cyl at pressure P, holding n_g moles of free gas and the air pocket of
@@ -358,7 +364,8 @@ dilation. The model solves
 it by bisection and applies it within the scan the valve opens:
 
     (43) (V_l + V_vir + V_hose)(1 - P1/K) + n_g R T / (P1 + Patm)
-           + Patm V_air / (P1 + Patm) = V_cyl + V_hose + C_hose P1
+           + Patm V_air / (P1 + Patm)
+           = V_cyl + C_series P1 + V_hose + C_hose P1
 
 The virgin saline leaves through the outlet before the solution and
 carries no dissolved gas, so eqs. (7) and (8) act on V_vir, with
@@ -376,7 +383,7 @@ the flow that would equalise the two pressures within one scan (so
 that a wide-open valve reproduces eq. (43) without overshoot); the
 admitted volume grows by Q_prox / (1 - P/K) and the chamber loses
 Q_prox from its volume balance, eq. (5). C_cyl is the cylinder's
-capacitance with V_in removed from its liquid and C_h the hose's,
+capacitance, eq. (4) with V_in removed from its liquid, and C_h the hose's,
 C_hose + (V_hose + V_in) / K:
 
     (45) Q_prox = min( a_p(t) Cd_prox A_prox sqrt(2 (P - P_h) / rho),
@@ -402,6 +409,21 @@ initial cylinder volume V_ch0 of eq. (9): at a run's starting pressure P0
 the cylinder holds Patm V_air / (P0 + Patm) more than the liquid and the
 oxygen alone. The stiffness, eq. (10), uses the capacitance that
 contains it.
+
+### Series compliance
+
+The seals, the cylinder and the actuator frame yield under pressure in
+series with the liquid, so the motor's position gives a chamber volume
+that grows by a constant compliance times the pressure, whatever the
+fill. The bulk-modulus runs at two fill levels separate it from the
+liquid: their compliances fit V / K + C_series, with C_series = A^2 /
+k_s for a series stiffness k_s at the piston:
+
+    (49) V_sys = V_ch0 - A x + C_series P
+
+It adds C_series to the capacitance of eqs. (4) and (42) and C_series P
+to the system volume of eqs. (9) and (43), and V_ch0 is the cylinder
+volume at zero gauge pressure.
 
 
 ## Numerical solution
@@ -450,31 +472,34 @@ eq. (9), holds to within 2e-9 m^3 over 6 s of compression.
 
 ## Measured values
 
-The bench tests of 2026-10-26 (`bench/`) replaced
-the guessed parameters. The values the model now carries, with what was
-assumed before:
+The bench tests of 2026-10-26 replaced the guessed parameters, and the
+measurement plan's runs of 2026-11-05 (`bench/characterisation/README.md`
+section 8) replaced most of those. The values the model now carries,
+with what was assumed before:
 
 | Parameter | Measured | Assumed before | Where |
 |---|---|---|---|
-| Bulk modulus K | 0.72 GPa effective (0.67–0.78; 0.81 gas-corrected, the liquid value once the pocket is explicit) | 1 GPa | `charBulkModulus`, 3 runs at a 343 mL fill |
-| Trapped air V_air at the transducer | about 0.1 mL at atmosphere, estimated from the geometry (the 2 cm passage of 1–2 mm bore holds 0.02–0.06 mL, the cavity about as much); far too small for the closed-chamber K runs' gas-law term (0.65 mL at the ramps' mean pressure, about 40 mL at atmosphere as gas), whose origin is open; to be settled by the fits at two fill levels | not modelled | geometry; `charBulkModulus`, `Vair_fit_mL` |
+| Bulk modulus K | 1.70 GPa, the liquid alone (effective with the series compliance: 0.77 GPa at 362 mL, 0.41 at 144 mL; 0.72 at 343 mL on 2026-10-26) | 1 GPa, then 0.72 effective | `charBulkModulus`, 3 runs at 362 mL and 2 at 144 mL |
+| Series compliance C_series | 0.26 mL/MPa, a series stiffness of 46 N/um at the piston: the seals, the cylinder and the frame | not modelled | `charBulkModulus`, the split of the two fills |
+| Trapped air V_air at the transducer | about 0.1 mL at atmosphere, estimated from the geometry (the 2 cm passage of 1–2 mm bore holds 0.02–0.06 mL, the cavity about as much); far too small for the closed-chamber K runs' gas-law term (0.65 mL at the ramps' mean pressure, about 40 mL at atmosphere as gas), the two fills give a constant series term, eq. (49), and leave a smaller curvature (0.2 to 0.8 mL at P0) whose origin is open | not modelled | geometry; `charBulkModulus`, `Vair_fit_mL` |
 | Saline volume Vl0 | 343 mL at the 280 mm start, including the dead volume | 300 mL | geometry |
-| Dead volume | 57 mL of passages (hose shut, with the present fittings); 86 mL with the 29 mL hose and the tube (delivery) | 20–30 mL (then 10 mL in the master) | 57 g of water fills it |
-| Hose compliance | 0.24 mL/MPa | not modelled | difference between bulk-modulus runs with the hose shut and open |
-| Orifice Cd | 0.85 (0.84–0.87), exponent 0.48; 4.8 mL/s at 10 MPa | 0.7; 4.0 mL/s | `charOrificeFlow`, deliveries at 2, 5 and 10 MPa |
-| Drive response | 22.8 ms dead time, 18.2 ms lag at the motor, no slew | 20 ms lag, slewed at the configured accel | `charDriveLag`, 74 step captures at the 4 ms scan |
-| Lag at the piston | not resolved | — | repeat with the pressure probe |
-| Reflected mass mr | 4.6e5 kg: 0.42 % of rated torque per mm/s^2 of piston acceleration (0.38, 0.41, 0.44 at steps of 0.3, 1, 2.5 mm/s), through the lossless torque constant, so an efficiency below 1 lowers it | 5e4 kg | `charDrivePath`, 74 open-chamber velocity-step captures |
-| Drive path stiffness | above 4.7 kN/um: the motor position at the same pressure differs by 1 to 3 um between an up and a down ramp through a 22 to 25 % (24 to 28 kN) friction reversal; no compliance in the model | not modelled | `charDrivePath`, the K300 ramps; a bound, not a value |
-| Coulomb friction Fc | 6.1 kN | 0.5 kN | `frictionFit` |
-| Viscous friction b | 2.3 MN s/m | 5 kN s/m | `frictionFit` |
-| Load-dependent friction mu | 0.45 (efficiency 0.69 pushing) | 0.85 efficiency | `frictionFit` |
+| Dead volume | 57 mL of passages (hose shut, with the present fittings); 115 mL with the 6 ft hose (58 mL) and the tube (delivery) | 20–30 mL (then 10 mL in the master) | 57 g of water fills it; the hose by its bore |
+| Hose compliance | 0.58 mL/MPa beyond its liquid after a purge, 0.62 before, for the 6 ft hose (0.097 per foot; 0.24 for the 3 ft hose on 2026-10-26) | not modelled | difference between bulk-modulus runs with the hose shut and open |
+| Orifice Cd | 0.84 (0.833–0.848), exponent 0.48; 4.75 mL/s at 10 MPa (0.85 on 2026-10-26) | 0.7; 4.0 mL/s | `charOrificeFlow`, deliveries at 4 and 10 MPa |
+| Drive response | 18.2 ms dead time, 7.5 ms lag at the motor, no slew, with `Y_DirectControl`'s command filter at 0.02 s (22.8 and 18.2 ms with it at 0.05 s) | 20 ms lag, slewed at the configured accel | `charDriveLag`, 48 step captures at the 4 ms scan, 10 in the closed chamber |
+| Lag at the piston | not resolved beyond the motor's | — | `charDriveLag` on the pressure of the closed-chamber captures |
+| Reflected mass mr | 4.9e5 kg: 0.447 % of rated torque per mm/s^2 of piston acceleration (0.441, 0.445, 0.457 at steps of 0.3, 1, 2.5 mm/s), through the lossless torque constant, so an efficiency below 1 lowers it | 5e4 kg | `charDrivePath`, 54 open-chamber velocity steps |
+| Drive path stiffness | above 3.9 kN/um; no backlash in direct reversals or in a dither at 3 to 10 MPa (windup 1.5 to 6 um); no compliance in the model | not modelled | `charDrivePath`, the K300 ramps, the reversals and the dither; a bound, not a value |
+| Coulomb friction Fc | 5.0 kN, of which the seals 0.5 kN | 0.5 kN | `frictionFit`, with the piston and with it removed |
+| Viscous friction b | 2.26 MN s/m, of which the seals 0.18 | 5 kN s/m | `frictionFit` |
+| Load-dependent friction mu | 0.45 (efficiency 0.69 pushing); 0.51 from the legs of the stops | 0.85 efficiency | `charDrivePath` (the K300 reversal), `frictionFit` |
 | Breakaway | about 24 kN | — | `frictionFit` |
-| Sensor noise | 2.0 mV rms (4.6 kPa) bare, 0.8 mV (1.8 kPa) with 4.7 µF; broadband | 5 kPa | `pressureNoiseProbe` |
+| Sensor noise | 0.73 mV rms (1.73 kPa) with the 4.7 µF capacitor, 2.0 mV (4.6 kPa) bare; broadband | 5 kPa | `pressureNoiseProbe` |
 | Transducer zero | +0.002 MPa vented with the input calibrated (421.4 Ω effective shunt); with the 434 Ω setting the reading was 0.971 P − 0.104 MPa | 0 | current source, `bench/pressure` section 6 |
 
 Still to measure: the dissolution time constant tauDiss (the hold time
-before delivery depends on it) and the lag at the piston. The GVL on the
+before delivery depends on it) and the stiffness with free gas (session 2
+of the measurement plan). The GVL on the
 machine now has the 20 ms filter, a median of 5, `G_cfgVelLimitMax`
 7 mm/s and `G_cfgDirectCtrlAccel` 10 mm/s² (which the drive does not
 apply).

@@ -138,36 +138,28 @@ The scan-rate recorder `FB_Probe` (ModbusRegisterMap.md, section 6). Nothing in 
 
 ---
 
-## 8. Pressure Loop Gain Schedule
+## 8. Pressure Loop Stop-Law Floor
 
-When `G_cfgPressureScheduleEnable` is TRUE on entry to pressure mode, `FB_PressureSchedule` sets the pressure loop's Kp, Ki and stop-law velocity limit every scan from an upper bound on the chamber stiffness, so the loop's crossover stays at or below `G_cfgPressureSchedCrossover`. The saline volume and the oxygen charge of the fill are not settings: the master writes them in holding registers HR9-12 (`G_mbSalineVolume` HR9-10, `G_mbOxygenRatio` HR11-12, see `docs/master/ModbusRegisterMap.md`), the slave latches them on entry to pressure mode, and an unwritten (zero) saline volume makes the schedule fall back to the configured gains. Both must be at or below the true values, and the charge must equal the recipe of the fill. The stiffness bound is evaluated at the present pressure and at the larger of the present and the target pressure, and the larger value is used. The choice is latched on entry. If a setting is out of range (`ParamError`), the loop runs on the fixed `G_cfgPressureKp`, `G_cfgPressureKi` and `G_cfgPressureStopStiffness`, which are unchanged and remain the fallback when the schedule is off.
+When `G_cfgPressureFloorEnable` is TRUE, `FB_PressureController` sets its stop law's floor every scan in place of the fixed `G_cfgPressureStopVelMin`: `G_cfgPressureFloorVelLow` until it detects outflow, and `G_cfgPressureStopVelMin` while the detection is latched. It detects outflow as a piston that moves forward with the output clamped while the pressure does not rise (over `G_cfgPressureFloorWindow`, with the position delayed by the measurement lag), and releases the latch when the pressure rises fast at or above the target, which is the outlet shutting under a moving piston. While the floor is not latched and the pressure is above the target, a positive command is zeroed (the forward stop, `G_cfgPressureFloorForwardStop`). It needs no stiffness value. In the design studies it takes the purge-closing peak from 10.9 to 10.4 MPa at a 10 MPa target (`design/pressure-loop/README.md`, "Stop-law floor study"). The window and the latch are cleared whenever the loop is not running, so each entry to pressure mode starts them afresh. A setting out of range (the block's `FloorError`) leaves the floor at `G_cfgPressureStopVelMin` with no forward stop.
 
 | Parameter | Default Value | Units | Description & Tuning Considerations |
 |---|---|---|---|
-| `G_cfgPressureScheduleEnable` | FALSE | BOOL | Selects the gain schedule. Latched on entry to pressure mode, so changing it during a run changes nothing until the next entry. |
-| `G_cfgPressureSchedCrossover` | 11.0 | rad/s | Target crossover of the pressure loop, wc. The scheduled Kp is `wc / KEst`, bounded by the two Kp limits. |
-| `G_cfgPressureSchedKiRatio` | 0.4 | 1/s | Ki / Kp. |
-| `G_cfgPressureSchedKpMin` | 0.001 | mm/s per MPa | Lower bound on the scheduled Kp. |
-| `G_cfgPressureSchedKpMax` | 5.0 | mm/s per MPa | Upper bound on the scheduled Kp. |
-| `G_cfgPressureSchedPistonArea` | 3431.0 | mm² | Piston area (2.602 in bore). |
-| `G_cfgPressureSchedEndOfTravel` | 367.0 | mm | Position at the end of travel, where the chamber is down to the passages (the same frame as `G_cfgPosSoftLimitMax`). The chamber volume is the swept volume from the piston to this position plus the passages and, when open, the hose. |
-| `G_cfgPressureSchedPassagesVol` | 57.0 | mL | Cylinder passages: chamber volume at the end of travel without the hose, measured with the present fittings. Must be at or below the true value; re-measure when the fittings change. |
-| `G_cfgPressureSchedHoseVol` | 29.0 | mL | Hose between the cylinder head and the outlet, measured. Counted only while `G_cfgPressureSchedHoseOpen` is TRUE. Must be at or below the true value. |
-| `G_cfgPressureSchedHoseCompl` | 1.2E-13 | m³/Pa | Hose compliance beyond its liquid (wall and any trapped air), a lower bound on the measured 0.24 mL/MPa. Counted only while `G_cfgPressureSchedHoseOpen` is TRUE. |
-| `G_cfgPressureSchedHoseOpen` | FALSE | BOOL | The proximal valve is open during the compression, so the hose volume and compliance are part of the chamber. Leave FALSE while the valve opens after mixing; set TRUE for a procedure that opens it before the compression. The measured hose values above do not change with it. |
-| `G_cfgPressureSchedBulkModulus` | 1.0E9 | Pa | Saline bulk modulus. Must be at or above the true value. |
-| `G_cfgPressureSchedHenry` | 1.22E-5 | mol/(m³·Pa) | Henry constant of oxygen in 0.9 % saline. |
-| `G_cfgPressureSchedGasTemp` | 293.0 | K | Gas temperature. |
-| `G_cfgPressureSchedPatm` | 101325.0 | Pa | Atmospheric pressure. |
-| `G_cfgPressureSchedArriveBand` | 0.5 | MPa | |error| at which the integrator is first released; it is held at zero until then. |
-| `G_cfgPressureSchedDeadTime` | 0.0228 | s | Drive dead time from command to response, measured on the bench (`bench/characterisation`) with `Y_DirectControl`'s FilterTimeConstant as wired. Re-measure if that pin changes. |
-| `G_cfgPressureSchedDriveLag` | 0.0182 | s | Drive velocity-loop time constant, measured as above. |
+| `G_cfgPressureFloorEnable` | FALSE | BOOL | Selects the stop-law floor. |
+| `G_cfgPressureFloorVelLow` | 0.5 | mm/s | Floor with no outflow detected: low, so the stop law acts in a sealed chamber. The latched floor is `G_cfgPressureStopVelMin`, which must exceed the speed the outflow needs (1.4 mm/s at 10 MPa). |
+| `G_cfgPressureFloorWindow` | 0.1 | s | Window over which the pressure rise rate and the piston speed are taken. 0.04 to 0.2 s work; a longer window releases late. At most 60 scans, and the window plus the measurement lag at most 63 scans. |
+| `G_cfgPressureFloorTrigVel` | 0.2 | mm/s | Least piston speed over the window for the outflow trigger. |
+| `G_cfgPressureFloorTrigRate` | 0.1 | MPa/s | The trigger counts while the pressure rises slower than this. Above about 0.5 MPa/s the latch can set during a compression of a gas-rich chamber. |
+| `G_cfgPressureFloorTrigError` | 0.05 | MPa | The trigger counts while the error (target − actual) exceeds this. |
+| `G_cfgPressureFloorTrigTime` | 0.04 | s | Time the trigger must hold before the latch sets. Zero makes it chatter. |
+| `G_cfgPressureFloorRelRate` | 1.0 | MPa/s | The latch releases when the pressure rises faster than this at or above the target. Must stay below the rise rate of the slowest closing of the outlet (4 MPa/s misses a 1 s closing). |
+| `G_cfgPressureFloorRelError` | 0.0 | MPa | The latch releases only with the error at or below this (the pressure at or above the target). |
+| `G_cfgPressureFloorForwardStop` | TRUE | BOOL | Zero a positive command above the target while outflow is not latched. Without it the floor alone does not stop the closing peak. |
 
 ---
 
 ## 9. Pressure Transducer and Pressure Loop
 
-The transducer is a 4-20 mA loop read as the voltage across a shunt on the controller's analog input. `FB_PressureInput` scales it and checks the live zero; `FB_PressureController` closes a PI loop that commands piston velocity through `Y_DirectControl` in VelocityTLMode (mode 111), clamped by a stop law so the axis can stop within the pressure error at the assumed chamber stiffness. The gain schedule of section 8 replaces the fixed gains and stop stiffness below when it is enabled.
+The transducer is a 4-20 mA loop read as the voltage across a shunt on the controller's analog input. `FB_PressureInput` scales it and checks the live zero; `FB_PressureController` closes a PI loop that commands piston velocity through `Y_DirectControl` in VelocityTLMode (mode 111), clamped by a stop law so the axis can stop within the pressure error at the assumed chamber stiffness. The stop law's floor can follow the outflow (section 8).
 
 ### Transducer
 
@@ -186,16 +178,16 @@ The transducer is a 4-20 mA loop read as the voltage across a shunt on the contr
 
 | Parameter | Default Value | Units | Description & Tuning Considerations |
 |---|---|---|---|
-| `G_cfgPressureKp` | 0.5 | mm/s per MPa | Velocity per pressure error. Fallback when the schedule is off or out of range. |
-| `G_cfgPressureKi` | 0.2 | mm/s per (MPa·s) | Velocity per integrated pressure error. Fallback as above. |
+| `G_cfgPressureKp` | 1.5 | mm/s per MPa | Velocity per pressure error. The loop's crossover is about Kp times the chamber stiffness: 5 rad/s with the hose open (3.2 MPa/mm, 66° of phase margin) and 11 rad/s with it shut at a full fill (7.5 MPa/mm, 45°). The cylinder's series compliance caps the stiffness at 13 MPa/mm, where 16° remain; lower Kp if pressure mode is to run with the hose shut and little liquid. |
+| `G_cfgPressureKi` | 0.6 | mm/s per (MPa·s) | Velocity per integrated pressure error: 0.4 Kp. |
 | `G_cfgPressureVelMax` | 5.0 | mm/s | Velocity clamp in pressure mode (also limited by `G_cfgVelLimitMax`). |
 | `G_cfgPressureAccel` | 50.0 | mm/s² | `Y_DirectControl` acceleration in pressure mode. |
 | `G_cfgPressureDecel` | 50.0 | mm/s² | Deceleration the pressure stop law assumes (`Y_DirectControl` has no decel input). The chamber stiffens by orders of magnitude as the gas dissolves, so the command must reverse within `v²/(2·decel)` of travel. |
-| `G_cfgPressureStopStiffness` | 100.0 | MPa/mm | Chamber stiffness assumed by the stop law: the velocity is clamped to `sqrt(2·Decel·|error|/stiffness)`. Above the liquid-only chamber's about 20 MPa/mm because the filtered reading lags the chamber during the approach. Fallback when the schedule is off. |
-| `G_cfgPressureStopVelMin` | 2.0 | mm/s | The stop law never clamps below this, so outflow can be balanced at zero error. It must exceed the piston speed the outlet needs (1.4 mm/s at 10 MPa through the orifice bank) or the loop holds a steady error below the target. Overshoot from this velocity is at most `stiffness·v²/(2·decel)`. |
+| `G_cfgPressureStopStiffness` | 25.0 | MPa/mm | Chamber stiffness assumed by the stop law: the velocity is clamped to `sqrt(2·Decel·|error|/stiffness)`. About twice the stiffest the chamber can be, 13 MPa/mm (the cylinder's series compliance with no liquid left), which allows for the lag of the filtered reading. A higher value approaches the target more slowly (a 1:1 compression arrives in 2.9 s at 25 and 5.0 s at 100); a lower one overshoots more (0.18 MPa at 15 against 0.09 at 25). |
+| `G_cfgPressureStopVelMin` | 2.0 | mm/s | The stop law never clamps below this, so outflow can be balanced at zero error. It must exceed the piston speed the outlet needs (1.4 mm/s at 10 MPa through the orifice bank) or the loop holds a steady error below the target. Overshoot from this velocity is at most `stiffness·v²/(2·decel)`. With the stop-law floor (section 8) it is the floor while outflow is latched, and `G_cfgPressureFloorVelLow` otherwise. |
 | `G_cfgPressureTorqueLimit` | 100.0 | % of rated | Torque limit in pressure mode. Caps the piston force if the sensor reads low. |
 | `G_cfgPressureTargetMax` | 15.0 | MPa gauge | Highest target accepted from the master. The effective limit is `MIN(G_cfgPressureTargetMax, G_cfgPressureCeiling - G_cfgPressureCeilingHyst)`. |
 | `G_cfgPressureCeiling` | 12.0 | MPa gauge | Mechanical pressure ceiling. Above it `PRG_Main` zeroes every command in the pressurising (positive) direction in every motion state (`G_sysPressureBlock`, IR9). No fault. Also caps the pressure target at Ceiling − Hyst. |
 | `G_cfgPressureCeilingHyst` | 0.5 | MPa | The block releases below Ceiling − Hyst. Well above the filtered transducer noise and the PI ripple, so the block does not chatter, and small against the 4 MPa headroom to the 16 MPa transducer range. |
-| `G_cfgPressureEndMargin` | 1.0 | mm | Pressure mode stops positive motion at `G_cfgPosSoftLimitMax` minus this, so a delivery ends at the end of travel without `FAULT_POSITION` (`G_sysAtEndOfTravel`, IR10). Stopping from `G_cfgPressureVelMax` takes about 0.45 mm (0.25 mm at `G_cfgPressureAccel`, 0.11 mm in the 22.8 ms dead time, 0.09 mm in the 18.2 ms lag), so 1.0 mm leaves at least 0.5 mm to the soft limit and costs 3.4 mL of deliverable volume. |
+| `G_cfgPressureEndMargin` | 1.0 | mm | Pressure mode stops positive motion at `G_cfgPosSoftLimitMax` minus this, so a delivery ends at the end of travel without `FAULT_POSITION` (`G_sysAtEndOfTravel`, IR10). Stopping from `G_cfgPressureVelMax` takes about 0.45 mm (0.25 mm at `G_cfgPressureAccel`, 0.11 mm in the 22.8 ms dead time, 0.09 mm in the 18.2 ms lag measured with the 0.05 s command filter; less with the present 0.02 s), so 1.0 mm leaves at least 0.5 mm to the soft limit and costs 3.4 mL of deliverable volume. |
 | `G_cfgPressureInBand` | 0.1 | MPa | `|actual - target|` below which the in-band status bit (`G_sysPerformanceStatus`, IR7) is set. |

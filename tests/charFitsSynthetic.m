@@ -8,8 +8,7 @@ function charFitsSynthetic()
 %   deliveries at three pressures; charDriveLag recovers tauV and the dead
 %   time from step probe captures, and roughly from 50 ms run logs,
 %   including the piston-side lag from the pressure column through the
-%   sensor chain; charScheduleCheck compares the schedule's stiffness bound
-%   with a known stiffness; charStopDistance recovers the delay and the
+%   sensor chain; charStopDistance recovers the delay and the
 %   deceleration of the stopping-distance law from captures and a run
 %   log of stops in both directions; charDrivePath recovers the inertia,
 %   the friction reversal, the backlash, the windup and the stiffness
@@ -156,41 +155,9 @@ end
 assert(failed, 'a pattern that matches nothing was accepted');
 fprintf('ok  file patterns: k_fill*.csv gives the two fills, a pattern with no match is an error\n');
 
-% --- Schedule check ---------------------------------------------------------------
-% The slave's stiffness bound against a liquid-only run of known stiffness
-% (the clean run above, K 1.3 GPa, the fill as the saline volume): with a
-% largest plausible bulk modulus of 2 GPa the bound is 2/1.3 of the
-% measured stiffness and the check passes; with the GVL's 1 GPa, below the
-% run's own, the bound is below the measured stiffness and the check fails.
-fillSaline = V0 / 1000;                                             % [mm^3 -> mL]
-bulk = struct('deadVolume_mL', Vdead / 1000);
-sc = charScheduleCheck(f2, struct('quiet', true, 'salineVolume_mL', fillSaline, 'bulk', bulk, ...
-    'settings', struct('G_cfgPressureSchedBulkModulus', 2e9)));
-assert(sc.pass && numel(sc.rows) == 2, 'bound below the stiffness with K_cfg above the true K');
-assert(all(abs([sc.rows.ratio] - 2000 / K) < 0.04 * 2000 / K), 'bound / measured %s, expected %.3f', ...
-    mat2str([sc.rows.ratio], 4), 2000 / K);
-gv = benchGvl();
-wcExpected = gv.G_cfgPressureSchedCrossover * 1300 / 2000;         % [rad/s] Kp k_true = wc k_true / k_bound
-assert(all(abs([sc.rows.wc] - wcExpected) < 0.04 * wcExpected), 'crossover %s rad/s, expected %.2f', ...
-    mat2str([sc.rows.wc], 4), wcExpected);
-sc = charScheduleCheck(f2, struct('quiet', true, 'salineVolume_mL', fillSaline, 'bulk', bulk, ...
-    'settings', struct('G_cfgPressureSchedBulkModulus', 1e9)));
-assert(~sc.pass && all([sc.rows.ratio] < 1) && abs(sc.minRatio - 1000 / K) < 0.04 * 1000 / K, ...
-    'a bound below the stiffness was accepted (ratio %.3f)', sc.minRatio);
-fprintf('ok  schedule check: bound / measured %.2f with 2 GPa (set 1.3 GPa), %.2f with 1 GPa fails\n', ...
-    2000 / K, sc.minRatio);
-
-% The committed K300 logs (proximal valve shut, 343 mL, logged at 434 ohm):
-% the GVL's bound, with its 1 GPa bulk modulus above the measured 0.72 GPa,
-% stands above the measured stiffness of every ramp.
 cap = fullfile(here, '..', 'bench', 'captures');
 k300 = {fullfile(cap, 'K300_char_20261026_192617.csv'), fullfile(cap, 'K300_char_20261026_192751.csv'), ...
         fullfile(cap, 'K300_char_20261026_193002.csv')};
-sc = charScheduleCheck(k300, struct('quiet', true, 'bulk', struct('logShuntOhms', 434, 'deadVolume_mL', 50)));
-assert(sc.pass && numel(sc.rows) == 24 && sc.minRatio > 1.15 && max([sc.rows.ratio]) < 1.6, ...
-    'K300 logs: bound / measured %.2f to %.2f over %d ramps', sc.minRatio, max([sc.rows.ratio]), numel(sc.rows));
-fprintf('ok  schedule check on the K300 logs: bound %.1f MPa/mm over measured %.1f to %.1f, ratio %.2f to %.2f\n', ...
-    sc.rows(1).kBound, min([sc.rows.dPdx]), max([sc.rows.dPdx]), sc.minRatio, max([sc.rows.ratio]));
 
 % --- Orifice flow -------------------------------------------------------------------
 Cd = 0.68;
@@ -316,7 +283,7 @@ fprintf('ok  stopping distance: D %.1f / %.1f mm/s^2 (set %.0f), T0 %.0f / %.0f 
 % reports: the inertia from the open-chamber velocity steps, the friction
 % reversal under load and the stiffness bound from the K300 ramps, and the
 % hose-open run as the contrast.
-steps26 = {fullfile(cap, 's1_cap_steps_*.csv'), fullfile(cap, 's2_cap_steps_*.csv')};
+steps26 = {fullfile(cap, 's1_cap_steps_*_20261026_*.csv'), fullfile(cap, 's2_cap_steps_*_20261026_*.csv')};
 rp = charDrivePath(steps26, struct('quiet', true));
 assert(rp.inertia.n == 74, '%d steps', rp.inertia.n);
 assert(abs(rp.inertia.J_pct_per_mm_s2 - 0.418) < 0.005 && abs(rp.inertia.mass_kg / 4.6e5 - 1) < 0.01, ...

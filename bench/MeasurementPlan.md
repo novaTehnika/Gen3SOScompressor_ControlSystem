@@ -15,7 +15,7 @@ sequences them and says what each run is for.
 | Sensor noise `noise` | 0 | `pressureNoiseProbe('idle')`, and any capture later |
 | Drive dead time `t_dead` and lag `tauV` at the motor | 0 | `frictionRun('s1', 'steps')` |
 | Whether the drive slews (`slew_limited`) | 0 | the same steps with `G_cfgDirectCtrlAccel` at 1 mm/s² |
-| Friction `Fc`, `b`, breakaway | 0 | `frictionRun` unloaded, in the bore and withdrawn |
+| Friction `Fc`, `b`, breakaway | 0 | `frictionRun` unloaded, in the bore and with the piston removed |
 | Reflected inertia `mr` | 0 | the same steps, `charDrivePath` |
 | Backlash and motor-side friction of the drive path | 0 | direct reversals in the open chamber, `charDriveRecipe('reversal')` |
 | Fill and dead volume `Vl0`, `V_passages` | 1 | the fill weighed against the geometry |
@@ -29,7 +29,7 @@ sequences them and says what each run is for.
 | Orifice `Cd` | 1 | deliveries at 4, 7 and 10 MPa, discharge weighed |
 | Hose procedure inputs: purge volume, `tube_refills`, `Tclose` | 1 and 2 | observed during the deliveries |
 | Dissolution time constant `tauDiss` | 2 | a position hold at 10 MPa with a 1:1 charge |
-| Stiffness with free gas (the gas model, the schedule's bound) | 2 | compression ramps with the charge |
+| Stiffness with free gas (the gas model) | 2 | compression ramps with the charge |
 | Hose opening at pressure (eq. 43, the degassing threshold) | 2 | the proximal valve opened at 10 MPa under the probe |
 | Supply pressure `P_supply` | 2 | the gauge when the charge is admitted |
 
@@ -103,11 +103,27 @@ Piston in the bore, chamber open, no liquid.
    with the probe so the breakaway and the stick time are captured:
 
    ```matlab
-   ru = frictionRun('u1', 'unloaded', struct('probe', true));
-   rb = frictionRun('bare', 'unloaded', struct('startPosition', 60));   % withdrawn below the cylinder entry
+   uo = struct('speeds', [0.1 0.3 1 3], 'tSteady', [60 40 20 10]);   % no 5 mm/s point (below)
+   ru = frictionRun('u1', 'unloaded', setfield(uo, 'probe', true));
+   rb = frictionRun('bare', 'unloaded', uo);         % piston removed, the same positions
    ```
 
-   `frictionFit` on each; the difference is the seal friction. The
+   The set's default speeds end at 5 mm/s, and starting or stopping at
+   that speed takes 80 to 100 % of rated torque for a few tens of ms:
+   the reflected inertia (0.42 % per mm/s^2) at the acceleration of the
+   drive, which does not slew. The run's 90 % torque abort cannot tell
+   that from a stall, so the 5 mm/s jogs end the run; at 3 mm/s the
+   transients stay under 30 %. The steady torque at 5 mm/s is 10 to
+   26 %, so the point is lost to the guard, not to the drive.
+
+   ```matlab
+   fu = frictionFit(ru.file);                        % unloaded logs are the first argument
+   fb = frictionFit(rb.file);
+   ```
+
+   Run `bare` with the piston removed from the actuator and from where
+   `u1` started, so that both cover the same part of the screw. The
+   difference of the two is the seal friction. The
    Coulomb term is the one open question in the friction set: 6.1 kN
    from the friction bench, 4.4 kN from the loaded legs of the stops
    runs. The loaded legs of session 1 settle it.
@@ -163,12 +179,12 @@ no second fill is needed.
    opts.probe = true;
    r1 = charRun('K300', kPath, opts);  r2 = charRun('K300', kPath, opts);  r3 = charRun('K300', kPath, opts);
    rk1 = charBulkModulus({r1.file, r2.file, r3.file}, struct('fillVolume_mL', V1));
-   sc  = charScheduleCheck({r1.file, r2.file, r3.file}, struct('salineVolume_mL', V1));
+   wc = benchGvl().G_cfgPressureKp * [rk1.segments.dPdx]   % rad/s, the loop's crossover on this chamber
    ```
 
-   The schedule check is the first commissioning step of the gain
-   schedule: the bound must not sit below the measured stiffness. The
-   same logs give the friction reversal under load and the bound on the
+   The crossover, the loop gain times the measured stiffness, should
+   sit at or below about 11 rad/s (characterisation README section 9).
+   The same logs give the friction reversal under load and the bound on the
    drive path's stiffness, `charDrivePath({r1.file, r2.file, r3.file})`:
    the up/down offset of the motor position at the same pressure,
    through a 25 kN reversal.
@@ -203,17 +219,31 @@ no second fill is needed.
    zero and the flat segment shows; at 5 and 9 MPa it does not), the
    windup and the stiffness or its bound.
 5. **Stops under load** at 8 and 10 MPa (section 6), the probe armed for
-   every stop:
+   every stop. `charStopPath` sizes each leg and ramp from the chamber's
+   stiffness, and its default model is the 2:1 air charge of the
+   October runs (4.4 MPa/mm at 8 MPa), well under this liquid-only
+   chamber's 7 to 8 MPa/mm: planned on that model, the first leg at
+   8 MPa reaches the 11 MPa guard. Plan on the stiffest segment of
+   step 2's K ramps instead:
 
    ```matlab
+   kMax = max([rk1.segments.dPdx]);                  % MPa/mm, the stiffest K300 segment
    opts.probe = 'stops';
    [stopPath, plan] = charStopPath(struct('levels_MPa', [8 10], 'speeds', [0.25 0.5], ...
-       'budget_MPa', [2 0.7], 'rampOvershoot_MPa', 0.2, 'minRun_mm', 0.03, ...
-       'minSteady_s', 0, 'pause_s', 3, 'P_start_MPa', 7));
+       'budget_MPa', [2 0.7], 'rampOvershoot_MPa', 0.2, 'minRun_mm', 0.02, ...
+       'minSteady_s', 0, 'pause_s', 3, 'P_start_MPa', 7, ...
+       'chargeRatio', 0, 'stiffness', @(P) kMax));
    r = charRun('stops_hp', stopPath, opts);
    rs = charStopDistance([r.capFiles {r.file}]);
    rr = frictionFit({}, r.file, struct('settle', 0.15, 'trim', 0.05, 'accel', 1e4));
    ```
+
+   Read the plan before the run: its first line says `charge 0:1` and
+   its `k MPa/mm` column reads `kMax`. At 10 MPa the 0.7 MPa budget
+   leaves the 0.25 mm/s leg 0.035 to 0.015 mm after its stop allowance
+   for 7 to 9 MPa/mm, hence `minRun_mm` 0.02; if the plan still skips it, the 10 MPa level gives
+   no stops and the 8 MPa level carries the fit. Start the run with the
+   chamber below 8 MPa: the first ramp is the one that ends at the level.
 
    `rs.T0_s` and `rs.D_mm_s2` set the slave's allowance; `rr` gives
    `mu` and the loaded Coulomb term against session 0's unloaded one.
@@ -223,7 +253,7 @@ no second fill is needed.
    to atmosphere, open the proximal valve, run the K path once; purge
    the hose with a short delivery at 2 MPa (the distal valve open until
    no bubbles leave the orifices; weigh the discharge, which is the purge
-   volume the hose model asks for, against the hose's 29 mL); close the
+   volume the hose model asks for, against the hose's 58 mL); close the
    distal valve with the piston stopped, run the K path again:
 
    ```matlab
@@ -249,11 +279,16 @@ no second fill is needed.
    rq7  = charRun('Q7',  {{'pressure', 4, 15}, {'pressure', 7, 100}},  struct('posStop', x7));
    rq10 = charRun('Q10', {{'pressure', 4, 15}, {'pressure', 10, 100}}, struct('posStop', x10));
    m4 = ...; m7 = ...; m10 = ...;                    % g in the beakers, by hand
-   V = V1 - mPurge / 1.005;                          % mL left after the hose purge
    rq = charOrificeFlow({rq4.file, rq7.file, rq10.file}, ...
-       struct('K_Pa', rk1.K_Pa, 'collected_mL', [m4 m7 m10] / 1.005, ...
-       'fillVolume_mL', [V, V - m4 / 1.005, V - (m4 + m7) / 1.005]));   % the fill at each run's start
+       struct('K_Pa', rk1.K_Pa, 'collected_mL', [m4 m7 m10] / 1.005));
    ```
+
+   The liquid at each opening, which the compressibility correction
+   needs, comes from the piston position there and the 57 mL dead
+   volume, so the fit needs no weighed fill. If `V1` and `mPurge` were
+   weighed, `'fillVolume_mL', [V, V - m4 / 1.005, V - (m4 + m7) / 1.005]`
+   with `V = V1 - mPurge / 1.005` gives the liquid at each run's start
+   instead.
 
    Set each `posStop` for 30 mL (8.7 mm) from the position at the
    target. Open the distal valve when the run prints that the pressure
@@ -270,16 +305,19 @@ no second fill is needed.
    twice:
 
    ```matlab
-   V2 = V - (m4 + m7 + m10) / 1.005;                 % mL, what the deliveries left
    r4 = charRun('K200', kPath, opts);  r5 = charRun('K200', kPath, opts);
-   rk = charBulkModulus({r1.file, r2.file, r3.file, r4.file, r5.file}, ...
-       struct('fillVolume_mL', [V1 V1 V1 V2 V2]));
+   rk = charBulkModulus({r1.file, r2.file, r3.file, r4.file, r5.file});
    rk.split
    ```
 
    `rk.split` separates the liquid's K from the series compliance of
-   the seals and the actuator, which only two fill levels can do. `V2`
-   is `V1` less the weighed volumes, so nothing is refilled.
+   the seals and the actuator, which only two fill levels can do.
+   Without `fillVolume_mL` each segment's liquid is the geometry's at
+   its position, so the two levels need no weighing. With the fills
+   weighed, `'fillVolume_mL', [V1 V1 V1 V2 V2]` with
+   `V2 = V1 - (mPurge + m4 + m7 + m10) / 1.005` replaces it; the
+   weighed and the geometric fill differ by air and by error in the
+   dead volume, which step 1 compares.
 
 ## Session 2: one oxygen charge, about two and a half hours
 
@@ -301,8 +339,6 @@ state.
    rc = charRun('K300_o2', kPath, opts);
    rkc = charBulkModulus(rc.file, struct('fillVolume_mL', V1, 'chargeRatio', 1, ...
        'pressureRange', [0.5 11], 'minRows', 8));
-   scg = charScheduleCheck(rc.file, struct('salineVolume_mL', V1, 'oxygenRatio', 1, ...
-       'bulk', struct('pressureRange', [0.5 11], 'minRows', 8)));
    ```
 
    On the 30 and 31 October logs the free gas above 6 MPa was four to
@@ -330,10 +366,10 @@ state.
    is also the first commissioning delivery at 1:1. Then run the
    delivery sequence of the process: distal valve open for the purge,
    weighing the discharge until solution appears (the degassed slug the
-   hose model carries as 2 to 3 mL behind the 29 mL of virgin saline),
+   hose model carries as 2 to 3 mL behind the hose's 58 mL of virgin saline),
    closed with the piston stopped, the pause, reopened to `posStop`.
-   Weigh the delivered solution. Do not run a 2:1 charge until the
-   schedule is commissioned: it degasses at the opening.
+   Weigh the delivered solution. Do not run a 2:1 charge with the
+   6 ft hose opened after mixing: it degasses at the opening.
 
 ## Carrying the results over
 
@@ -348,9 +384,10 @@ state.
 - `design/pressure-loop/robust.py`: narrow the ranges to the new spread,
   then rerun `study_robust`, `study_compare` and `study_delivery` with
   the settled hose procedure.
-- The GVL: `G_cfgPressureSchedBulkModulus`, `HoseCompliance` and
-  `PassagesVolume` from the fits (upper bounds, as the schedule needs);
-  the stop allowance (`G_cfgPressureDecel` and its delay) from
+- The GVL: `G_cfgPressureKp` so that the crossover on the stiffest
+  chamber pressure mode runs on stays near 11 rad/s, and
+  `G_cfgPressureStopStiffness` above every measured dP/dx; the stop
+  allowance (`G_cfgPressureDecel` and its delay) from
   `rs.T0_s` and `rs.D_mm_s2`; `masterConfig.deadVolume` if the passages
   changed with the fittings.
 - `slave-sim/slaveSimConfig.m`: `chamberContactPos` from the cylinder

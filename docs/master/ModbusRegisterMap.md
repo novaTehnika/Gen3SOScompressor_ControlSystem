@@ -76,8 +76,8 @@ task interval.
 | 4 | `%MW3.483334` | UINT | `G_mbFaultReset` | 1 = FaultReset (level) |
 | 5–6 | `%MD3.483336` | REAL | `G_mbReference` | Position mode: mm. Velocity mode: mm/s. Torque mode: % of rated. Pressure mode (code 7): target pressure, MPa gauge |
 | 7–8 | `%MD3.483340` | REAL | `G_mbPositionSpeed` | Operator speed, mm/s: position moves and Go Home. The slave limits it to `0` to `G_cfgVelLimitMax`; 0 holds a position move and a Go Home does not start. Homing uses its configured speeds. Written every exchange |
-| 9–10 | `%MD3.483344` | REAL | `G_mbSalineVolume` | Saline volume of the fill, mL, for the pressure gain schedule. Latched by the slave on entry to pressure mode; 0 (never written) makes the schedule fall back to the configured gains |
-| 11–12 | `%MD3.483348` | REAL | `G_mbOxygenRatio` | Oxygen charge as STP volume per saline volume (1.0 for 1:1), for the pressure gain schedule. Latched on entry to pressure mode |
+| 9–10 | `%MD3.483344` | REAL | `G_mbSalineVolume` | Saline volume of the fill, mL. Received by the slave (`G_sysSalineVolume`) and not used. |
+| 11–12 | `%MD3.483348` | REAL | `G_mbOxygenRatio` | Oxygen charge as STP volume per saline volume (1.0 for 1:1). Received by the slave (`G_sysOxygenRatio`) and not used. |
 | 13–20 | | | | Reserved |
 | 101–110 | | | | Bench area (`bench/modbus`): not loaded with the main program in service |
 | 111 | `%MW3.483548` | UINT | `G_mbProbeArm` | Step probe (section 6): a changed value is an arm |

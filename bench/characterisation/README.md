@@ -39,15 +39,12 @@ position guards.
 | `charStopDistance.m` | Test 4: the stopping distance of every stop in the run, from the captures and the log, fitted to the stop law's two terms per direction and compared with the slave's allowance |
 | `charDrivePath.m` | Test 5: the drive path from the motor's position, velocity and torque against the pressure: the inertia of velocity steps, the friction reversal and the stiffness bound of the K ramps, and the backlash, windup and motor-side friction of the reversal and dither captures |
 | `charDriveRecipe.m` | Test 5: the `velstep` paths of the two reversal runs (direct reversals in the open chamber, a dither about a pressure in the closed one) |
-| `charScheduleCheck.m`, `charScheduleBound.m` | Section 9: the stiffness bound of the slave's gain schedule (`FB_PressureSchedule`) computed from the GVL at the pressures and positions of a log and compared with the stiffness the log measured |
 
 `tests/charRunSim.m` runs `charRun` and the fits against the simulated slave
 (through the friction bench's `fakeProbeLink`), the one-pass path included,
 `tests/charFitsSynthetic.m` the fits on synthetic logs with known
-parameters (the schedule check included, on the committed K300 logs too, and
-`charDrivePath` on a synthetic two-mass drive and on the October logs),
-and `tests/slavePressureMode.m` holds `charScheduleBound` equal to the
-compiled block; `tests/run_all.sh` runs them.
+parameters (`charDrivePath` on a synthetic two-mass drive and on the
+October logs); `tests/run_all.sh` runs them.
 
 ## 0. What the friction bench's runs already give
 
@@ -57,7 +54,7 @@ parameters come out of runs made for it:
 | Friction bench run | Gives | Command |
 |---|---|---|
 | `'delivery'` at 10, 5 and 2.5 MPa | Cd and the square-root law (test 2) | `charOrificeFlow({[logs '/d10_delivery_*.csv'], [logs '/d5_delivery_*.csv'], [logs '/d2_delivery_*.csv']}, struct('K_Pa', ..., 'collected_mL', [...]))`; leave `collected_mL` out if the discharge was not weighed |
-| `'steps'` captures | tauV at the motor (test 3, open chamber) | `charDriveLag([logs '/s1_cap_steps_*.csv'], struct('accel', 1e4, 'decel', 1e4))` or `stepResponseFit` with the same options |
+| `'steps'` captures | tauV at the motor (test 3, open chamber) | `charDriveLag([logs '/s1_cap_steps_*_20261026_*.csv'], struct('accel', 1e4, 'decel', 1e4))` or `stepResponseFit` with the same options |
 
 `logs` is where the files are (section 1, "Where the logs are"). The fits
 take a name, a pattern or a cell array of either.
@@ -156,9 +153,9 @@ convoluted); it was measured by purging the air with liquid, running the
 piston to the soft limit, opening the valves
 and drawing the liquid out of the passages into the chamber, then removing
 the liner and piston from the bottom of the cylinder, catching the liquid,
-and weighing it: 57 g of DI water. The discharge hose (3 ft of 1/4 in,
-29 mL) and the orifice tube (0.24 mL) are on top of this when the proximal
-valve is open.
+and weighing it: 57 g of DI water. The discharge hose (6 ft of 1/4 in,
+58 mL by its bore; 3 ft and 29 mL in the October runs) and the orifice
+tube (0.24 mL) are on top of this when the proximal valve is open.
 
 Then, for every liquid-only run:
 
@@ -230,28 +227,29 @@ rk.split                                    % liquid K and series stiffness (pri
 
 **Hose stiffness.** Fill and purge the hose (the proximal valve open, the
 cylinder holding the same liquid volume as in `r1`, so the piston is at
-the same position, the hose and tube liquid, 29.24 mL, on top), run the
+the same position, the hose and tube liquid `Vh` on top), run the
 path once, then again after a thorough hose purge (it carries the slug
-that degassed, 2 to 3 mL behind the 29 mL; trapped air is what the second
-run removes). The compliance the hose adds is the difference of the
+that degassed, 2 to 3 mL behind the hose's virgin saline; trapped air is
+what the second run removes). The compliance the hose adds is the difference of the
 ramps' compliances; take the liquid in the hose out to leave the wall and
 the air:
 
 ```matlab
+Vh = 58.2;                                           % mL, hose (6 ft of 1/4 in) and tube; 29.24 with the 3 ft hose
 ro1 = charRun('K300_hose', path, opts);              % valve open, hose filled
 ro2 = charRun('K300_hose_purged', path, opts);       % after the hose purge
 A = 3431;                                            % mm^2
 C = @(f, V) A / mean([getfield(charBulkModulus(f, struct('quiet', true, 'fillVolume_mL', V)), 'dPdx_MPa_mm')]) / 1000;   % mL/MPa
-Ch1 = C(ro1.file, V1 + 29.24) - C(r1.file, V1);      % mL/MPa the hose adds
-Ch2 = C(ro2.file, V1 + 29.24) - C(r1.file, V1);
-wall1 = Ch1 - 29.24 / (rk1.K_Pa / 1e6)               % mL/MPa beyond the hose liquid, before the purge
-wall2 = Ch2 - 29.24 / (rk1.K_Pa / 1e6)               % and after
+Ch1 = C(ro1.file, V1 + Vh) - C(r1.file, V1);         % mL/MPa the hose adds
+Ch2 = C(ro2.file, V1 + Vh) - C(r1.file, V1);
+wall1 = Ch1 - Vh / (rk1.K_Pa / 1e6)                  % mL/MPa beyond the hose liquid, before the purge
+wall2 = Ch2 - Vh / (rk1.K_Pa / 1e6)                  % and after
 ```
 
-A mL/MPa is 1e-12 m^3/Pa: the compliance beyond the liquid goes to
-`G_cfgPressureSchedHoseCompl` (a lower bound, so the smaller of the
-two) and to the model's `C_hose`; 0.24 mL/MPa was the 26 October value
-with the hose unpurged.
+A mL/MPa is 1e-12 m^3/Pa: the compliance beyond the liquid goes to the
+model's `C_hose`; 0.24 mL/MPa was the 26 October value
+with the 3 ft hose unpurged. The compliance scales with the hose's
+length, so a hose change needs these runs again.
 
 Start the path from about 2.5 MPa (reach it with a `pressure` step or a
 first short ramp) so the first ramp begins in the fitted range. Close the
@@ -459,8 +457,9 @@ rf = stepResponseFit([r1.capFiles r2.capFiles], struct('accel', 1e4, 'decel', 1e
 ```
 
 For the committed 26 October captures use
-`[logs '/s1_cap_steps_*.csv']` and `[logs '/s2_cap_steps_*.csv']` in place of
-the file lists.
+`[logs '/s1_cap_steps_*_20261026_*.csv']` and
+`[logs '/s2_cap_steps_*_20261026_*.csv']` in place of the file lists, and
+the date `20261105` for the 5 November ones.
 
 **Closed, liquid-filled chamber: the lag at the piston** (purged, at 3 to
 5 MPa, from section 2): small steps, because at 11 MPa/mm a 0.2 mm/s step
@@ -662,7 +661,7 @@ means the leg does not fit the budget with the stiffness the plan assumes.
 The plan assumes the 2:1 air charge in 343 mL (`chargeRatio`,
 `fillVolume_mL`, the proximal valve shut). For a liquid-only chamber add
 `'chargeRatio', 0` (7.2 MPa/mm with the valve shut) and, with the hose
-open, `'C_hose_m3_Pa', 2.4e-13` as well (4.8 MPa/mm). Whatever the chamber,
+open, `'C_hose_m3_Pa', 6.2e-13` as well (3.1 MPa/mm with the 6 ft hose). With the hose shut,
 the 0.5 mm/s leg at 10 MPa is skipped: its stop alone, over the bench's
 latency, takes more than the 0.7 MPa left under the guard, and the
 0.25 mm/s leg there is 0.03 to 0.1 mm. The budget at 10 MPa is 0.7 MPa
@@ -760,10 +759,11 @@ values as fitted until the tests are repeated with the calibrated input.
 **Two dead volumes.** The proximal valve at the cylinder head is shut
 during compression and mixing and open during the delivery, so the
 chamber has two dead volumes: the cylinder passages alone, the measured
-57 mL (`masterConfig.deadVolume`), and the passages plus the hose (29 mL)
-and the tube (0.24 mL), 86 mL, during the delivery. The hose is prefilled
-with virgin saline, and the delivery's first 29 mL is that purge, which
-does not change Cd but is not solution.
+57 mL (`masterConfig.deadVolume`), and the passages plus the hose and
+the tube (0.24 mL) during the delivery: 86 mL with the 3 ft hose of
+these runs (29 mL), 115 mL with the 6 ft hose (58 mL) since. The hose is
+prefilled with virgin saline, and the delivery's first hose volume is
+that purge, which does not change Cd but is not solution.
 
 **What the hose means for the model.** A delivery runs with the hose
 open, so the compliance the loop sees is the liquid's plus a constant
@@ -783,70 +783,72 @@ The friction bench's own fits on the same day's runs (`frictionFit`,
 24 kN; all far above the model's 500 N and 5e3 N s/m. The transducer reads
 -0.11 MPa with the chamber open in every log.
 
-## 9. Checking the pressure schedule's stiffness bound
+### Results of 5 November: the measurement plan, sessions 0 and 1
 
-The slave's gain schedule (`FB_PressureSchedule`, off by default behind
-`G_cfgPressureScheduleEnable`) sets Kp, Ki and the stop-law limit from an
-upper bound on the chamber stiffness computed from the configured
-settings and the position and pressure (design README, eqs. (39) to
-(41)). The bound is an FB output that no register publishes, so the bench
-cannot read it from the machine; `charScheduleCheck` computes it from the
-same GVL settings at the pressure and position of every ramp of a log
-(`charScheduleBound` is that formula, held equal to the compiled block by
-`tests/slavePressureMode.m`) and compares it with the ramp's measured
-dP/dx. It is the first step of commissioning the schedule: the bound must
-not be below the stiffness, or the scheduled gain crosses over above its
-`G_cfgPressureSchedCrossover` (11 rad/s).
+The runs of `bench/MeasurementPlan.md` sessions 0 and 1 on the calibrated
+input (421.4 ohm), logged in `bench/captures/` with the date `20261105`.
+Session 1 (one liquid-only fill, the proximal valve shut except for the
+hose runs) ran first, from 17:24; session 0 (dry) followed from 18:35.
+No fill or purge was weighed, so every liquid volume below is the
+geometry's, A (x_EOT - x) + 57 mL. Session 2 (the oxygen charge) is not
+run. The values are not yet carried into `models/params.py`, the GVL or
+the robustness ranges (see the end of this section).
 
-Run it on the K runs of section 3 (the proximal valve shut, `hoseOpen`
-false, the saline volume the master would send in HR9-10 for the fill, no
-oxygen), then on the hose-open runs (`hoseOpen` true), and on a charged
-run with the charge the master would send in HR11-12:
+| Parameter | Result | Runs | Notes |
+|---|---|---|---|
+| Sensor noise and zero | 0.73 mV rms, 1.73 kPa per sample; zero +0.003 MPa vented | `idle_20261105_183515` (250 samples at 4 ms) | The 0.8 mV of the shunt capacitor, so the capacitor is in place. |
+| Drive response at the motor | 7.5 +/- 0.05 ms lag after 18.2 ms dead time (t63 28 ms), the same at 0.3, 1 and 2.5 mm/s and in both directions; closed chamber at 7 to 10 MPa/mm the same, 7.6 ms after 18.2 ms | `s1_steps_20261105_183700`, `s2_steps_20261105_183819` (48 captures); `lag_wet_char_20261105_173826` (10) | **Faster than on 26 October** (18.2 ms after 22.8 ms with the same fit: 41 ms in all against 26 ms now), with a spread of 0.1 ms over the captures of either day. `Y_DirectControl`'s FilterTimeConstant, a filter on the command it sends the drive, was hard-wired at 0.05 s in the October LD and is now `G_cfgDirectCtrlFilterTime`, 0.02 s: that is the change. The `s3` run with `G_cfgDirectCtrlAccel` at 1 mm/s^2 was not made. |
+| Lag at the piston | not resolved: 21.9 +/- 8.9 ms including the dead time from the pressure of the captures, below the motor's 25.7 ms | `lag_wet_char_20261105_173826` | The sensor chain hides the split; the piston follows the motor within what it resolves. |
+| Reflected inertia | 0.447 % of rated torque per mm/s^2 (0.441, 0.445 and 0.457 at steps of 0.3, 1 and 2.5 mm/s): 4.9e5 kg at the piston, lossless | the 48 step captures and the reversals | 7 % above October's 0.418. |
+| Backlash and motor-side friction, open chamber | no backlash: the torque reverses within 8 um of motor travel; reversal 9.5, 14.3 and 20.3 % at 0.3, 1 and 2.5 mm/s | `rev_char_20261105_183927` (21 captures, 15 analysed) | The motor-side friction is not separated from the seals' (no flat segment). |
+| Backlash and windup under load (dither) | no backlash at 3 to 10 MPa; windup 1.5 to 6 um through a 14 to 30 % reversal, ks 2.2 to 4.4 kN/um | `dither_char_20261105_174057` (52 captures) | |
+| Friction reversal under load, stiffness bound | 15 % at 4 MPa rising to 30 % at 9 MPa; dT = 4.1 + 2.80 P %: Fc 2.25 kN, mu 0.45; drive path ks > 3.9 kN/um | the three K300 runs | Up/down motor offsets of 6 um median, just above the 5 um floor, so a bound. |
+| Bulk modulus, one fill | 6.8 to 7.9 MPa/mm at 362 mL (277.6 to 278.2 mm): K effective 0.77 GPa (0.72 to 0.84); the fit's liquid term 0.88 GPa | `K300_char_20261105_172421`, `_172541`, `_172702` | Up and down agree to 0.5 %, the three runs to 1 %. The gas term, 0.2 to 0.8 mL at P0, fails the 0.3 mL tolerance; the two fills below explain the compliance without gas. |
+| Bulk modulus, two fills | liquid K 1.70 GPa in series with 46 N/um (0.26 mL/MPa, a constant compliance); 9.3 to 11.1 MPa/mm at 144 mL | the K300 runs and `K200_char_20261105_182500`, `_182604` (341.6 mm) | The compliance is V / K + A^2 / ks: the single-fill 0.72 GPa of October and 0.77 now are that sum at 350 to 360 mL. With one K for the liquid the model makes the chamber at 144 mL 18 MPa/mm instead of 10. |
+| Loop crossover at the GVL's Kp of 1.5 (section 9) | 10 to 12 rad/s at 362 mL with the hose shut (6.8 to 7.9 MPa/mm), 14 to 17 rad/s at 144 mL with the hose shut (9.3 to 11.1), 4 to 5 rad/s with the hose open (2.6 to 3.5) | the K300, K200 and hose runs | The delivery runs with the hose open, where the margin is widest. Hose shut at a low fill is the stiff corner (30° of phase margin or less): pressure mode is not run there by the procedure. |
+| Hose compliance, 6 ft hose (58 mL with the tube) | the hose adds 0.65 mL/MPa before the purge and 0.61 after; beyond its own liquid (0.03 mL/MPa at 1.7 GPa), 0.58 mL/MPa of wall and 0.04 of air: 0.097 mL/MPa per foot | `K300_hose_char_20261105_180515`, `K300_hose_purged_char_20261105_180933` | The hose is twice October's 3 ft, and its compliance per foot is 20 % above October's 0.08 (0.24 mL/MPa for 3 ft, unpurged). Above the robustness range (0.12 to 0.36) and the GVL's lower bound (0.12, which stays a lower bound). The cylinder's part at the hose runs' 355 mL is taken from the two-fill split (0.465 mL/MPa). |
+| Stopping distance under load | comp x = 0.019 s v + v^2 / (2 x 196 mm/s^2), ret 0.016 s v + v^2 / (2 x 77 mm/s^2); 6 to 12 um at 0.25 and 0.5 mm/s, 7.6 to 10.8 MPa | `stops_hp_char_20261105_175543` (6 captured stops) | Every stop within the slave's allowance (0.05 s, 50 mm/s^2; worst -7 um). The law's residual is 28 % of the stops, which are a few um, so the split between the terms is loose. `_174848` ended on the pressure guard: the path was planned on the October gas-charged stiffness. |
+| Friction at speed under load | mu 0.51 +/- 0.05, Fc not resolved | the legs of the stops run (6) | Agrees with the K300 reversal's 0.45. |
+| Friction unloaded | with the piston: Fc 5.0 +/- 0.1 kN, b 2.26e6 +/- 0.07e6 N s/m, F0 -0.05 kN, residual 0.3 kN over 0.1 to 3 mm/s; piston removed: Fc 4.5 +/- 0.1 kN, b 2.09e6 +/- 0.06e6; seals: 0.5 kN and 0.18e6 N s/m | `u1_unloaded_20261105_185217`; `bare_unloaded_20261105_190535` | Both over 295 to 326 mm. The seals are a tenth of the Coulomb term and under a tenth of the viscous one: the drive (gearbox, screw, brake) carries the rest. No Stribeck region. Breakaway not resolved (94 % of the starts within 3 samples). `u1_unloaded_20261105_184019` ended on the torque abort at the first 5 mm/s start. |
+| Orifice Cd | 0.839 (0.833 to 0.848), exponent 0.48; 4.75 mL/s at 10 MPa, piston 1.38 mm/s | `Q4_char_20261105_182916`, `Q10_char_20261105_181759`; 34 and 131 g | `Q7_char_20261105_182952` (33 g) has no steady 3 s window. Collected against swept: +5.0 % (Q4), +3.4 % (Q10), +16.7 % (Q7). The first Q4 and Q7 (`_181511`, `_181710`) were not weighed. Agrees with October's 0.85. |
+
+**Carried over.** `models/params.py` takes the liquid K (1.70 GPa) and
+the series compliance as a new term of the chamber model
+(`C_series`, eq. (49) of `models/README.md`), the 6 ft hose (`V_hose`
+57.9 mL, `C_hose` 0.58 mL/MPa), Cd 0.84, the drive (18.2 ms and
+7.5 ms), mr 4.9e5 kg, Fc 5.0 kN, b 2.26e6 N s/m and the noise
+(1.7 kPa); `design/pressure-loop/robust.py` spans the new values; and
+the GVL's pressure-loop gains are set for the measured chamber
+(`G_cfgPressureKp` 1.5, `G_cfgPressureKi` 0.6,
+`G_cfgPressureStopStiffness` 25 MPa/mm), which the controller needs
+rebuilt for.
+
+## 9. Checking the loop gain against the measured stiffness
+
+The pressure loop's crossover is close to its proportional gain times
+the chamber stiffness: `G_cfgPressureKp` [mm/s per MPa] times dP/dx
+[MPa/mm] is in rad/s. The gain is fixed, so the stiffest chamber the
+loop runs on sets its margin: with the 20 ms input filter and the
+measured drive (18.2 ms dead time, 7.5 ms lag) the loop keeps 66° of
+phase margin at a crossover of 5 rad/s, 45° at 11 rad/s and 16° at
+18 rad/s (`design/pressure-loop/study_linear.py`). The K runs give the
+stiffness, so they check the gain before pressure mode is run on a new
+fill, hose or fitting:
 
 ```matlab
 cd bench/characterisation
 addpath ../common
-V1 = 343;                                   % mL, the weighed fill: HR9-10 (a lower bound on the true volume)
-sc  = charScheduleCheck({r1.file, r2.file, r3.file}, struct('salineVolume_mL', V1));
-sch = charScheduleCheck(ro1.file, struct('salineVolume_mL', V1 + 29.24, 'hoseOpen', true));
-scg = charScheduleCheck(rc.file, struct('salineVolume_mL', V1, 'oxygenRatio', 1, 'bulk', ...
-    struct('pressureRange', [0.5 11], 'minRows', 8)));          % rc: a charged run (section 3, oxygen charge)
+rk = charBulkModulus({r1.file, r2.file, r3.file});   % the chamber as it will run: valve shut or open
+wc = benchGvl().G_cfgPressureKp * [rk.segments.dPdx]   % rad/s per ramp segment
 ```
 
-For the committed 26 October logs (recorded at 434 ohm, with the 50 mL
-dead volume they were fitted with; the shut-valve runs and the hose-open
-run separately, each with its own `hoseOpen`):
-
-```matlab
-logs = '../captures';
-bulk = struct('logShuntOhms', 434, 'deadVolume_mL', 50);
-sc  = charScheduleCheck({[logs '/K300_char_20261026_192617.csv'], ...
-    [logs '/K300_char_20261026_192751.csv'], [logs '/K300_char_20261026_193002.csv']}, ...
-    struct('bulk', bulk));
-sch = charScheduleCheck([logs '/K300_char_20261026_193603.csv'], struct('hoseOpen', true, 'bulk', bulk));
-```
-
-The table has one row per ramp: the measured dP/dx,
-the bound at the ramp's top pressure and position, their ratio, the
-scheduled Kp and the loop crossover Kp times the measured stiffness
-(rad/s). `r.pass` is true when the ratio is at least `opts.margin`
-(1) on every ramp; `r.rows` and `r.minRatio` hold the numbers, `r.lag_s`
-the delay the stop law assumes (compare `charStopDistance`'s `r.T0_s`).
-`opts.settings` replaces a GVL value by name (for example
-`struct('G_cfgPressureSchedBulkModulus', 2e9)`) to see what a change
-would do before it is loaded.
-
-**Reading it.** A ratio above 1 is a bound above the stiffness: the
-schedule's gain is below the one that would cross over at 11 rad/s, by
-that ratio. A ratio below 1 on any ramp fails the check: the configured
-bulk modulus is below the true one, or the saline volume or the end of
-travel is set above the machine's. The result on the 26 October K300 runs
-(valve shut, 343 mL, `G_cfgPressureSchedBulkModulus` 1 GPa) is a bound of
-10.0 MPa/mm against 6.9 to 8.0 measured (ratio 1.24 to 1.45), loop
-crossover 7.6 to 8.8 rad/s against 11; with the hose open at 299 mm a
-bound of 7.9 MPa/mm against 4.8 to 5.9 (ratio 1.32 to 1.62). The schedule
-is conservative on both by 25 to 60 %, the measured bulk modulus being
-0.72 GPa against the 1 GPa configured.
+Keep the crossover at or below about 11 rad/s for the chamber the
+procedure runs pressure mode on; lower `G_cfgPressureKp` in proportion
+if it is above. The stop law's `G_cfgPressureStopStiffness` (25 MPa/mm)
+must stay above every measured dP/dx, or the approach overshoots. On the
+5 November runs: 10 to 12 rad/s with the proximal valve shut at 362 mL,
+4 to 5 rad/s with the hose open, and 14 to 17 rad/s with the valve shut
+at 144 mL, a chamber the procedure does not run pressure mode on.
 
 ## 10. Test 5: drive path
 
@@ -893,7 +895,7 @@ cells, as the other fits do) and fits what each gives:
 cd bench/characterisation
 addpath ../common
 logs = '../captures';
-steps = {[logs '/s1_cap_steps_*.csv'], [logs '/s2_cap_steps_*.csv']};
+steps = {[logs '/s1_cap_steps_*_20261026_*.csv'], [logs '/s2_cap_steps_*_20261026_*.csv']};
 rp = charDrivePath(steps);                                   % inertia
 rk = charDrivePath({[logs '/K300_char_20261026_192617.csv'], ...
     [logs '/K300_char_20261026_192751.csv'], [logs '/K300_char_20261026_193002.csv']});   % friction reversal, stiffness bound

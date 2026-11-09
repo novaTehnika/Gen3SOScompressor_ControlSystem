@@ -28,10 +28,10 @@ static double outflow(const plant_t *pl, double P, double V_l, double valve, dou
 
 /* ----- Hose ------------------------------------------------------------ */
 
-/* [m^3/Pa] Liquid part of the capacitance, eq. (42). */
+/* [m^3/Pa] Liquid part of the capacitance, eqs. (42) and (49). */
 static double liquid_capacitance(const plant_t *pl, double V_l, double V_vir)
 {
-    double C = (V_l + V_vir) / pl->p.K;
+    double C = (V_l + V_vir) / pl->p.K + pl->p.C_series;
     if (pl->hose_open)
         C += pl->p.C_hose;
     return C;
@@ -108,7 +108,8 @@ static double prox_flow(const plant_t *pl, const double *y, double prox)
     double P_abs = P + pl->p.Patm;
     double C_ch = ((y[IY_NTOT] - y[IY_NDIS]) * pl->p.RT / (P_abs * P_abs)
                    + pl->p.nRT_air / (P_abs * P_abs)
-                   + (y[IY_VL] - V_in) / pl->p.K);
+                   + (y[IY_VL] - V_in) / pl->p.K
+                   + pl->p.C_series);
     double C_h = pl->p.C_hose + (pl->p.V_hose + V_in) / pl->p.K;
     double dV_eq = dP / (1 / C_ch + 1 / C_h);
     return dmin(Q, dV_eq / pl->p.Ts);
@@ -154,6 +155,9 @@ static void derivatives(const plant_t *pl, const double *y, double u_act, double
     double dv;
     if (pl->velocity_mode) {
         dv = (u_act - v) / p->tauV;                             /* eq. (12) */
+        double P_stall = (p->Fcap - p->Fc - p->b * dmax(v, 0.0)) / (p->A * (1.0 + p->mu));
+        if (P >= P_stall && v >= 0.0 && dv > 0.0)              /* eq. (13) */
+            dv = 0.0;
     } else {                                                    /* eq. (14) */
         double friction_sign = dmax(-1.0, dmin(1.0, v / p->veps));
         dv = (u_act - P * p->A - p->b * v
@@ -334,7 +338,7 @@ double plant_volume_closure(const plant_t *pl)                  /* eq. (9) */
 {
     const double *y = pl->y;
     double P = y[IY_P];
-    double system = plant_chamber_volume(pl);
+    double system = plant_chamber_volume(pl) + pl->p.C_series * P;   /* eq. (49) */
     if (pl->hose_open)
         system += pl->p.V_hose + pl->p.C_hose * P;
     double contents = ((y[IY_VL] - y[IY_VIN] + y[IY_VVIR]) * (1 - P / pl->p.K)

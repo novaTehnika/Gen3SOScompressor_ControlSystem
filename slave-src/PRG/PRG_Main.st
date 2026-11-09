@@ -51,7 +51,6 @@
        fbFilterPressure    : FB_AnalogInputFilter
        fbPressureInput     : FB_PressureInput
        fbPressureCtrl      : FB_PressureController
-       fbPressureSched     : FB_PressureSchedule
        fbModeDecoder       : FB_ModeDecoder
        fbHandshake         : FB_HandshakeManager
        fbFaultReset        : FB_FaultResetHandler
@@ -97,7 +96,7 @@
        bFilteredFaultReset : BOOL
        rFilteredPressureVolts : LREAL
        rAnalogFilterAlpha  : LREAL := 0.0
-       rAnalogFilterTime   : LREAL := 0.0     (* G_cfgAnalogFilterTimeConst in seconds, for fbPressureSched
+       rAnalogFilterTime   : LREAL := 0.0     (* G_cfgAnalogFilterTimeConst in seconds, for fbPressureCtrl's floor
        bFaultResetInFaultState : BOOL
        eFaultResetActiveCode   : E_FaultCode
        (* Limit-recovery context (computed once per scan before the state machine)
@@ -131,15 +130,6 @@
        bInFault            : BOOL             (* ST_FAULT / ST_FAULT_IDLE
        bPositionMode       : BOOL             (* ST_POSITION_CTRL / ST_RECOVERY_POSITION: Y_DirectControl in position mode
        bVelocityMode       : BOOL             (* ST_VELOCITY_CTRL / ST_RECOVERY_VELOCITY: Y_DirectControl in velocity mode
-       rSchedSaline        : LREAL            (* G_sysSalineVolume latched on entry to pressure mode (mL)
-       rSchedOxygenRatio   : LREAL            (* G_sysOxygenRatio latched on entry to pressure mode
-       bPressureSchedActive : BOOL            (* G_cfgPressureScheduleEnable latched on entry to pressure mode
-       bPressureSchedUsed  : BOOL             (* fbPressureSched drives fbPressureCtrl's gains this scan
-       rPressureKp         : LREAL            (* Gains and limits passed to fbPressureCtrl this scan:
-       rPressureKi         : LREAL            (*   scheduled, or the G_cfgPressure* values
-       rPressureVelMax     : LREAL
-       rPressureStiffness  : LREAL
-       rPressureIntegScale : LREAL := 1.0
        (* Y_DirectControl hand-off to MC_Stop (see Command Arbitration)
        bKeepDirectControl  : BOOL             (* Keep Y_DirectControl enabled (zero command) until MC_Stop aborts it
        eKeepDirectMode     : Y_ControlMode    (* ControlMode of the direct-control session being stopped
@@ -478,12 +468,6 @@ ELSIF G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL THEN
             G_sysConfirmedMode := E_OperatingMode#MODE_PRESSURE;
             stCurrentLimits.VelMax := MIN(G_cfgPressureVelMax, G_cfgVelLimitMax);
             stCurrentLimits.TorqueMax := G_cfgPressureTorqueLimit;
-            (* The gain schedule and the fill it is computed for are chosen
-               once per entry, so a change of the switch or of the fill
-               registers never changes the gains mid-run. *)
-            bPressureSchedActive := G_cfgPressureScheduleEnable;
-            rSchedSaline := G_sysSalineVolume;
-            rSchedOxygenRatio := G_sysOxygenRatio;
         END_IF;
 
         rPressureTarget := LIMIT(LREAL#0.0, G_sysReference,
@@ -1304,77 +1288,35 @@ fbPosShaper(
     CycleTime := G_cfgScanTime
 );
 
-(* Pressure-loop gain schedule - Kp, Ki and the stop-law limit from the
-   stiffness bound, when selected on entry. A ParamError falls back to the
-   configured gains. *)
-fbPressureSched(
-    Enable := bPressureCtrlActive AND bPressureSchedActive,
-    Reset := bEnterState AND bPressureCtrlActive,
+(* Pressure loop - enabled only on scans where the pressure state body ran,
+   so the transition scan commands zero velocity and the floor's window
+   starts afresh on each entry. Reset on entry, and while a positive command
+   is blocked, clears the integrator. *)
+fbPressureCtrl(
+    Enable := bPressureCtrlActive,
+    Reset := (bEnterState AND bPressureCtrlActive) OR bPressureCmdBlocked,
     Target := rPressureTarget,
     Actual := G_sysActualPressure,
     Position := G_sysActualPosition,
-    EndOfTravel := G_cfgPressureSchedEndOfTravel,
+    Kp := G_cfgPressureKp,
+    Ki := G_cfgPressureKi,
     VelMax := stCurrentLimits.VelMax,
     DecelMax := G_cfgPressureDecel,
+    Stiffness := G_cfgPressureStopStiffness,
     StopVelMin := G_cfgPressureStopVelMin,
     CycleTime := G_cfgScanTime,
+    FloorEnable := G_cfgPressureFloorEnable,
+    VelLow := G_cfgPressureFloorVelLow,
+    Window := G_cfgPressureFloorWindow,
     FilterTime := rAnalogFilterTime,
     MedianSize := G_cfgAnalogMedianSize,
-    DriveDeadTime := G_cfgPressureSchedDeadTime,
-    DriveLag := G_cfgPressureSchedDriveLag,
-    Crossover := G_cfgPressureSchedCrossover,
-    KiRatio := G_cfgPressureSchedKiRatio,
-    KpMin := G_cfgPressureSchedKpMin,
-    KpMax := G_cfgPressureSchedKpMax,
-    PistonArea := G_cfgPressureSchedPistonArea,
-    SalineVolume := rSchedSaline,
-    PassagesVolume := G_cfgPressureSchedPassagesVol,
-    HoseVolume := G_cfgPressureSchedHoseVol,
-    HoseCompliance := G_cfgPressureSchedHoseCompl,
-    HoseOpen := G_cfgPressureSchedHoseOpen,
-    BulkModulus := G_cfgPressureSchedBulkModulus,
-    OxygenRatio := rSchedOxygenRatio,
-    Henry := G_cfgPressureSchedHenry,
-    GasTemp := G_cfgPressureSchedGasTemp,
-    Patm := G_cfgPressureSchedPatm,
-    ArriveBand := G_cfgPressureSchedArriveBand
-);
-
-bPressureSchedUsed := bPressureCtrlActive AND bPressureSchedActive AND
-                      NOT fbPressureSched.ParamError;
-IF bPressureSchedUsed THEN
-    rPressureKp := fbPressureSched.Kp;
-    rPressureKi := fbPressureSched.Ki;
-    rPressureVelMax := fbPressureSched.VelLimit;
-    rPressureStiffness := fbPressureSched.Stiffness;
-    rPressureIntegScale := fbPressureSched.IntegScale;
-ELSE
-    rPressureKp := G_cfgPressureKp;
-    rPressureKi := G_cfgPressureKi;
-    rPressureVelMax := stCurrentLimits.VelMax;
-    rPressureStiffness := G_cfgPressureStopStiffness;
-    rPressureIntegScale := LREAL#1.0;
-END_IF;
-
-(* Pressure loop - enabled only on scans where the pressure state body ran,
-   so the transition scan commands zero velocity. Reset on entry clears the
-   integrator; under the schedule, so does the hold until the first
-   arrival. *)
-fbPressureCtrl(
-    Enable := bPressureCtrlActive,
-    Reset := (bEnterState AND bPressureCtrlActive) OR
-             (bPressureSchedUsed AND fbPressureSched.IntegHold) OR
-             bPressureCmdBlocked,
-    Target := rPressureTarget,
-    Actual := G_sysActualPressure,
-    Kp := rPressureKp,
-    Ki := rPressureKi,
-    VelMax := rPressureVelMax,
-    DecelMax := G_cfgPressureDecel,
-    Stiffness := rPressureStiffness,
-    StopVelMin := G_cfgPressureStopVelMin,
-    CycleTime := G_cfgScanTime,
-    IntegScale := rPressureIntegScale
+    TrigVel := G_cfgPressureFloorTrigVel,
+    TrigRate := G_cfgPressureFloorTrigRate,
+    TrigError := G_cfgPressureFloorTrigError,
+    TrigTime := G_cfgPressureFloorTrigTime,
+    RelRate := G_cfgPressureFloorRelRate,
+    RelError := G_cfgPressureFloorRelError,
+    ForwardStop := G_cfgPressureFloorForwardStop
 );
 
 

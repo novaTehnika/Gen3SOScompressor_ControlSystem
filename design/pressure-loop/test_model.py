@@ -89,7 +89,7 @@ def check_config():
             and par.cfg()['G_cfgPressureStopVelMin'] == 2.0)
     q = par.with_(G_cfgPressureKp=2.0, K=2e9)
     assert (q.cfg()['G_cfgPressureKp'] == 2.0 and q.K == 2e9
-            and par.cfg()['G_cfgPressureKp'] == 0.5)
+            and par.cfg()['G_cfgPressureKp'] == 1.5)
     q = StudyParams.from_overrides(['K=2e9', 'nsub=10',
                                     'liquid_depletes=false',
                                     'G_cfgScanTime=0.001', 'solver=euler'])
@@ -125,11 +125,12 @@ def check_stiffness():
     for _ in range(500):
         plant.scan(1e-4, 0.0)
     measured = (plant.P - P1) / (plant.x - x1)              # [Pa/m]
-    expected = par.A * par.K / par.Vl0                      # [Pa/m]
+    # Liquid and series compliance, eqs. (4), (10) and (49)
+    expected = par.A / (par.Vl0 / par.K + par.C_series)     # [Pa/m]
     assert abs(measured / expected - 1) < 0.02, (measured, expected)
     assert abs(plant.stiffness / expected - 1) < 0.02
     ok(f'sealed liquid chamber stiffness {measured / 1e9:.2f} MPa/mm = '
-       f'A K / Vl ({expected / 1e9:.2f})')
+       f'A / (Vl / K + C_series) ({expected / 1e9:.2f})')
 
 
 def check_conservation():
@@ -194,7 +195,7 @@ def check_outlet():
     Q10 = par.Q_orifice(10e6)
     expect = par.Cd * par.n_orifice * math.pi * par.d_orifice**2 / 4 \
         * math.sqrt(2 * 10e6 / par.rho)
-    assert abs(Q10 - expect) < 1e-15 and abs(Q10 * 1e6 - 4.83) < 0.01
+    assert abs(Q10 - expect) < 1e-15 and abs(Q10 * 1e6 - 4.77) < 0.01
     assert abs(par.Q_orifice(2.5e6) / Q10 - 0.5) < 1e-12
     assert par.Q_orifice(-1e5) == 0.0
 
@@ -212,7 +213,8 @@ def check_outlet():
        f'the pressure {dP_step / 1e6:.2f} MPa in the opening scan')
 
     # The run ends at the limit switch, with the passages, the hose and
-    # its dilation full of solution, and reports the volume delivered:
+    # their dilations full of solution, and reports the volume
+    # delivered:
     # the saline and the hose's virgin saline, less what is left. The
     # liquid is stressed by P/K and the delivered volume is measured at
     # pressure, so both carry the factor (1 - P/K).
@@ -220,7 +222,8 @@ def check_outlet():
                 ctl.SlaveController())
     P_end = r.P[-1]
     squeeze = 1 - P_end / par.K            # at the pressure reached
-    left = par.V_passages + par.V_hose + par.C_hose * P_end     # [m^3]
+    left = (par.V_passages + par.V_hose
+            + (par.C_series + par.C_hose) * P_end)              # [m^3]
     assert r.t[-1] < 299 and r.events[:2] == [1.0, 6.0]
     assert abs(r.V_l[-1] * squeeze - left) < 0.3e-6
     expect = ((par.Vl0 + par.V_hose) * squeeze - left) * 1e6    # [mL]
@@ -237,10 +240,11 @@ def check_outlet():
     V_l = plant.V_l
     plant.open_hose()
     P1 = plant.P
-    # Linearised: dP = P (V_hose / K + C_hose) / (V_l / K + V_hose / K
-    # + C_hose) less the hose's own atmosphere start
+    # Linearised: dP = P C_h / (C_cyl + C_h), with the cylinder's
+    # C_cyl = V_l / K + C_series and the hose's C_h = V_hose / K +
+    # C_hose, less the hose's own atmosphere start
     C_h = par.V_hose / par.K + par.C_hose
-    dP_lin = 10e6 * C_h / (V_l / par.K + C_h)
+    dP_lin = 10e6 * C_h / (V_l / par.K + par.C_series + C_h)
     assert abs((10e6 - P1) / dP_lin - 1) < 0.05, (P1, dP_lin)
     assert abs(plant.volume_closure()) < 1e-12
     ok(f'opening the hose drops a liquid-only chamber from 10 to '
@@ -302,7 +306,7 @@ def check_throttled_opening():
     # it lies right behind the virgin saline; the purge is sized to it.
     q = par.with_(ratio=2.0, d_prox=0.3e-3, Topen_prox=0.5)
     r = sim.run(q, scenarios.deliver(q), ctl.ScheduledSlaveController(
-        's', wc=16.0, V_dead_cfg=81e-6, C_hose_cfg=1.2e-13))
+        's', wc=16.0, V_dead_cfg=109e-6, C_hose_cfg=1.2e-13))
     P_sat = r.P_sat[0]
     V_expect = P_sat * (q.C_hose + q.V_hose / q.K)          # [m^3]
     assert abs(r['V_degas'] / (V_expect * 1e6) - 1) < 0.1, \
@@ -369,8 +373,11 @@ def check_actuators():
         seen.append(plant.v)
     assert all(v == 0.0 for v in seen[:5 + n_dead])
     assert seen[5 + n_dead] > 0
+    # Four scans after the first that moves, five scans of the lag of
+    # eq. (12) have acted
     settle = seen[5 + n_dead + 4]           # 4 scans = 16 ms after start
-    assert 0.5 * 0.002 < settle < 0.8 * 0.002, settle
+    lag = 1 - math.exp(-5 * par.Ts / par.tauV)                  # [-]
+    assert abs(settle / 0.002 - lag) < 0.01, (settle, lag)
     ok(f'velocity command acts after {n_dead} scans of dead time and '
        f'reaches {settle / 0.002 * 100:.0f} % in 16 ms (tauV '
        f'{par.tauV * 1e3:.1f} ms)')
@@ -540,109 +547,14 @@ def check_scheduled():
        "FB_PressureController's")
 
 
-def check_scheduled_st():
-    par = StudyParams()
-    cfg = slave_config()
-    # The reference takes the plant's values where the slave has settings;
-    # they must agree for the two to be compared.
-    assert abs(par.A - cfg['G_cfgPressureSchedPistonArea'] * 1e-6) < 1e-15
-    assert par.t_dead == cfg['G_cfgPressureSchedDeadTime']
-    assert par.tauV == cfg['G_cfgPressureSchedDriveLag']
-    assert (par.kH, par.T, par.Patm) == (cfg['G_cfgPressureSchedHenry'],
-        cfg['G_cfgPressureSchedGasTemp'], cfg['G_cfgPressureSchedPatm'])
-
-    def reference():
-        return ctl.ScheduledSlaveController(
-            'ref', wc=cfg['G_cfgPressureSchedCrossover'],
-            K_cfg=cfg['G_cfgPressureSchedBulkModulus'],
-            V_l_cfg=par.Vl0,
-            V_dead_cfg=(cfg['G_cfgPressureSchedPassagesVol']
-                         + cfg['G_cfgPressureSchedHoseVol']) * 1e-6,
-            C_hose_cfg=cfg['G_cfgPressureSchedHoseCompl'],
-            ratio_cfg=None,
-            ki_ratio=cfg['G_cfgPressureSchedKiRatio'],
-            kp_min=cfg['G_cfgPressureSchedKpMin'],
-            kp_max=cfg['G_cfgPressureSchedKpMax'],
-            e_int=cfg['G_cfgPressureSchedArriveBand'])
-
-    class Lockstep:
-        """Runs the reference and the port on the same inputs and
-        returns the reference's command."""
-        mode = 'V'
-
-        def __init__(self, ref, port):
-            self.ref, self.port = ref, port
-            self.name = port.name
-            self.cfg = port.cfg
-
-        def reset(self, p, sc):
-            u = self.ref.reset(p, sc)
-            assert self.port.reset(p, sc) == u
-            self.accel, self.decel = self.ref.accel, self.ref.decel
-            self.worst, self.kp, self.gain = 0.0, [], 0.0
-            return u
-
-        def step(self, P, tg, t, sc, x=0.0):
-            a = self.ref.step(P, tg, t, sc, x)
-            b = self.port.step(P, tg, t, sc, x)
-            self.worst = max(self.worst, abs(a - b))
-            self.kp.append(self.port.fb.Kp)
-            for r, q in ((self.ref.fb, self.port.fb),):
-                self.gain = max(self.gain, abs(r.Kp - q.Kp),
-                                abs(r.Ki - q.Ki),
-                                abs(r.VelMax - q.VelMax))
-            return a
-
-    q = par.with_(hose_before=True)     # the hose is open throughout
-    for name in ('compress', 'deliver'):
-        L = Lockstep(reference(), ctl.ScheduledSlaveControllerST(
-            SchedHoseOpen=True))
-        r = sim.run(q, scenarios.make(name, q), L)
-        assert L.worst < 1e-9, (name, L.worst)            # [m/s]
-        assert L.gain < 1e-9, (name, L.gain)  # [mm/s per MPa]
-        assert L.port.sched.Enable and not L.port.sched.ParamError
-        assert not L.port.sched.IntegHold                  # arrived
-        assert max(L.kp) > 1.5 * min(L.kp)                 # scheduled
-        ok(f'FB_PressureSchedule (ST) matches ScheduledSlaveController '
-           f'scan for scan through {name} (largest command difference '
-           f'{L.worst:.1e} m/s, Kp {min(L.kp):.3f} to {max(L.kp):.3f})')
-
-    # With the switch off the port is the GVL loop.
-    sc = scenarios.stiffstep(par)
-    a, b = ctl.SlaveController(), ctl.ScheduledSlaveControllerST(
-        ScheduleEnable=False)
-    a.reset(par, sc), b.reset(par, sc)
-    rng = random.Random(2)
-    for k in range(2000):
-        P = 10e6 + 2e6 * math.sin(k / 100.0) + rng.uniform(-1e5, 1e5)
-        assert a.step(P, 10.5e6, k * par.Ts, sc) == \
-            b.step(P, 10.5e6, k * par.Ts, sc)
-    ok('ScheduledSlaveControllerST with the switch off is the GVL loop')
-
-    # Gas spring: the stiffness grows as the pressure squared, so the
-    # bound at the target pressure keeps the stop law from braking late.
-    g = StudyParams(Vl0=1e-6, ratio=200.0, P_supply=1e3, noise=0.0,
-               P_offset=0.0, V_passages=1e-6, V_hose=1e-9, C_hose=0.0,
-               tauDiss=1e9)
-    L = Lockstep(ctl.ScheduledSlaveController(
-        'ref', wc=6.0, K_cfg=1.0e9, V_dead_cfg=1e-6, C_hose_cfg=0.0),
-        ctl.ScheduledSlaveControllerST(
-            SchedBulkModulus=1.0e9, SchedPassagesVol=1.0,
-            SchedHoseOpen=False, SchedCrossover=6.0,
-            saline_ml=1.0, oxygen_ratio=200.0))
-    r = sim.run(g, scenarios.compress(g), L)
-    assert L.worst < 1e-9 and L.gain < 1e-9, (L.worst, L.gain)
-    assert r['overshoot'] < 0.3, r['overshoot']             # [MPa]
-    ok(f'gas-spring compression at wc 6: overshoot '
-       f'{r["overshoot"]:.2f} MPa, the port matches the reference')
-
-
 def check_legacy_reference():
     # Reference values for this case without noise or transducer offset,
-    # computed with Heun at nsub = 5, a 2 ms scan and a drive lag of
-    # 8.7 ms; the case pins both so that it guards the earlier model
+    # computed with Heun at nsub = 5, a 2 ms scan, a drive lag of
+    # 8.7 ms and a chamber of K 0.72 GPa with no series compliance; the
+    # case pins them so that it guards the earlier model
     par = StudyParams().legacy().with_(noise=0.0, P_offset=0.0,
-                                  G_cfgScanTime=0.002, tauV=0.0087)
+                                  G_cfgScanTime=0.002, tauV=0.0087,
+                                  K=0.72e9, C_series=0.0)
     c = ctl.LegacyController('ref', 'V', 0.5, 0.2, 0, True, 50e-3)
     r = sim.run(par, scenarios.stiffstep(par), c, legacy_sensor=True)
     assert (abs(r['overshoot'] - 0.1662) < 1e-4
@@ -672,45 +584,136 @@ def check_closed_loop():
        f'{r["overshoot"]:.2f} MPa, stroke {r["stroke_mm"]:.1f} mm, 60 s '
        f'in {dt:.1f} s)')
 
-    # With the earlier StopVelMin of 0.5 mm/s the stop law caps the
+    # With the earlier settings (Kp 0.5, Ki 0.2, a stop-law stiffness
+    # of 100 MPa/mm and a StopVelMin of 0.5 mm/s) the stop law caps the
     # piston below the speed the outflow needs, so the loop holds a
     # steady error through the delivery. The hose is open from the
     # start, so the dip is the distal valve's.
+    EARLIER = {'Kp': 0.5, 'Ki': 0.2, 'StopStiffness': 100.0}
     q = par.with_(hose_before=True)
     r = sim.run(q, scenarios.deliver(q),
-                ctl.SlaveController('old', StopVelMin=0.5))
+                ctl.SlaveController('old', StopVelMin=0.5, **EARLIER))
     assert 1.5 < r['dipMax'] < 3.0, r['dipMax']
     assert math.isnan(r['tSettle']) and r['V_ok'] < 30, r['V_ok']
-    ok(f'delivery 1:1 with StopVelMin 0.5 mm/s: dip {r["dipMax"]:.2f} '
-       f'MPa, never back in band, error above 1 MPa after '
-       f'{r["V_ok"]:.0f} of {r["V_delivered"]:.0f} mL')
-    # With the GVL's StopVelMin of 2 mm/s both loops reach the limit
-    # switch with the pressure in band. The hose's compliance caps the
-    # end stiffness near 10 MPa/mm even at the smallest dead volume, so
-    # neither loop loses margin there. The GVL gains let the pressure
-    # through the ceiling when the purge closes the valve against the
-    # moving piston; the scheduled loop keeps it below.
+    ok(f'delivery 1:1 with the earlier gains and StopVelMin 0.5 mm/s: '
+       f'dip {r["dipMax"]:.2f} MPa, never back in band, error above '
+       f'1 MPa after {r["V_ok"]:.0f} of {r["V_delivered"]:.0f} mL')
+    # With a StopVelMin of 2 mm/s the loops reach the limit switch with
+    # the pressure in band. The hose's and the cylinder's compliance cap
+    # the end stiffness even at the smallest dead volume, so no loop
+    # loses margin there. The earlier gains let the pressure through
+    # the ceiling when the purge closes the valve against the moving
+    # piston; the GVL gains keep it below, and the scheduled loop does
+    # no better than they do.
     q = par.with_(hose_before=True, V_passages=52e-6)
-    relaxed = ctl.SlaveController('r')
-    sched = ctl.ScheduledSlaveController('s', wc=11.0, V_dead_cfg=81e-6,
+    sched = ctl.ScheduledSlaveController('s', wc=11.0, V_dead_cfg=109e-6,
                                          C_hose_cfg=1.2e-13)
-    r1 = sim.run(q, scenarios.deliver(q), relaxed)
+    r0 = sim.run(q, scenarios.deliver(q),
+                 ctl.SlaveController('e', **EARLIER))
+    r1 = sim.run(q, scenarios.deliver(q), ctl.SlaveController('g'))
     r2 = sim.run(q, scenarios.deliver(q), sched)
-    k_cap = par.A / ((q.V_dead - q.V_tube) / q.K + q.C_hose)     # [Pa/m]
+    k_cap = par.A / ((q.V_dead - q.V_tube) / q.K + q.C_series
+                     + q.C_hose)                                 # [Pa/m]
     assert abs(r1.stiffness[-1] / k_cap - 1) < 0.05, r1.stiffness[-1]
-    assert r1['P_max'] > par.P_ceiling / 1e6 > r2['P_max'], \
-        (r1['P_max'], r2['P_max'])
+    assert r0['P_max'] > par.P_ceiling / 1e6 > r1['P_max'], \
+        (r0['P_max'], r1['P_max'])
+    assert abs(r1['P_max'] - r2['P_max']) < 0.1, r2['P_max']
+    assert abs(r1['dipMax'] - r2['dipMax']) < 0.1, r2['dipMax']
+    assert r1['V_ok'] == r1['V_delivered']
     assert r2['V_ok'] == r2['V_delivered']
     assert r1['ripple'] < 0.001 and r2['ripple'] < 0.001
     assert math.isnan(r1['tSettle']) is False and r1['rmsErr'] < 0.01
-    ok(f'delivery to a 81 mL dead volume: the hose compliance caps the '
-       f'end stiffness at {r1.stiffness[-1] / 1e9:.0f} MPa/mm, both '
-       f'loops reach the limit switch in band; the purge closing peaks '
-       f'at {r1["P_max"]:.2f} MPa (GVL) and {r2["P_max"]:.2f} MPa '
-       f'(scheduled)')
+    ok(f'delivery to a {(q.V_dead - q.V_tube) * 1e6:.0f} mL dead volume: '
+       f'the end stiffness is capped at {r1.stiffness[-1] / 1e9:.0f} '
+       f'MPa/mm and the loops reach the limit switch in band; the '
+       f'purge closing peaks at {r0["P_max"]:.2f} MPa with the earlier '
+       f'gains, {r1["P_max"]:.2f} with the GVL gains and '
+       f'{r2["P_max"]:.2f} scheduled')
 
 
 # %% ===== STOP-LAW FLOOR POLICIES =======================================
+def check_floor_block():
+    """FB_PressureController's own floor and forward stop (translated
+    from ST) against FloorPolicy's switched floor with the forward
+    stop, eqs. (46) and (48)."""
+    class Lockstep:
+        """Runs the reference (the block with a FloorPolicy setting its
+        floor) and the block with its own floor on the same inputs,
+        and returns the reference's command."""
+        mode = 'V'
+
+        def __init__(self, **cfg):
+            self.ref = ctl.SlaveController('ref', floor=ctl.FloorPolicy(
+                'switched', forward_stop=True), **cfg)
+            self.port = ctl.SlaveController('port', FloorEnable=True,
+                                            **cfg)
+            self.name, self.cfg = 'port', self.port.cfg
+
+        def reset(self, p, sc):
+            u = self.ref.reset(p, sc)
+            assert self.port.reset(p, sc) == u
+            assert self.port.fb.FloorEnable
+            assert not self.ref.fb.FloorEnable
+            self.accel, self.decel = self.ref.accel, self.ref.decel
+            self.worst, self.latches, self.releases = 0.0, 0, 0
+            self.floors = set()
+            return u
+
+        def step(self, P, tg, t, sc, x=0.0):
+            was = self.port.fb.Latched
+            a = self.ref.step(P, tg, t, sc, x)
+            b = self.port.step(P, tg, t, sc, x)
+            self.worst = max(self.worst, abs(a - b))
+            q = self.port.fb
+            assert not q.FloorError
+            assert q.Latched == self.ref.floor.latched, t
+            assert q.rFloor == self.ref.fb.StopVelMin, t
+            self.latches += q.Latched and not was
+            self.releases += was and not q.Latched
+            self.floors.add(q.rFloor)
+            return a
+
+    # Scan for scan through the compression and the 1:1 delivery with
+    # both hose procedures and a 1 s closing, at the GVL gains and at
+    # the earlier, lower ones
+    par = StudyParams()
+    c = par.cfg()
+    cases = (('hose before', par.with_(hose_before=True)),
+             ('hose after', par),
+             ('1 s closing', par.with_(hose_before=True, Tclose=1.0)))
+    for label, q in cases:
+        for cfg in ({}, {'Kp': 0.5, 'Ki': 0.2, 'StopStiffness': 100.0}):
+            L = Lockstep(**cfg)
+            sim.run(q, scenarios.compress(q), L)
+            assert L.worst == 0.0, (label, 'compress', L.worst)
+            r = sim.run(q, scenarios.deliver(q), L)
+            assert L.worst == 0.0, (label, 'deliver', L.worst)
+            # At the GVL gains the loop stops the piston through a slow
+            # closing before the pressure rises fast enough to release
+            # the latch, so only the other cases must release it.
+            slow = label == '1 s closing' and not cfg
+            assert L.latches >= 1 and (L.releases >= 1 or slow), \
+                (label, L.latches, L.releases)
+            assert L.floors == {c['G_cfgPressureFloorVelLow'],
+                                c['G_cfgPressureStopVelMin']}
+            assert r['V_ok'] == r['V_delivered'], label
+    ok("FB_PressureController's floor and forward stop match "
+       'FloorPolicy scan for scan through the compression and the 1:1 '
+       'delivery, both hose procedures and a 1 s closing: the latch '
+       'sets on the outflow and releases at the closing')
+
+    # A floor setting out of range leaves the configured StopVelMin and
+    # no forward stop: the run is the run with the floor off.
+    q = par.with_(hose_before=True)
+    sc = scenarios.deliver(q)
+    bad = ctl.SlaveController('bad', FloorEnable=True, FloorWindow=1.0)
+    r0, r1 = sim.run(q, sc, ctl.SlaveController()), sim.run(q, sc, bad)
+    assert bad.fb.FloorError and not bad.fb.Latched
+    assert np.array_equal(r0.u, r1.u)
+    ok('a floor window longer than the ring is a FloorError: the loop '
+       'runs on the configured StopVelMin')
+
+
 def check_floor_policy():
     """FloorPolicy, eqs. (46) to (48)."""
     par = StudyParams().with_(hose_before=True)
@@ -770,8 +773,8 @@ def check_floor_policy():
     # Closed loop, 1:1 with the hose open before the compression: the
     # switched floor with the forward stop sets no latch during the
     # compression, leaves no steady error in the delivery, and stops
-    # the piston when the purge shuts the valve, so the pressure stays
-    # below the ceiling where the fixed floor of the GVL does not.
+    # the piston when the purge shuts the valve, so the closing peak is
+    # well below that of the fixed floor of the GVL.
     pol = dict(mode='switched', forward_stop=True)
     sw = ctl.SlaveController('sw', floor=ctl.FloorPolicy(**pol))
     rc = sim.run(par, scenarios.compress(par), sw)
@@ -784,7 +787,7 @@ def check_floor_policy():
     e = (rd.target[late] - rd.P_meas[late]) / 1e6               # [MPa]
     assert abs(np.mean(e)) < 0.05 and np.std(e) < 0.1, (e.mean(),
                                                          e.std())
-    assert rg['P_max'] > par.P_ceiling / 1e6 > rd['P_max'] + 1.0
+    assert par.P_ceiling / 1e6 > rg['P_max'] > rd['P_max'] + 0.3
     assert rd['V_ok'] == rd['V_delivered']
     ok(f'floor policies: fixed = configured StopVelMin; switched '
        f'latch sets {i_on} scans into a flat window, holds through a '
@@ -818,8 +821,8 @@ if __name__ == '__main__':
     check_sensor()
     check_wiring()
     check_scheduled()
-    check_scheduled_st()
     check_legacy_reference()
     check_closed_loop()
     check_floor_policy()
+    check_floor_block()
     check_runner()
