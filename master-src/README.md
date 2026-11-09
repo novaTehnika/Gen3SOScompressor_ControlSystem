@@ -671,10 +671,11 @@ is true at the first row after a jump of `seq` larger than the row's
 `tracePlot` returns three figures: `overview` (pressure with the window mean, maximum and
 minimum when the file has them, position, velocity and torque against time), `delivery` (swept volume, flow, and pressure against
 swept volume) and `status` (status and mode codes, the operation flags, link state
-and link health). For a decimated file the overview is in interval mode: the
-pressure row draws the interval's mean, minimum and maximum and the target as
-steps from `tStartRel_s` without the snapshot, and the position, velocity and
-torque rows draw the interval means as steps. Fault, link-down and E-STOP intervals are shaded and lines
+and link health). The overview always draws the snapshot
+columns; when the file has window or interval statistics (`summaryScans` above
+0) the pressure row adds their mean, minimum and maximum as steps and the
+position, velocity and torque rows add the mean as steps, from `tStartRel_s` in
+a decimated file. Fault, link-down and E-STOP intervals are shaded and lines
 break where records were missed. With `'save'` on, each figure is saved as
 `<csv name>_<overview|delivery|status>.fig` in `saveDir` (the file's folder
 by default).
