@@ -224,6 +224,31 @@ Modbus holding group extended to HR114 and the input group to IR524; and an
 
 ---
 
+### Exchange Summary and the Per-Scan Bound
+
+`FB_ExchangeSummary` summarises the scans between two changes of the master's
+heartbeat (HR1) for IR21-34. Its per-scan cost is one comparison, four
+additions, a MIN and a MAX and a counter increment; the six divisions, the
+copies of its outputs and the sequence increment happen only in the scan a
+window closes. `PRG_Main` calls it once, before the step probe (the probe
+stays last), and copies its eight outputs to `G_sysSum*`; `PRG_Output`
+copies those to `G_mbSum*` with `LREAL_TO_REAL` every scan, and the Modbus
+group is copied once per scan, so a read is self-consistent. The window
+length is capped by the constant `cMaxScans` (65535 scans), which keeps the
+sums bounded when the link is lost.
+
+The block reads no `G_*` variable (the caller passes the heartbeat and the
+four channels as inputs), uses only IF chains, `MIN`/`MAX`,
+`UINT_TO_LREAL` and `UINT#` / `LREAL#` literals and a `VAR CONSTANT`, and
+keeps its accumulators and outputs `LREAL` so that the py and c targets agree
+(`tests/stTargetParity.py` runs it). MotionWorks setup for it: the
+`FB_ExchangeSummary` block, the eight `G_mbSum*` globals (addresses in
+`GlobalVariables_Reference.st`) and the eight `G_sysSum*` globals, the Modbus
+input group extended to at least IR34, and an
+`fbExchangeSummary : FB_ExchangeSummary` instance in `PRG_Main`.
+
+---
+
 ## 5. How-To Guides
 
 ### How to Add a New Operating Mode

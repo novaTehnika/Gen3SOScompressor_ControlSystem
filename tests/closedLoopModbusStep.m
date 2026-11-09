@@ -14,7 +14,10 @@ function closedLoopModbusStep()
 %   the DAQ outputs at their final values. Checks that the master's
 %   register map (modbusMap) agrees with the slave's, then covers homing,
 %   position, pressure, fault reset, link loss on either side, a late
-%   exchange and the model stopping on a lost link.
+%   exchange and the model stopping on a lost link, and the slave's
+%   per-exchange summary (IR21-34): its windows follow the master's
+%   heartbeat, are the mean, minimum and maximum of the scans' own inputs,
+%   survive link loss and the length cap, and reach the master intact.
 %
 %   masterStep uses masterConfig as it is, so the slave's soft limit is
 %   widened to the bench value to match.
@@ -47,6 +50,10 @@ h.log = struct('read', zeros(0, 2), 'written', zeros(1, 0));
 h.tick = 0;
 h.m = [];
 h.writeLost = false;    % master's registers do not reach the slave
+h.logScans = false;     % record the exchange summary's inputs and outputs every scan
+h.scanLog = zeros(0, 19);
+h.inputFcn = [];        % @(h) volts for the slave's analog input before each scan
+h.log.words = zeros(0, map.nRead);
 h.readLost = false;     % slave's registers do not reach the master
 
 % The master's register map is the slave's: every register modbusMap
@@ -66,7 +73,11 @@ pairs = {'hr', 'heartbeat', 'G_mbHeartbeat'; 'hr', 'modeCode', 'G_mbModeCode';
          'ir', 'position', 'G_mbActualPosition';
          'ir', 'velocity', 'G_mbActualVelocity'; 'ir', 'torque', 'G_mbActualTorque';
          'ir', 'commandedPosition', 'G_mbCommandedPosition';
-         'ir', 'pressure', 'G_mbActualPressure'};
+         'ir', 'pressure', 'G_mbActualPressure';
+         'ir', 'pressureMean', 'G_mbSumPressureMean'; 'ir', 'pressureMin', 'G_mbSumPressureMin';
+         'ir', 'pressureMax', 'G_mbSumPressureMax'; 'ir', 'velocityMean', 'G_mbSumVelocityMean';
+         'ir', 'torqueMean', 'G_mbSumTorqueMean'; 'ir', 'positionMean', 'G_mbSumPositionMean';
+         'ir', 'summaryScans', 'G_mbSumScans'; 'ir', 'summarySeq', 'G_mbSumSeq'};
 % Every register of the slave inside the exchange is one modbusMap names
 % (the registers beyond it are the step probe's, read separately).
 inside = arrayfun(@(r) r.first <= map.(groupOf(sideOf(r.group), 'nWrite', 'nRead')), R);
@@ -132,10 +143,14 @@ h = command(h, 2);
 % (The new speed reaches the slave an exchange or more after the command,
 % so the condition waits for it as well as for the motion.)
 h = runUntil(h, 30, @(h) abs(h.sl.G.G_mbPositionSpeed - 2) < 1e-6 && abs(h.sl.ax.v) > 1.9);
+nEx0 = rows(h.log.words);
+h.logScans = true;
+h.scanLog = zeros(0, 19);
 h = runUntil(h, 0.3, []);
 assert(abs(h.sl.G.G_mbPositionSpeed - 2) < 1e-6 && abs(h.sl.ax.v - 2) < 0.1);
 h.app.positionSpeed = 0;
 h = runUntil(h, 3, []);
+h.logScans = false;
 xHold = h.sl.ax.x;
 h = runUntil(h, 1, []);
 assert(h.sl.G.G_mbPositionSpeed == 0 && abs(h.sl.ax.v) < 0.01 && abs(h.sl.ax.x - xHold) < 0.01);
@@ -146,6 +161,16 @@ assert(h.m.statusCode == 3 && abs(h.sl.G.G_mbPositionSpeed - cfg.speedMax) < 1e-
 h.app.positionSpeed = cfg.speedMax;
 fprintf('ok  position speed through HR7-8: 2 mm/s, 0 holds at %.2f mm, 100 limited to %g mm/s\n', ...
     xHold, h.sl.G.G_mbPositionSpeed);
+
+% The summary through the move at 2 mm/s and its stop: the windows are the
+% scans' own means, and the velocity mean follows the stop.
+Sm = summaryWindows(h.scanLog, 65535);
+cr = checkReads(h, Sm, h.log.words(nEx0 + 1:end, :), 0);
+w = Sm.win;
+assert(w(2).velocityMean > 1.9 && min([w.velocityMean]) < 0.5 && any(diff([w.positionMean]) > 0.05), ...
+    'the summary did not follow the move');
+fprintf('ok  summary through a move at 2 mm/s and its stop: %d windows, velocity mean %.2f to %.2f mm/s, Scans %d to %d\n', ...
+    numel(w), max([w.velocityMean]), min([w.velocityMean]), Sm.scansMin, Sm.scansMax);
 
 % Go Home with a slow drive start. The link carries no BrakeDisengage, so
 % the master enters the operation tEnableMax after raising MotionEnable,
@@ -342,6 +367,72 @@ h = runUntil(h, 0.5, []);
 assert(h.m.doSafety == 1 && h.m.state == 1);
 fprintf('ok  e-stop\n');
 
+% Exchange summary (IR21-34), windows follow the heartbeat: the axis rests
+% in the chamber at 1 MPa and a 15 Hz tone of 0.1 MPa rides on the
+% transducer's voltage, so the pressure moves within a window and the
+% snapshot in IR19-20 (one scan in twelve) aliases the tone to 5 Hz. With
+% no late exchange, each master write closes one window: 12.5 scans on
+% average, 5 to 20 with the read call's jitter (up to 25 ms) in the write time.
+h.sl.ax.x = chamberPosition(h.sl, 1);
+h.link.cfg.lateExchangeRate = 0;
+tone = 0.1;                                     % [MPa]
+h.inputFcn = @(h) pressureVolts(h.sl, h.sl.ax.P + tone * sin(2 * pi * 15 * h.tick / 1000));
+h = runUntil(h, 1, []);
+nEx0 = rows(h.log.words);
+h.logScans = true;
+h.scanLog = zeros(0, 19);
+h = runUntil(h, 3, []);
+h.logScans = false;
+Sm = summaryWindows(h.scanLog, 65535);
+assert(Sm.nBoundary >= 55 && Sm.scansMin >= 5 && Sm.scansMax <= 20 && ...
+    abs(mean([Sm.win.scans]) - 12.5) < 0.5, '%d windows of %d to %d scans, mean %.2f', ...
+    Sm.nBoundary, Sm.scansMin, Sm.scansMax, mean([Sm.win.scans]));
+cr = checkReads(h, Sm, h.log.words(nEx0 + 1:end, :), 0.5);
+assert(cr.scansMin >= 5 && cr.scansMax <= 20);
+fprintf('ok  summary windows follow the heartbeat: %d windows, Scans %d to %d (mean %.2f; reads %d to %d), Seq +1 per read over %d reads\n', ...
+    Sm.nBoundary, Sm.scansMin, Sm.scansMax, mean([Sm.win.scans]), cr.scansMin, cr.scansMax, cr.nRead);
+assert(cr.stdMean < 0.5 * cr.stdSnap && cr.minRange >= 0.5 * cr.ptpLogged, ...
+    'window means std %.4f vs snapshots %.4f MPa; window range %.3f, logged pk-pk %.3f', ...
+    cr.stdMean, cr.stdSnap, cr.minRange, cr.ptpLogged);
+fprintf('ok  summary averages the tone: std of window means %.4f MPa against %.4f MPa of the snapshots (ratio %.2f), smallest window range %.3f of %.3f MPa pk-pk\n', ...
+    cr.stdMean, cr.stdSnap, cr.stdMean / cr.stdSnap, cr.minRange, cr.ptpLogged);
+h.inputFcn = [];
+h.sl.hook.pressureVolt = NaN;
+
+% Link loss: with no write the heartbeat is frozen and the window stays
+% open, to be closed by the first write after the link returns. With the
+% length cap at 25 scans the windows close without a write.
+nEx0 = rows(h.log.words);
+h.logScans = true;
+h.scanLog = zeros(0, 19);
+h = runUntil(h, 0.3, []);
+h.writeLost = true;
+h = runUntil(h, 0.5, []);
+h.writeLost = false;
+h = runUntil(h, 0.3, []);
+h.logScans = false;
+Sm = summaryWindows(h.scanLog, 65535);
+assert(Sm.scansMax >= 125 && sum([Sm.win.scans] >= 125) == 1, ...
+    'longest window %d scans after 0.5 s of lost writes', Sm.scansMax);
+fprintf('ok  summary through a write loss: one window of %d scans, Seq repeats, closed by the first write after it\n', Sm.scansMax);
+
+h.sl.s.fbExchangeSummary.cMaxScans = 25;
+h.logScans = true;
+h.scanLog = zeros(0, 19);
+h = runUntil(h, 0.3, []);
+h.writeLost = true;
+h = runUntil(h, 0.4, []);
+h.writeLost = false;
+h = runUntil(h, 0.3, []);
+h.logScans = false;
+h.sl.s.fbExchangeSummary.cMaxScans = 65535;
+Sm = summaryWindows(h.scanLog, 25);
+lost = Sm.win(Sm.winTick > Sm.scanTick(1) + 300 & Sm.winTick <= Sm.scanTick(1) + 700);
+assert(all([lost.scans] == 25) && numel(lost) >= 3 && numel(lost) <= 5, ...
+    '%d windows in the lost-write stretch, Scans %s', numel(lost), mat2str([lost.scans]));
+fprintf('ok  summary length cap: %d windows of %d scans without a write, Seq +%d\n', ...
+    numel(lost), lost(1).scans, numel(lost));
+
 % Swept volume: none at the end of travel, bore area per mm.
 assert(abs(sweptVolume(cfg.posEOT, cfg)) < 1e-9);
 assert(abs(sweptVolume(cfg.posEOT - 100, cfg) ...
@@ -349,6 +440,145 @@ assert(abs(sweptVolume(cfg.posEOT - 100, cfg) ...
 fprintf('ok  volume scaling (%.3f mL/mm)\n', mLPerMm(cfg));
 
 fprintf('all passed\n');
+end
+
+
+function row = scanRow(sl, tick, pre)
+% One scan's log of the exchange summary: the block's inputs, the globals
+% they come from (pre: velocity, torque and position as the scan found
+% them), the pressure register and the summary registers.
+fb = sl.s.fbExchangeSummary;
+row = [fb.Heartbeat, fb.Pressure, fb.Velocity, fb.Torque, fb.Position, ...
+    sl.G.G_sysActualPressure, pre, sl.G.G_mbActualPressure, ...
+    sl.G.G_mbSumPressureMean, sl.G.G_mbSumPressureMin, sl.G.G_mbSumPressureMax, ...
+    sl.G.G_mbSumVelocityMean, sl.G.G_mbSumTorqueMean, sl.G.G_mbSumPositionMean, ...
+    sl.G.G_mbSumScans, sl.G.G_mbSumSeq, tick];
+end
+
+
+function v = pressureVolts(sl, P)
+% The analog input voltage of the transducer at gauge pressure P (MPa): the
+% simulator's 4-20 mA loop over its range, through the shunt.
+mA = sl.sim.sensorZeroMa + sl.sim.sensorSpanMa * P / sl.sim.sensorRangeMPa;
+v = mA * sl.sim.sensorShuntOhm / 1000;
+end
+
+
+function S = summaryWindows(L, cap)
+% Check the slave's summary against its own log of inputs, scan by scan
+% (columns of scanRow). A window is closed by the scan whose heartbeat
+% differs from the previous scan's, or when it holds cap scans: Seq then
+% advances by one in that scan and the published values are the mean,
+% minimum and maximum of the window's scans, as single (the registers are
+% REAL). Between closing scans the registers do not change. The window
+% that was open when the log began is not checked, as its early scans are
+% not in the log. Returns S.win, one element per checked window (scans,
+% the means, tick of its closing scan), the counts and extremes.
+hb = L(:, 1); p = L(:, 2); v = L(:, 3); q = L(:, 4); x = L(:, 5);
+n = rows(L);
+% The block's inputs are the globals it is wired to, and the pressure
+% register is the same value as single
+assert(isequal(L(:, 2:5), L(:, 6:9)), 'block inputs differ from the globals in columns %s, max %g', mat2str(find(any(L(:, 2:5) ~= L(:, 6:9)))), max(max(abs(L(:, 2:5) - L(:, 6:9)))));
+assert(isequal(L(:, 10), double(single(p))), 'IR19-20 differs from the block''s pressure');
+seq = L(:, 18);
+dSeq = mod(diff(seq), 65536);
+first = find(dSeq > 0, 1) + 1;          % first closing scan in the log
+assert(~isempty(first), 'no window closed in the log');
+assert(all(diff(hb(1:first - 1)) == 0), 'the heartbeat changed without a window closing');
+reg = L(:, 11:18);
+changed = [false; any(diff(reg) ~= 0, 2)];
+count = 0;                              % scans in the open window
+S.win = struct('scans', {}, 'pressureMean', {}, 'velocityMean', {}, 'positionMean', {}, 'tick', {});
+open = first;                           % first scan of the open window
+nClose = 0;
+for i = first:n
+    closes = (i > first && (hb(i) ~= hb(i - 1) || count >= cap)) || i == first;
+    if i == first
+        assert(dSeq(i - 1) == 1, 'Seq advanced by %d', dSeq(i - 1));
+    else
+        assert(dSeq(i - 1) == closes, 'scan %d: Seq advanced by %d, expected %d', i, dSeq(i - 1), closes);
+        assert(changed(i) == closes, 'scan %d: registers %s', i, ternary(changed(i), 'changed', 'held'));
+    end
+    if closes && i > first
+        k = open:i - 1;
+        e = [mean(p(k)), min(p(k)), max(p(k)), mean(v(k)), mean(q(k)), mean(x(k))];
+        got = reg(i, 1:6);
+        assert(all(abs(got - double(single(e))) <= 2 * eps(single(e)) + 1e-12), ...
+            'scan %d: published %s, window %s', i, mat2str(got, 7), mat2str(e, 7));
+        assert(reg(i, 7) == numel(k), 'scan %d: Scans %d for a window of %d', i, reg(i, 7), numel(k));
+        S.win(end + 1) = struct('scans', numel(k), 'pressureMean', got(1), ...
+            'velocityMean', got(4), 'positionMean', got(6), 'tick', L(i, 19));
+        nClose = nClose + 1;
+    end
+    if closes
+        open = i;
+        count = 0;
+    end
+    count = count + 1;
+end
+S.nBoundary = nClose;
+S.scansMin = min([S.win.scans]);
+S.scansMax = max([S.win.scans]);
+S.winTick = [S.win.tick];
+S.scanTick = L(:, 19);
+S.log = L;
+end
+
+
+function r = checkReads(h, S, W, tSkip)
+% Check the master's reads (the rows of W, one per exchange, as the Read
+% block returned them) against the slave's summary. Each read carries the
+% summary registers of the scan it was served before: Seq is one more than
+% the read before (no write was lost, no exchange late), IR21-33 equal the
+% slave's registers of that Seq in the scan log, and Scans is in range. A
+% read before the log began is skipped. Then, from tSkip seconds on and for
+% windows of at least 10 scans: min < mean < max, and the means vary less
+% than the snapshots (IR19-20) do while the window range keeps a good part
+% of the logged pressure swing.
+map = h.map;
+L = S.log;
+ok = ~any(isnan(W), 2);
+W = W(ok, :);
+seq = W(:, map.ir.summarySeq);
+inLog = ismember(seq, L(:, 18));
+W = W(inLog, :);
+seq = seq(inLog);
+assert(rows(W) > 5, 'only %d reads fall in the log', rows(W));
+assert(all(mod(diff(seq), 65536) == 1), 'Seq between reads: %s', mat2str(mod(diff(seq), 65536)'));
+for j = 1:rows(W)
+    i = find(L(:, 18) == seq(j), 1);
+    u = @(k) modbusUnpack(W(j, k), W(j, k + 1));
+    got = [u(map.ir.pressureMean), u(map.ir.pressureMin), u(map.ir.pressureMax), ...
+        u(map.ir.velocityMean), u(map.ir.torqueMean), u(map.ir.positionMean), ...
+        W(j, map.ir.summaryScans)];
+    assert(isequal(got, L(i, 11:17)), 'read of Seq %d differs from the slave''s registers', seq(j));
+end
+r.nRead = rows(W);
+r.scansMin = min(W(:, map.ir.summaryScans));
+r.scansMax = max(W(:, map.ir.summaryScans));
+% Dynamics, once the window is a full one
+tRead = L(arrayfun(@(s) find(L(:, 18) == s, 1), seq), 19) / 1000;
+sel = tRead >= L(1, 19) / 1000 + tSkip & W(:, map.ir.summaryScans) >= 10;
+pm = arrayfun(@(j) modbusUnpack(W(j, map.ir.pressureMean), W(j, map.ir.pressureMean + 1)), find(sel));
+pn = arrayfun(@(j) modbusUnpack(W(j, map.ir.pressureMin), W(j, map.ir.pressureMin + 1)), find(sel));
+px = arrayfun(@(j) modbusUnpack(W(j, map.ir.pressureMax), W(j, map.ir.pressureMax + 1)), find(sel));
+ps = arrayfun(@(j) modbusUnpack(W(j, map.ir.pressure), W(j, map.ir.pressure + 1)), find(sel));
+r.stdMean = std(pm);
+r.stdSnap = std(ps);
+r.ptpLogged = max(L(:, 2)) - min(L(:, 2));
+r.minRange = min(px - pn);
+if tSkip > 0
+    assert(all(pn < pm & pm < px), 'min < mean < max fails');
+end
+end
+
+
+function s = ternary(c, a, b)
+if c
+    s = a;
+else
+    s = b;
+end
 end
 
 
@@ -404,9 +634,11 @@ for n = 1:round(T * 1000)
             case 'exchange'
                 if h.readLost || ev.failed
                     h.log.read(end + 1, :) = [NaN, NaN];
+                    h.log.words(end + 1, :) = NaN;
                 else
                     h.mbRead = ev.data;
                     h.log.read(end + 1, :) = [ev.dur, ev.data(h.map.ir.heartbeatEcho)];
+                    h.log.words(end + 1, :) = ev.data;
                 end
                 h = stepMaster(h);
                 words = [];
@@ -433,7 +665,17 @@ for n = 1:round(T * 1000)
         for q = reqs
             h.link = modbusLink('answer', h.link, q.slot, readInputRegisters(h.sl, q.start, q.n));
         end
+        if ~isempty(h.inputFcn)
+            h.sl.hook.pressureVolt = h.inputFcn(h);
+        end
+        if h.logScans
+            % (the axis model sets these after a scan, for the next one)
+            pre = [h.sl.G.G_sysActualVelocity, h.sl.G.G_sysActualTorque, h.sl.G.G_sysActualPosition];
+        end
         h.y = scan(h.sl);
+        if h.logScans
+            h.scanLog(end + 1, :) = scanRow(h.sl, h.tick, pre);
+        end
         [h.link, reqs] = modbusLink('due', h.link, k, 'write');
         for q = reqs
             writeHoldingRegisters(h.sl, q.start, q.words);

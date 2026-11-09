@@ -1,12 +1,17 @@
-function buf = traceDrain(buf, ring)
+function [buf, new] = traceDrain(buf, ring)
 %TRACEDRAIN Append the records of the ring that are newer than the buffer.
-%   buf = traceDrain(buf, ring) takes the valid rows of ring whose record
-%   number is above buf.lastSeq (see traceStart for the buffer and for
-%   validity), puts them in record order and appends the leading
-%   consecutive run to buf.data, doubling its capacity as needed. The
-%   rows after a missing number stay in the ring and are taken by a later
-%   call, once the row between is written.
+%   [buf, new] = traceDrain(buf, ring) takes the valid rows of ring whose
+%   record number is above buf.lastSeq (see traceStart for the buffer and
+%   for validity), puts them in record order and appends the leading
+%   consecutive run to buf.data (traceAppend), doubling its capacity as
+%   needed. The rows after a missing number stay in the ring and are
+%   taken by a later call, once the row between is written.
 %
+%   new holds the rows taken, k x traceLayout().nCol (0 x nCol when
+%   there are none). With buf.keep false (traceStart) they are not
+%   appended and buf.n stays 0; lastSeq, missed and gaps are updated all
+%   the same.
+
 %   When the first new record is not buf.lastSeq + 1, the ring overwrote
 %   records before they were read: the number lost is added to buf.missed
 %   and [first new number, number lost] is appended to buf.gaps. The
@@ -16,6 +21,7 @@ function buf = traceDrain(buf, ring)
 %   scalar 0 when the model is not running) leaves buf unchanged.
 
 L = traceLayout();
+new = zeros(0, L.nCol);
 [ring, ok] = traceRingCheck(ring);
 if ~ok
     return
@@ -43,15 +49,9 @@ if lost > 0
     buf.gaps(end + 1, :) = [s(1), lost];
 end
 
-nNew = numel(s);
-cap = size(buf.data, 1);
-if buf.n + nNew > cap
-    while buf.n + nNew > cap
-        cap = 2 * cap;
-    end
-    buf.data(cap, L.nCol) = 0;      % grows by zero fill
+new = ring(rows, 1:L.nCol);
+if buf.keep
+    buf = traceAppend(buf, new);
 end
-buf.data(buf.n + (1:nNew), :) = ring(rows, 1:L.nCol);
-buf.n = buf.n + nNew;
 buf.lastSeq = s(end);
 end

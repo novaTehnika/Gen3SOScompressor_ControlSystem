@@ -86,6 +86,14 @@
      G_mbActualTorque      AT %QD73820 : REAL  (* IR15-16: % of rated *)
      G_mbCommandedPosition AT %QD73824 : REAL  (* IR17-18: mm *)
      G_mbActualPressure    AT %QD73828 : REAL  (* IR19-20: MPa gauge *)
+     G_mbSumPressureMean   AT %QD73832 : REAL  (* IR21-22: mean pressure of the last exchange window, MPa gauge *)
+     G_mbSumPressureMin    AT %QD73836 : REAL  (* IR23-24: minimum pressure of that window, MPa gauge *)
+     G_mbSumPressureMax    AT %QD73840 : REAL  (* IR25-26: maximum pressure of that window, MPa gauge *)
+     G_mbSumVelocityMean   AT %QD73844 : REAL  (* IR27-28: mean velocity of that window, mm/s *)
+     G_mbSumTorqueMean     AT %QD73848 : REAL  (* IR29-30: mean torque of that window, % of rated *)
+     G_mbSumPositionMean   AT %QD73852 : REAL  (* IR31-32: mean position of that window, mm *)
+     G_mbSumScans          AT %QW73856 : UINT  (* IR33: scans in that window; 0 before the first window closes *)
+     G_mbSumSeq            AT %QW73858 : UINT  (* IR34: windows closed, wraps 65535 -> 0 *)
 
      G_mbProbeWritten      AT %QD74592 : UDINT  (* IR401-402: records written so far *)
      G_mbProbeMark         AT %QD74596 : UDINT  (* IR403-404: index of the record written in the scan of the last arm *)
@@ -519,6 +527,20 @@
      G_sysProbeState           : UINT := UINT#0
      G_sysProbeXfer            : UINT := UINT#0
      G_sysProbeIndex           : INT := 0         (* Loop counter of PRG_Output's window copy *)
+
+
+     (* ========================================================================
+        EXCHANGE SUMMARY (fbExchangeSummary outputs, published by PRG_Output)
+        ======================================================================== *)
+
+     G_sysSumPressureMean      : LREAL := 0.0
+     G_sysSumPressureMin       : LREAL := 0.0
+     G_sysSumPressureMax       : LREAL := 0.0
+     G_sysSumVelocityMean      : LREAL := 0.0
+     G_sysSumTorqueMean        : LREAL := 0.0
+     G_sysSumPositionMean      : LREAL := 0.0
+     G_sysSumScans             : UINT := UINT#0
+     G_sysSumSeq               : UINT := UINT#0
    END_VAR
 
 

@@ -1,8 +1,14 @@
 function cfg = masterConfig()
 %MASTERCONFIG Constants for the master state machine and signal scaling.
 
+% Values that other entries are computed from are locals: the MATLAB
+% Function block compiles this file, and MATLAB Coder rejects a field added
+% to cfg after a field of cfg has been read.
+exchangePeriod  = 0.05;         % s
+trackMaxSeconds = 3600;         % s
+
 cfg.dt             = 0.025;     % model step (s)
-cfg.exchangePeriod = 0.05;      % Modbus write + read period (s), a multiple of dt
+cfg.exchangePeriod = exchangePeriod;  % Modbus write + read period (s), a multiple of dt
 cfg.commTimeout    = 0.3;       % slave counter unchanged this long = link lost (s): several exchanges, to ride out a slow one
 
 % Cylinder geometry. Displayed positions are distances from the end of
@@ -36,6 +42,11 @@ cfg.oxygenRatio  = 1.0;     % oxygen charge as STP volume per saline volume (1.0
 % posMax <= G_cfgPosSoftLimitMax.
 cfg.posMin = 0;             % mm
 cfg.posMax = 367;           % mm
+
+% Manual position target (mm from the end of travel) shown before a
+% connection: inside the cylinder. Once the slave link is up, and whenever
+% manual control is engaged, the target takes the piston's position.
+cfg.targetFromEotDefault = 150;
 
 % Operator speed: one setting, as a percentage of speedMax, for jog,
 % position moves, Go Home and homing. It is sent as the jog reference and
@@ -74,4 +85,17 @@ cfg.procSettleTime   = 2.0;  % s inside the band for "settled", default
 cfg.procEndVolume    = 5;    % mL swept: at or below this an alsoWhen 'endOfTravel' step ends (above the slave's end margin of 1.0 mm, 3.4 mL)
 cfg.procMaxChecks    = 6;    % checklist items per step (the panel's checkbox pool)
 cfg.procMaxParams    = 8;    % parameters per procedure (the panel's field pool)
+
+% Trace recorder and live plot (operator app).
+cfg.traceIntervalPresets = [0.05 0.1 0.5 1 10 60];  % s, the Trace panel's record intervals
+cfg.traceIntervalDefault = 0.05;    % s, the interval at app start (every exchange)
+cfg.livePlotSeconds      = 600;     % s of history in the live plot
+cfg.livePlotPeriod       = 0.5;     % s between live plot redraws (a multiple of displayPeriod)
+cfg.livePlotPosition     = [];      % [x y width height] px of the live plot window when opened; [] for MATLAB's default. View > Side by side places it regardless
+cfg.procRecordDefault    = 1;       % s, a procedure's record interval when it gives none
+
+% Track steps (procedure): the table the shell plays, one value per exchange.
+cfg.trackMaxSeconds      = trackMaxSeconds;  % s, longest track series
+cfg.trackTableLength     = round(trackMaxSeconds / exchangePeriod) + 1;  % values in TrackTable
+cfg.trackPressureSlopeMax = Inf;    % atm/s a pressure track may change at; Inf: not checked
 end

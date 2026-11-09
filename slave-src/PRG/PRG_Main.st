@@ -69,6 +69,8 @@
        (* Step probe: scan-rate data capture, called last
        fbProbe             : FB_Probe
        nProbeWord          : INT              (* Index of the window copy out of fbProbe.Stage
+       (* Exchange summary: per-heartbeat-window statistics of the pressure and the axis
+       fbExchangeSummary   : FB_ExchangeSummary
        (* Timers — each has exactly one call site (see end of body)
        tStateTimer         : TON
        tBrakeTimer         : TON
@@ -1376,6 +1378,29 @@ IF G_sysScanCounter >= UINT#65535 THEN
 ELSE
     G_sysScanCounter := G_sysScanCounter + UINT#1;
 END_IF;
+
+
+(* --------------------------------------------------------------------------
+   Exchange Summary
+   Summarises the scans between two changes of the master's heartbeat (see
+   FB_ExchangeSummary). The outputs change only in the scan a window closes;
+   PRG_Output publishes them in IR21-34.
+   -------------------------------------------------------------------------- *)
+fbExchangeSummary(
+    Heartbeat := G_mbHeartbeat,
+    Pressure := G_sysActualPressure,
+    Velocity := G_sysActualVelocity,
+    Torque := G_sysActualTorque,
+    Position := G_sysActualPosition
+);
+G_sysSumPressureMean := fbExchangeSummary.PressureMean;
+G_sysSumPressureMin := fbExchangeSummary.PressureMin;
+G_sysSumPressureMax := fbExchangeSummary.PressureMax;
+G_sysSumVelocityMean := fbExchangeSummary.VelocityMean;
+G_sysSumTorqueMean := fbExchangeSummary.TorqueMean;
+G_sysSumPositionMean := fbExchangeSummary.PositionMean;
+G_sysSumScans := fbExchangeSummary.Scans;
+G_sysSumSeq := fbExchangeSummary.Seq;
 
 
 (* --------------------------------------------------------------------------
