@@ -2255,7 +2255,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % The volume panel's view selector and Zero button, in the panel's
         % grid under the value
         function createVolumeControls(app, grid)
-            grid.RowHeight = {'1x', 26};
+            grid.RowHeight = {'1x', 30};
             grid.ColumnWidth = {124, '1x'};
             app.VolumeValue.Layout.Column = [1 2];
 
@@ -2271,21 +2271,21 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.VolumeSweptButton.Tag = 'swept';
             app.VolumeSweptButton.FontSize = 10;
             app.VolumeSweptButton.Tooltip = {'Swept volume: the saline still deliverable, without the dead volume'};
-            app.VolumeSweptButton.Position = [2 0 38 26];
+            app.VolumeSweptButton.Position = [2 2 38 26];
 
             app.VolumeMixingButton = uitogglebutton(app.VolumeViewGroup);
             app.VolumeMixingButton.Text = 'Mix';
             app.VolumeMixingButton.Tag = 'mixing';
             app.VolumeMixingButton.FontSize = 10;
             app.VolumeMixingButton.Tooltip = {'Mixing volume: the swept volume plus the dead volume that takes part in mixing'};
-            app.VolumeMixingButton.Position = [42 0 38 26];
+            app.VolumeMixingButton.Position = [42 2 38 26];
 
             app.VolumeSinceZeroButton = uitogglebutton(app.VolumeViewGroup);
             app.VolumeSinceZeroButton.Text = 'Incr';
             app.VolumeSinceZeroButton.Tag = 'sinceZero';
             app.VolumeSinceZeroButton.FontSize = 10;
             app.VolumeSinceZeroButton.Tooltip = {'Volume delivered since Zero was pressed; -- until then'};
-            app.VolumeSinceZeroButton.Position = [82 0 38 26];
+            app.VolumeSinceZeroButton.Position = [82 2 38 26];
 
             app.VolumeZeroButton = uibutton(grid, 'push');
             app.VolumeZeroButton.Layout.Row = 2;
@@ -2301,7 +2301,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % The pressure panel's unit selector, in the panel's grid under
         % the value
         function createPressureControls(app, grid)
-            grid.RowHeight = {'1x', 26};
+            grid.RowHeight = {'1x', 30};
             grid.ColumnWidth = {124, '1x'};
             app.PressureValue.Layout.Column = [1 2];
 
@@ -2317,21 +2317,21 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.PressureUnitPsiButton.Tag = 'psi';
             app.PressureUnitPsiButton.FontSize = 10;
             app.PressureUnitPsiButton.Tooltip = {'Show pressures in psi, absolute'};
-            app.PressureUnitPsiButton.Position = [2 0 38 26];
+            app.PressureUnitPsiButton.Position = [2 2 38 26];
 
             app.PressureUnitAtmButton = uitogglebutton(app.PressureUnitGroup);
             app.PressureUnitAtmButton.Text = 'atm';
             app.PressureUnitAtmButton.Tag = 'atm';
             app.PressureUnitAtmButton.FontSize = 10;
             app.PressureUnitAtmButton.Tooltip = {'Show pressures in atm, absolute'};
-            app.PressureUnitAtmButton.Position = [42 0 38 26];
+            app.PressureUnitAtmButton.Position = [42 2 38 26];
 
             app.PressureUnitMPaButton = uitogglebutton(app.PressureUnitGroup);
             app.PressureUnitMPaButton.Text = 'MPa';
             app.PressureUnitMPaButton.Tag = 'MPa';
             app.PressureUnitMPaButton.FontSize = 10;
             app.PressureUnitMPaButton.Tooltip = {'Show pressures in MPa, absolute'};
-            app.PressureUnitMPaButton.Position = [82 0 38 26];
+            app.PressureUnitMPaButton.Position = [82 2 38 26];
         end
 
         % Create UIFigure and components
@@ -2459,7 +2459,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.FaultActiveLampLabel.Layout.Row = 1;
             app.FaultActiveLampLabel.Layout.Column = 2;
             app.FaultActiveLampLabel.HorizontalAlignment = 'right';
-            app.FaultActiveLampLabel.Text = 'Fault Active';
+            app.FaultActiveLampLabel.Text = 'Fault';
 
             % Create FaultActiveLamp
             app.FaultActiveLamp = uilamp(app.LampGrid);
@@ -2472,7 +2472,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.MixerOnLampLabel.Layout.Row = 1;
             app.MixerOnLampLabel.Layout.Column = 4;
             app.MixerOnLampLabel.HorizontalAlignment = 'right';
-            app.MixerOnLampLabel.Text = 'Mixer On';
+            app.MixerOnLampLabel.Text = 'Mixer';
 
             % Create MixerOnLamp
             app.MixerOnLamp = uilamp(app.LampGrid);
