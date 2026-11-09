@@ -57,6 +57,9 @@ from runner import Case, run_cases
 # %% ===== STUDY VARIABLES ===============================================
 RATIOS = (1.0, 1.5, 2.0, 2.5, 3.0)      # [-] STP oxygen to saline
 TRACE_RATIO = 1.0                       # [-] ratio of the plotted traces
+# [(mm/s)/MPa, (mm/s)/(MPa s), MPa/mm] The slave's gains and stop-law
+# stiffness before the retune on the measured chamber
+EARLIER = {'Kp': 0.5, 'Ki': 0.2, 'StopStiffness': 100.0}
 # Hose procedures: StudyParams.hose_before for each
 PROCEDURES = {'hose opened after mixing': False,
               'hose opened before compression': True}
@@ -65,24 +68,24 @@ PROCEDURES = {'hose opened after mixing': False,
 def controller_set():
     """Return the controllers compared.
 
-    The slave arms are the GVL (StopVelMin 2 mm/s, which passes the
-    1.4 mm/s the measured outflow needs) and the earlier StopVelMin of
-    0.5 mm/s as a reference. The scheduled arms are
-    ScheduledSlaveController at three crossovers with the measured
-    bounds (K 1.0 GPa, dead volume 109 mL, hose compliance
-    0.12 mL/MPa). The flow-feedforward arm is a bound; the feedforward
-    is not implementable on the machine.
+    The slave arms are the GVL (Kp 1.5, Ki 0.6, a stop-law stiffness of
+    15 MPa/mm and StopVelMin 2 mm/s), the GVL with the block's floor
+    that follows the outflow and its forward stop (FloorEnable), and
+    the earlier gains (Kp 0.5, Ki 0.2, 100 MPa/mm) as a reference. The
+    scheduled arms are ScheduledSlaveController at two crossovers with
+    the measured bounds (K 1.0 GPa, dead volume 109 mL, hose compliance
+    0.12 mL/MPa), a comparison that is not in the slave. The
+    flow-feedforward arm is a bound; the feedforward is not
+    implementable on the machine.
     """
     S = ctl.SlaveController
     Sch = ctl.ScheduledSlaveController
     sched = dict(V_dead_cfg=109e-6, K_cfg=1.0e9, C_hose_cfg=1.2e-13)
     return [
         S('slave (GVL)'),
-        S('slave vmin0.5 (earlier)', StopVelMin=0.5),
-        Sch('sched wc6', wc=6.0, **sched),
+        S('slave (GVL) + floor', FloorEnable=True),
+        S('slave earlier gains', **EARLIER),
         Sch('sched wc11', wc=11.0, **sched),
-        Sch('sched wc11 ki1 v7', wc=11.0, ki_ratio=1.0, VelMax=7.0,
-            **sched),
         Sch('sched wc16', wc=16.0, **sched),
         S('slave +flowFF (bound)', flow_ff=True),
     ]

@@ -2,8 +2,8 @@
 
 Open items after the step probe, position speed, configuration and cleanup
 work (PR #21), the simulator, models and link timing work (PR #22), and
-the pressure-loop design, bench and scheduled-controller work (PR #17 and
-the scheduled pressure controller), the pressure input calibration, and
+the pressure-loop design and bench work (PR #17), the pressure input
+calibration, and
 the 5 November characterisation with its carry-over into the models, the
 GVL and the design studies (PR #38).
 Grouped by where they have to be done. Settled: the mechanical pressure
@@ -17,12 +17,17 @@ build predates the step probe's 4096-record ring and the declarations
 below, so rebuild with them (the `.st` headers and the GVL reference are
 the reference for each) and confirm:
 
-- [ ] Rebuild with the gain schedule's measured drive and hose
-      (`G_cfgPressureSchedDeadTime` 0.0182 s, `G_cfgPressureSchedDriveLag`
-      0.0075 s, `G_cfgPressureSchedHoseVol` 57.9 mL; PR #38). The
-      schedule is off by default, so nothing else changes until it is
-      enabled; they were measured with `G_cfgDirectCtrlFilterTime` at
-      0.02 s, so remeasure the drive if that setting changes.
+- [ ] Rebuild with the single pressure controller: delete the
+      `FB_PressureSchedule` POU and its instance, every
+      `G_cfgPressureSched*` and `G_cfgPressureScheduleEnable`, and
+      `PRG_Main`'s schedule locals (`rSched*`, `bPressureSched*`,
+      `rPressureKp`/`Ki`/`VelMax`/`Stiffness`/`IntegScale`); redeclare
+      `FB_PressureController` from its header (the `Position` and floor
+      inputs, the `Latched` and `FloorError` outputs, the two 64-sample
+      rings of the new type `ARRAY64LREAL`, no `IntegScale`); add the ten
+      `G_cfgPressureFloor*`; and set `G_cfgPressureKp` 1.5,
+      `G_cfgPressureKi` 0.6 and `G_cfgPressureStopStiffness` 15.0. The
+      gains were chosen with `G_cfgDirectCtrlFilterTime` at 0.02 s.
 - [ ] Rebuild with the current `FB_Probe` (the 4096-record ring, 16 s;
       HR111-114, IR401-524) and `G_cfgProbeEnable`,
       `G_cfgProbeFillPerScan`.
@@ -52,7 +57,7 @@ the reference for each) and confirm:
         `TetherHold`; `ParamError` local), `FB_PressureController` and
         `FB_PressureInput` (their `Error`/`VelLimit`/`Saturated`/
         `LoopMa`/`OutOfRange`/`ParamError` as locals),
-        `FB_PressureSchedule` (`Lag` local), `FB_SafetyMonitor` (the six
+        `FB_SafetyMonitor` (the six
         `Fault*`; three as locals).
   - [ ] `G_cfgGearRatio` and `G_cfgLeadScrewPitch` keep their values;
         only their comments changed.
@@ -285,7 +290,7 @@ specified here; the implementation plan decides the files.
       `bench/MeasurementPlan.md` sessions 0 and 1 (5 November; results in
       `bench/characterisation/README.md` section 8) and its carry-over
       into `models/params.py` (with the series compliance of eq. (49)),
-      `robust.py`, the GVL's gain schedule and the design studies.
+      `robust.py`, the GVL's pressure-loop gains and the design studies.
 - [ ] Measurement plan session 2, the oxygen charge: the dissolution
       time constant `tauDiss` (a position hold at 10 MPa), the stiffness
       with free gas, the hose opening at pressure under the probe, and
@@ -311,7 +316,7 @@ specified here; the implementation plan decides the files.
       because `Y_DirectControl`'s FilterTimeConstant went from a
       hard-wired 0.05 s to `G_cfgDirectCtrlFilterTime` 0.02 s. Decide the
       setting (a lag inside the pressure loop: shorter raises the
-      scheduled controller's margin) and remeasure the drive with
+      loop's margin) and remeasure the drive with
       `frictionRun('s1', 'steps')` whenever it changes.
 - [ ] `frictionRun`'s 90 % torque abort trips on the inertia of a 5 mm/s
       start or stop (80 to 100 % for tens of ms), so the unloaded sets
@@ -351,8 +356,8 @@ specified here; the implementation plan decides the files.
       returning, every stop within the slave's allowance.
 - [ ] Decide whether to tighten the stop law's allowance to the fit
       (`G_cfgPressureDecel` 50 mm/s² against the measured 77 or more;
-      the unscheduled stop law has no delay term, and
-      `FB_PressureSchedule` computes its own `Lag`). The fit's residual
+      the stop law allows one scan of delay against the measured 16 to
+      19 ms). The fit's residual
       is 28 % of stops a few µm long, so a second run at 0.5 and 1 mm/s
       would pin the two terms better.
 - [ ] Confirm that `Y_DirectControl`'s `Acceleration` input limits the
@@ -371,7 +376,7 @@ specified here; the implementation plan decides the files.
       compression and opens after mixing; a switched bypass orifice is
       deferred. With the 6 ft hose, keep oxygen runs at 1:1 or accept
       the degassed slug. The remedies: open the proximal valve before
-      the compression (the scheduled controller then delivers 2:1 at
+      the compression (the loop then delivers 2:1 at
       10 MPa in every plausible case), or fit a bypass metering orifice
       of 0.2 mm (Cv about 0.0013, five seconds to fill the hose) opened
       ahead of the ball valve (`study_hose_opening.py`). The purge must
@@ -406,52 +411,43 @@ specified here; the implementation plan decides the files.
 
 ## Open decisions
 
-- [ ] The scheduled pressure controller is ported (`FB_PressureSchedule`
-      behind `G_cfgPressureScheduleEnable`, off by default; the stiffness
-      bound taken at the present and the target pressure; lockstep with
-      the Python reference to 1e-9; the saline volume and charge arrive in
-      HR9-12). Commission it in this order: the stiffness estimate against
-      the measured slope on the characterisation bench; a water-only
-      delivery with the full valve sequence, comparing the opening dip and
-      the purge-closing rise with the model's 0.8 and 0.9 MPa at the
-      11 rad/s crossover; oxygen at 1:1, then 2:1. The GVL gains let the
-      purge closing reach 12.1 MPa in every plausible case; until the
-      schedule is on, stop the piston before shutting the distal valve.
+- [ ] Commission the retuned pressure loop (Kp 1.5, Ki 0.6, stop-law
+      stiffness 15 MPa/mm) in this order: the loop's crossover on the
+      bench's K ramps (`bench/characterisation/README.md` section 9); a
+      water-only compression to 10 MPa, comparing the arrival and the
+      overshoot with the model's 2.6 s and 0.2 MPa; a water-only
+      delivery with the full valve sequence, comparing the opening dip
+      and the purge-closing rise with the model's 0.8 and 0.9 MPa; then
+      oxygen at 1:1. The gains are simulation-tuned on one bench
+      session's series compliance; Kp 1.0 is the fallback if the bench
+      shows less margin.
 - [ ] An on-line stiffness estimate (dP against dx while the piston moves)
-      as a monitor beside the configured bound, logging its value and
-      flagging disagreement, which is the schedule's one failure mode (a
-      wrong configuration). Letting it raise the gain is a later,
-      reversible step; model predictive control was considered and set
-      aside (scan rate, uncertain gas model, no sensor for the valve
-      events).
+      as a monitor, logging its value and flagging a chamber stiffer than
+      the fixed gain allows (a crossover above about 11 rad/s: hose shut
+      at a low fill). Model predictive control and a gain schedule were
+      considered and set aside (the schedule gave the results of the
+      fixed gain on the measured chamber).
 - [ ] A transducer in the tube downstream of the distal valve would give
       the outflow and the valve state (the flow feedforward the studies
       carry as a bound, limited by the loop's 50 ms); a transducer at the
       distal end of the hose gives no usable lead (the pressure wave
       crosses the 6 ft hose in 6 ms). Decide whether the extra input is worth
       it.
-- [x] Port the stop-law floor policy (the switched floor with the
-      forward stop) as `FB_PressureFloor`, behind
-      `G_cfgPressureFloorEnable`, off by default.
-- [ ] Commission the stop-law floor: rebuild with `FB_PressureFloor`,
-      its `PRG_Main` wiring, the `G_cfgPressureFloor*` declarations and
-      `FB_PressureController`'s `Saturated` and `Error` outputs; then a
-      water-only delivery with the floor on, checking that the latch sets
-      within a second of the distal valve opening and releases when it
-      shuts, and that the closing peak stays near the model's 10.4 MPa
-      (12.1 without the floor). On the GVL gains it removes the
-      purge-closing peak through the ceiling; on the scheduled controller
-      at 11 rad/s it takes 2.5:1 at 11 MPa from 81 % to every plausible
-      case.
-- [ ] Decide the schedule's default switch and crossover once it has run
-      on the machine. With the November drive, 11 rad/s keeps 46° of
-      phase margin and 16 rad/s 29°; 2.5:1 at 11 MPa needs 16 rad/s or
-      the floor policy above. With the October drive,
-      `G_cfgPressureSchedCrossover` 11 rad/s overshot a gas-dominated
-      chamber by 1 MPa and 6 rad/s by 0.06 MPa (the figures are in the
-      message of commit b457360; rerun that case with the November drive;
-      `design/pressure-loop/test_model.py` checks only the 6 rad/s case,
-      overshoot below 0.3 MPa).
+- [x] The stop-law floor (the switched floor with the forward stop) is
+      part of `FB_PressureController`, behind `G_cfgPressureFloorEnable`,
+      off by default.
+- [ ] Commission the stop-law floor after the retuned loop: a water-only
+      delivery with `G_cfgPressureFloorEnable` TRUE, checking that the
+      latch (`fbPressureCtrl.Latched`) sets within a second of the distal
+      valve opening and releases when it shuts, and that the closing peak
+      stays near the model's 10.4 MPa (10.9 without the floor). It is
+      what 2.5:1 at 11 MPa needs to stay under the ceiling in every
+      plausible case.
+- [ ] HR9-12 (the saline volume and oxygen charge of the fill) are still
+      written by the master and received by the slave, which no longer
+      uses them. Decide whether to keep them for a later use (a stiffness
+      monitor, logging) or to drop them from the protocol, the shell and
+      the operator app.
 - [ ] The probe's record index wraps after 2^32 scans (about 200 days at
       4 ms of uninterrupted running), and the master does not handle the
       wrap.

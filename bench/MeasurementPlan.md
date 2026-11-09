@@ -29,7 +29,7 @@ sequences them and says what each run is for.
 | Orifice `Cd` | 1 | deliveries at 4, 7 and 10 MPa, discharge weighed |
 | Hose procedure inputs: purge volume, `tube_refills`, `Tclose` | 1 and 2 | observed during the deliveries |
 | Dissolution time constant `tauDiss` | 2 | a position hold at 10 MPa with a 1:1 charge |
-| Stiffness with free gas (the gas model, the schedule's bound) | 2 | compression ramps with the charge |
+| Stiffness with free gas (the gas model) | 2 | compression ramps with the charge |
 | Hose opening at pressure (eq. 43, the degassing threshold) | 2 | the proximal valve opened at 10 MPa under the probe |
 | Supply pressure `P_supply` | 2 | the gauge when the charge is admitted |
 
@@ -179,12 +179,12 @@ no second fill is needed.
    opts.probe = true;
    r1 = charRun('K300', kPath, opts);  r2 = charRun('K300', kPath, opts);  r3 = charRun('K300', kPath, opts);
    rk1 = charBulkModulus({r1.file, r2.file, r3.file}, struct('fillVolume_mL', V1));
-   sc  = charScheduleCheck({r1.file, r2.file, r3.file}, struct('salineVolume_mL', V1));
+   wc = benchGvl().G_cfgPressureKp * [rk1.segments.dPdx]   % rad/s, the loop's crossover on this chamber
    ```
 
-   The schedule check is the first commissioning step of the gain
-   schedule: the bound must not sit below the measured stiffness. The
-   same logs give the friction reversal under load and the bound on the
+   The crossover, the loop gain times the measured stiffness, should
+   sit at or below about 11 rad/s (characterisation README section 9).
+   The same logs give the friction reversal under load and the bound on the
    drive path's stiffness, `charDrivePath({r1.file, r2.file, r3.file})`:
    the up/down offset of the motor position at the same pressure,
    through a 25 kN reversal.
@@ -339,8 +339,6 @@ state.
    rc = charRun('K300_o2', kPath, opts);
    rkc = charBulkModulus(rc.file, struct('fillVolume_mL', V1, 'chargeRatio', 1, ...
        'pressureRange', [0.5 11], 'minRows', 8));
-   scg = charScheduleCheck(rc.file, struct('salineVolume_mL', V1, 'oxygenRatio', 1, ...
-       'bulk', struct('pressureRange', [0.5 11], 'minRows', 8)));
    ```
 
    On the 30 and 31 October logs the free gas above 6 MPa was four to
@@ -370,8 +368,8 @@ state.
    weighing the discharge until solution appears (the degassed slug the
    hose model carries as 2 to 3 mL behind the hose's 58 mL of virgin saline),
    closed with the piston stopped, the pause, reopened to `posStop`.
-   Weigh the delivered solution. Do not run a 2:1 charge until the
-   schedule is commissioned: it degasses at the opening.
+   Weigh the delivered solution. Do not run a 2:1 charge with the
+   6 ft hose opened after mixing: it degasses at the opening.
 
 ## Carrying the results over
 
@@ -386,9 +384,10 @@ state.
 - `design/pressure-loop/robust.py`: narrow the ranges to the new spread,
   then rerun `study_robust`, `study_compare` and `study_delivery` with
   the settled hose procedure.
-- The GVL: `G_cfgPressureSchedBulkModulus`, `HoseCompliance` and
-  `PassagesVolume` from the fits (upper bounds, as the schedule needs);
-  the stop allowance (`G_cfgPressureDecel` and its delay) from
+- The GVL: `G_cfgPressureKp` so that the crossover on the stiffest
+  chamber pressure mode runs on stays near 11 rad/s, and
+  `G_cfgPressureStopStiffness` above every measured dP/dx; the stop
+  allowance (`G_cfgPressureDecel` and its delay) from
   `rs.T0_s` and `rs.D_mm_s2`; `masterConfig.deadVolume` if the passages
   changed with the fittings.
 - `slave-sim/slaveSimConfig.m`: `chamberContactPos` from the cylinder

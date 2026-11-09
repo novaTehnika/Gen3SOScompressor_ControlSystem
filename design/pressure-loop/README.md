@@ -123,7 +123,9 @@ StopVelMin of 0.5 mm/s, which sits 2 MPa low. The degassed volume also depends o
 hose is opened at pressure. Each run records its own event times
 (`Result.events`), and the metrics use them.
 
-**Scheduled slave controller.** The candidate for the slave. It runs
+**Scheduled slave controller.** A comparison arm that is not in the
+slave: with the measured chamber it gives the results of the fixed
+gain it arrives at (see the results). It runs
 `FB_PressureController` with Kp, Ki and the stop law set every scan from
 an upper bound on the chamber stiffness computed from what the slave
 has: the measured pressure, the piston position against the limit
@@ -146,8 +148,7 @@ stiffness and for the measurement lag, through the block's VelMax
 input. The integrator is held at zero until the pressure first comes
 within 0.5 MPa of the target, because the low scheduled gain would
 otherwise let it wind up on the approach. The block multiplies its
-stored integral by Ki, so the integral is rescaled when Ki changes; the
-Structured Text port must do the same.
+stored integral by Ki, so the integral is rescaled when Ki changes.
 
 **Stop-law floor policies.** The stop law clamps the velocity to zero
 at zero error, which suits a sealed chamber; with the outlet open the
@@ -155,7 +156,11 @@ piston must keep moving at the outflow speed to hold the pressure, and
 `StopVelMin` is the floor that lets it. `FloorPolicy` replaces the fixed
 floor with one set every scan from what the slave measures, and can add
 a forward stop. It applies to `SlaveController` and
-`ScheduledSlaveController` through their `floor` argument. The
+`ScheduledSlaveController` through their `floor` argument; the block
+has the `switched` policy with the forward stop built in, behind
+`G_cfgPressureFloorEnable` (the override `FloorEnable=True`), and a
+controller given a `FloorPolicy` runs with the block's own floor off.
+The
 `switched` policy, eq. (46), detects the outflow without a stiffness
 value: in a sealed chamber a piston moving forward raises the pressure,
 so a forward-moving piston under a clamped command with the pressure
@@ -868,71 +873,13 @@ the forward stop run in a delivery. In the slave it is `FB_PressureFloor`,
 ahead of the schedule and the controller ("Porting the floor"). None of it helps the present procedure with the
 6 ft hose, whose limit is the opening drop.
 
-## Porting the schedule
+## The floor in the slave
 
-`FB_PressureSchedule` (`slave-src/FB/`) is the port of
-`ScheduledSlaveController`. It is off by default and is selected on
-entry to pressure mode by `G_cfgPressureScheduleEnable`; its settings
-are the `G_cfgPressureSched*` values of the GVL, except the saline volume and
-the oxygen charge of the fill, which the master writes in holding registers
-HR9-12 and the slave latches on entry to pressure mode. `FB_PressureController`
-gains an `IntegScale` input, because PRG_Main cannot write the block's
-stored integral.
-
-The reference's arguments map to the settings as follows: `wc` to
-`Crossover`, `K_cfg` to `BulkModulus`, `V_l_cfg` to `SalineVolume` (HR9-10),
-`V_dead_cfg` to `PassagesVolume` plus `HoseVolume` and `C_hose_cfg` to
-`HoseCompliance`, both hose terms counted only when `HoseOpen` is set,
-`ratio_cfg` to `OxygenRatio` (HR11-12), `ki_ratio` to `KiRatio`, `kp_min` and
-`kp_max` to `KpMin` and `KpMax`, and `e_int` to `ArriveBand`. The lag of
-eq. (41) is built from the pressure input filter's time constant, the
-median window, the scan time and the drive's dead time and lag
-(`DriveDeadTime`, `DriveLag`).
-
-The reference's limit-switch position `x_limit` is
-`G_cfgPressureSchedEndOfTravel` on the slave, where the chamber is down
-to the passages, so the chamber volume is the swept volume to that
-position plus the passages (and the hose when it is open). All of these
-are measured values; the hose is switched in and out by
-`G_cfgPressureSchedHoseOpen`, not by editing them. The estimate stays an
-upper bound on the stiffness while each is at or below its true value.
-
-When Ki changes, the schedule outputs `IntegScale` = previous Ki / new
-Ki so that Ki times the stored integral is continuous. The integrator is
-held at zero until the first arrival by driving the controller's Reset on
-the held scans and on the arrival scan, which reproduces the reference
-zeroing the integral after each held call.
-
-`check_scheduled_st` in `test_model.py` runs the reference and
-`ScheduledSlaveControllerST` in lockstep through the compression and the
-delivery and requires the commands to agree to 1e-9 m/s on every scan;
-`tests/stTargetParity.py` checks the Python translation against the Octave
-one.
-
-The stiffness bound is evaluated at the present pressure (`KEst`) and
-at the larger of the present and the target pressure (`KEstTarget`);
-the larger is used for Kp and the stop law, and the pressure history
-that sets the dissolved oxygen is updated from the measurement only.
-`check_scheduled_st` compares Kp, Ki and the stop-law limit as well as
-the command, and includes a gas-spring compression.
-
-Left for commissioning: `G_cfgPressureSchedHoseOpen` against the
-procedure (FALSE while the proximal valve opens after mixing), and the
-charge against the recipe.
-
-## Porting the floor
-
-`FB_PressureFloor` (`slave-src/FB/`) is the port of `FloorPolicy` in
-its switched mode with the forward stop, eqs. (46) and (48). It is off
-by default and is selected on entry to pressure mode by
-`G_cfgPressureFloorEnable`; its settings are the `G_cfgPressureFloor*`
-values of the GVL, with the latched floor at `G_cfgPressureStopVelMin`.
-`PRG_Main` calls it ahead of `FB_PressureSchedule` and
-`FB_PressureController` and passes its `StopVelMin` to both, and zeroes
-a positive pressure-loop command while its `StopForward` is set.
-`FB_PressureController` gains the outputs `Saturated` and `Error`,
-because the floor reads the controller's saturation and output of the
-previous scan, which it held in internal variables.
+`FB_PressureController` (`slave-src/FB/`) holds the stop law, the
+switched floor of eq. (46) and the forward stop of eq. (48). The floor
+is off by default and is selected by `G_cfgPressureFloorEnable`; its
+settings are the `G_cfgPressureFloor*` values of the GVL, with the
+latched floor at `G_cfgPressureStopVelMin`.
 
 The policy's arguments map to the settings as follows: `v_lo` to
 `FloorVelLow`, `v_hi` to `StopVelMin`, `window` to `FloorWindow`,
@@ -943,18 +890,19 @@ The policy's arguments map to the settings as follows: `v_lo` to
 filter time constant and the median window, as
 `measurement_lag_scans()` computes it. The window and the delay are
 held in rings of 64 samples, so the window plus the delay is at most
-63 scans (25 and 9 at the defaults); a longer setting is a
-`ParamError`, which falls back to the configured floor.
+63 scans (25 and 9 at the defaults); a longer setting is the block's
+`FloorError`, which leaves the configured floor and no forward stop.
+The window and the latch are cleared while the block is disabled, so
+each entry to pressure mode starts them afresh. The forward stop acts
+on the output after the clamp, and the integrator and its anti-windup
+see the output before it, as `FloorPolicy.limit_forward` is applied
+after the block in the studies.
 
-`FloorPolicyST` runs the translated block with `FloorPolicy`'s
-interface, and `ScheduledSlaveControllerST` wires it as `PRG_Main` does
-when `G_cfgPressureFloorEnable` is set. `check_floor_st` in
-`test_model.py` runs `FloorPolicy` and the block in lockstep through
-the 1:1 delivery with both hose procedures and a 1 s closing, under the
-GVL loop and the scheduled loop, and requires the floor, the latch and
-the forward stop to agree on every scan; then it runs the wiring
-against `SlaveController` and `ScheduledSlaveController` with the
-policy, with the schedule off and on, and requires the commands to
-agree to 1e-9 m/s. `tests/slavePressureMode.m` runs the compiled slave
-through an outflow and an abrupt closing: the latch sets and releases,
-and the closing peaks at 10.25 MPa against 11.81 without the floor.
+`check_floor_block` in `test_model.py` runs the block with a
+`FloorPolicy` setting its floor and the block with its own floor in
+lockstep through the compression and the 1:1 delivery, with both hose
+procedures and a 1 s closing, at the GVL gains and at the earlier ones,
+and requires the command, the floor and the latch to be equal on every
+scan. `tests/slavePressureMode.m` runs the compiled slave through an
+outflow and an abrupt closing: the latch sets and releases, and the
+closing peaks at 10.25 MPa against 10.70 without the floor.

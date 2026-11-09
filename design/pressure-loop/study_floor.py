@@ -80,6 +80,8 @@ SCHED = {'V_dead_cfg': 109e-6, 'K_cfg': 1.0e9, 'C_hose_cfg': 1.2e-13,
 SW_FS = {'mode': 'switched', 'forward_stop': True}
 ARMS = [
     R.ControllerSpec('GVL (fixed 2)'),
+    R.ControllerSpec('earlier gains', {'Kp': 0.5, 'Ki': 0.2,
+                                       'StopStiffness': 100.0}),
     R.ControllerSpec('fixed 0.5', {'StopVelMin': 0.5}),
     R.ControllerSpec('switched', floor={'mode': 'switched'}),
     R.ControllerSpec('fixed 2 +fs',
@@ -91,8 +93,8 @@ ARMS = [
     R.ControllerSpec('sched11 switched +fs', sched=SCHED, floor=SW_FS),
 ]
 # Arms run by the Monte Carlo by default
-MC_ARMS = ('GVL (fixed 2)', 'switched +fs', 'estimated +fs', 'sched11',
-           'sched11 switched +fs')
+MC_ARMS = ('GVL (fixed 2)', 'earlier gains', 'switched +fs',
+           'estimated +fs', 'sched11', 'sched11 switched +fs')
 
 # Nominal cases: (label, StudyParams overrides)
 CASES = [

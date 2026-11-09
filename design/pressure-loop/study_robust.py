@@ -37,7 +37,7 @@ directory.
 Usage:
     python3 study_robust.py [--n 200] [--seed 1] [--workers N]
                             [--out DIR] [--ratio 1.0] [--target 10]
-                            [--configs GVL,f20,...] [--corner-n 4]
+                            [--configs GVL,earlier,...] [--corner-n 4]
                             [--cfg Kp=0.25 ...] [--flow-ff]
                             [--ff-scale 0.7]
 
@@ -81,9 +81,13 @@ COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
 # Flow feedforward is not practical on this machine, so no built-in arm
 # uses it; --flow-ff still runs it as a bound on what knowing the flow
 # would buy.
-# The GVL carries the 20 ms filter and StopVelMin 2 mm/s, which lets the
-# stop law pass the 1.4 mm/s the measured outflow needs; vmin0.5 is the
-# earlier setting, kept as a reference. The scheduled arms assume the
+# The GVL carries Kp 1.5, Ki 0.6, a stop-law stiffness of 15 MPa/mm, the
+# 20 ms filter and StopVelMin 2 mm/s, which lets the stop law pass the
+# 1.4 mm/s the measured outflow needs; GVL+floor adds the block's floor
+# that follows the outflow and its forward stop; earlier is the gains
+# before the retune (Kp 0.5, Ki 0.2, 100 MPa/mm), kept as a reference.
+# The scheduled arms are a comparison that is not in the slave; they
+# assume the
 # dead volume at the low end of its range (a lower bound keeps the
 # stiffness estimate an upper bound), the bulk modulus at the top of its
 # measured range, and the saline volume and charge as configured for
@@ -92,11 +96,10 @@ COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
 SCHED = {'V_dead_cfg': 109e-6, 'K_cfg': 1.0e9, 'C_hose_cfg': 1.2e-13}
 CONFIGS = {
     'GVL': ControllerSpec('GVL'),
-    'vmin0.5': ControllerSpec('vmin0.5', {'StopVelMin': 0.5}),
-    'sched6': ControllerSpec('sched6', sched=dict(wc=6.0, **SCHED)),
+    'GVL+floor': ControllerSpec('GVL+floor', {'FloorEnable': True}),
+    'earlier': ControllerSpec('earlier', {'Kp': 0.5, 'Ki': 0.2,
+                                          'StopStiffness': 100.0}),
     'sched11': ControllerSpec('sched11', sched=dict(wc=11.0, **SCHED)),
-    'sched11+v7': ControllerSpec('sched11+v7', {'VelMax': 7.0},
-                                 sched=dict(wc=11.0, **SCHED)),
     'sched16': ControllerSpec('sched16', sched=dict(wc=16.0, **SCHED)),
 }
 

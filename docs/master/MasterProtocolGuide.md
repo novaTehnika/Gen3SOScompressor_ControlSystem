@@ -43,8 +43,8 @@ This document provides step-by-step guidance for implementing the Simulink Deskt
 | HR4 | `G_mbFaultReset` | 1 = FaultReset (level) |
 | HR5-6 | `G_mbReference` | REAL reference: mm, mm/s or % by mode |
 | HR7-8 | `G_mbPositionSpeed` | REAL operator speed, mm/s: position moves and Go Home (0 holds a position move; Go Home does not start) |
-| HR9-10 | `G_mbSalineVolume` | REAL saline volume of the fill, mL (pressure gain schedule) |
-| HR11-12 | `G_mbOxygenRatio` | REAL oxygen charge as STP volume per saline volume (pressure gain schedule) |
+| HR9-10 | `G_mbSalineVolume` | REAL saline volume of the fill, mL (received, not used by the slave) |
+| HR11-12 | `G_mbOxygenRatio` | REAL oxygen charge as STP volume per saline volume (received, not used by the slave) |
 
 The slave debounces HR2 (`G_cfgDebounceTimeMode`, 50 ms) and HR3 and HR4
 (`G_cfgDebounceTimeCommand`, 20 ms for both) before acting on them. The master DAQ drives P0.0 (safety control relay
@@ -365,15 +365,8 @@ STP volume per saline volume), REALs copied to `G_sysSalineVolume` and
 `G_sysOxygenRatio` by `PRG_Input`. The master writes `cfg.salineVolume` and
 `cfg.oxygenRatio` in every exchange (the shell's `SalineVolume` and
 `OxygenRatio` Constant blocks, which `masterStep` takes as its last two
-inputs). They are used only by the pressure gain schedule
-(`G_cfgPressureScheduleEnable`): `PRG_Main` latches them on entry to pressure
-mode, so rewriting them during a run changes nothing. A saline volume of 0
-(registers never written) or a negative or non-numeric value makes
-`FB_PressureSchedule` report `ParamError`, and the loop runs on the configured
-gains. The saline volume and the charge must each be at or below the true
-values: a smaller value makes the stiffness bound larger, so the gain lower
-and the loop slower (safe), and a larger one the reverse. The charge must
-equal the recipe of the fill (1.0 for 1:1).
+inputs). The slave receives them and uses them for nothing: the pressure loop
+runs on fixed gains and needs no description of the fill.
 
 The reference is read by the slave at most every 50 ms plus one 4 ms
 service tick. The master sends the next value with the same write that

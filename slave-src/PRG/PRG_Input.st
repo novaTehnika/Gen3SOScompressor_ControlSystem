@@ -12,7 +12,7 @@
    reference arrives in engineering units (mm, mm/s or % by mode), and the
    position-move speed (mm/s) in its own register. The saline volume (mL)
    and oxygen charge (STP volume per saline volume) of the fill arrive in
-   the same exchange for the pressure gain schedule.
+   the same exchange; the slave does not use them.
 
    ============================================================================ *)
 
@@ -22,7 +22,7 @@ G_sysReference := REAL_TO_LREAL(G_mbReference);
 (* Position-move speed (mm/s), the path shaper's speed limit in position modes *)
 G_sysPositionSpeed := REAL_TO_LREAL(G_mbPositionSpeed);
 
-(* Fill description for the pressure gain schedule *)
+(* Fill description: received, not used by the slave *)
 G_sysSalineVolume := REAL_TO_LREAL(G_mbSalineVolume);
 G_sysOxygenRatio := REAL_TO_LREAL(G_mbOxygenRatio);
 
