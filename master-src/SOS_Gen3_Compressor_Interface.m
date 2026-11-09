@@ -421,6 +421,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 app.liveFig = traceLiveNew('on');
                 set(app.liveFig.fig, 'CloseRequestFcn', @(~, ~) closeLivePlot(app));
                 app.liveFig.fig.Units = 'pixels';
+                if ~isempty(app.cfg.livePlotPosition)
+                    app.liveFig.fig.Position = app.cfg.livePlotPosition;
+                end
                 app.livePolls = 0;
                 traceLiveUpdate(app.liveFig, app.traceLive);
             catch ME
@@ -593,6 +596,20 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         function setText(~, label, text)
             if ~strcmp(char(label.Text), char(text))
                 label.Text = text;
+            end
+        end
+
+        % Set the manual position target to the piston's position (mm,
+        % slave frame) when the piston is inside the cylinder; a piston
+        % outside it leaves the target as it is.
+        function targetFromPistonPosition(app, position)
+            if ~isfinite(position)
+                return
+            end
+            x = round(app.cfg.posEOT - position);
+            if x <= app.cfg.inCylinderFromEot
+                lim = app.TargetPositionSpinner.Limits;
+                app.TargetPositionSpinner.Value = min(max(x, lim(1)), lim(2));
             end
         end
 
@@ -868,14 +885,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             trackOp(app, statusCode);
             if app.targetFromPiston && d.live && app.linkReady ...
                     && isfinite(d.position) && app.activeOp ~= app.OP_POSITION
-                % The first position reading of the connection becomes the
-                % manual target when the piston is inside the cylinder;
-                % a piston outside it leaves the in-cylinder default.
-                x = round(app.cfg.posEOT - d.position);
-                if x <= app.cfg.inCylinderFromEot
-                    lim = app.TargetPositionSpinner.Limits;
-                    app.TargetPositionSpinner.Value = min(max(x, lim(1)), lim(2));
-                end
+                % The first live position reading of the connection becomes
+                % the manual target (inside the cylinder only).
+                targetFromPistonPosition(app, d.position);
                 app.targetFromPiston = false;
             end
             app.lastPosition = d.position;
@@ -1810,6 +1822,11 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % Value changed function: ManualControlButton
         function ManualControlButtonPressed(app, event)
             value = app.ManualControlButton.Value;
+            % Engaging manual control takes the piston's position as the
+            % position target, so Go moves nothing until it is changed.
+            if value && isRunning(app) && app.linkReady
+                targetFromPistonPosition(app, app.lastPosition);
+            end
             app.TargetPositionSpinner.Enable = value;
             app.TargetPositionmmSpinnerLabel.Enable = value;
             app.TargetPressureSpinner.Enable = value;

@@ -157,10 +157,10 @@ The app shows volume (mL), absolute pressure (psi, atm or MPa), position (mm
 from the end of travel) and flow (mL/s, positive toward the end of travel).
 Position targets in manual control are also mm from the end of travel, and
 pressure targets are absolute in the pressure unit. The position target starts
-at `targetFromEotDefault` (inside the cylinder) and, when the slave link comes
-up after Connect, takes the piston's position if that is inside the cylinder
-(at most `inCylinderFromEot` from the end of travel), so Go moves nothing until
-the operator changes it. `masterConfig` holds the end of travel (`posEOT`), bore and dead
+at `targetFromEotDefault` (inside the cylinder) and takes the piston's position,
+if that is inside the cylinder (at most `inCylinderFromEot` from the end of
+travel), when Manual Control is engaged while connected and when the slave link
+first comes up after Connect, so Go moves nothing until the operator changes it. `masterConfig` holds the end of travel (`posEOT`), bore and dead
 volume, and the atmosphere added to the slave's gauge pressure (`atmAmbient`).
 `mLPerMm` converts position and velocity to volume and flow; `sweptVolume`,
 `mixingVolume` and `readoutText` give the volume views and the readout text.
@@ -586,8 +586,9 @@ with its minimum and maximum), the position from the end of travel, the velocity
 and the torque, against the time before now. The aligned 20 Hz stream goes into
 a circular buffer of 12000 rows, and the figure is redrawn every
 `cfg.livePlotPeriod` (0.5 s) while it is open, by setting the line data in place;
-closing it stops the updates. The redraw is part of the poll, so a poll that
-overruns `displayPeriod` shows in `app.PollStats`.
+closing it stops the updates. `cfg.livePlotPosition` ([x y width height] px,
+empty for MATLAB's default) sets where the window opens. The redraw is part of
+the poll, so a poll that overruns `displayPeriod` shows in `app.PollStats`.
 
 ## Trace files
 
