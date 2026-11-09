@@ -44,14 +44,10 @@ cfg.oxygenRatio  = 1.0;     % oxygen charge as STP volume per saline volume (1.0
 cfg.posMin = 0;             % mm
 cfg.posMax = 367;           % mm
 
-% Manual position target (mm from the end of travel). Before a connection
-% it is targetFromEotDefault, inside the cylinder. When the slave link comes
-% up it takes the piston's position if the piston is inside the cylinder,
-% at most inCylinderFromEot from the end of travel (the slave's exit-guard
-% band, G_cfgPosCylinderEntry + G_cfgPosExitGuardMargin = 196 mm in the
-% slave frame), and keeps the default otherwise.
+% Manual position target (mm from the end of travel) shown before a
+% connection: inside the cylinder. Once the slave link is up, and whenever
+% manual control is engaged, the target takes the piston's position.
 cfg.targetFromEotDefault = 150;
-cfg.inCylinderFromEot    = 171;
 
 % Operator speed: one setting, as a percentage of speedMax, for jog,
 % position moves, Go Home and homing. It is sent as the jog reference and

@@ -157,10 +157,9 @@ The app shows volume (mL), absolute pressure (psi, atm or MPa), position (mm
 from the end of travel) and flow (mL/s, positive toward the end of travel).
 Position targets in manual control are also mm from the end of travel, and
 pressure targets are absolute in the pressure unit. The position target starts
-at `targetFromEotDefault` (inside the cylinder) and takes the piston's position,
-if that is inside the cylinder (at most `inCylinderFromEot` from the end of
-travel), when Manual Control is engaged while connected and when the slave link
-first comes up after Connect, so Go moves nothing until the operator changes it. `masterConfig` holds the end of travel (`posEOT`), bore and dead
+at `targetFromEotDefault` and takes the piston's position whenever Manual
+Control is engaged while connected, and when the slave link first comes up after
+Connect, so Go moves nothing until the operator changes it. `masterConfig` holds the end of travel (`posEOT`), bore and dead
 volume, and the atmosphere added to the slave's gauge pressure (`atmAmbient`).
 `mLPerMm` converts position and velocity to volume and flow; `sweptVolume`,
 `mixingVolume` and `readoutText` give the volume views and the readout text.

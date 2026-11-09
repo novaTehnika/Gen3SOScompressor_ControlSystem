@@ -600,23 +600,17 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         end
 
         % Set the manual position target to the piston's position (mm,
-        % slave frame) when the piston is inside the cylinder; a piston
-        % outside it leaves the target as it is.
+        % slave frame), so Go moves nothing until the operator changes it.
         function targetFromPistonPosition(app, position)
             if ~isfinite(position)
                 app.StatusLabel.Text = "Position target kept: no position reading yet";
                 return
             end
             x = round(app.cfg.posEOT - position);
-            if x <= app.cfg.inCylinderFromEot
-                lim = app.TargetPositionSpinner.Limits;
-                app.TargetPositionSpinner.Value = min(max(x, lim(1)), lim(2));
-                app.StatusLabel.Text = sprintf( ...
-                    "Position target set to the piston, %d mm from EOT", x);
-            else
-                app.StatusLabel.Text = sprintf( ...
-                    "Position target kept: piston outside the cylinder (%d mm from EOT)", x);
-            end
+            lim = app.TargetPositionSpinner.Limits;
+            app.TargetPositionSpinner.Value = min(max(x, lim(1)), lim(2));
+            app.StatusLabel.Text = sprintf( ...
+                "Position target set to the piston, %d mm from EOT", x);
         end
 
         % Request an operation. RequestedMode is written before CommandSeq
@@ -892,7 +886,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             if app.targetFromPiston && d.live && app.linkReady ...
                     && isfinite(d.position) && app.activeOp ~= app.OP_POSITION
                 % The first live position reading of the connection becomes
-                % the manual target (inside the cylinder only).
+                % the manual target.
                 targetFromPistonPosition(app, d.position);
                 app.targetFromPiston = false;
             end
@@ -982,9 +976,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             % Manual targets are distances from the end of travel, within
             % the master's soft limits and not past the end of travel. The
             % target shown before a connection is the configured in-cylinder
-            % position; once the slave link is up it takes the piston's
-            % position when that is inside the cylinder, so Go moves
-            % nothing until the operator changes it.
+            % position; once the slave link is up, and whenever manual
+            % control is engaged, it takes the piston's position, so Go
+            % moves nothing until the operator changes it.
             limits = [max(app.cfg.posEOT - app.cfg.posMax, 0), ...
                 app.cfg.posEOT - app.cfg.posMin];
             setSpinnerRange(app, app.TargetPositionSpinner, limits);
