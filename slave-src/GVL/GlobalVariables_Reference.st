@@ -258,10 +258,11 @@
                                                           Y_DirectControl block has no decel input. The chamber
                                                           stiffens by orders of magnitude as the gas dissolves; the
                                                           command must reverse within v^2/(2*decel) of travel *)
-     G_cfgPressureStopStiffness  : LREAL := 15.0       (* Chamber stiffness assumed by the stop law (MPa/mm): the
+     G_cfgPressureStopStiffness  : LREAL := 25.0       (* Chamber stiffness assumed by the stop law (MPa/mm): the
                                                           velocity is clamped to sqrt(2*Decel*|error|/stiffness).
-                                                          Above the stiffest the chamber can be, 13 MPa/mm (the
-                                                          cylinder's series compliance with no liquid left) *)
+                                                          About twice the stiffest the chamber can be, 13 MPa/mm
+                                                          (the cylinder's series compliance with no liquid left),
+                                                          which allows for the lag of the filtered reading *)
      G_cfgPressureStopVelMin     : LREAL := 2.0        (* The stop law never clamps below this (mm/s), so outflow
                                                           can be balanced at zero error. Must exceed the piston
                                                           speed the outlet needs (1.4 mm/s at 10 MPa through the

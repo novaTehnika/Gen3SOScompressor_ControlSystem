@@ -69,7 +69,7 @@ def controller_set():
     """Return the controllers compared.
 
     The slave arms are the GVL (Kp 1.5, Ki 0.6, a stop-law stiffness of
-    15 MPa/mm and StopVelMin 2 mm/s), the GVL with the block's floor
+    25 MPa/mm and StopVelMin 2 mm/s), the GVL with the block's floor
     that follows the outflow and its forward stop (FloorEnable), and
     the earlier gains (Kp 0.5, Ki 0.2, 100 MPa/mm) as a reference. The
     scheduled arms are ScheduledSlaveController at two crossovers with

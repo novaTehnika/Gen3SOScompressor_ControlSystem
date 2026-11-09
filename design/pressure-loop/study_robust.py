@@ -81,7 +81,7 @@ COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
 # Flow feedforward is not practical on this machine, so no built-in arm
 # uses it; --flow-ff still runs it as a bound on what knowing the flow
 # would buy.
-# The GVL carries Kp 1.5, Ki 0.6, a stop-law stiffness of 15 MPa/mm, the
+# The GVL carries Kp 1.5, Ki 0.6, a stop-law stiffness of 25 MPa/mm, the
 # 20 ms filter and StopVelMin 2 mm/s, which lets the stop law pass the
 # 1.4 mm/s the measured outflow needs; GVL+floor adds the block's floor
 # that follows the outflow and its forward stop; earlier is the gains

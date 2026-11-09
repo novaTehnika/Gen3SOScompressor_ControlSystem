@@ -26,7 +26,7 @@ the reference for each) and confirm:
       inputs, the `Latched` and `FloorError` outputs, the two 64-sample
       rings of the new type `ARRAY64LREAL`, no `IntegScale`); add the ten
       `G_cfgPressureFloor*`; and set `G_cfgPressureKp` 1.5,
-      `G_cfgPressureKi` 0.6 and `G_cfgPressureStopStiffness` 15.0. The
+      `G_cfgPressureKi` 0.6 and `G_cfgPressureStopStiffness` 25.0. The
       gains were chosen with `G_cfgDirectCtrlFilterTime` at 0.02 s.
 - [ ] Rebuild with the current `FB_Probe` (the 4096-record ring, 16 s;
       HR111-114, IR401-524) and `G_cfgProbeEnable`,
@@ -412,10 +412,10 @@ specified here; the implementation plan decides the files.
 ## Open decisions
 
 - [ ] Commission the retuned pressure loop (Kp 1.5, Ki 0.6, stop-law
-      stiffness 15 MPa/mm) in this order: the loop's crossover on the
+      stiffness 25 MPa/mm) in this order: the loop's crossover on the
       bench's K ramps (`bench/characterisation/README.md` section 9); a
       water-only compression to 10 MPa, comparing the arrival and the
-      overshoot with the model's 2.6 s and 0.2 MPa; a water-only
+      overshoot with the model's 2.9 s and 0.1 MPa; a water-only
       delivery with the full valve sequence, comparing the opening dip
       and the purge-closing rise with the model's 0.8 and 0.9 MPa; then
       oxygen at 1:1. The gains are simulation-tuned on one bench

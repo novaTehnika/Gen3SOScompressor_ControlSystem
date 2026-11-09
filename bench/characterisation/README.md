@@ -820,7 +820,7 @@ the series compliance as a new term of the chamber model
 (1.7 kPa); `design/pressure-loop/robust.py` spans the new values; and
 the GVL's pressure-loop gains are set for the measured chamber
 (`G_cfgPressureKp` 1.5, `G_cfgPressureKi` 0.6,
-`G_cfgPressureStopStiffness` 15 MPa/mm), which the controller needs
+`G_cfgPressureStopStiffness` 25 MPa/mm), which the controller needs
 rebuilt for.
 
 ## 9. Checking the loop gain against the measured stiffness
@@ -844,7 +844,7 @@ wc = benchGvl().G_cfgPressureKp * [rk.segments.dPdx]   % rad/s per ramp segment
 
 Keep the crossover at or below about 11 rad/s for the chamber the
 procedure runs pressure mode on; lower `G_cfgPressureKp` in proportion
-if it is above. The stop law's `G_cfgPressureStopStiffness` (15 MPa/mm)
+if it is above. The stop law's `G_cfgPressureStopStiffness` (25 MPa/mm)
 must stay above every measured dP/dx, or the approach overshoots. On the
 5 November runs: 10 to 12 rad/s with the proximal valve shut at 362 mL,
 4 to 5 rad/s with the hose open, and 14 to 17 rad/s with the valve shut
