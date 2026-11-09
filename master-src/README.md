@@ -8,14 +8,14 @@ reading over the link.
 
 | Path | Contents |
 |------|----------|
-| `logic/` | All master logic, as plain `.m` functions that run under MATLAB and GNU Octave. `masterStep.m` is the entry point called once per model step; `masterStateMachine.m` sequences the handshake, motion and fault handling; `masterConfig.m` holds every constant. `proc*.m` is the operator app's procedure engine and `opTrack.m` the rule by which the app and the engine follow an operation through `StatusCode`. |
-| `procedure/` | The procedure the operator app walks through in non-manual mode, as data: `sopProcedure.m`. The SOP replaces this file; no code changes. |
-| `trace/` | The trace recorder's host-side functions, plain `.m` files that run under MATLAB and GNU Octave: `traceStart` and `traceDrain` (collect records from the ring), `traceMeta` and `traceWriteCsv` (write a trace file), `traceReadCsv` and `traceDerive` (read it back and add the displayed quantities), `tracePlot` (three figures) and `traceColumnNames`. The block that fills the ring, `traceStep`, and the ring's layout, `traceLayout`, are in `logic/`. |
+| `logic/` | All master logic, as plain `.m` functions that run under MATLAB and GNU Octave. `masterStep.m` is the entry point called once per model step; `masterStateMachine.m` sequences the handshake, motion and fault handling; `masterConfig.m` holds every constant. `proc*.m` is the operator app's procedure engine (`procTrackSeries` and `procTrackCheck` sample and check a track step's series) and `opTrack.m` the rule by which the app and the engine follow an operation through `StatusCode`. `trackStep.m` plays the track table inside the model (the `TrackStep` block). |
+| `procedure/` | The procedure the operator app walks through in non-manual mode, as data: `sopProcedure.m`. The SOP replaces this file; no code changes. `experimentTemplate.m` is a procedure to copy from: every kind of step once, with a comment on its fields, and a track step and the record intervals. |
+| `trace/` | The trace recorder's host-side functions, plain `.m` files that run under MATLAB and GNU Octave: `traceStart`, `traceDrain` and `traceAppend` (collect records from the ring), `traceAlignNew`/`traceAlign` (give each row the slave summary of its own window), `traceDecimateNew`/`traceDecimate` and `traceIntervalExchanges` (combine exchanges into the record interval), `traceLiveBuffer`, `traceLiveAppend`, `traceLiveNew` and `traceLiveUpdate` (the live plot), `traceMeta` and `traceWriteCsv` (write a trace file), `traceReadCsv` and `traceDerive` (read it back and add the displayed quantities), `tracePlot` (three figures) and `traceColumnNames`. The block that fills the ring, `traceStep`, and the ring's layout, `traceLayout`, are in `logic/`. |
 | `captures/` | Trace files the app saves (gitignored; created on first use). |
-| `shell/buildShell.m` | Generates `shell/SOS_Gen3_Master_Shell.slx`: Modbus Client blocks at the 50 ms exchange, DAQ blocks, one MATLAB Function block calling `masterStep`, a second one (`TraceStep`) calling `traceStep`, the Constant blocks the app writes and the Gain blocks it reads. The model holds no logic and is rebuilt from this script, not edited by hand. |
+| `shell/buildShell.m` | Generates `shell/SOS_Gen3_Master_Shell.slx`: Modbus Client blocks at the 50 ms exchange, DAQ blocks, one MATLAB Function block calling `masterStep`, a second one (`TraceStep`) calling `traceStep`, a third (`TrackStep`) calling `trackStep`, the Constant blocks the app writes and the Gain blocks it reads. The model holds no logic and is rebuilt from this script, not edited by hand. |
 | `shell/modbusShellDiscover.m` | Prints the Modbus block and client settings of a hand-configured shell so they can be pasted into `buildShell.m`. |
 | `shell/addDaq.m` | Creates one Simulink Desktop Real-Time DAQ block. Holds the board setup (PCI-6221, driver options, missed-tick limit) and the digital channel numbering. |
-| `SOS_Gen3_Compressor_Interface.m` | Operator app (programmatic App Designer export). Starts the shell model, writes operator requests to its Constant blocks and polls its outputs. Takes its position target range, speed presets and cylinder geometry from `masterConfig.m` at startup. |
+| `SOS_Gen3_Compressor_Interface.m` | Operator app (programmatic App Designer export). Starts the shell model, writes operator requests to its Constant blocks and polls its outputs. Takes its position target range, speed presets and cylinder geometry from `masterConfig.m` at startup. Laid out with nested `uigridlayout`s. |
 | `legacy/`, `SOS_Gen3_Compressor_Master.slx` | Earlier Stateflow-based app model and its `.mlapp`, and the hand-built `SimulinkMaster.slx` bench model with manual mode control, kept for reference. |
 
 ## Running on the lab PC
@@ -31,7 +31,7 @@ SOS_Gen3_Compressor_Interface      % then press "Connect to Compressor"
 
 `buildShell` sets everything: the Modbus blocks' register rows (the Write
 block writes as many registers as its input is wide, so its row has no
-count; the Read row reads 20) and the Modbus client (`ModbusClient`, TCP/IP,
+count; the Read row reads 34) and the Modbus client (`ModbusClient`, TCP/IP,
 controller IP and port, 0.5 s timeout, byte order big-endian, word order
 little-endian) in Configuration Parameters > Modbus. The controller IP and
 the timeout are `MODBUS_SETUP` at the top of the script. After a build,
@@ -60,17 +60,39 @@ both carry the one operator speed, set from the app's speed control in percent o
 the model sends it to the slave in MPa gauge, and the slave closes the loop on its
 own transducer. `ESTOP` and `Mixer` act at once.
 
+The `TrackStep` block sits between the `TargetPosition` and `TargetPressure`
+Constant blocks and `masterStep`'s inputs 4 and 7; those two Constants are no
+longer wired to `masterStep` directly. It takes the two targets, the
+`TrackTable` Constant, `TrackMode` (0 none, 2 position, 4 pressure), `TrackSeq`
+and the status code one step late (the `StatusDelay` Unit Delay on
+`masterStep`'s output 7). While `TrackMode` is not 0 it replaces the target of
+that mode by `TrackTable(index)`, and otherwise passes both through, so manual
+control and the other steps are unchanged. The index is
+`floor(count / 2) + 1`, one table value per exchange, where `count` is the
+number of model steps since `TrackSeq` last changed in which the delayed status
+showed the mode's operation running (5 for pressure, 2 or 3 for position); the
+series therefore starts when the slave is in mode and not during the handshake,
+and the last value holds when the table ends. `TrackIndex` (a Gain block with a
+Display) exposes the index. `TrackTable` is a Constant whose value is the
+model-workspace variable `trackTable` (`cfg.trackTableLength` values, one hour
+at the exchange period), and the model is built with
+`DefaultParameterBehavior` Tunable so the app can replace the variable while the
+model runs (`setTrackTable`). `ProcStep` is a Constant holding the running
+procedure's step number, 0 outside a run, written only when it changes.
+
 The `TraceStep` block records the link for the Record button. It takes the raw
 read vector, the write vector as `masterStep` produced it, `masterStep`'s
-`doSafety`, `StatusCode`, `FaultCode`, `State` and `LinkOk`, and the app's
-`RequestedMode`, `CommandSeq`, `TargetPosition`, `TargetPressure`, `ESTOP` and
-`Mixer` blocks. Once per Modbus exchange it writes one record into a ring of
-512 records (25.6 s) and outputs the whole ring each step to the `TraceRing`
-Gain block, a test point the app reads like the other Gain blocks. Each record
+`doSafety`, `StatusCode`, `FaultCode`, `State` and `LinkOk`, the app's
+`RequestedMode` and `CommandSeq`, the targets `masterStep` received (the outputs
+of `TrackStep`, so a playing track shows in the trace), and the app's `ESTOP`,
+`Mixer` and `ProcStep` blocks (14 inputs). Once per Modbus exchange it writes
+one record into a ring of 512 records (25.6 s, 45 columns) and outputs the
+whole ring each step to the `TraceRing` Gain block, a test point the app reads
+like the other Gain blocks. Each record
 carries its sequence number in the first column and again in the last (the
 guard), so the app takes only rows whose two copies agree and sees from the
 sequence numbers whether the ring overwrote records it had not read yet.
-The trace layout is unchanged: the raw read vector carries IR9 and IR10.
+The raw read vector carries IR1-34, so the trace records the slave's per-write summary (IR21-34) with the rest. `masterStep`'s logic is unchanged; its read grows to IR34.
 
 The app reads `StatusCode`, `FaultCode`, `State`, `Position`,
 `Velocity`, `Pressure` (the slave's gauge transducer reading plus `atmAmbient`, atm absolute),
@@ -95,12 +117,49 @@ the E-stop, which also clears a lost-link status once the link is back. The
 mode buttons are enabled only in manual control, while connected with the
 slave link up and out of E-STOP.
 
+## Operator app layout
+
+The window is a `MainGrid` of three bands, in nested `uigridlayout`s:
+
+- The readout band (190 px) holds the four readouts (flow, volume,
+  position, pressure) of equal width, the status line and the Fault and Mixer
+  lamps under them, and the STOP button pinned at the top right,
+  120 px wide over the band's height.
+- The Controls band (128 px) holds three rows: connect, mode and target
+  controls, the speed row (label, field, presets and the speed in mm/s) and, at
+  the right, Record, the interval dropdown and the trace status.
+- The Procedure panel takes the remaining height, so a taller window lengthens
+  only its instruction text.
+
+A new window is 940 x 900 px (drawable area); the minimum is 830 x 680. Below
+the minimum the grid keeps its minimum extent and the window scrolls.
+
+The **View** menu places the windows. The app's monitor is the one containing
+the centre of its window. A monitor's work area is its area less a 48 px margin
+along the bottom, for the taskbar.
+
+- **Side by side** puts the app on the left half of its monitor's work area (at
+  least its minimum width) and the live plot on the right half, opening the
+  plot when it is closed; with under 200 px left for the plot it is not placed.
+  The app is brought to the front.
+- **Live plot on second monitor** maximises the live plot on the largest other
+  monitor. It is disabled with one monitor.
+- **Default size** restores 940 x 900 from maximised or side by side, keeping the
+  window's top-left corner and clamping it into the monitor's work area.
+
+The window decorations are measured from the figure's outer position and
+position when visible, and otherwise taken as 8, 8, 8 and 90 px (left, bottom,
+right, top).
+
 ## Operator app readouts
 
 The app shows volume (mL), absolute pressure (psi, atm or MPa), position (mm
 from the end of travel) and flow (mL/s, positive toward the end of travel).
 Position targets in manual control are also mm from the end of travel, and
-pressure targets are absolute in the pressure unit. `masterConfig` holds the end of travel (`posEOT`), bore and dead
+pressure targets are absolute in the pressure unit. The position target starts
+at `targetFromEotDefault` and takes the piston's position whenever Manual
+Control is engaged while connected, and when the slave link first comes up after
+Connect, so Go moves nothing until the operator changes it. `masterConfig` holds the end of travel (`posEOT`), bore and dead
 volume, and the atmosphere added to the slave's gauge pressure (`atmAmbient`).
 `mLPerMm` converts position and velocity to volume and flow; `sweptVolume`,
 `mixingVolume` and `readoutText` give the volume views and the readout text.
@@ -173,10 +232,12 @@ The engine is `procNew`, `procAction`, `procStep` and `procView` in `logic/`:
 pure functions on one state struct `p`, with no persistent state, no timers and
 no app handle. The app calls `procStep(p, in, dt)` on every poll with what it
 read from the model (`connected`, `statusCode`, `faultCode`, `estop`, `pressure`,
-`volume`, `pressureBlock`, `atEndOfTravel`) and executes the returned requests
-(`params`, `mixer`, `stop`, `op` with `target`, `unit` and `speed`,
-`zeroVolume`) through its own operation requests, so
-the interlocks stay in one place. `procAction` only records the operator's
+`volume`, `pressureBlock`, `atEndOfTravel`, and for track steps
+`positionFromEOT`, the position in mm from the end of travel, and
+`positionSpeed`, the operator's effective speed in mm/s) and executes the
+returned requests in this order (`params`, `mixer`, `stop`, `track`, `op` with
+`target`, `unit` and `speed`, `zeroVolume`, `record`, `recordEnd`) through its
+own operation requests, so the interlocks stay in one place. `procAction` only records the operator's
 intent (start, confirm, repeat, check, setParam, pause, resume, abort, reset)
 and refuses an action the state does not allow; `procView` gives what the panel
 shows. `tests/smokeProcedureEngine.m` runs all of it against a stand-in for the
@@ -191,7 +252,7 @@ Manual control and the procedure exclude each other: the mode buttons work only
 in manual control and Start Procedure only out of it, and manual control is not
 available while a procedure is active, paused included.
 
-**Panel.** The Procedure panel (`ProcedurePanel`, right of the readouts) holds
+**Panel.** The Procedure panel (`ProcedurePanel`, below the controls and taking the window's remaining height) holds
 the step list (display only: done steps marked `[x]`, the current one `>`), the
 step's heading, title and instruction, its checklist (a pool of
 `cfg.procMaxChecks` checkboxes) or, in a param step, its parameter fields (a
@@ -199,7 +260,8 @@ pool of `cfg.procMaxParams` fields in two columns, editable only while the step
 waits for the operator), Confirm (with the step's label), Repeat where the step
 has one, Pause/Resume and Abort, and the readouts: the procedure timer, the
 volume discharged, the held pressure target and a message line with the engine's
-state and the reason for a pause or the last refused action. The panel only
+state and the reason for a pause or the last refused action. The checklist
+and parameter rows collapse to no height when the step has none. The panel only
 copies what `procView` returns. Every operator action and every poll steps the
 engine at once, so Abort sends its stop immediately; the engine's operations go
 through the app's `requestOp`/`stopOp` and the same `motionAllowed` interlock as
@@ -210,6 +272,19 @@ during a procedure is left to the engine, which pauses with "Model stopped".
 The volume-zero request also zeroes the Incr view. A procedure that does not
 validate leaves the panel empty, Start Procedure disabled and the reason on the
 status line.
+
+**Selection.** At start the app loads the procedure named by `cfg.procedure`
+(the SOP). The **Procedure** menu lists, after **Open...** and **Reload**, every
+`.m` file of `procedure/`, sorted by name, with a check mark on the loaded one;
+choosing an item loads that function. **Open...** takes any `.m` file (its folder is added to the path and
+the function is loaded by name, listed and checked in the menu while it is
+the loaded one) and **Reload** loads the current choice again, for a file just
+edited. A choice is validated through `procNew` at once: on success the status
+line reads `Procedure loaded: <name>` and the panel shows the new procedure; on
+a failure the previously loaded procedure and its check mark stay, and the
+status line gives the reason. Nothing is remembered between sessions. The whole
+menu is disabled while a procedure is active (running, waiting for the
+operator, paused or aborting).
 
 ### Parameters
 
@@ -248,16 +323,20 @@ fields it uses (`procNew` fills the defaults).
 | `repeatFrom` | confirm | `''` | id of an earlier step; shows a second button that jumps back to it |
 | `repeatLabel` | confirm | `'Repeat'` | label of that button |
 | `params` | param | required | keys entered and confirmed in this step |
-| `op` | machine | required | `home`, `goHome`, `position`, `pressure` or `stop` |
+| `op` | machine | required | `home`, `goHome`, `position`, `pressure`, `track` or `stop` |
+| `mode` | track | required | `pressure` (atm absolute) or `position` (mm from the end of travel) |
+| `signal` | track | required | a function `@(t, p)` of the time column `t` (s) and the parameter values `p` (a struct, key to value), or a two-column matrix `[t value]` |
+| `relative` | track | `false` | the series is added to the reading at the step's first issue |
+| `record` | all | the procedure's | this step's record interval in s, or `'off'` (see Recording from a procedure) |
 | `target` | position, pressure | required | a number, a parameter key, or a function handle `@(values, cfg)` returning a finite scalar, evaluated whenever the step issues its operation (on entry and again on resume); `procNew` evaluates it once on the parameter defaults and rejects a failure |
 | `unit` | position | `'mm'` | `mm` from the end of travel, or `mL` chamber volume (`deadVolume` plus the swept volume); a pressure is atm absolute |
 | `speed` | position | NaN (none) | mm/s the move is capped at; the operator's speed still wins when it is lower (0 holds) |
 | `pressureMax` | machine | `Inf` | atm absolute; above it the step pauses (below) |
 | `alsoWhen` | confirm, pressure | `''` | `'endOfTravel'`: the step also completes at the end of travel (below) |
-| `until` | machine, wait | by op | the completion condition (below) |
-| `keep` | position, pressure | `false` | leave the operation running as the background operation; otherwise the engine stops it once the step completes |
+| `until` | machine, wait | by op | the completion condition (below); a track has only `elapsed` |
+| `keep` | position, pressure (not track) | `false` | leave the operation running as the background operation; otherwise the engine stops it once the step completes |
 | `tolerance` | settled | `cfg.procPressureTol` | atm |
-| `duration` | wait; settled | required for a timed wait; `cfg.procSettleTime` | s |
+| `duration` | timed wait; settled; track | required for a timed wait and a track; `cfg.procSettleTime` | s: a number, or for a timed wait and a track a parameter key |
 | `timeout` | machine, wait | `Inf` | when exceeded the procedure pauses (and stops a non-kept operation) |
 | `timerStart`, `timerStop` | all | `false` | start the procedure timer when the step completes; stop it on entering the step |
 | `zeroVolume` | all | `false` | on entering the step, take the reference of the volume-discharged readout |
@@ -293,7 +372,108 @@ a `repeatFrom` that is not an earlier step; too many checks or parameters; an
 unknown sink or kind; a pressure parameter with a unit; `keep` on a step that
 cannot hold; `speed` outside a position step or not above 0; `pressureMax` not
 above 0; an unknown `alsoWhen` or one on another step; a target function that
-fails on the defaults; a settled wait with no earlier pressure step with `keep`).
+fails on the defaults; a settled wait with no earlier pressure step with `keep`;
+a `record` that is not a number above 0 or `'off'`; a `duration` key that names
+no parameter; a track without `mode`, `signal` or `duration`, or with `target`,
+`unit`, `speed`, `alsoWhen` or `keep`; `mode`, `signal` or `relative` on another
+step; a track signal that fails on the defaults or leaves the limits below).
+
+### Track steps
+
+A track step (`op = 'track'`, `until = 'elapsed'`) makes the pressure or the
+position follow a time series for `duration` seconds. The series is sampled
+once per exchange: `N = floor(duration / exchangePeriod) + 1` values at
+`t = (0 : N-1)' * exchangePeriod`. A function `signal` is called once with the
+column `t`, and with each `t` in turn when the result is not N values; a
+`[t value]` matrix needs strictly increasing `t >= 0` and finite values, is
+linear between its points and holds its first value before `t(1)` and its last
+after its end. Every sample must be finite, and N is bounded by
+`cfg.trackTableLength` (`cfg.trackMaxSeconds`, one hour): a longer series is
+split into consecutive track steps, or repeated with `repeatFrom`.
+
+*Validation.* `procNew` samples the signal on the parameters' defaults and
+checks it (`procTrackSeries`, `procTrackCheck`): an absolute pressure series
+within ambient to `pressureMax` plus ambient, an absolute position series
+within `max(posEOT - posMax, 0)` to `posEOT - posMin`; a relative series by its
+span against the width of that range; a position slope above `cfg.speedMax`
+(mm/s). A pressure slope is checked only when `cfg.trackPressureSlopeMax` is
+finite (default `Inf`): the pressure a loop can follow depends on the chamber's
+stiffness, which the procedure does not know, so a signal that is too fast
+lags and the trace shows the tracking error. The step then checks again when
+it issues, with the parameter values in force: the absolute series (the signal
+plus the offset) against the limits and a position slope against
+`in.positionSpeed`; a failure pauses with "Track signal ..." or "Track signal
+could not be computed: ..." and sends nothing, and a relative position track
+pauses with "Position reading unavailable" when `in.positionFromEOT` is NaN.
+
+*Offset.* A relative series is added to the reading at the step's first issue
+(`in.pressure`, or `in.positionFromEOT`), which is kept for a resume so the
+planned levels stay the same; it is taken again when the step is entered again
+(`repeatFrom`, or the return after a background operation was re-run).
+
+*Issue and borrowing.* When a background operation of the track's mode is
+running (an earlier pressure or position step with `keep`), the track
+borrows it: no operation is requested, the series plays over the hold, and when
+the step ends the target returns to the hold's own value and the hold carries
+on. Otherwise the track requests its own operation with the first value as its
+target and stops it when the step completes. `keep` is not allowed on a track,
+because a lost background operation is re-established by running its step again,
+which for a track would replay the series; a hold after a track is a pressure or
+position step with `keep`. The step completes when `duration` seconds have
+counted from the moment the operation's status showed it running, the same
+condition under which the shell's `TrackStep` starts the series.
+
+*Request.* `req.track` is `struct('action', 'start', 'mode', m, 'series', v,
+'relative', tf, 'offset', o, 'duration', T)` with `v` the absolute series (atm
+absolute, or mm from the end of travel; `o` is 0 when not relative) or
+`struct('action', 'end')`. The app writes the table (position values as slave
+axis positions, clamped to the soft limits, padded with the last value to
+`cfg.trackTableLength`), then `TrackMode`, then `TrackSeq` incremented, then
+the operation's `RequestedMode`/`CommandSeq`. It tries the simulation's
+variable-tuning API for `trackTable` and falls back to assigning the model
+workspace variable and updating the model; the first update's time is reported
+on the status line.
+
+*Pause and resume.* Any pause (operator, pressure guard, timeout, ended
+operation, E-STOP, link, model or slave fault) ends the track (`TrackMode` 0);
+an own operation is stopped as for any machine step, a borrowed one carries on.
+Resume issues the step again: the series is sampled with the current
+parameter values and restarts from its start with the original offset. Abort and
+completion end the track too, and the app ends it whenever it clears its
+operation.
+
+*Progress.* While a timed wait runs or a track has been issued, the panel's
+title line shows `(m:ss / m:ss)`, the elapsed time against the duration
+(`stepProgress` of `procView`).
+
+### Recording from a procedure
+
+`record` on the procedure is a number above 0 (s) or `'off'`; the default is
+`cfg.procRecordDefault` (1 s), not the app's interval, because a procedure is data
+and its files must not depend on the operator's setting. A step's `record`
+overrides it for that step, and a step without one inherits the procedure's. The
+engine asks for the interval (`req.record`) on entering a step whose effective
+value differs from the last one asked, and always on the first step, and asks
+`req.recordEnd` when the run ends (completed or aborted). The app carries it out:
+
+- a number starts a recording owned by the procedure at that interval, unless
+  the operator stopped a recording earlier in this run; with a recording running
+  it changes the interval; with one paused it resumes it;
+- `'off'` pauses the recording: the open interval is emitted and no rows are
+  taken until the next number, which shows as a jump of `seq` in the file;
+- at the end of the run a procedure-owned recording is saved to `captures/`
+  without a dialog, and an operator-owned one continues at the dropdown's
+  interval;
+- a slave fault or E-STOP pause keeps recording (the fault and the recovery are
+  the data), a model stop ends the recording as it always does;
+- **Stop recording** during a run saves with the dialog as usual and the
+  procedure starts no other recording in that run (Start Procedure resets this);
+- **Record** pressed during a run starts an operator-owned recording at the
+  procedure's last requested interval; later requests still set its interval, and
+  it outlives the run.
+
+The interval dropdown is disabled during a run and shows the interval in
+force; it returns to the operator's choice when the run ends.
 
 ### States
 
@@ -341,52 +521,100 @@ so write `Holding {dischargePressure}.` and not `... atm.`. The seed procedure
 computes the oxygen fill volume from its parameters in a function target
 (`oxygenFillVolume`, with its equation in the comment) and writes the saline
 volume and the oxygen ratio to the slave (sinks); its constants `FILL_EXCESS`,
-`PUSH_SPEED` and `PUSH_PRESSURE_MAX` are at the top of the file.
+`PUSH_SPEED` and `PUSH_PRESSURE_MAX` are at the top of the file; the seed
+procedure records each run at 1 s (`record`).
+
+`procedure/experimentTemplate.m` is the file to copy from for an experiment: it
+sets the record interval for the run and per step, has one step of each kind
+(including a relative pressure track after a kept pressurize, which borrows the
+hold, and a timed wait that holds pressure through it) and comments the fields.
+Copy it to a new name in `procedure/`, rename the function, delete what is not
+needed and set `cfg.procedure`. `tests/run_all.sh smokeProcedureEngine`
+validates the shipped procedure, and `experimentTemplate` through `procNew`, and
+walks them against the stand-in.
+
 ## Recording a trace
 
-The Trace panel (between the lamps and the Procedure panel) records what
-crosses the link. **Record** is available while connected. Pressing it starts a recording of the exchanges
-from that moment, and the panel shows the samples taken, the elapsed time and,
-in red, any records missed. Pressing it again (**Stop recording**) ends the
-recording, writes the file at once to `captures/trace_yyyymmdd_HHMMSS.csv` and
-then opens a Save dialog proposing that path: choosing another name or folder
-moves the file there, and cancelling keeps it in `captures/`. Recording also
-ends, without a dialog, when the model stops (a lost Modbus connection, for
-example), when **Disconnect** is pressed and when the app is closed; the file
-is then saved to `captures/` and the panel names it. **Plot trace...** opens
-a file chooser in `captures/` and plots the file chosen.
+**Record**, the interval dropdown and the trace status are at the right of the
+Controls band. The **Trace** menu has Record (Stop recording while recording,
+Ctrl+R; enabled as the button is), Plot trace... (Ctrl+P) and Live plot
+(Ctrl+L); the last two are only in the menu and always enabled.
 
-The app reads the ring on its display poll (`displayPeriod`, 0.1 s) while recording. The ring holds 25.6 s,
-so a stall of the app shorter than that loses nothing. Records overwritten
-before they were read are counted as missed: the panel turns red, the file's
-`missed` entry gives the total and the sequence column jumps where they were
-lost. The records between the last poll and a model stop (at most one poll) are not
-captured; pressing **Disconnect** reads the ring once more before stopping.
+**Record** is available while connected. The dropdown chooses the record
+interval: `cfg.traceIntervalPresets` (0.05 s (20 Hz), 0.1 s (10 Hz), 0.5 s
+(2 Hz), 1 s, 10 s, 60 s), starting at `cfg.traceIntervalDefault` (0.05 s, every
+exchange). A preset list cannot give an invalid value; a procedure may ask for
+any value, which is rounded to whole exchanges (below). Changing the dropdown
+while recording applies at once: the open interval is written as a row and a new
+grid starts. Pressing Record starts a recording at the dropdown's interval; the
+label shows the rows written, the elapsed time and the interval, `"N records,
+S s, every X s"`, `", paused by step"` while a procedure step has recording off,
+and the records missed in red. Pressing the button again (**Stop recording**)
+ends the recording, writes the file at once to
+`captures/trace_yyyymmdd_HHMMSS.csv` and then opens a Save dialog proposing that
+path: choosing another name or folder moves the file there, and cancelling keeps
+it in `captures/`. Recording also ends, without a dialog, when the model stops (a
+lost Modbus connection, for example), when **Disconnect** is pressed and when the
+app is closed; the file is then saved to `captures/` and the trace status names it.
+**Plot trace...** opens a file chooser in `captures/` and plots the file chosen.
+
+During a procedure the interval belongs to the procedure (`record`, see
+Recording from a procedure above): the dropdown is disabled and shows the
+interval in force, a number starts a recording owned by the procedure that is
+saved without a dialog when the run ends, and a recording the operator started
+(Record during a run, or before it) takes the procedure's intervals while it
+runs and returns to the dropdown's choice afterwards. Stopping a recording
+during a run keeps the procedure from starting another in that run.
+
+The app reads the ring on every display poll (`displayPeriod`, 0.1 s) whether or
+not it is recording, so the live plot is always current; the ring holds 25.6 s,
+so a stall of the app shorter than that loses nothing. Each poll takes the new
+records (`traceDrain`, which keeps none), aligns them (`traceAlign`, below),
+appends them to the live buffer and, while recording and not paused, passes
+them through `traceDecimate` into the recording (`traceAppend`). Records
+overwritten before they were read are counted as missed: the label turns red,
+the file's `missed` entry gives the total and the sequence column jumps where
+they were lost. The records between the last poll and a model stop (at most one
+poll) are not captured; pressing **Disconnect** reads the ring once more before
+stopping. The first rows of a recording start about two exchanges after the
+button, because the alignment holds the newest two records back.
+
+**Live plot** (Trace > Live plot; View > Side by side places it) opens a figure with four stacked axes over the last
+`cfg.livePlotSeconds` (600 s): the pressure (the snapshot, and the window mean
+with its minimum and maximum), the position from the end of travel, the velocity
+and the torque, against the time before now. The aligned 20 Hz stream goes into
+a circular buffer of 12000 rows, and the figure is redrawn every
+`cfg.livePlotPeriod` (0.5 s) while it is open, by setting the line data in place;
+closing it stops the updates. `cfg.livePlotPosition` ([x y width height] px,
+empty for MATLAB's default) sets where the window opens. The redraw is part of
+the poll, so a poll that overruns `displayPeriod` shows in `app.PollStats`.
 
 ## Trace files
 
 A trace file is a CSV with a `# key: value` header block, a line of column
-names and one row per Modbus exchange (50 ms). Values are the raw engineering
-units of the link: position in slave axis millimetres, pressure in MPa gauge,
-targets as the app writes them. The geometry in force at capture time is
-stored in the header, so the displayed quantities are derived from the file
-alone.
+names and one row per record interval (one Modbus exchange, 50 ms, by default).
+Values are the raw engineering units of the link: position in slave axis
+millimetres, pressure in MPa gauge, targets as the app writes them (the targets
+`masterStep` received, so a playing track shows). The geometry in force at
+capture time is stored in the header, so the displayed quantities are derived
+from the file alone.
 
 | Metadata key | Meaning |
 |--------------|---------|
-| `format` | File format version (1). |
+| `format` | File format version (3; formats 1 and 2 still read and plot, see below). |
 | `source` | Writer of the file. |
 | `started` | Wall-clock start, `yyyy-mm-ddTHH:MM:SS`. |
 | `records`, `missed` | Rows written and records lost to ring overruns. |
 | `dt_s`, `exchangePeriod_s` | Model step and Modbus exchange period. |
+| `recordInterval_s` | The effective record interval when the recording started (whole exchanges). A procedure can change it during the file; a row's own interval is its `nExchanges` times `exchangePeriod_s`. |
 | `posEOT_mm`, `boreDiameter_mm`, `deadVolume_mL`, `mixingDeadVolume_mL` | Cylinder geometry (`masterConfig`). |
 | `atmPerMPa`, `atmAmbient_atm` | Pressure scaling and the atmosphere added to gauge pressure. |
 | `referenceUnits` | Units of the `reference` column by mode. |
 
 | Column | Source | Unit |
 |--------|--------|------|
-| `seq` | Record number since model start, from 1 | - |
-| `t_s` | Model time of the recording step | s |
+| `seq` | Record number since model start, from 1; of the last exchange in the row | - |
+| `t_s` | Model time of the recording step; of the last exchange in the row | s |
 | `heartbeat` | HR1 written in this exchange | count |
 | `heartbeatEcho` | IR1 | count |
 | `slaveCounter` | IR2 | count |
@@ -398,6 +626,12 @@ alone.
 | `torque_pct` | IR15-16 | % rated |
 | `commandedPosition_mm` | IR17-18 | mm |
 | `pressureGauge_MPa` | IR19-20, as the slave reports it | MPa gauge |
+| `pressureMeanGauge_MPa`, `pressureMinGauge_MPa`, `pressureMaxGauge_MPa` | IR21-22, IR23-24, IR25-26: pressure over the scans of the row's window | MPa gauge |
+| `velocityMean_mm_s` | IR27-28 | mm/s |
+| `torqueMean_pct` | IR29-30 | % rated |
+| `positionMean_mm` | IR31-32 | mm |
+| `summaryScans` | IR33, scans in the window; 0 where there is none | count |
+| `summarySeq` | IR34, window number, wraps at 65536; of the last window in the row | count |
 | `modeCode`, `motionEnable`, `faultReset` | HR2 to HR4 as sent | code, 0/1, 0/1 |
 | `reference` | HR5-6 as sent | mm (position), mm/s (jog), MPa gauge (pressure) |
 | `positionSpeed_mm_s` | HR7-8 as sent | mm/s |
@@ -406,25 +640,79 @@ alone.
 | `statusCode`, `faultCode`, `state` | `masterStep` outputs (`state` is `masterStateMachine`'s `ST_*`) | code |
 | `linkOk`, `doSafety` | `masterStep` outputs | 0/1 |
 | `op`, `cmdSeq` | `RequestedMode`, `CommandSeq` blocks | code, count |
-| `targetPosition_mm` | `TargetPosition` block | mm, slave axis |
-| `targetPressure_atm` | `TargetPressure` block | atm absolute |
+| `targetPosition_mm` | the target `masterStep` received (`TrackStep` output 1) | mm, slave axis |
+| `targetPressure_atm` | the target `masterStep` received (`TrackStep` output 2) | atm absolute |
 | `estop`, `mixer` | `ESTOP`, `Mixer` blocks | 0/1 |
+| `procStep` | `ProcStep` block: the running procedure's step number, 0 outside a run | count |
+| `nExchanges` | Exchanges combined into the row (1 in the ring) | count |
 
-`traceLayout.m` defines the columns and `traceColumnNames` gives the header.
-Read and plot a file from MATLAB or Octave (with `master-src/logic` and
-`master-src/trace` on the path):
+**Summary alignment.** The slave closes a window on each change of the master's
+heartbeat, so a window spans the scans of one master write, and publishes it with
+a lag: the summary read in record n describes the window opened by the write of
+record n-2. The ring is raw, and the app aligns while it records: `traceAlign`
+holds two records back and gives row k the summary of record k+2 when
+`seq(k+2) = seq(k) + 2`, `summaryScans(k+2) > 0` and its `summarySeq` is not the
+window last assigned (a late exchange the link merged reads the same window
+twice, and it is counted once). Otherwise the row has no window: the six values
+0, `summaryScans` 0 and `summarySeq` 0. A format 3 file therefore has the summary
+on the row of its window, whatever the interval, and a tool reading columns
+`pressureMeanGauge_MPa` to `summarySeq` of a format 3 file must not shift them.
+A format 2 file (raw, one row per exchange) has the lag in it:
+`traceDerive` gives its row k the summary of record k+2, NaN where record k+2
+is missing, is not exactly two records later or reports `summaryScans` 0, and a
+format 1 file has none.
+
+**Decimation.** An interval of `interval` seconds is `n = max(1, round(max(interval,
+exchangePeriod) / exchangePeriod))` exchanges: a smaller interval is raised to
+one exchange and a value that is not a multiple is rounded, not rejected, and
+the file records the effective interval. `traceDecimate` combines the aligned rows
+of each interval into one:
+
+- over the windows with `summaryScans > 0`, the means of pressure, velocity,
+  torque and position are weighted by the scans (`sum(scans * mean) / sum(scans)`),
+  the minimum is the smallest window minimum and the maximum the largest window
+  maximum, `summaryScans` is the sum and `summarySeq` the last window's number;
+  with no window all are 0;
+- every other column is the last exchange's, so `seq` and `t_s` identify the
+  exchange the snapshot values come from, and `nExchanges` is the count;
+- the row covers `t_s - (nExchanges - 1) * exchangePeriod_s` to
+  `t_s + exchangePeriod_s`.
+
+The grid is anchored at the first record taken after a start, resume or interval
+change; an interval is emitted when its last record arrives, or early when a
+record beyond it arrives (records were missed), when `procStep` changes (no row
+spans two steps) and when the recording is flushed. A row with fewer than n
+exchanges is a partial interval: at the end of a recording, at a step change, at
+a pause or where records were missed.
+
+`traceLayout.m` defines the columns (44 of them, 45 in the ring with the guard)
+and `traceColumnNames` gives the header. Read and plot a file from MATLAB or
+Octave (with `master-src/logic` and `master-src/trace` on the path):
 
 ```matlab
 d = traceReadCsv(file);     % d.meta, d.names, d.data and one column vector per name
-d = traceDerive(d);         % adds posFromEOT_mm, sweptVolume_mL, mixingVolume_mL, flow_mL_s, pressureAbs_atm, gap, tRel_s, ...
+d = traceDerive(d);         % adds posFromEOT_mm, sweptVolume_mL, mixingVolume_mL, flow_mL_s, pressureAbs_atm, pressureMeanAbs_atm, pressureMinAbs_atm, pressureMaxAbs_atm, posMeanFromEOT_mm, interval_s, tStartRel_s, decimated, gap, tRel_s, ...
 figs = tracePlot(file);     % a file name, the struct from traceReadCsv, or [] to choose a file
 figs = tracePlot(d, 'visible', 'off', 'save', true, 'saveDir', folder);
 ```
 
-`tracePlot` returns three figures: `overview` (pressure, position, velocity
-and torque against time), `delivery` (swept volume, flow, and pressure against
+`traceDerive` adds to the quantities above: `posMeanFromEOT_mm` (the end of
+travel minus the window's mean position; NaN where `summaryScans` is 0 and in
+files before format 3), `interval_s` (`nExchanges` times the exchange period),
+`tStartRel_s` (`tRel_s` minus `(nExchanges - 1)` exchange periods, where the
+row's interval begins) and the scalar `decimated` (some row combines more than
+one exchange). A file without `procStep` and `nExchanges` gets 0 and 1. `gap`
+is true at the first row after a jump of `seq` larger than the row's
+`nExchanges`.
+
+`tracePlot` returns three figures: `overview` (pressure with the window mean, maximum and
+minimum when the file has them, position, velocity and torque against time), `delivery` (swept volume, flow, and pressure against
 swept volume) and `status` (status and mode codes, the operation flags, link state
-and link health). Fault, link-down and E-STOP intervals are shaded and lines
+and link health). The overview always draws the snapshot
+columns; when the file has window or interval statistics (`summaryScans` above
+0) the pressure row adds their mean, minimum and maximum as steps and the
+position, velocity and torque rows add the mean as steps, from `tStartRel_s` in
+a decimated file. Fault, link-down and E-STOP intervals are shaded and lines
 break where records were missed. With `'save'` on, each figure is saved as
 `<csv name>_<overview|delivery|status>.fig` in `saveDir` (the file's folder
 by default).
@@ -433,7 +721,9 @@ by default).
 
 `tests/run_all.sh` (repository root) needs `python3` and `octave-cli`. It
 translates `slave-src` into a simulated slave with `tools/st_translate.py` and runs the
-master logic against it in closed loop. The trace recorder, the ring drain and
+master logic against it in closed loop. The trace recorder, the ring drain, the
+alignment, decimation and live buffer, track playback, the procedure engine and
 the CSV and plot functions are tested against a stand-in slave. The Simulink
-shell and the app (including the `TraceRing` read and the Record button) are
-not covered; they can only be exercised on the lab PC.
+shell and the app (including the `TraceRing` read, the Record button, the
+interval dropdown, the live plot and the track table update) are not covered;
+they can only be exercised on the lab PC.

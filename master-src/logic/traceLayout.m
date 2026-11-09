@@ -5,9 +5,9 @@ function L = traceLayout()
 %   header (traceColumnNames). L.guard repeats the record number so a row
 %   read while being written is recognised.
 L.depth = 512;              % records (25.6 s at the 50 ms exchange)
-L.nCol  = 34;               % data columns, written to the CSV
-L.width = 35;               % ring columns: data plus the guard
-L.guard = 35;               % repeats seq
+L.nCol  = 44;               % data columns, written to the CSV
+L.width = 45;               % ring columns: data plus the guard
+L.guard = 45;               % repeats seq
 L.col.seq                  = 1;   % record number since model start, from 1
 L.col.t_s                  = 2;   % model time of the recording step (s)
 L.col.heartbeat            = 3;   % HR1 written in this exchange
@@ -42,4 +42,18 @@ L.col.targetPosition_mm    = 31;  % TargetPosition block, slave axis mm
 L.col.targetPressure_atm   = 32;  % TargetPressure block, atm absolute
 L.col.estop                = 33;  % ESTOP block
 L.col.mixer                = 34;  % Mixer block
+% Summary of the window the slave closed before this read, IR21-34. In
+% the ring it describes the scans of the write two records earlier; the
+% recorder's host side moves it onto that record (traceAlign), so in a
+% format 3 file it describes the row's own window (see traceDerive)
+L.col.pressureMeanGauge_MPa = 35; % IR21-22, mean over the window
+L.col.pressureMinGauge_MPa = 36;  % IR23-24
+L.col.pressureMaxGauge_MPa = 37;  % IR25-26
+L.col.velocityMean_mm_s    = 38;  % IR27-28
+L.col.torqueMean_pct       = 39;  % IR29-30, % rated
+L.col.positionMean_mm      = 40;  % IR31-32
+L.col.summaryScans         = 41;  % IR33, scans in the window; 0 before the first
+L.col.summarySeq           = 42;  % IR34, window number, wraps at 65536
+L.col.procStep             = 43;  % ProcStep block: running procedure step, 0 outside a procedure
+L.col.nExchanges           = 44;  % exchanges combined into the record; traceStep writes 1, traceDecimate the count
 end

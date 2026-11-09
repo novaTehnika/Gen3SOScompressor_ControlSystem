@@ -31,6 +31,18 @@ G_mbActualTorque := LREAL_TO_REAL(G_sysActualTorque);
 G_mbCommandedPosition := LREAL_TO_REAL(G_sysCommandedPosition);
 G_mbActualPressure := LREAL_TO_REAL(G_sysActualPressure);
 
+(* Exchange summary registers (FB_ExchangeSummary). The values change only
+   in the scan a window closes; the Modbus group is copied once per scan, so
+   a read sees one window. *)
+G_mbSumPressureMean := LREAL_TO_REAL(G_sysSumPressureMean);
+G_mbSumPressureMin := LREAL_TO_REAL(G_sysSumPressureMin);
+G_mbSumPressureMax := LREAL_TO_REAL(G_sysSumPressureMax);
+G_mbSumVelocityMean := LREAL_TO_REAL(G_sysSumVelocityMean);
+G_mbSumTorqueMean := LREAL_TO_REAL(G_sysSumTorqueMean);
+G_mbSumPositionMean := LREAL_TO_REAL(G_sysSumPositionMean);
+G_mbSumScans := G_sysSumScans;
+G_mbSumSeq := G_sysSumSeq;
+
 (* Step probe registers (FB_Probe). The window changes only in the scan a
    fill completes: StartTail is made different from Start before the
    window is touched and set equal to it last, so a read that straddles

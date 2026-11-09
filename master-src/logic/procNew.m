@@ -12,7 +12,8 @@ function p = procNew(proc, cfg, values)
 %           parameters' defaults (the values entered in the previous run)
 %
 %   proc has name (char), params (cell array of structs), steps (cell array
-%   of structs) and optional timerLabel and volumeLabel. A parameter gives
+%   of structs) and optional timerLabel, volumeLabel and record (the trace
+%   interval in s, or 'off'; default cfg.procRecordDefault). A parameter gives
 %   key and value, and optionally label, unit, min, max, format, sink
 %   ('', 'SalineVolume' or 'OxygenRatio') and kind ('' or 'pressure': its
 %   value, min and max are atm absolute, shown in the display unit, and it
@@ -23,7 +24,13 @@ function p = procNew(proc, cfg, values)
 %   a position step), pressureMax (atm absolute, a machine step) and
 %   alsoWhen ('endOfTravel', a confirm step or a pressure step). A position
 %   or pressure target may be a function handle @(values, cfg) returning a
-%   finite scalar, evaluated when the step issues its operation.
+%   finite scalar, evaluated when the step issues its operation. A step may
+%   give record (a number above 0, or 'off'; absent: the procedure's), and a
+%   timed wait or a track its duration as a parameter key. A track step
+%   (op 'track') gives mode ('pressure' or 'position'), signal (a function
+%   @(t, values) of the time column or a [t value] matrix), duration and
+%   optionally relative; procNew samples the signal on the parameters'
+%   defaults and checks it (procTrackSeries, procTrackCheck).
 %
 %   The engine state p holds the normalized procedure in p.def and the run
 %   in the fields documented in procStep.m. procNew raises 'procNew:bad' for
@@ -33,7 +40,12 @@ function p = procNew(proc, cfg, values)
 %   parameters, an unknown sink or kind, a pressure parameter with a unit,
 %   keep on a step that cannot hold, a speed, pressureMax or alsoWhen where
 %   it does not apply, a target function that fails on the parameters'
-%   defaults, or a settled wait with no earlier pressure step that has keep.
+%   defaults, a settled wait with no earlier pressure step that has keep, a
+%   record that is not a number above 0 or 'off', a duration key that names
+%   no parameter, a track without mode, signal or duration, a track with
+%   target, unit, speed, alsoWhen or keep, mode, signal or relative on
+%   another step, or a track signal that fails on the defaults or leaves
+%   the pressure or position limits.
 
 if nargin < 3
     values = struct();
@@ -62,6 +74,8 @@ p.k = 0;
 p.stepT = 0;
 p.phase = 'issue';
 p.track = emptyTrack();
+p.trk = emptyTrk();
+p.record = '';
 p.settleT = 0;
 p.settleOk = false;
 p.bg = emptyBg();
@@ -93,6 +107,11 @@ function t = emptyTrack()
 t = struct('op', 0, 'confirmed', false, 'sinceSent', 0, 'target', NaN);
 end
 
+function t = emptyTrk()
+t = struct('on', false, 'borrow', false, 't', 0, 'offset', NaN, ...
+    'duration', NaN);
+end
+
 function b = emptyBg()
 b = struct('op', 0, 'target', NaN, 'step', 0, 'confirmed', false, ...
     'sinceSent', 0, 'lost', false);
@@ -108,6 +127,13 @@ def.timerLabel = 'Time pressurized';
 def.volumeLabel = 'Volume discharged (mL)';
 if isfield(proc, 'timerLabel'), def.timerLabel = proc.timerLabel; end
 if isfield(proc, 'volumeLabel'), def.volumeLabel = proc.volumeLabel; end
+def.record = cfg.procRecordDefault;
+if isfield(proc, 'record')
+    if ~validRecord(proc.record)
+        error('procNew:bad', 'record must be a number above 0 or ''off''');
+    end
+    def.record = proc.record;
+end
 
 % ----- Parameters -----
 rawParams = asCell(proc, 'params');
@@ -166,7 +192,8 @@ ts = struct('id', '', 'section', '', 'title', '', 'text', '', 'type', '', ...
     'unit', '', 'until', '', 'keep', false, 'tolerance', NaN, ...
     'duration', NaN, 'timeout', Inf, 'timerStart', false, ...
     'timerStop', false, 'zeroVolume', false, 'mixer', '', ...
-    'speed', NaN, 'pressureMax', Inf, 'alsoWhen', '');
+    'speed', NaN, 'pressureMax', Inf, 'alsoWhen', '', ...
+    'mode', '', 'signal', [], 'relative', false, 'record', NaN);
 steps = repmat(ts, 1, 0);
 section = '';
 pressureHold = false;   % an earlier pressure step has keep
@@ -233,7 +260,8 @@ for k = 1:numel(rawSteps)
         end
     end
     if strcmp(s.type, 'machine')
-        if ~any(strcmp(s.op, {'home', 'goHome', 'position', 'pressure', 'stop'}))
+        if ~any(strcmp(s.op, {'home', 'goHome', 'position', 'pressure', ...
+                'track', 'stop'}))
             bad('unknown op "%s"', s.op);
         end
         if any(strcmp(s.op, {'position', 'pressure'}))
@@ -283,6 +311,7 @@ for k = 1:numel(rawSteps)
             case 'position', allowed = {'arrive'};
             case {'home', 'goHome'}, allowed = {'ended'};
             case 'pressure', allowed = {'running', 'settled'};
+            case 'track', allowed = {'elapsed'};
             otherwise, allowed = {'stopped'};
         end
         if isempty(s.until), s.until = allowed{1}; end
@@ -299,9 +328,57 @@ for k = 1:numel(rawSteps)
         if strcmp(s.until, 'settled') && ~pressureHold
             bad('a settled wait needs an earlier pressure step with keep');
         end
-        if isempty(s.until) && ~(isfinite(s.duration) && s.duration >= 0)
-            bad('a timed wait needs a duration');
+        if isempty(s.until)
+            d = s.duration;
+            if ischar(d)
+                if ~any(strcmp(d, keys))
+                    bad('duration "%s" names no parameter', d);
+                end
+                d = defaults.(d);
+            end
+            if ~(isnumeric(d) && isscalar(d) && isfinite(d) && d >= 0)
+                bad('a timed wait needs a duration');
+            end
         end
+    end
+    if ischar(s.duration) && ~((strcmp(s.type, 'wait') && isempty(s.until)) ...
+            || (strcmp(s.type, 'machine') && strcmp(s.op, 'track')))
+        bad('a duration key only applies to a timed wait or a track step');
+    end
+    isTrack = strcmp(s.type, 'machine') && strcmp(s.op, 'track');
+    if ~isTrack && (isfield(r, 'mode') || isfield(r, 'signal') ...
+            || isfield(r, 'relative'))
+        bad('mode, signal and relative only apply to a track step');
+    end
+    if isTrack
+        if ~any(strcmp(s.mode, {'pressure', 'position'}))
+            bad('a track needs mode "pressure" or "position"');
+        end
+        if isempty(s.signal)
+            bad('a track needs a signal');
+        end
+        if ~(islogical(s.relative) || (isnumeric(s.relative) && isscalar(s.relative)))
+            bad('relative must be true or false');
+        end
+        s.relative = logical(s.relative);
+        if isnumeric(s.duration) && isnan(s.duration)
+            bad('a track needs a duration');
+        end
+        [raw, why] = procTrackSeries(s, defaults, cfg);
+        if isempty(why)
+            if strcmp(s.mode, 'position')
+                limit = cfg.speedMax;
+            else
+                limit = cfg.trackPressureSlopeMax;
+            end
+            why = procTrackCheck(raw, s.mode, s.relative, cfg, limit);
+        end
+        if ~isempty(why)
+            bad('track signal %s', why);
+        end
+    end
+    if ~(isequaln(s.record, NaN) || validRecord(s.record))
+        bad('record must be a number above 0 or ''off''');
     end
     if isfield(r, 'speed') && ~strcmp(s.type, 'machine')
         bad('speed only applies to a position step');
@@ -323,6 +400,9 @@ for k = 1:numel(rawSteps)
         bad('alsoWhen only applies to a confirm step or a pressure step');
     end
     if strcmp(s.until, 'settled')
+        if ischar(s.duration)
+            bad('a settled step takes its duration as a number');
+        end
         if isnan(s.tolerance), s.tolerance = cfg.procPressureTol; end
         if isnan(s.duration), s.duration = cfg.procSettleTime; end
     end
@@ -330,6 +410,11 @@ for k = 1:numel(rawSteps)
 end
 def.steps = steps;
 def.normalized = true;
+end
+
+function tf = validRecord(v)
+% A record interval: a number above 0 (s) or 'off'.
+tf = isequal(v, 'off') || (isnumeric(v) && isscalar(v) && isfinite(v) && v > 0);
 end
 
 function c = asCell(proc, name)

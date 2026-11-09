@@ -40,6 +40,8 @@ tests/modbusLinkTiming.m
 tests/masterReadouts.m
 tests/traceRecorder.m
 tests/traceCsvPlot.m
+tests/traceStream.m
+tests/trackPlayback.m
 tests/smokeMasterStateMachine.m
 tests/smokeProcedureEngine.m
 "

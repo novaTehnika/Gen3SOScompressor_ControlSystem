@@ -40,7 +40,8 @@ has to be skipped or spread over scans inside its own POU (the step probe,
 `FB_Probe`, copies at most `G_cfgProbeFillPerScan` records per scan for
 this reason). The Modbus holding group spans HR1-114 and the input group
 IR1-524 for the probe's registers (`docs/master/ModbusRegisterMap.md`,
-section 6).
+section 6); without the probe the groups span HR1-12 and IR1-34, the
+latter including the exchange summary (IR21-34, section 3).
 
 1. Assign `PRG_Main` (and the LD POU) to the cyclic task
 2. Set the task interval to **4 ms** (the program takes about 2.5 ms a scan, so a 2 ms task overruns and runs on every second motion cycle)

@@ -1,20 +1,21 @@
 function traceRing = traceStep(mbRead, mbWrite, doSafety, statusCode, faultCode, ...
-    state, linkOk, op, cmdSeq, targetPosition, targetPressure, estop, mixer)
+    state, linkOk, op, cmdSeq, targetPosition, targetPressure, estop, mixer, procStep)
 %TRACESTEP Entry point for the Simulink shell's TraceStep MATLAB Function
 %   block: keeps a ring of one record per Modbus exchange and returns the
 %   whole ring. Called once per model step (cfg.dt) next to masterStep,
 %   which it does not touch; the app reads the ring while recording
 %   (traceStart / traceDrain) and writes it to a CSV.
 %
-%   mbRead        input registers IR1..IR20 as read by the Modbus Client
+%   mbRead        input registers IR1..IR34 as read by the Modbus Client
 %                 Read block (modbusMap, raw 16-bit values as doubles)
 %   mbWrite       holding registers HR1..HR12 as masterStep returned them
 %                 and the Modbus Client Write block sends them
 %   doSafety, statusCode, faultCode, state, linkOk
 %                 masterStep outputs of the same step
-%   op, cmdSeq, targetPosition, targetPressure, estop, mixer
+%   op, cmdSeq, targetPosition, targetPressure, estop, mixer, procStep
 %                 values of the Constant blocks the app writes;
-%                 targetPressure in atm absolute
+%                 targetPressure in atm absolute, procStep the running
+%                 procedure step (0 outside a procedure)
 %
 %   traceRing     traceLayout().depth x traceLayout().width matrix, one
 %                 record per row. Record n (n = 1, 2, ... since the first
@@ -22,6 +23,8 @@ function traceRing = traceStep(mbRead, mbWrite, doSafety, statusCode, faultCode,
 %                 the guard column repeats it, so a row read while it is
 %                 being written is recognised by guard ~= n. Rows not yet
 %                 written are zero. The columns are named in traceLayout.
+%                 The nExchanges column holds 1 here; the host side
+%                 overwrites it when it combines records (traceDecimate).
 %
 %   A record is taken in every step whose count is a multiple of
 %   cfg.exchangePeriod/cfg.dt, counted from the first call. The read
@@ -65,6 +68,14 @@ if mod(stepCount, stepsPerExchange) == 0
     rec(L.col.torque_pct)           = modbusUnpack(r(map.ir.torque), r(map.ir.torque + 1));
     rec(L.col.commandedPosition_mm) = modbusUnpack(r(map.ir.commandedPosition), r(map.ir.commandedPosition + 1));
     rec(L.col.pressureGauge_MPa)    = modbusUnpack(r(map.ir.pressure), r(map.ir.pressure + 1));
+    rec(L.col.pressureMeanGauge_MPa) = modbusUnpack(r(map.ir.pressureMean), r(map.ir.pressureMean + 1));
+    rec(L.col.pressureMinGauge_MPa) = modbusUnpack(r(map.ir.pressureMin), r(map.ir.pressureMin + 1));
+    rec(L.col.pressureMaxGauge_MPa) = modbusUnpack(r(map.ir.pressureMax), r(map.ir.pressureMax + 1));
+    rec(L.col.velocityMean_mm_s)    = modbusUnpack(r(map.ir.velocityMean), r(map.ir.velocityMean + 1));
+    rec(L.col.torqueMean_pct)       = modbusUnpack(r(map.ir.torqueMean), r(map.ir.torqueMean + 1));
+    rec(L.col.positionMean_mm)      = modbusUnpack(r(map.ir.positionMean), r(map.ir.positionMean + 1));
+    rec(L.col.summaryScans)         = r(map.ir.summaryScans);
+    rec(L.col.summarySeq)           = r(map.ir.summarySeq);
     rec(L.col.modeCode)             = w(map.hr.modeCode);
     rec(L.col.motionEnable)         = w(map.hr.motionEnable);
     rec(L.col.faultReset)           = w(map.hr.faultReset);
@@ -83,6 +94,8 @@ if mod(stepCount, stepsPerExchange) == 0
     rec(L.col.targetPressure_atm)   = targetPressure;
     rec(L.col.estop)                = estop;
     rec(L.col.mixer)                = mixer;
+    rec(L.col.procStep)             = procStep;
+    rec(L.col.nExchanges)           = 1;
     rec(L.guard)                    = seq;
 
     ring(mod(seq - 1, L.depth) + 1, :) = rec;

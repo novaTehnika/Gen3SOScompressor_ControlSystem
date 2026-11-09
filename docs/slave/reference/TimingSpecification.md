@@ -244,8 +244,8 @@ Modbus service tick  |..|..|..|..|..|..|..|..|..|..|..|..|  (4 ms)
 MP2600iec scan       ||||||||||||||||||||||||||||||||||||||  (4 ms)
 ```
 
-The master writes holding registers HR1-HR12 and reads input registers IR1-IR20
-once per exchange. The slave's Modbus server services the connection on its own
+The master writes holding registers HR1-HR12 and reads input registers IR1-IR34
+once per exchange (IR21-34 summarise the scans between two writes, about 12 of them). The slave's Modbus server services the connection on its own
 tick, independent of the PLC task; `PRG_Main` sees new holding register values
 at its next scan. See `docs/master/ModbusRegisterMap.md`.
 

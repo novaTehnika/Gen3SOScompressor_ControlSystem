@@ -6,7 +6,7 @@ function map = modbusMap()
 %   word first (modbusPack / modbusUnpack).
 
 map.nWrite = 12;            % HR1-12, one FC16 write
-map.nRead  = 20;            % IR1-20, one FC04 read
+map.nRead  = 34;            % IR1-34, one FC04 read
 
 map.hr.heartbeat    = 1;    % master step counter, wraps at 65536
 map.hr.modeCode     = 2;    % mode code, or the full fault code during reset
@@ -32,4 +32,13 @@ map.ir.velocity          = 13;  % REAL mm/s (13-14)
 map.ir.torque            = 15;  % REAL % (15-16)
 map.ir.commandedPosition = 17;  % REAL mm (17-18)
 map.ir.pressure          = 19;  % REAL MPa gauge (19-20)
+% Summary of the last closed window (one master write long), IR21-34
+map.ir.pressureMean      = 21;  % REAL MPa gauge (21-22)
+map.ir.pressureMin       = 23;  % REAL MPa gauge (23-24)
+map.ir.pressureMax       = 25;  % REAL MPa gauge (25-26)
+map.ir.velocityMean      = 27;  % REAL mm/s (27-28)
+map.ir.torqueMean        = 29;  % REAL % (29-30)
+map.ir.positionMean      = 31;  % REAL mm (31-32)
+map.ir.summaryScans      = 33;  % UINT, scans in the window, 0 before the first
+map.ir.summarySeq        = 34;  % UINT, window number, wraps at 65536
 end

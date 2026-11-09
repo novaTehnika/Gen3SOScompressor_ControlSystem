@@ -1,8 +1,12 @@
-function buf = traceStart(ring)
+function buf = traceStart(ring, keep)
 %TRACESTART Empty trace buffer that continues after the newest record
 %   already in the ring.
-%   buf = traceStart(ring) returns the buffer traceDrain appends to:
+%   buf = traceStart(ring) returns the buffer traceDrain appends to;
+%   buf = traceStart(ring, keep) with keep false makes traceDrain count
+%   the records without storing them (the live view needs the records,
+%   not the file):
 %
+%     keep      true when traceDrain stores the records (default)
 %     lastSeq   newest record number taken so far: the largest valid one
 %               in ring, 0 when there is none or the ring is unusable
 %     n         records held in data
@@ -16,6 +20,9 @@ function buf = traceStart(ring)
 %   records already in the ring belong to before the start and are not
 %   taken.
 
+if nargin < 2
+    keep = true;
+end
 L = traceLayout();
 [ring, ok] = traceRingCheck(ring);
 lastSeq = 0;
@@ -27,5 +34,5 @@ if ok
     end
 end
 buf = struct('lastSeq', lastSeq, 'n', 0, 'missed', 0, ...
-    'gaps', zeros(0, 2), 'data', zeros(1024, L.nCol));
+    'gaps', zeros(0, 2), 'data', zeros(1024, L.nCol), 'keep', logical(keep));
 end

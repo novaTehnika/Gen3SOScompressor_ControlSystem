@@ -31,6 +31,15 @@ the reference for each) and confirm:
 - [ ] Rebuild with the current `FB_Probe` (the 4096-record ring, 16 s;
       HR111-114, IR401-524) and `G_cfgProbeEnable`,
       `G_cfgProbeFillPerScan`.
+- [ ] Exchange summary (IR21-34): add the `FB_ExchangeSummary` block;
+      the eight `G_mbSum*` globals (`G_mbSumPressureMean AT %QD73832`,
+      `G_mbSumPressureMin AT %QD73836`, `G_mbSumPressureMax AT %QD73840`,
+      `G_mbSumVelocityMean AT %QD73844`, `G_mbSumTorqueMean AT %QD73848`,
+      `G_mbSumPositionMean AT %QD73852`, all `REAL`; `G_mbSumScans AT
+      %QW73856` and `G_mbSumSeq AT %QW73858`, `UINT`); the eight
+      `G_sysSum*` globals (six `LREAL := 0.0`, two `UINT := UINT#0`); the
+      `fbExchangeSummary : FB_ExchangeSummary` instance in `PRG_Main`; and
+      the input register group (FC04) extended to at least IR34.
 - [ ] LD POU: delete the `MC_MoveVelocity` instance if it is still
       there (no recaptured screenshot shows it), with `G_cmdMoveVelocity`,
       `G_staMoveVelocity`, their two types and `G_sysCycleCount`.
@@ -92,6 +101,12 @@ the reference for each) and confirm:
 
 ## Lab PC
 
+- [ ] Rebuild the controller with the exchange summary (MotionWorks
+      project, above) before `buildShell` or a bench: the shell's Read row
+      becomes 34 registers, and a controller whose input group ends at
+      IR20 answers it with an error and the model stops.
+- [ ] Measure the per-register term of the link with `modbusCountSweep`
+      at 20 and at 34 registers, and enter it in `modbusLinkConfig.m`.
 - [ ] Relaunch the operator app and check the procedure panel (it replaces
       the old tabs): it fits the figure beside the readouts; the step
       list, heading, instruction, checklist and the parameter fields (two
@@ -113,6 +128,37 @@ the reference for each) and confirm:
       `OxygenRatio` Constant blocks are added; `MasterStep` gains outputs
       11 and 12, with the `PressureBlock` and `AtEndOfTravel` Gain blocks
       the app reads (an older shell makes every poll fail).
+- [ ] Rebuild the shell again (`buildShell`) for the recorder interval,
+      the live plot and the track step: the `TrackStep` MATLAB Function
+      block (between `TargetPosition`/`TargetPressure` and `MasterStep`
+      inputs 4 and 7), the `TrackTable`, `TrackMode`, `TrackSeq` and
+      `ProcStep` Constants, the `StatusDelay` Unit Delay, the `TrackIndex`
+      Gain, and `TraceStep` with 14 inputs (ring width 45). Check the
+      build log for stack warnings on the 72001-value `trackTable`, and
+      that `DefaultParameterBehavior` Tunable leaves the other Constants
+      writable with `set_param` while the model runs.
+- [ ] Track table update: check which path of `setTrackTable` works with
+      the model running in Connected IO (the `Simulation` object's
+      `setVariable` on the model-workspace `trackTable`, or the fallback of
+      assigning the variable and updating the model), and time a full
+      table (`cfg.trackTableLength` = 72001 values; the status line reports
+      the first update). The slave faults after 300 ms without a write, so
+      an update that blocks the app's thread near that long needs a smaller
+      `cfg.trackMaxSeconds`, or the chunked table (a 1000-value constant
+      copied into a persistent table over consecutive steps).
+- [ ] Poll cost of the stream: with the live plot open for 10 minutes and a
+      recording at 0.05 s, read `app.PollStats` (`mean`, `max`,
+      `overruns`). The ring (512 x 45) is read on every poll and the plot
+      is redrawn every `cfg.livePlotPeriod`; if the poll overruns, raise
+      `livePlotPeriod` or plot every k-th point.
+- [ ] One track step of each mode on the bench (a relative pressure track
+      after a kept pressurize, which borrows the hold, and a position
+      track from idle with its own operation): the series starts when the
+      slave reports the mode (`TrackIndex` stays 1 until then), the
+      targets in the trace follow the table, pause and resume restart it,
+      and `TrackMode` is 0 afterwards. Run `experimentTemplate` with a
+      short `holdTime` and check its files (1 s, 0.05 s and 10 s rows,
+      `procStep` in the column).
 - [ ] Relaunch the operator app and check the pressure units and the
       procedure rework: the psi/atm/MPa toggles fit the pressure panel and
       the choice persists across a restart; the target spinner's limits

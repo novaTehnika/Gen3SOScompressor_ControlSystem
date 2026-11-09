@@ -8,7 +8,10 @@ function buildShell()
 %   MATLAB Function block, TraceStep, calls traceStep (master-src/logic) with
 %   the link vectors, masterStep's status outputs and the app's Constant
 %   blocks; it outputs the trace ring, which the TraceRing Gain block (a
-%   test point) exposes to the app. Run in MATLAB
+%   test point) exposes to the app. A third, TrackStep, calls trackStep
+%   (master-src/logic): it replaces the TargetPosition or TargetPressure
+%   the app wrote with the value of the track table for the exchange while a
+%   procedure's track step plays, and passes them through otherwise. Run in MATLAB
 %   with Simulink, Simulink Desktop Real-Time and Industrial Communication
 %   Toolbox (R2024b or later), from any folder:
 %
@@ -55,6 +58,10 @@ new_system(mdl);
 set_param(mdl, 'SolverType', 'Fixed-step', 'Solver', 'FixedStepDiscrete', ...
     'FixedStep', Ts, 'StopTime', 'inf', ...
     'PreLoadFcn', ['addpath(fullfile(fileparts(which(''' mdl ''')), ''..'', ''logic''));']);
+% The track table is a model-workspace variable that the TrackTable
+% Constant reads; tunable, so the app can replace it while the model runs.
+set_param(mdl, 'DefaultParameterBehavior', 'Tunable');
+assignin(get_param(mdl, 'ModelWorkspace'), 'trackTable', zeros(1, cfg.trackTableLength));
 
 % --- DAQ blocks ---------------------------------------------------------
 addDaq(mdl, 'DO Safety',   'Digital Output', '1', Ts);     % P0.0 safety relay
@@ -126,6 +133,23 @@ for k = 1:size(appInputs, 1)
         'Value', appInputs{k, 2}, 'SampleTime', Ts);
 end
 
+% --- Constants written by the app that are not masterStep inputs -------------
+% TrackTable: the series a track step plays (one value per exchange; the
+% model-workspace variable, replaced by the app). TrackMode: 0 none, 2
+% position, 4 pressure. TrackSeq: counts the track starts. ProcStep: the
+% running procedure's step number, 0 outside a run.
+add_block('simulink/Sources/Constant', [mdl '/TrackTable'], ...
+    'Value', 'trackTable', 'SampleTime', Ts);
+otherInputs = {'TrackMode', '0'; 'TrackSeq', '0'; 'ProcStep', '0'};
+for k = 1:size(otherInputs, 1)
+    add_block('simulink/Sources/Constant', [mdl '/' otherInputs{k, 1}], ...
+        'Value', otherInputs{k, 2}, 'SampleTime', Ts);
+end
+% The status code one step late: the track plays while it shows the mode's
+% operation running.
+add_block('simulink/Discrete/Unit Delay', [mdl '/StatusDelay'], ...
+    'InitialCondition', '0', 'SampleTime', Ts);
+
 % --- MATLAB Function block --------------------------------------------------
 blk = [mdl '/MasterStep'];
 add_block('simulink/User-Defined Functions/MATLAB Function', blk);
@@ -145,19 +169,38 @@ chart.Script = sprintf([ ...
     '    targetVelocity, jogDirection, targetPressure, estop, mixer, ...\n' ...
     '    positionSpeed, salineVolume, oxygenRatio);\n']);
 
+% --- Track playback ----------------------------------------------------------
+% Inputs 1..6: the app's TargetPosition and TargetPressure, the TrackTable,
+% TrackMode, TrackSeq and the delayed status code. Outputs 1..2 replace the
+% targets masterStep receives; output 3 is the table index in play.
+add_block('simulink/User-Defined Functions/MATLAB Function', [mdl '/TrackStep']);
+chart = find(sfroot, '-isa', 'Stateflow.EMChart', 'Path', [mdl '/TrackStep']);
+chart.Script = sprintf([ ...
+    'function [targetPositionOut, targetPressureOut, trackIndex] = fcn( ...\n' ...
+    '          targetPosition, targetPressure, trackTable, trackMode, trackSeq, ...\n' ...
+    '          statusCode)\n' ...
+    '%% All logic lives in master-src/logic/trackStep.m.\n' ...
+    '[targetPositionOut, targetPressureOut, trackIndex] = trackStep( ...\n' ...
+    '    targetPosition, targetPressure, trackTable, trackMode, trackSeq, ...\n' ...
+    '    statusCode);\n']);
+add_block('simulink/Math Operations/Gain', [mdl '/TrackIndex'], 'Gain', '1');
+add_block('simulink/Sinks/Display', [mdl '/TrackIndex Display']);
+
 % --- Trace recorder ----------------------------------------------------------
-% Inputs 1..13: the read vector, the write vector as sent, masterStep's
-% doSafety, statusCode, faultCode, state and linkOk, and the app's
-% RequestedMode, CommandSeq, TargetPosition, TargetPressure, ESTOP, Mixer.
+% Inputs 1..14: the read vector, the write vector as sent, masterStep's
+% doSafety, statusCode, faultCode, state and linkOk, the app's RequestedMode
+% and CommandSeq, the targets masterStep received (TrackStep's outputs),
+% the app's ESTOP and Mixer and the procedure step.
 add_block('simulink/User-Defined Functions/MATLAB Function', [mdl '/TraceStep']);
 chart = find(sfroot, '-isa', 'Stateflow.EMChart', 'Path', [mdl '/TraceStep']);
 chart.Script = sprintf([ ...
     'function traceRing = fcn(mbRead, mbWrite, doSafety, statusCode, faultCode, ...\n' ...
-    '          state, linkOk, op, cmdSeq, targetPosition, targetPressure, estop, mixer)\n' ...
+    '          state, linkOk, op, cmdSeq, targetPosition, targetPressure, estop, mixer, ...\n' ...
+    '          procStep)\n' ...
     '%% All logic lives in master-src/logic/traceStep.m.\n' ...
     'traceRing = traceStep(double(mbRead(:)''), mbWrite, doSafety, statusCode, ...\n' ...
     '    faultCode, state, linkOk, op, cmdSeq, targetPosition, targetPressure, ...\n' ...
-    '    estop, mixer);\n']);
+    '    estop, mixer, procStep);\n']);
 add_block('simulink/Math Operations/Gain', [mdl '/TraceRing'], 'Gain', '1');
 add_block('simulink/Sinks/Terminator', [mdl '/TraceRing Term']);
 
@@ -170,6 +213,9 @@ else
 end
 add_line(mdl, 'RT Read/1', 'MasterStep/1');
 for k = 1:size(appInputs, 1)
+    if any(strcmp(appInputs{k, 1}, {'TargetPosition', 'TargetPressure'}))
+        continue;                            % TrackStep passes these on
+    end
     add_line(mdl, [appInputs{k, 1} '/1'], sprintf('MasterStep/%d', k + 1));
 end
 add_line(mdl, 'MasterStep/1', 'RT Write/1');
@@ -181,6 +227,19 @@ end
 add_line(mdl, 'MasterStep/2', 'DO Safety/1');
 add_line(mdl, 'MasterStep/3', 'DO Mixer/1');
 
+% TrackStep sits between the app's targets and masterStep (inputs 4 and 7).
+add_line(mdl, 'TargetPosition/1', 'TrackStep/1');
+add_line(mdl, 'TargetPressure/1', 'TrackStep/2');
+add_line(mdl, 'TrackTable/1',     'TrackStep/3');
+add_line(mdl, 'TrackMode/1',      'TrackStep/4');
+add_line(mdl, 'TrackSeq/1',       'TrackStep/5');
+add_line(mdl, 'MasterStep/7',     'StatusDelay/1');
+add_line(mdl, 'StatusDelay/1',    'TrackStep/6');
+add_line(mdl, 'TrackStep/1',      'MasterStep/4');
+add_line(mdl, 'TrackStep/2',      'MasterStep/7');
+add_line(mdl, 'TrackStep/3',      'TrackIndex/1');
+add_line(mdl, 'TrackIndex/1',     'TrackIndex Display/1');
+
 % TraceStep branches off the sources above.
 add_line(mdl, 'RT Read/1',    'TraceStep/1');
 add_line(mdl, 'MasterStep/1', 'TraceStep/2');
@@ -188,11 +247,13 @@ add_line(mdl, 'MasterStep/2', 'TraceStep/3');
 for k = 7:10                                 % statusCode, faultCode, state, linkOk
     add_line(mdl, sprintf('MasterStep/%d', k), sprintf('TraceStep/%d', k - 3));
 end
-traceInputs = {'RequestedMode', 'CommandSeq', 'TargetPosition', 'TargetPressure', ...
-               'ESTOP', 'Mixer'};
-for k = 1:numel(traceInputs)
-    add_line(mdl, [traceInputs{k} '/1'], sprintf('TraceStep/%d', k + 7));
-end
+add_line(mdl, 'RequestedMode/1', 'TraceStep/8');
+add_line(mdl, 'CommandSeq/1',    'TraceStep/9');
+add_line(mdl, 'TrackStep/1',     'TraceStep/10');     % the targets masterStep received
+add_line(mdl, 'TrackStep/2',     'TraceStep/11');
+add_line(mdl, 'ESTOP/1',         'TraceStep/12');
+add_line(mdl, 'Mixer/1',         'TraceStep/13');
+add_line(mdl, 'ProcStep/1',      'TraceStep/14');
 add_line(mdl, 'TraceStep/1', 'TraceRing/1');
 add_line(mdl, 'TraceRing/1', 'TraceRing Term/1');
 % A test point keeps the signal's buffer, which the app reads through

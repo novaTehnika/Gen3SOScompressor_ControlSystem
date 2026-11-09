@@ -58,8 +58,9 @@ This plan does **not** cover the testing of the Simulink master controller softw
 -   **Objective:** Verify the Modbus TCP link between the master and slave and the slave's field I/O are correctly configured and functioning.
 -   **Procedure:**
     -   Write each holding register from the master (HR1-HR8) and verify the matching `G_mb*` global seen by the slave.
-    -   Verify each input register read by the master (IR1-IR20) matches the slave's source value, including `REAL` word order.
+    -   Verify each input register read by the master (IR1-IR34) matches the slave's source value, including `REAL` word order.
     -   Apply known loop currents to the pressure input and verify `G_aiPressure` and the scaled pressure in IR19-20.
+    -   Verify that the exchange summary (IR21-34) advances once per heartbeat change and that its mean, minimum and maximum bracket the pressure seen in IR19-20 over the window.
 -   **Acceptance Criteria:** All registers and signals must match their expected values (`ModbusRegisterMap.md`, `IOReference.md`).
 
 ### 3.2 Handshake Protocol Testing

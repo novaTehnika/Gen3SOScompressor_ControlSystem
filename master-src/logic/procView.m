@@ -33,6 +33,8 @@ function v = procView(p, opts)
 %     pressureTarget atm of the pressure the procedure holds, NaN if none
 %     pressureTargetText  that pressure in the display unit with its label,
 %                    or '--'
+%     stepProgress   'm:ss / m:ss' (elapsed of total) for a timed wait and
+%                    for a track step once issued, else ''
 %     message        why the procedure paused or ended, or the last refusal;
 %                    the note of a step that ended on its own when there is
 %                    none
@@ -210,6 +212,30 @@ v.message = p.message;
 if isempty(v.message)
     v.message = p.note;
 end
+
+% ----- Step progress -----
+v.stepProgress = '';
+if active && ~isempty(st)
+    if strcmp(st.type, 'wait') && isempty(st.until)
+        total = st.duration;
+        if ischar(total)
+            total = p.values.(total);
+        end
+        v.stepProgress = progressText(p.stepT, total);
+    elseif strcmp(st.type, 'machine') && strcmp(st.op, 'track') ...
+            && ~isnan(p.trk.duration)
+        v.stepProgress = progressText(p.trk.t, p.trk.duration);
+    end
+end
+end
+
+function s = progressText(elapsed, total)
+% 'm:ss / m:ss', the elapsed time as the timer shows it (whole seconds
+% down) held at the total, the total rounded up.
+e = floor(min(elapsed, total));
+t = ceil(total);
+s = sprintf('%d:%02d / %d:%02d', floor(e / 60), mod(e, 60), ...
+    floor(t / 60), mod(t, 60));
 end
 
 function s = fillKeys(p, opts, s)

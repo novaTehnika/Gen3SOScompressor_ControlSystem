@@ -16,9 +16,13 @@ function [p, req] = procStep(p, in, dt)
 %                      above its pressure ceiling (IR9)
 %          atEndOfTravel  logical: the slave is at the end of travel less
 %                      its end margin (IR10)
+%          positionFromEOT  optional, mm from the end of travel (default
+%                      NaN: a relative position track pauses)
+%          positionSpeed    optional, mm/s the operator's speed allows
+%                      (default Inf)
 %
 %   req is what the app is to do, in this order (an empty value means do
-%   nothing):
+%   nothing; params, mixer, stop, track, op, zeroVolume, record, recordEnd):
 %          params      struct, sink name -> value, written to the shell
 %                      Constant blocks, or []
 %          mixer       -1 none, 0 or 1: switch the stir bar
@@ -30,7 +34,15 @@ function [p, req] = procStep(p, in, dt)
 %          unit        '' when op has no target
 %          speed       mm/s the step caps a position move at, NaN for the
 %                      operator's speed alone (op 2 only)
-%          zeroVolume  true: take the reference of the volume readout
+%          track       [], or struct('action', 'start', 'mode', 'pressure' or
+%                      'position', 'series', column of absolute values (atm
+%                      absolute or mm from the end of travel, one per
+%                      exchange), 'relative', logical, 'offset' (what was
+%                      added to the signal, 0 when not relative), 'duration',
+%                      s), or struct('action', 'end'): the shell plays the
+%                      series as the target of the mode's operation
+%          record      [], a number (trace interval in s) or 'off'
+%          recordEnd   true: the run has ended, finish its recording
 %
 %   The engine does everything the operator and the model decide here, and
 %   nothing else: procAction only records the operator's intent, and the
@@ -52,6 +64,12 @@ function [p, req] = procStep(p, in, dt)
 %     note          what ended a step on its own (end of travel)
 %     k, stepT      current step and the time in it (not counted paused)
 %     phase         within a machine step: issue, track, stopping, settle
+%     record        the record request last emitted ('' before the first)
+%     trk           the current track: on (the shell is playing it), borrow
+%                   (it plays over a background hold of the same mode),
+%                   t (s of the series played), offset (added to a relative
+%                   signal, NaN until taken at the step's first issue) and
+%                   duration (s)
 %     track         the current step's operation: op, confirmed, sinceSent,
 %                   target (op as RequestedMode)
 %     settleT       s the pressure has been inside the band
@@ -134,6 +152,7 @@ if strcmp(p.state, 'aborting')
     end
 elseif ~isempty(cause)
     p = supervisionPause(p, cause);
+    [p, req] = endTrack(p, req);
 elseif strcmp(p.state, 'paused') && ~isempty(p.reason)
     p.reason = '';
     p.message = 'The condition has cleared: resume or abort';
@@ -151,6 +170,11 @@ if p.bg.op ~= 0 && ~p.bg.lost && isempty(cause)
             p.bg.lost = true;
             [p, req] = pauseNow(p, req, sprintf('%s ended (status %d)', ...
                 opLabel(p.bg.op), status), false);
+            if p.trk.on
+                [p, req] = endTrack(p, req);
+                p.phase = 'issue';
+                p.track = emptyTrack();
+            end
         end
     end
 end
@@ -203,6 +227,7 @@ switch intent
             p.stepT = 0;
             p.message = '';
             req.stop = true;
+            [p, req] = endTrack(p, req);
         end
     case 'pause'
         if any(strcmp(p.state, {'running', 'waitOperator'}))
@@ -307,7 +332,14 @@ function [p, req] = pauseStep(p, req, msg, allowStop)
 if strcmp(p.state, 'running')
     st = p.def.steps(p.k);
     if strcmp(st.type, 'machine') && any(strcmp(p.phase, {'track', 'settle'}))
-        if st.keep && strcmp(p.phase, 'track')
+        if strcmp(st.op, 'track')
+            % A borrowed track leaves the hold it played over running.
+            borrowed = p.trk.borrow;
+            [p, req] = endTrack(p, req);
+            if ~borrowed && allowStop
+                req.stop = true;
+            end
+        elseif st.keep && strcmp(p.phase, 'track')
             p.bg = struct('op', p.track.op, 'target', p.track.target, ...
                 'step', p.k, 'confirmed', p.track.confirmed, ...
                 'sinceSent', p.track.sinceSent, 'lost', false);
@@ -350,6 +382,11 @@ if any(strcmp(p.phase, {'track', 'settle'}))
 end
 switch p.phase
     case 'issue'
+        if strcmp(st.op, 'track')
+            [p, req] = issueTrack(p, req, in, st);
+            return
+        end
+        [p, req] = endTrack(p, req);
         if strcmp(st.op, 'stop')
             req.stop = true;
             p.phase = 'stopping';
@@ -393,6 +430,11 @@ switch p.phase
         late = tr.sinceSent >= c.procStatusDelay;
         done = false;
         switch st.op
+            case 'track'
+                if late && tr.confirmed && any(status == trackStatus(st.mode))
+                    p.trk.t = p.trk.t + dt;
+                end
+                done = p.trk.t >= p.trk.duration - 1e-9;
             case 'position'
                 done = late && status == 3;
             case 'pressure'
@@ -413,7 +455,17 @@ switch p.phase
             done = true;
             p.note = sprintf('%s ended at the end of travel', st.title);
         end
-        if done
+        if done && strcmp(st.op, 'track')
+            borrowed = p.trk.borrow;
+            [p, req] = endTrack(p, req);
+            if borrowed
+                [p, req] = completeStep(p, req, in);
+            else
+                p.phase = 'stopping';
+                p.stepT = 0;
+                req.stop = true;
+            end
+        elseif done
             if st.keep
                 p.bg = struct('op', tr.op, 'target', tr.target, ...
                     'step', p.k, 'confirmed', true, ...
@@ -425,6 +477,7 @@ switch p.phase
                 req.stop = true;
             end
         elseif ended
+            [p, req] = endTrack(p, req);
             p.phase = 'settle';
             p.settleOk = tr.confirmed && any(strcmp(st.op, {'home', 'goHome'}));
         elseif p.stepT >= st.timeout
@@ -457,7 +510,7 @@ end
 
 function [p, req] = waitWork(p, req, in, dt, st)
 if isempty(st.until)
-    if p.stepT >= st.duration
+    if p.stepT >= stepDuration(p, st)
         [p, req] = completeStep(p, req, in);
     end
     return
@@ -491,10 +544,12 @@ p.k = k;
 p.stepT = 0;
 p.phase = 'issue';
 p.track = emptyTrack();
+p.trk = emptyTrk();
 p.settleT = 0;
 p.settleOk = false;
 p.message = '';
 p.checks = false(1, numel(st.checks));
+[p, req] = emitRecord(p, req, st);
 if st.timerStop
     p.timer.running = false;
 end
@@ -536,7 +591,9 @@ if p.returnTo > 0
     p.stepT = p.ret.stepT;
     p.phase = p.ret.phase;
     p.track = emptyTrack();
+    p.trk = emptyTrk();
     p.message = '';
+    [p, req] = emitRecord(p, req, p.def.steps(p.k));
     return
 end
 if p.k >= numel(p.def.steps)
@@ -549,7 +606,9 @@ if p.k >= numel(p.def.steps)
         req.stop = true;
     end
     p.bg = emptyBg();
+    [p, req] = endTrack(p, req);
     [p, req] = mixerOff(p, req);
+    req.recordEnd = true;
     return
 end
 [p, req] = enterStep(p, req, in, p.k + 1);
@@ -562,7 +621,9 @@ p.reason = reason;
 p.message = reason;
 p.timer.running = false;
 p.bg = emptyBg();
+[p, req] = endTrack(p, req);
 [p, req] = mixerOff(p, req);
+req.recordEnd = true;
 end
 
 function [p, req] = mixerOff(p, req)
@@ -585,6 +646,8 @@ p.timer = struct('running', false, 'elapsed', NaN);
 p.volumeRef = NaN;
 p.volumeDischarged = NaN;
 p.bg = emptyBg();
+p.trk = emptyTrk();
+p.record = '';
 p.returnTo = 0;
 p.mixerOn = false;
 p.prevState = '';
@@ -594,7 +657,13 @@ end
 
 function req = emptyReq()
 req = struct('op', -1, 'target', NaN, 'unit', '', 'speed', NaN, ...
-    'stop', false, 'mixer', -1, 'params', [], 'zeroVolume', false);
+    'stop', false, 'mixer', -1, 'params', [], 'zeroVolume', false, ...
+    'track', [], 'record', [], 'recordEnd', false);
+end
+
+function t = emptyTrk()
+t = struct('on', false, 'borrow', false, 't', 0, 'offset', NaN, ...
+    'duration', NaN);
 end
 
 function t = emptyTrack()
@@ -700,5 +769,116 @@ switch status
         m = sprintf('%s: the slave did not report stopped (status 33)', st.title);
     otherwise
         m = sprintf('%s ended early (status %d)', st.title, status);
+end
+end
+
+% ===== Track and record =====
+
+function [p, req] = issueTrack(p, req, in, st)
+% Issue a track step: sample the signal on the present parameter values,
+% take (or reuse) the offset of a relative signal, check the absolute
+% series and start it, over the background hold of its mode when there is
+% one and over an operation of its own otherwise.
+if strcmp(st.mode, 'pressure')
+    code = 4;
+    reading = in.pressure;
+    speed = p.cfg.trackPressureSlopeMax;
+    unit = 'atm';
+    what = 'Pressure';
+else
+    code = 2;
+    reading = fieldOr(in, 'positionFromEOT', NaN);
+    speed = fieldOr(in, 'positionSpeed', Inf);
+    unit = 'mm';
+    what = 'Position';
+end
+[raw, why, T] = procTrackSeries(st, p.values, p.cfg);
+if ~isempty(why)
+    [p, req] = pauseNow(p, req, ['Track signal ' why], false);
+    return
+end
+offset = 0;
+if st.relative
+    offset = p.trk.offset;
+    if isnan(offset)
+        offset = reading;
+    end
+    if ~isfinite(offset)
+        [p, req] = pauseNow(p, req, [what ' reading unavailable'], false);
+        return
+    end
+end
+v = raw + offset;
+why = procTrackCheck(v, st.mode, false, p.cfg, speed);
+if ~isempty(why)
+    [p, req] = pauseNow(p, req, ['Track signal ' why], false);
+    return
+end
+borrow = p.bg.op == code && ~p.bg.lost;
+if borrow
+    p.track = struct('op', code, 'confirmed', true, ...
+        'sinceSent', p.c.procStatusDelay, 'target', v(1));
+else
+    p.bg = emptyBg();
+    req.op = code;
+    req.target = v(1);
+    req.unit = unit;
+    req.speed = NaN;
+    p.track = struct('op', code, 'confirmed', false, 'sinceSent', 0, ...
+        'target', v(1));
+end
+req.track = struct('action', 'start', 'mode', st.mode, 'series', v, ...
+    'relative', st.relative, 'offset', offset, 'duration', T);
+p.trk = struct('on', true, 'borrow', borrow, 't', 0, 'offset', offset, ...
+    'duration', T);
+p.phase = 'track';
+p.settleT = 0;
+p.settleOk = false;
+end
+
+function [p, req] = endTrack(p, req)
+% Ask the app to stop playing the series, if one is playing.
+if p.trk.on
+    req.track = struct('action', 'end');
+    p.trk.on = false;
+    p.trk.borrow = false;
+end
+end
+
+function [p, req] = emitRecord(p, req, st)
+% Request the step's record interval when it differs from the last one
+% requested. A step without its own takes the procedure's.
+eff = st.record;
+if isnumeric(eff) && isscalar(eff) && isnan(eff)
+    eff = p.def.record;
+end
+if ~isequal(eff, p.record)
+    req.record = eff;
+    p.record = eff;
+end
+end
+
+function codes = trackStatus(mode)
+% Status codes in which the mode's operation is following the target.
+if strcmp(mode, 'pressure')
+    codes = 5;
+else
+    codes = [2 3];
+end
+end
+
+function T = stepDuration(p, st)
+% A step's duration in s: a number, or the value of the parameter it names.
+T = st.duration;
+if ischar(T)
+    T = p.values.(T);
+end
+end
+
+function v = fieldOr(in, name, default)
+if isfield(in, name)
+    v = in.(name);
+else
+    v = default;
 end
 end

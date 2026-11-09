@@ -15,10 +15,21 @@ function figs = tracePlot(src, varargin)
 %   'saveDir'  folder for the saved figures (default: the CSV's folder)
 %
 %   figs is the row of the three figure handles:
-%     overview  pressure (atm absolute) with the target while the master
+%     overview  pressure (atm absolute) with the window mean (steps),
+%               maximum and minimum over each master write when the file
+%               has them (format 2 and 3) and the target while the master
 %               is in pressure mode, position from the end of travel with
 %               the command and the target while in position mode,
-%               velocity, torque, on one time axis
+%               velocity, torque, on one time axis. The snapshot columns
+%               are always drawn; when the file has window or interval
+%               statistics (format 2 and 3, summaryScans > 0) the pressure
+%               row adds their mean, minimum and maximum as steps and the
+%               position, velocity and torque rows add the mean
+%               (posMeanFromEOT_mm, velocityMean_mm_s, torqueMean_pct) as
+%               steps; in a decimated file (some row combines several
+%               exchanges, d.decimated of traceDerive) the steps start at
+%               the interval's start (tStartRel_s), and an interval
+%               without a window (summaryScans 0) leaves a break
 %     delivery  swept volume, flow, and pressure against swept volume
 %     status    status code and master state, mode request and
 %               confirmation, motion flags, link and safety lines, and
@@ -71,7 +82,18 @@ if isempty(opts.savedir) && isfield(d, 'file') && ~isempty(d.file)
 end
 
 t = d.tRel_s;
+decimated = d.decimated;
+if decimated
+    tx = d.tStartRel_s;     % [s] rows are drawn from the start of their interval
+else
+    tx = t;
+end
 bands = shadeRuns(d);
+if decimated
+    statName = 'interval';
+else
+    statName = 'window';
+end
 cTarget = [0.85 0.33 0.10];
 cLine = [0 0.45 0.74];
 cLine2 = [0.47 0.67 0.19];
@@ -82,22 +104,58 @@ f1 = newFigure('overview', opts.visible);
 ax = zeros(1, 4);
 ax(1) = subplot(4, 1, 1);
 pTarget = maskOut(d.targetPressure_atm, d.statusCode == 5);
-h = drawSeries(t, {d.pressureAbs_atm, pTarget}, d.gap, ...
-    {cLine, cTarget}, {'-', '-'}, bands, @plot);
-legend(h, {'pressure', 'target'}, 'Location', 'northeast');
+hasWin = any(isfinite(d.pressureMeanAbs_atm));
+cWin = [0.65 0.82 0.95];
+if hasWin
+    % The statistics of an interval (or a window) as steps from its
+    % start; the snapshot and the target at their own time.
+    h = drawSeries({tx, tx, tx, t, t}, {d.pressureMaxAbs_atm, ...
+        d.pressureMinAbs_atm, d.pressureMeanAbs_atm, d.pressureAbs_atm, ...
+        pTarget}, d.gap, {cWin, cWin, cLine2, cLine, cTarget}, ...
+        {'-', '-', '-', '-', '-'}, bands, ...
+        {@stairs, @stairs, @stairs, @plot, @plot});
+    set(h(1:2), 'LineWidth', 0.5);
+    legend(h([1 3 4 5]), {[statName ' max/min'], [statName ' mean'], ...
+        'pressure', 'target'}, 'Location', 'northeast');
+else
+    h = drawSeries(t, {d.pressureAbs_atm, pTarget}, d.gap, ...
+        {cLine, cTarget}, {'-', '-'}, bands, @plot);
+    legend(h, {'pressure', 'target'}, 'Location', 'northeast');
+end
 ylabel('pressure [atm abs]');
 title('Overview');
 ax(2) = subplot(4, 1, 2);
 tgt = maskOut(d.targetFromEOT_mm, d.statusCode == 2 | d.statusCode == 3);
-h = drawSeries(t, {d.posFromEOT_mm, d.commandedFromEOT_mm, tgt}, d.gap, ...
-    {cLine, cLine2, cTarget}, {'-', '--', '-'}, bands, @plot);
-legend(h, {'position', 'commanded', 'target'}, 'Location', 'northeast');
+if any(isfinite(d.posMeanFromEOT_mm))
+    h = drawSeries({t, t, tx, t}, {d.posFromEOT_mm, d.commandedFromEOT_mm, ...
+        d.posMeanFromEOT_mm, tgt}, d.gap, {cLine, cLine2, cLine3, cTarget}, ...
+        {'-', '--', '-', '-'}, bands, {@plot, @plot, @stairs, @plot});
+    legend(h, {'position', 'commanded', [statName ' mean'], 'target'}, ...
+        'Location', 'northeast');
+else
+    h = drawSeries(t, {d.posFromEOT_mm, d.commandedFromEOT_mm, tgt}, d.gap, ...
+        {cLine, cLine2, cTarget}, {'-', '--', '-'}, bands, @plot);
+    legend(h, {'position', 'commanded', 'target'}, 'Location', 'northeast');
+end
 ylabel('from EOT [mm]');
 ax(3) = subplot(4, 1, 3);
-drawSeries(t, {d.velocity_mm_s}, d.gap, {cLine}, {'-'}, bands, @plot);
+scans = optCol(d, 'summaryScans', numel(t));
+vMean = maskOut(optCol(d, 'velocityMean_mm_s', numel(t)), scans > 0);
+if any(isfinite(vMean))
+    drawSeries({t, tx}, {d.velocity_mm_s, vMean}, d.gap, {cLine, cLine3}, ...
+        {'-', '-'}, bands, {@plot, @stairs});
+else
+    drawSeries(t, {d.velocity_mm_s}, d.gap, {cLine}, {'-'}, bands, @plot);
+end
 ylabel('velocity [mm/s]');
 ax(4) = subplot(4, 1, 4);
-drawSeries(t, {d.torque_pct}, d.gap, {cLine}, {'-'}, bands, @plot);
+tqMean = maskOut(optCol(d, 'torqueMean_pct', numel(t)), scans > 0);
+if any(isfinite(tqMean))
+    drawSeries({t, tx}, {d.torque_pct, tqMean}, d.gap, {cLine, cLine3}, ...
+        {'-', '-'}, bands, {@plot, @stairs});
+else
+    drawSeries(t, {d.torque_pct}, d.gap, {cLine}, {'-'}, bands, @plot);
+end
 ylabel('torque [%]');
 xlabel('time [s]');
 linkaxes(ax, 'x');
@@ -193,6 +251,15 @@ pos = get(f, 'Position');
 set(f, 'Position', [pos(1), pos(2), 900, 700]);
 end
 
+function v = optCol(d, name, n)
+%OPTCOL The column name of d, or NaN(n, 1) when the file has no such column.
+if isfield(d, name)
+    v = d.(name);
+else
+    v = NaN(n, 1);
+end
+end
+
 function y = maskOut(y, keep)
 %MASKOUT NaN where keep is false, so the line shows only the kept samples.
 y(~keep) = NaN;
@@ -237,13 +304,26 @@ end
 
 function h = drawSeries(x, ys, gap, colors, styles, bands, plotFcn, markGaps)
 %DRAWSERIES Draw the bands, the dashed gap markers and the series on the
-%   current axes; returns the handles of the series for the legend. The
-%   y limits are fixed from the data before the bands are drawn, so the
-%   bands span the axes without taking part in the autoscale. markGaps
-%   is false when x is not time.
+%   current axes; returns the handles of the series for the legend.
+%   x is one vector for all series or a cell with one per series (the
+%   gap markers use the first); plotFcn is one plot function handle for
+%   all series or a cell with one per series. The y limits are fixed from
+%   the data before the bands are drawn, so the bands span the axes
+%   without taking part in the autoscale. markGaps is false when x is not
+%   time.
 if nargin < 8
     markGaps = true;
 end
+xs = x;
+if ~iscell(xs)
+    xs = repmat({x}, 1, numel(ys));
+end
+x = xs{1};
+xAll = [];
+for k = 1:numel(xs)
+    xAll = [xAll; xs{k}(:)]; %#ok<AGROW>
+end
+xAll = xAll(isfinite(xAll));
 hold on;
 pooled = [];
 for k = 1:numel(ys)
@@ -270,13 +350,17 @@ for g = 1:numel(gx)
     plot([gx(g) gx(g)], lim, 'k--', 'HandleVisibility', 'off');
 end
 h = zeros(1, numel(ys));
+fcn = plotFcn;
+if ~iscell(fcn)
+    fcn = repmat({plotFcn}, 1, numel(ys));
+end
 for k = 1:numel(ys)
-    [xx, yy] = breakAtGaps(x, ys{k}, gap);
-    h(k) = plotFcn(xx, yy, 'Color', colors{k}, 'LineStyle', styles{k});
+    [xx, yy] = breakAtGaps(xs{k}, ys{k}, gap);
+    h(k) = fcn{k}(xx, yy, 'Color', colors{k}, 'LineStyle', styles{k});
 end
 set(gca, 'YLim', lim);
-if numel(x) > 1 && max(x) > min(x)
-    set(gca, 'XLim', [min(x) max(x)]);
+if numel(xAll) > 1 && max(xAll) > min(xAll)
+    set(gca, 'XLim', [min(xAll) max(xAll)]);
 end
 grid on;
 end
