@@ -35,8 +35,11 @@ process.
 
 SlaveController runs the slave's FB_PressureController, translated from
 Structured Text, wired as PRG_Main wires it. It is a PI controller whose
-output is clamped by a stop law (README eq. (19)). It can optionally add
-a flow feedforward (eq. (20)), which the slave does not have.
+output is clamped by a stop law (README eq. (19)), with the block's own
+floor that follows the outflow and its forward stop, eqs. (46) and (48),
+when G_cfgPressureFloorEnable is set (the override FloorEnable=True). It
+can optionally add a flow feedforward (eq. (20)), which the slave does
+not have.
 
 ScheduledSlaveController runs the same block with its gains and its
 stop-law stiffness set every scan from an estimate of the chamber
@@ -44,21 +47,16 @@ stiffness, eqs. (39) to (41). The estimate uses only what the slave
 has: the measured pressure, the piston position against a configured
 contact position, and the configured saline volume and charge. It is an
 upper bound on the stiffness, so the scheduled gain is a lower bound on
-the gain that gives the chosen crossover. This is the candidate for the
-slave; it is prototyped here before being ported to Structured Text.
+the gain that gives the chosen crossover. It is a comparison arm of the
+studies and is not in the slave: with the measured chamber it gives the
+results of a fixed gain.
 
-ScheduledSlaveControllerST runs the slave's FB_PressureSchedule and
-FB_PressureController, both translated from Structured Text, wired as
-PRG_Main wires them, with the schedule's settings read from the GVL. It
-is the port of ScheduledSlaveController and matches it scan for scan.
-
-FloorPolicy sets the stop-law floor (StopVelMin) of either slave
-controller every scan from the detected outflow instead of the fixed
-configured value, eqs. (46) to (48), and can add a forward stop above
-the target. Its switched mode with the forward stop is ported to the
-slave as FB_PressureFloor; FloorPolicyST runs that block, translated,
-with the same interface, and ScheduledSlaveControllerST wires it as
-PRG_Main does when G_cfgPressureFloorEnable is set.
+FloorPolicy sets the stop-law floor (StopVelMin) of either controller
+every scan from the detected outflow instead of the fixed configured
+value, eqs. (46) to (48), and can add a forward stop above the target.
+Its switched mode with the forward stop is what FB_PressureController
+has; the other modes are study arms. A controller given a FloorPolicy
+runs the block with its own floor off.
 
 LegacyController is a PID controller written for the earlier studies
 (eqs. (21) to (25)). It can estimate the chamber stiffness online for its
@@ -73,8 +71,6 @@ FILE DEPENDENCY:
 ../../models/generated/ (translated by tools/st_translate.py from
 slave-src/FB/)
     FB_PressureController.py
-    FB_PressureFloor.py
-    FB_PressureSchedule.py
 """
 
 import math
@@ -83,9 +79,6 @@ import modelpath  # noqa: F401  (puts models/ on sys.path)
 import slave  # noqa: F401  (puts the generated blocks on sys.path)
 from FB_PressureController import (FB_PressureController,
                                    new_FB_PressureController)
-from FB_PressureSchedule import (FB_PressureSchedule,
-                                 new_FB_PressureSchedule)
-from FB_PressureFloor import FB_PressureFloor, new_FB_PressureFloor
 
 
 # %% ===== SLAVE CONTROLLER ==============================================
@@ -229,7 +222,7 @@ class FloorPolicy:
         """Return this scan's floor [mm/s] from the measured pressure P
         [MPa], the piston position x [mm], the error err [MPa], and the
         block's saturation flag and velocity [mm/s] of the previous
-        scan, the block's Saturated output."""
+        scan (the block's bSaturated and Velocity)."""
         self.P_hist.append(P)
         self.x_hist.append(x)
         if len(self.P_hist) > self.W + 1:
@@ -279,83 +272,6 @@ class FloorPolicy:
         if self.forward_stop and not self.latched and err < 0.0:
             return min(v, 0.0)
         return v
-
-
-class FloorPolicyST:
-    """The slave's FB_PressureFloor, translated from Structured Text,
-    with FloorPolicy's interface: the switched floor of eq. (46) with
-    the forward stop of eq. (48) when forward_stop is set.
-
-    The settings are the G_cfgPressureFloor* values of the slave
-    configuration given to reset(), with the latched floor at
-    G_cfgPressureStopVelMin, unless the constructor names them in
-    FloorPolicy's terms (v_lo, v_hi, window, v_on, r_on, e_on, t_on,
-    r_off, e_off; slave units). The position delay is the block's own,
-    from the filter time constant and the median window, as
-    measurement_lag_scans() gives it.
-    """
-
-    mode = 'switched'
-    NAMES = {'v_lo': 'VelLow', 'v_hi': 'VelHigh', 'window': 'Window',
-             'v_on': 'TrigVel', 'r_on': 'TrigRate', 'e_on': 'TrigError',
-             't_on': 'TrigTime', 'r_off': 'RelRate', 'e_off': 'RelError'}
-
-    def __init__(self, forward_stop=None, **settings):
-        unknown = set(settings) - set(self.NAMES)
-        if unknown:
-            raise ValueError(f'unknown floor settings {sorted(unknown)}')
-        self.forward_stop = forward_stop
-        self.settings = settings
-
-    def reset(self, c):
-        """Prepare a run with the slave configuration c, as PRG_Main
-        configures the block on entry to pressure mode."""
-        b = new_FB_PressureFloor()
-        b.Enable = True
-        b.VelLow = c['G_cfgPressureFloorVelLow']                # [mm/s]
-        b.VelHigh = c['G_cfgPressureStopVelMin']                # [mm/s]
-        b.Window = c['G_cfgPressureFloorWindow']                # [s]
-        b.CycleTime = c['G_cfgScanTime']                        # [s]
-        b.FilterTime = c['G_cfgAnalogFilterTimeConst']          # [s]
-        b.MedianSize = c['G_cfgAnalogMedianSize']               # [-]
-        b.TrigVel = c['G_cfgPressureFloorTrigVel']              # [mm/s]
-        b.TrigRate = c['G_cfgPressureFloorTrigRate']            # [MPa/s]
-        b.TrigError = c['G_cfgPressureFloorTrigError']          # [MPa]
-        b.TrigTime = c['G_cfgPressureFloorTrigTime']            # [s]
-        b.RelRate = c['G_cfgPressureFloorRelRate']              # [MPa/s]
-        b.RelError = c['G_cfgPressureFloorRelError']            # [MPa]
-        b.ForwardStop = c['G_cfgPressureFloorForwardStop']
-        for name, value in self.settings.items():
-            setattr(b, self.NAMES[name], value)
-        if self.forward_stop is not None:
-            b.ForwardStop = self.forward_stop
-        b.Reset = True                      # the entry scan
-        self.b = b
-        self.dt = c['G_cfgScanTime']                            # [s]
-        self.latched = False
-        self.floor = b.VelLow                                   # [mm/s]
-        self.trace_floor = []                                   # [mm/s]
-        self.trace_latched = []
-
-    def step(self, P, x, err, saturated, v_out_prev):
-        """Return this scan's floor [mm/s], as FloorPolicy.step."""
-        b = self.b
-        b.Actual, b.Position, b.Error = P, x, err
-        b.Saturated, b.VelocityPrev = saturated, v_out_prev
-        FB_PressureFloor(b, self.dt)
-        b.Reset = False
-        if b.ParamError:
-            raise ValueError('FB_PressureFloor: a setting is out of '
-                             'range')
-        self.latched, self.floor = b.Latched, b.StopVelMin
-        self.trace_floor.append(self.floor)
-        self.trace_latched.append(self.latched)
-        return self.floor
-
-    def limit_forward(self, v, err):
-        """Return the velocity command v [mm/s] with the block's
-        forward stop of this scan applied."""
-        return min(v, 0.0) if self.b.StopForward else v
 
 
 class SlaveController:
@@ -411,6 +327,21 @@ class SlaveController:
         fb.Stiffness = c['G_cfgPressureStopStiffness']  # [MPa/mm]
         fb.StopVelMin = c['G_cfgPressureStopVelMin']    # [mm/s]
         fb.CycleTime = c['G_cfgScanTime']       # [s]
+        # The block's own floor, eqs. (46) and (48); off when a
+        # FloorPolicy sets the floor in its place
+        fb.FloorEnable = (c['G_cfgPressureFloorEnable']
+                          and self.floor is None)
+        fb.VelLow = c['G_cfgPressureFloorVelLow']       # [mm/s]
+        fb.Window = c['G_cfgPressureFloorWindow']       # [s]
+        fb.FilterTime = c['G_cfgAnalogFilterTimeConst']  # [s]
+        fb.MedianSize = c['G_cfgAnalogMedianSize']      # [-]
+        fb.TrigVel = c['G_cfgPressureFloorTrigVel']     # [mm/s]
+        fb.TrigRate = c['G_cfgPressureFloorTrigRate']   # [MPa/s]
+        fb.TrigError = c['G_cfgPressureFloorTrigError']  # [MPa]
+        fb.TrigTime = c['G_cfgPressureFloorTrigTime']   # [s]
+        fb.RelRate = c['G_cfgPressureFloorRelRate']     # [MPa/s]
+        fb.RelError = c['G_cfgPressureFloorRelError']   # [MPa]
+        fb.ForwardStop = c['G_cfgPressureFloorForwardStop']
         self.fb = fb
         self.first_scan = True
         if self.floor is not None:
@@ -428,7 +359,7 @@ class SlaveController:
             err = tgt - P_meas * 1e-6                           # [MPa]
             # [Pa -> MPa], [m -> mm]
             fb.StopVelMin = self.floor.step(P_meas * 1e-6, x * 1e3,
-                                            err, fb.Saturated,
+                                            err, fb.bSaturated,
                                             fb.Velocity)
         self.floor_done = True
         return fb.StopVelMin
@@ -445,6 +376,7 @@ class SlaveController:
         # [Pa -> MPa]
         fb.Target = min(max(target * 1e-6, 0.0), self.target_max)
         fb.Actual = P_meas * 1e-6
+        fb.Position = x * 1e3                           # [m -> mm]
         FB_PressureController(fb, self.dt)
 
         # PRG_Main clamps the block output to VelMax.
@@ -839,127 +771,3 @@ class ScheduledSlaveController(SlaveController):
         if hold:
             fb.rInteg = 0.0
         return u
-
-
-# %% ===== SCHEDULED SLAVE CONTROLLER, STRUCTURED TEXT ===================
-class ScheduledSlaveControllerST(SlaveController):
-    """FB_PressureSchedule and FB_PressureController wired as PRG_Main
-    wires them, eqs. (39) to (41).
-
-    The schedule's settings are the G_cfgPressureSched* values of the
-    GVL, with overrides by full or short name as for SlaveController
-    (for example SchedCrossover=6.0). The schedule is used when
-    G_cfgPressureScheduleEnable is TRUE, which the constructor sets
-    unless ScheduleEnable=False is given; otherwise the block runs on
-    the configured gains, as PRG_Main does.
-
-    The saline volume [mL] and the oxygen ratio [-] are what the master
-    writes to holding registers HR7 to HR10. They are the constructor
-    arguments saline_ml and oxygen_ratio, which default to the run's
-    saline volume and charge ratio.
-
-    The slave measures the piston position in its own frame, where the
-    chamber is down to the passages at G_cfgPressureSchedEndOfTravel. The
-    run's position x is mapped so that the distance to that limit is
-    the distance to the run's limit-switch position.
-    """
-
-    def __init__(self, name='scheduled-st', flow_ff=False,
-                 saline_ml=None, oxygen_ratio=None, **overrides):
-        overrides.setdefault('ScheduleEnable', True)
-        super().__init__(name, flow_ff, **overrides)
-        self.saline_ml = saline_ml                              # [mL]
-        self.oxygen_ratio = oxygen_ratio                        # [-]
-
-    def reset(self, par, scenario):
-        u0 = super().reset(par, scenario)
-        c = self.c
-        self.active = c['G_cfgPressureScheduleEnable']
-        self.x_limit = limit_position(par, scenario)            # [m]
-        self.pos_limit = c['G_cfgPressureSchedEndOfTravel']     # [mm]
-        s = new_FB_PressureSchedule()
-        # Settings, as PRG_Main passes them
-        s.EndOfTravel = self.pos_limit                          # [mm]
-        s.VelMax = self.vel_max                                 # [mm/s]
-        s.DecelMax = c['G_cfgPressureDecel']                    # [mm/s^2]
-        s.StopVelMin = c['G_cfgPressureStopVelMin']             # [mm/s]
-        s.CycleTime = c['G_cfgScanTime']                        # [s]
-        s.FilterTime = c['G_cfgAnalogFilterTimeConst']          # [s]
-        s.MedianSize = c['G_cfgAnalogMedianSize']               # [-]
-        s.DriveDeadTime = c['G_cfgPressureSchedDeadTime']  # [s]
-        s.DriveLag = c['G_cfgPressureSchedDriveLag']            # [s]
-        s.Crossover = c['G_cfgPressureSchedCrossover']
-        s.KiRatio = c['G_cfgPressureSchedKiRatio']
-        s.KpMin = c['G_cfgPressureSchedKpMin']
-        s.KpMax = c['G_cfgPressureSchedKpMax']
-        s.PistonArea = c['G_cfgPressureSchedPistonArea']
-        if self.saline_ml is None:
-            s.SalineVolume = par.Vl0 * 1e6      # [m^3 -> mL]
-        else:
-            s.SalineVolume = self.saline_ml                     # [mL]
-        s.PassagesVolume = c['G_cfgPressureSchedPassagesVol']
-        s.HoseVolume = c['G_cfgPressureSchedHoseVol']
-        s.HoseCompliance = c['G_cfgPressureSchedHoseCompl']
-        s.HoseOpen = c['G_cfgPressureSchedHoseOpen']
-        s.BulkModulus = c['G_cfgPressureSchedBulkModulus']
-        if self.oxygen_ratio is None:
-            s.OxygenRatio = scenario.ratio                      # [-]
-        else:
-            s.OxygenRatio = self.oxygen_ratio                   # [-]
-        s.Henry = c['G_cfgPressureSchedHenry']
-        s.GasTemp = c['G_cfgPressureSchedGasTemp']
-        s.Patm = c['G_cfgPressureSchedPatm']
-        s.ArriveBand = c['G_cfgPressureSchedArriveBand']
-        self.sched = s
-        self.k_est = math.nan                                   # [Pa/m]
-        # The stop-law floor, FB_PressureFloor, when selected
-        if c['G_cfgPressureFloorEnable']:
-            self.floor_st = FloorPolicyST()
-            self.floor_st.reset(c)
-        else:
-            self.floor_st = None
-        return u0
-
-    def step(self, P_meas, target, t, scenario, x=0.0):
-        fb, s, c = self.fb, self.sched, self.c
-        entry = self.first_scan
-        self.first_scan = False
-        # PRG_Main limits the target to [0, TargetMax]. [Pa -> MPa]
-        tgt = min(max(target * 1e-6, 0.0), self.target_max)
-        act = P_meas * 1e-6                                     # [MPa]
-        # Slave position: the same distance to the limit. [m -> mm]
-        pos = self.pos_limit - (self.x_limit - x) * 1e3
-        # The floor takes the controller's output and saturation of the
-        # previous scan; its ParamError stops the run here, where
-        # PRG_Main would fall back to the configured StopVelMin.
-        if self.floor_st is not None:
-            v_floor = self.floor_st.step(act, pos, tgt - act,
-                                         fb.Saturated, fb.Velocity)
-        else:
-            v_floor = c['G_cfgPressureStopVelMin']              # [mm/s]
-        s.StopVelMin = fb.StopVelMin = v_floor
-        s.Enable, s.Reset = self.active, entry
-        s.Target, s.Actual, s.Position = tgt, act, pos
-        FB_PressureSchedule(s, self.dt)
-        used = self.active and not s.ParamError
-        self.k_est = s.KEst * 1e9               # [MPa/mm -> Pa/m]
-        fb.Enable = True
-        fb.Reset = entry or (used and s.IntegHold)
-        if used:
-            fb.Kp, fb.Ki = s.Kp, s.Ki
-            fb.VelMax, fb.Stiffness = s.VelLimit, s.Stiffness
-            fb.IntegScale = s.IntegScale
-        else:
-            fb.Kp = c['G_cfgPressureKp']
-            fb.Ki = c['G_cfgPressureKi']
-            fb.VelMax = self.vel_max
-            fb.Stiffness = c['G_cfgPressureStopStiffness']
-            fb.IntegScale = 1.0
-        fb.Target, fb.Actual = tgt, act
-        FB_PressureController(fb, self.dt)
-        # PRG_Main clamps the block output to VelMax. [mm/s]
-        v = min(max(fb.Velocity, -self.vel_max), self.vel_max)
-        if self.floor_st is not None:
-            # Forward stop above the target, eq. (48)
-            v = self.floor_st.limit_forward(v, fb.Error)
-        return v * 1e-3                                 # [mm/s -> m/s]

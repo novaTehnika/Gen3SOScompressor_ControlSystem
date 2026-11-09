@@ -115,8 +115,8 @@
      G_mbFaultReset        AT %MW3.483334 : UINT  (* HR4: 1 = FaultReset *)
      G_mbReference         AT %MD3.483336 : REAL  (* HR5-6: reference, mm / mm/s / % by mode *)
      G_mbPositionSpeed     AT %MD3.483340 : REAL  (* HR7-8: operator speed, mm/s: position moves and Go Home (0 holds a position move; Go Home does not start) *)
-     G_mbSalineVolume      AT %MD3.483344 : REAL  (* HR9-10: saline volume of the fill, mL (gain schedule) *)
-     G_mbOxygenRatio       AT %MD3.483348 : REAL  (* HR11-12: oxygen charge as STP volume per saline volume (gain schedule) *)
+     G_mbSalineVolume      AT %MD3.483344 : REAL  (* HR9-10: saline volume of the fill, mL; received and not used *)
+     G_mbOxygenRatio       AT %MD3.483348 : REAL  (* HR11-12: oxygen charge as STP volume per saline volume; received and not used *)
 
      G_mbProbeArm          AT %MW3.483548 : UINT   (* HR111: a changed value is an arm *)
      G_mbProbeReqLo        AT %MW3.483550 : UINT   (* HR112: low word of the first record index wanted in the window *)
@@ -249,18 +249,19 @@
      G_cfgPressureSensorMinMa    : LREAL := 3.6        (* Loop current below this: open loop or unpowered transducer (mA) *)
      G_cfgPressureSensorMaxMa    : LREAL := 20.5       (* Loop current above this: over range or shorted shunt (mA) *)
      G_cfgPressureSensorFaultTime: TIME := T#100MS     (* Out-of-range current must persist this long before FAULT_PRESSURE_SENSOR *)
-     G_cfgPressureKp             : LREAL := 0.5        (* Velocity per pressure error (mm/s per MPa) *)
-     G_cfgPressureKi             : LREAL := 0.2        (* Velocity per integrated pressure error (mm/s per MPa*s) *)
+     G_cfgPressureKp             : LREAL := 1.5        (* Velocity per pressure error (mm/s per MPa): a crossover of 5 rad/s with the
+                                                          hose open (3.2 MPa/mm) and 11 rad/s with it shut at a full fill (7.5 MPa/mm) *)
+     G_cfgPressureKi             : LREAL := 0.6        (* Velocity per integrated pressure error (mm/s per MPa*s): 0.4 Kp *)
      G_cfgPressureVelMax         : LREAL := 5.0        (* Velocity clamp in pressure mode (mm/s) *)
      G_cfgPressureAccel          : LREAL := 50.0       (* Y_DirectControl accel in pressure mode (mm/s^2) *)
      G_cfgPressureDecel          : LREAL := 50.0       (* Deceleration the pressure stop law assumes (mm/s^2); the
                                                           Y_DirectControl block has no decel input. The chamber
                                                           stiffens by orders of magnitude as the gas dissolves; the
                                                           command must reverse within v^2/(2*decel) of travel *)
-     G_cfgPressureStopStiffness  : LREAL := 100.0      (* Chamber stiffness assumed by the stop law (MPa/mm): the
+     G_cfgPressureStopStiffness  : LREAL := 15.0       (* Chamber stiffness assumed by the stop law (MPa/mm): the
                                                           velocity is clamped to sqrt(2*Decel*|error|/stiffness).
-                                                          Above the liquid-only chamber's ~20 MPa/mm because the
-                                                          filtered reading lags the chamber during the approach *)
+                                                          Above the stiffest the chamber can be, 13 MPa/mm (the
+                                                          cylinder's series compliance with no liquid left) *)
      G_cfgPressureStopVelMin     : LREAL := 2.0        (* The stop law never clamps below this (mm/s), so outflow
                                                           can be balanced at zero error. Must exceed the piston
                                                           speed the outlet needs (1.4 mm/s at 10 MPa through the
@@ -286,33 +287,10 @@
                                                           the lag), so 1.0 mm leaves at least 0.5 mm to the soft limit *)
      G_cfgPressureInBand         : LREAL := 0.1        (* |actual - target| for the in-band status output (MPa) *)
 
-     (* Gain schedule (FB_PressureSchedule). When enabled, latched on entry to
-        pressure mode, Kp, Ki and the stop law follow an upper bound on the
-        chamber stiffness instead of G_cfgPressureKp/Ki/StopStiffness above,
-        which remain the fallback. *)
-     G_cfgPressureScheduleEnable     : BOOL := FALSE       (* Schedule the pressure-loop gains on the stiffness bound *)
-     G_cfgPressureSchedCrossover     : LREAL := 11.0       (* Target loop crossover wc (rad/s) *)
-     G_cfgPressureSchedKiRatio       : LREAL := 0.4        (* Ki / Kp (1/s) *)
-     G_cfgPressureSchedKpMin         : LREAL := 0.001      (* Lower bound on the scheduled Kp (mm/s per MPa) *)
-     G_cfgPressureSchedKpMax         : LREAL := 5.0        (* Upper bound on the scheduled Kp (mm/s per MPa) *)
-     G_cfgPressureSchedPistonArea    : LREAL := 3431.0     (* Piston area (mm^2), 2.602 in bore *)
-     G_cfgPressureSchedEndOfTravel   : LREAL := 367.0      (* Position at the end of travel, where the chamber is down to the passages (mm) *)
-     G_cfgPressureSchedPassagesVol   : LREAL := 57.0       (* Cylinder passages, chamber volume at the end of travel without the hose (mL), measured with the present fittings *)
-     G_cfgPressureSchedHoseVol       : LREAL := 57.9       (* Hose between the cylinder head and the outlet (mL), 6 ft of 1/4 in bore; used when the hose is open *)
-     G_cfgPressureSchedHoseCompl     : LREAL := 1.2E-13    (* Hose compliance beyond its liquid (m^3/Pa), a lower bound on the measured value; used when the hose is open *)
-     G_cfgPressureSchedHoseOpen      : BOOL := FALSE       (* The proximal valve is open during the compression, so the hose is part of the chamber; FALSE when it opens after mixing *)
-     G_cfgPressureSchedBulkModulus   : LREAL := 1.0E9      (* Effective bulk modulus of the filled chamber (Pa), an upper bound: the saline (1.7 GPa) and the cylinder's series compliance together, which this stays above up to 620 mL *)
-     G_cfgPressureSchedHenry         : LREAL := 1.22E-5    (* Henry constant of oxygen in 0.9 % saline (mol/(m^3 Pa)) *)
-     G_cfgPressureSchedGasTemp       : LREAL := 293.0      (* Gas temperature (K) *)
-     G_cfgPressureSchedPatm          : LREAL := 101325.0   (* Atmospheric pressure (Pa) *)
-     G_cfgPressureSchedArriveBand    : LREAL := 0.5        (* |error| that first releases the integrator (MPa) *)
-     G_cfgPressureSchedDeadTime      : LREAL := 0.0182     (* Drive dead time, command to response (s), measured with G_cfgDirectCtrlFilterTime 0.02 s *)
-     G_cfgPressureSchedDriveLag      : LREAL := 0.0075     (* Drive velocity-loop time constant (s), measured with G_cfgDirectCtrlFilterTime 0.02 s *)
-
-     (* Stop-law floor (FB_PressureFloor). When enabled, latched on entry to
-        pressure mode, the stop law's floor is G_cfgPressureFloorVelLow until
-        outflow is detected and G_cfgPressureStopVelMin while it is latched,
-        and a forward command above the target is stopped while it is not
+     (* Stop-law floor (FB_PressureController, FloorEnable). When enabled the
+        stop law's floor is G_cfgPressureFloorVelLow until outflow is detected
+        and G_cfgPressureStopVelMin while it is latched, and a forward command
+        above the target is stopped while it is not
         (design/pressure-loop/README.md, "Stop-law floor study"). *)
      G_cfgPressureFloorEnable        : BOOL := FALSE       (* Switch the stop-law floor on detected outflow *)
      G_cfgPressureFloorVelLow        : LREAL := 0.5        (* Floor with no outflow detected (mm/s); the latched floor is G_cfgPressureStopVelMin *)
