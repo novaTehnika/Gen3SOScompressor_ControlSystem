@@ -79,13 +79,17 @@ at the exchange period), and the model is built with
 `DefaultParameterBehavior` Tunable so the app can replace the variable while the
 model runs (`setTrackTable`). `ProcStep` is a Constant holding the running
 procedure's step number, 0 outside a run, written only when it changes.
+`SalineVolume` and `OxygenRatio` are Constants holding the fill (mL, and the
+oxygen charge as STP volume per saline volume), written by a procedure's param
+step through its sinks; `buildShell` sets them to `cfg.salineVolume` and
+`cfg.oxygenRatio`.
 
 The `TraceStep` block records the link for the Record button. It takes the raw
 read vector, the write vector as `masterStep` produced it, `masterStep`'s
 `doSafety`, `StatusCode`, `FaultCode`, `State` and `LinkOk`, the app's
 `RequestedMode` and `CommandSeq`, the targets `masterStep` received (the outputs
 of `TrackStep`, so a playing track shows in the trace), and the app's `ESTOP`,
-`Mixer` and `ProcStep` blocks (14 inputs). Once per Modbus exchange it writes
+`Mixer`, `ProcStep`, `SalineVolume` and `OxygenRatio` blocks (16 inputs). Once per Modbus exchange it writes
 one record into a ring of 512 records (25.6 s, 45 columns) and outputs the
 whole ring each step to the `TraceRing` Gain block, a test point the app reads
 like the other Gain blocks. Each record
@@ -298,7 +302,7 @@ A parameter is a struct in the procedure's `params` cell array.
 | `value` | required | default value, a numeric scalar |
 | `min`, `max` | `-Inf`, `Inf` | range, checked when entered and on confirm |
 | `format` | `'%g'` | display and `{key}` substitution in titles, texts and checks |
-| `sink` | `''` | `''`, `'SalineVolume'` or `'OxygenRatio'`: the shell Constant block that receives the value when the param step is confirmed |
+| `sink` | `''` | `''`, `'SalineVolume'` or `'OxygenRatio'`: the shell Constant block that receives the value when the param step is confirmed; the trace records it (`salineVolume_mL`, `oxygenRatio`) |
 | `kind` | `''` | `''` or `'pressure'`: the value, `min` and `max` are atm absolute and shown and entered in the pressure unit; the parameter takes no `unit` of its own |
 
 A pressure parameter's `{key}` renders converted and followed by the unit label
@@ -520,7 +524,8 @@ through `procNew` and walks it against the stand-in. Pressure parameters are
 so write `Holding {dischargePressure}.` and not `... atm.`. The seed procedure
 computes the oxygen fill volume from its parameters in a function target
 (`oxygenFillVolume`, with its equation in the comment) and writes the saline
-volume and the oxygen ratio to the slave (sinks); its constants `FILL_EXCESS`,
+volume and the oxygen ratio to the shell's `SalineVolume` and
+`OxygenRatio` blocks (sinks), which the trace records; its constants `FILL_EXCESS`,
 `PUSH_SPEED` and `PUSH_PRESSURE_MAX` are at the top of the file; the seed
 procedure records each run at 1 s (`record`).
 
@@ -635,8 +640,8 @@ from the file alone.
 | `modeCode`, `motionEnable`, `faultReset` | HR2 to HR4 as sent | code, 0/1, 0/1 |
 | `reference` | HR5-6 as sent | mm (position), mm/s (jog), MPa gauge (pressure) |
 | `positionSpeed_mm_s` | HR7-8 as sent | mm/s |
-| `salineVolume_mL` | HR9-10 as sent | mL |
-| `oxygenRatio` | HR11-12 as sent | STP volume per saline volume |
+| `salineVolume_mL` | `SalineVolume` block: the fill (a procedure's sink, else `cfg.salineVolume`) | mL |
+| `oxygenRatio` | `OxygenRatio` block: the fill (a procedure's sink, else `cfg.oxygenRatio`) | STP volume per saline volume |
 | `statusCode`, `faultCode`, `state` | `masterStep` outputs (`state` is `masterStateMachine`'s `ST_*`) | code |
 | `linkOk`, `doSafety` | `masterStep` outputs | 0/1 |
 | `op`, `cmdSeq` | `RequestedMode`, `CommandSeq` blocks | code, count |

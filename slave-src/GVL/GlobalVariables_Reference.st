@@ -123,8 +123,6 @@
      G_mbFaultReset        AT %MW3.483334 : UINT  (* HR4: 1 = FaultReset *)
      G_mbReference         AT %MD3.483336 : REAL  (* HR5-6: reference, mm / mm/s / % by mode *)
      G_mbPositionSpeed     AT %MD3.483340 : REAL  (* HR7-8: operator speed, mm/s: position moves and Go Home (0 holds a position move; Go Home does not start) *)
-     G_mbSalineVolume      AT %MD3.483344 : REAL  (* HR9-10: saline volume of the fill, mL; received and not used *)
-     G_mbOxygenRatio       AT %MD3.483348 : REAL  (* HR11-12: oxygen charge as STP volume per saline volume; received and not used *)
 
      G_mbProbeArm          AT %MW3.483548 : UINT   (* HR111: a changed value is an arm *)
      G_mbProbeReqLo        AT %MW3.483550 : UINT   (* HR112: low word of the first record index wanted in the window *)
@@ -436,8 +434,6 @@
      G_sysRequestedMode        : E_OperatingMode  (* Mode from master *)
      G_sysReference            : LREAL := 0.0     (* Reference from master: mm, mm/s or % by mode *)
      G_sysPositionSpeed        : LREAL := 0.0     (* Operator speed from master (mm/s): position moves and Go Home (0 holds a position move; Go Home does not start); limited to [0, G_cfgVelLimitMax] in PRG_Main *)
-     G_sysSalineVolume         : LREAL := 0.0     (* Saline volume from master (mL); 0 until written *)
-     G_sysOxygenRatio          : LREAL := 0.0     (* Oxygen charge per saline volume from master (STP volume ratio) *)
      G_sysScanCounter          : UINT := UINT#0   (* Incremented every scan, published in G_mbSlaveCounter *)
      G_sysActiveFaultCode      : UINT := UINT#0   (* G_sysActiveFault as an integer, published in G_mbFaultCode *)
      G_sysConfirmedModeCode    : UINT := UINT#0   (* Handshake confirmed mode as an integer, published in G_mbConfCode *)

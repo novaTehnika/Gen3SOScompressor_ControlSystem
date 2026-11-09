@@ -51,7 +51,7 @@ record = 1;                        % s between records, unless a step says other
 % within min and max. Steps refer to a parameter by its key: as a target
 % or a signal argument, or in text as {key}. format sets how the value is
 % shown; sink names a shell block that receives the value ('SalineVolume'
-% or 'OxygenRatio', for the slave's gain schedule).
+% or 'OxygenRatio', the fill the trace records).
 
 params = {
     struct('key', 'targetPressure', 'label', 'Target pressure', ...

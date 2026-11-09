@@ -115,13 +115,13 @@ The sweep needs the protocol program (`PRG_Main`, which holds the Modbus
 groups at IR1-524 and HR1-114) loaded with the axis idle and the shell
 stopped: case A of section 4. Reads take input registers from IR1. Writes
 need a block of holding registers that the program does not use: the
-group ends at HR114, HR1-12 are the protocol's, HR101-110 are left to the
+group ends at HR114, HR1-8 are the protocol's, HR101-110 are left to the
 bench programs and HR111-114 are the step probe's, so the free block is
-HR13-100. Pass `writeStart` 13: the default write counts (1, 6, 30 and 88
-registers) end at HR100. The group is shorter than the 123 registers of one
+HR9-100. Pass `writeStart` 9: the default write counts (1, 6, 30 and 88
+registers) end at HR96. The group is shorter than the 123 registers of one
 write, so the sweep cannot reach the largest write; the slope from 1 to 88
 registers gives the term, and the model splits at 123 whatever is measured.
-`modbusCountSweep` refuses a write into HR1-12 or HR111-114, or past the
+`modbusCountSweep` refuses a write into HR1-8 or HR111-114, or past the
 end of the group (`opts.holdingLast`), before it connects. The block is
 read once and the same values are written back, so nothing changes.
 
@@ -131,7 +131,7 @@ read once and the same values are written back, so nothing changes.
 
    ```matlab
    cd bench/modbus
-   r = modbusCountSweep(500, struct('writeStart', 13));
+   r = modbusCountSweep(500, struct('writeStart', 9));
    ```
 
    It sends 500 cycles of reads of 1, 2, 20, 60 and 125 registers and

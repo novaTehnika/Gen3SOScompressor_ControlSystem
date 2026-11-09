@@ -17,7 +17,7 @@ measured by the bench test in `bench/modbus`.
 | Client | Simulink shell on the lab PC |
 
 Each exchange is one **Write Multiple Registers (FC16)** of holding registers
-1–12 followed at once by one **Read Input Registers (FC04)** of input registers
+1–8 followed at once by one **Read Input Registers (FC04)** of input registers
 1–20, so both land in the same controller service tick. The exchange period is
 up to 50 ms, a multiple of the master step; see
 [EthernetCommsReference.md](EthernetCommsReference.md).
@@ -76,9 +76,7 @@ task interval.
 | 4 | `%MW3.483334` | UINT | `G_mbFaultReset` | 1 = FaultReset (level) |
 | 5–6 | `%MD3.483336` | REAL | `G_mbReference` | Position mode: mm. Velocity mode: mm/s. Torque mode: % of rated. Pressure mode (code 7): target pressure, MPa gauge |
 | 7–8 | `%MD3.483340` | REAL | `G_mbPositionSpeed` | Operator speed, mm/s: position moves and Go Home. The slave limits it to `0` to `G_cfgVelLimitMax`; 0 holds a position move and a Go Home does not start. Homing uses its configured speeds. Written every exchange |
-| 9–10 | `%MD3.483344` | REAL | `G_mbSalineVolume` | Saline volume of the fill, mL. Received by the slave (`G_sysSalineVolume`) and not used. |
-| 11–12 | `%MD3.483348` | REAL | `G_mbOxygenRatio` | Oxygen charge as STP volume per saline volume (1.0 for 1:1). Received by the slave (`G_sysOxygenRatio`) and not used. |
-| 13–20 | | | | Reserved |
+| 9–20 | | | | Reserved |
 | 101–110 | | | | Bench area (`bench/modbus`): not loaded with the main program in service |
 | 111 | `%MW3.483548` | UINT | `G_mbProbeArm` | Step probe (section 6): a changed value is an arm |
 | 112–113 | `%MW3.483550` | UINT ×2 | `G_mbProbeReqLo`, `G_mbProbeReqHi` | Step probe: index of the first record wanted in the window (low word first) |
@@ -186,7 +184,7 @@ reads as a counter frozen at 0.
   transducer's loop shunt; `FB_PressureInput` scales it to MPa gauge for
   IR19-20 and for the slave's pressure loop (mode 7).
 - On the master, `masterStep` takes the 34-register read vector and returns
-  the 12-register write vector; `modbusMap.m` holds the indices and
+  the 8-register write vector; `modbusMap.m` holds the indices and
   `modbusPack.m` / `modbusUnpack.m` the REAL packing (low word first). The
   Simulink blocks handle plain `uint16`.
 - The step probe's registers (section 6) are filled by `PRG_Output` from
@@ -208,7 +206,7 @@ the master and slave behave identically. It is read in its own FC04 read
 between the protocol's exchanges, never in them. The input group must extend
 to IR524 and the holding group to HR114. A group is copied every scan over its
 whole span, so these spans (gaps included) are the probe's standing cost; a
-project that does not use the probe keeps the groups at IR34 and HR12 (the
+project that does not use the probe keeps the groups at IR34 and HR8 (the
 protocol's registers) and `G_cfgProbeEnable` FALSE. Every 32-bit value is on
 a 4-byte boundary except the request at HR112, which is two UINT registers,
 low word first.

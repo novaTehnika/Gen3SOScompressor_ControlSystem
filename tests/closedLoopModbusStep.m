@@ -63,7 +63,6 @@ R = slaveSimMex('registers');
 pairs = {'hr', 'heartbeat', 'G_mbHeartbeat'; 'hr', 'modeCode', 'G_mbModeCode';
          'hr', 'motionEnable', 'G_mbMotionEnable'; 'hr', 'faultReset', 'G_mbFaultReset';
          'hr', 'reference', 'G_mbReference'; 'hr', 'positionSpeed', 'G_mbPositionSpeed';
-         'hr', 'salineVolume', 'G_mbSalineVolume'; 'hr', 'oxygenRatio', 'G_mbOxygenRatio';
          'ir', 'heartbeatEcho', 'G_mbHeartbeatEcho'; 'ir', 'slaveCounter', 'G_mbSlaveCounter';
          'ir', 'confCode', 'G_mbConfCode'; 'ir', 'faultCode', 'G_mbFaultCode';
          'ir', 'faultActive', 'G_mbFaultActive'; 'ir', 'inMotion', 'G_mbInMotion';
@@ -206,10 +205,6 @@ h = command(h, 4);
 h = runUntil(h, 10, @(h) h.m.statusCode == 5);
 assert(h.m.statusCode == 5 && h.sl.G.G_mbModeCode == 7);
 assert(abs(h.sl.G.G_mbReference - 20 / cfg.atmPerMPa) < 1e-3);
-% The fill description rides in the same exchange; the slave receives it.
-assert(h.sl.G.G_mbSalineVolume == single(cfg.salineVolume) && h.sl.G.G_mbOxygenRatio == single(cfg.oxygenRatio));
-assert(h.sl.G.G_sysSalineVolume == single(cfg.salineVolume) && h.sl.G.G_sysOxygenRatio == single(cfg.oxygenRatio), ...
-    'fill not received by the slave');
 h = runUntil(h, 30, @(h) h.y.performanceStatus == 1);
 assert(h.y.performanceStatus == 1, 'pressure target not reached');
 % Let the loop settle, so that the display (filtered on the master and

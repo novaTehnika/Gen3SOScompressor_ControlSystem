@@ -244,8 +244,8 @@ h.ring = zeros(L.depth, L.width);
 h.freezeFrom = Inf;
 h.freezeTo = Inf;
 h.logR = zeros(nMax, nRead);          % mbRead of each step
-h.logW = zeros(nMax, 12);           % mbWrite
-h.logO = zeros(nMax, 12);           % masterStep outputs and app values
+h.logW = zeros(nMax, modbusMap().nWrite);   % mbWrite
+h.logO = zeros(nMax, 14);           % masterStep outputs and app values
 h.logT = zeros(nMax, 13);           % stand-in's true feedback and summary
 h.buf = [];
 h.nextPoll = 0;
@@ -273,6 +273,8 @@ targetPressure = 5;
 estop = 0;
 mixer = double(k >= 200);
 procStep = floor(k / 100);              % steps through 0, 1, 2, ...
+salineVolume = cfg.salineVolume + floor(k / 400);   % mL, changes as a sink would
+oxygenRatio = cfg.oxygenRatio + 0.5 * floor(k / 1000);
 
 truth = [100 + 0.5 * t, 0.5, 10 * sin(t), 100 + 0.5 * t, 2 + sin(t)];
 if mod(k, 2) == 0
@@ -299,15 +301,17 @@ end
 
 [mbWrite, doSafety, ~, ~, ~, ~, statusCode, faultCode, state, linkOk] = ...
     masterStep(h.mbRead, op, cmdSeq, targetPosition, 0.5, 1, targetPressure, ...
-    estop, mixer, speedFromPercent(cfg.speedDefault, cfg), cfg.salineVolume, cfg.oxygenRatio);
+    estop, mixer, speedFromPercent(cfg.speedDefault, cfg));
 h.lastHb = mbWrite(1);
 h.ring = traceStep(h.mbRead, mbWrite, doSafety, statusCode, faultCode, ...
-    state, linkOk, op, cmdSeq, targetPosition, targetPressure, estop, mixer, procStep);
+    state, linkOk, op, cmdSeq, targetPosition, targetPressure, estop, mixer, procStep, ...
+    salineVolume, oxygenRatio);
 
 h.logR(k + 1, :) = h.mbRead;
 h.logW(k + 1, :) = mbWrite;
 h.logO(k + 1, :) = [doSafety, statusCode, faultCode, state, linkOk, op, ...
-    cmdSeq, targetPosition, targetPressure, estop, mixer, procStep];
+    cmdSeq, targetPosition, targetPressure, estop, mixer, procStep, ...
+    salineVolume, oxygenRatio];
 h.logT(k + 1, :) = h.truth;
 h.k = k + 1;
 end
@@ -369,8 +373,8 @@ e(L.col.motionEnable) = w(3);
 e(L.col.faultReset) = w(4);
 e(L.col.reference) = modbusUnpack(w(5), w(6));
 e(L.col.positionSpeed_mm_s) = modbusUnpack(w(7), w(8));
-e(L.col.salineVolume_mL) = modbusUnpack(w(9), w(10));
-e(L.col.oxygenRatio) = modbusUnpack(w(11), w(12));
+e(L.col.salineVolume_mL) = o(13);
+e(L.col.oxygenRatio) = o(14);
 e(L.col.statusCode) = o(2);
 e(L.col.faultCode) = o(3);
 e(L.col.state) = o(4);

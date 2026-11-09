@@ -13,10 +13,10 @@ function result = modbusCountSweep(nCycles, opts)
 %                      no writes. It must lie inside the holding register
 %                      group (opts.holdingLast) and outside every register
 %                      the program uses (check the Global Variables
-%                      worksheet); HR1-12 (the protocol) and HR111-114 (the
+%                      worksheet); HR1-8 (the protocol) and HR111-114 (the
 %                      step probe) are refused. HR101-110 belong to the
-%                      bench programs: stay below them (writeStart 13 with
-%                      the default counts ends at HR100).
+%                      bench programs: stay below them (writeStart 9 with
+%                      the default counts ends at HR96).
 %                      The block is read once (FC03) and the same values
 %                      are written back, so its content does not change.
 %   opts.writeCounts   registers per write (default [1 6 30 88]). The
@@ -64,7 +64,7 @@ if ~isempty(opts.writeStart)
     last = opts.writeStart + max(opts.writeCounts) - 1;
     assert(last <= opts.holdingLast, ...
         'writes to HR%d-%d run past the holding group (HR1-%d)', opts.writeStart, last, opts.holdingLast);
-    protected = [1 12; 111 114];
+    protected = [1 8; 111 114];
     for p = 1:size(protected, 1)
         assert(last < protected(p, 1) || opts.writeStart > protected(p, 2), ...
             'writes to HR%d-%d would overwrite HR%d-%d', opts.writeStart, last, protected(p, :));

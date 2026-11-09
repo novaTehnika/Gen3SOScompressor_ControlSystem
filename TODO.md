@@ -7,8 +7,8 @@ calibration, and
 the 5 November characterisation with its carry-over into the models, the
 GVL and the design studies (PR #38).
 Grouped by where they have to be done. Settled: the mechanical pressure
-ceiling is 12 MPa; the saline volume and oxygen charge reach the slave in
-holding registers.
+ceiling is 12 MPa; the fill (saline volume and oxygen charge) stays on the
+master, in the procedure and the trace, and the protocol does not carry it.
 
 ## MotionWorks project
 
@@ -28,6 +28,13 @@ the reference for each) and confirm:
       `G_cfgPressureFloor*`; and set `G_cfgPressureKp` 1.5,
       `G_cfgPressureKi` 0.6 and `G_cfgPressureStopStiffness` 25.0. The
       gains were chosen with `G_cfgDirectCtrlFilterTime` at 0.02 s.
+- [ ] Delete `G_mbSalineVolume` (`AT %MD3.483344`), `G_mbOxygenRatio`
+      (`AT %MD3.483348`), `G_sysSalineVolume` and `G_sysOxygenRatio`,
+      and the two fill lines of `PRG_Input`. With the probe the holding
+      register group (FC#03,06,16) still spans HR1-114; without it the
+      group ends at HR8. Rerun `buildShell` before shortening the group:
+      a shell built earlier writes HR1-12, which a group ending at HR8
+      does not hold. With the group at HR114 the order does not matter.
 - [ ] Rebuild with the current `FB_Probe` (the 4096-record ring, 16 s;
       HR111-114, IR401-524) and `G_cfgProbeEnable`,
       `G_cfgProbeFillPerScan`.
@@ -113,17 +120,18 @@ the reference for each) and confirm:
       (Resume refused until cleared), a slave fault pausing it (the reset
       dialog opens; Resume once reset), Abort mid-move,
       and Disconnect during a procedure.
-- [ ] Rerun `buildShell`. The Modbus Client Write block becomes 12
-      registers (HR1-12) and the `PositionSpeed`, `SalineVolume` and
-      `OxygenRatio` Constant blocks are added; `MasterStep` gains outputs
-      11 and 12, with the `PressureBlock` and `AtEndOfTravel` Gain blocks
-      the app reads (an older shell makes every poll fail).
+- [ ] Rerun `buildShell`. The Modbus Client Write block becomes 8
+      registers (HR1-8) and the `PositionSpeed` Constant block is added;
+      `MasterStep` gains outputs 11 and 12, with the `PressureBlock` and
+      `AtEndOfTravel` Gain blocks the app reads (an older shell makes
+      every poll fail).
 - [ ] Rebuild the shell again (`buildShell`) for the recorder interval,
       the live plot and the track step: the `TrackStep` MATLAB Function
       block (between `TargetPosition`/`TargetPressure` and `MasterStep`
-      inputs 4 and 7), the `TrackTable`, `TrackMode`, `TrackSeq` and
-      `ProcStep` Constants, the `StatusDelay` Unit Delay, the `TrackIndex`
-      Gain, and `TraceStep` with 14 inputs (ring width 45). Check the
+      inputs 4 and 7), the `TrackTable`, `TrackMode`, `TrackSeq`,
+      `ProcStep`, `SalineVolume` and `OxygenRatio` Constants, the
+      `StatusDelay` Unit Delay, the `TrackIndex` Gain, `MasterStep` with
+      10 inputs and `TraceStep` with 16 inputs (ring width 45). Check the
       build log for stack warnings on the 72001-value `trackTable`, and
       that `DefaultParameterBehavior` Tunable leaves the other Constants
       writable with `set_param` while the model runs.
@@ -167,9 +175,8 @@ the reference for each) and confirm:
       line, and the oxygen loading pressure default against the
       regulator.
 - [ ] Relaunch the operator app and check the new speed control (percent field and presets).
-      The app does not write `SalineVolume` or `OxygenRatio`; HR9-12 stay
-      at the `buildShell` defaults (`masterConfig.m`: 343 mL, 1.0) until
-      the app's oxygen:saline field is wired to the shell.
+      Outside a procedure the trace's `salineVolume_mL` and `oxygenRatio`
+      hold the `buildShell` defaults (`masterConfig.m`: 343 mL, 1.0).
 - [ ] Run `tests\run_all.bat` under MATLAB, including the MEX build of the
       compiled simulated slave. It has only been run under Octave. The
       Python parity tests (`stTargetParity.py`, `plantParity.py`) also need
@@ -489,11 +496,6 @@ specified here; the implementation plan decides the files.
       stays near the model's 10.4 MPa (10.9 without the floor). It is
       what 2.5:1 at 11 MPa needs to stay under the ceiling in every
       plausible case.
-- [ ] HR9-12 (the saline volume and oxygen charge of the fill) are still
-      written by the master and received by the slave, which no longer
-      uses them. Decide whether to keep them for a later use (a stiffness
-      monitor, logging) or to drop them from the protocol, the shell and
-      the operator app.
 - [ ] The probe's record index wraps after 2^32 scans (about 200 days at
       4 ms of uninterrupted running), and the master does not handle the
       wrap.
