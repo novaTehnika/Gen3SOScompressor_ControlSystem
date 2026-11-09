@@ -1,8 +1,14 @@
 function cfg = masterConfig()
 %MASTERCONFIG Constants for the master state machine and signal scaling.
 
+% Values that other entries are computed from are locals: the MATLAB
+% Function block compiles this file, and MATLAB Coder rejects a field added
+% to cfg after a field of cfg has been read.
+exchangePeriod  = 0.05;         % s
+trackMaxSeconds = 3600;         % s
+
 cfg.dt             = 0.025;     % model step (s)
-cfg.exchangePeriod = 0.05;      % Modbus write + read period (s), a multiple of dt
+cfg.exchangePeriod = exchangePeriod;  % Modbus write + read period (s), a multiple of dt
 cfg.commTimeout    = 0.3;       % slave counter unchanged this long = link lost (s): several exchanges, to ride out a slow one
 
 % Cylinder geometry. Displayed positions are distances from the end of
@@ -84,7 +90,7 @@ cfg.livePlotPeriod       = 0.5;     % s between live plot redraws (a multiple of
 cfg.procRecordDefault    = 1;       % s, a procedure's record interval when it gives none
 
 % Track steps (procedure): the table the shell plays, one value per exchange.
-cfg.trackMaxSeconds      = 3600;    % s, longest track series
-cfg.trackTableLength     = round(cfg.trackMaxSeconds / cfg.exchangePeriod) + 1;  % values in TrackTable
+cfg.trackMaxSeconds      = trackMaxSeconds;  % s, longest track series
+cfg.trackTableLength     = round(trackMaxSeconds / exchangePeriod) + 1;  % values in TrackTable
 cfg.trackPressureSlopeMax = Inf;    % atm/s a pressure track may change at; Inf: not checked
 end
