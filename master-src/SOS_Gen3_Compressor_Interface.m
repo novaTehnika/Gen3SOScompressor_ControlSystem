@@ -604,12 +604,18 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % outside it leaves the target as it is.
         function targetFromPistonPosition(app, position)
             if ~isfinite(position)
+                app.StatusLabel.Text = "Position target kept: no position reading yet";
                 return
             end
             x = round(app.cfg.posEOT - position);
             if x <= app.cfg.inCylinderFromEot
                 lim = app.TargetPositionSpinner.Limits;
                 app.TargetPositionSpinner.Value = min(max(x, lim(1)), lim(2));
+                app.StatusLabel.Text = sprintf( ...
+                    "Position target set to the piston, %d mm from EOT", x);
+            else
+                app.StatusLabel.Text = sprintf( ...
+                    "Position target kept: piston outside the cylinder (%d mm from EOT)", x);
             end
         end
 
