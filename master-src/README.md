@@ -122,8 +122,8 @@ slave link up and out of E-STOP.
 The window is a `MainGrid` of three bands, in nested `uigridlayout`s:
 
 - The readout band (190 px) holds the four readouts (flow, volume,
-  position, pressure) of equal width, the status line and the Fault Active and
-  Mixer On lamps under them, and the STOP button pinned at the top right,
+  position, pressure) of equal width, the status line and the Fault and Mixer
+  lamps under them, and the STOP button pinned at the top right,
   120 px wide over the band's height.
 - The Controls band (128 px) holds three rows: connect, mode and target
   controls, the speed row (label, field, presets and the speed in mm/s) and, at
@@ -156,7 +156,11 @@ right, top).
 The app shows volume (mL), absolute pressure (psi, atm or MPa), position (mm
 from the end of travel) and flow (mL/s, positive toward the end of travel).
 Position targets in manual control are also mm from the end of travel, and
-pressure targets are absolute in the pressure unit. `masterConfig` holds the end of travel (`posEOT`), bore and dead
+pressure targets are absolute in the pressure unit. The position target starts
+at `targetFromEotDefault` (inside the cylinder) and, when the slave link comes
+up after Connect, takes the piston's position if that is inside the cylinder
+(at most `inCylinderFromEot` from the end of travel), so Go moves nothing until
+the operator changes it. `masterConfig` holds the end of travel (`posEOT`), bore and dead
 volume, and the atmosphere added to the slave's gauge pressure (`atmAmbient`).
 `mLPerMm` converts position and velocity to volume and flow; `sweptVolume`,
 `mixingVolume` and `readoutText` give the volume views and the readout text.

@@ -864,10 +864,13 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             if app.targetFromPiston && app.linkReady && isfinite(d.position) ...
                     && app.activeOp ~= app.OP_POSITION
                 % The first position reading of the connection becomes the
-                % manual target, within the spinner's limits.
-                lim = app.TargetPositionSpinner.Limits;
-                app.TargetPositionSpinner.Value = min(max( ...
-                    round(app.cfg.posEOT - d.position), lim(1)), lim(2));
+                % manual target when the piston is inside the cylinder;
+                % a piston outside it leaves the in-cylinder default.
+                x = round(app.cfg.posEOT - d.position);
+                if x <= app.cfg.inCylinderFromEot
+                    lim = app.TargetPositionSpinner.Limits;
+                    app.TargetPositionSpinner.Value = min(max(x, lim(1)), lim(2));
+                end
                 app.targetFromPiston = false;
             end
             app.lastPosition = d.position;
@@ -957,7 +960,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             % the master's soft limits and not past the end of travel. The
             % target shown before a connection is the configured in-cylinder
             % position; once the slave link is up it takes the piston's
-            % position, so Go moves nothing until the operator changes it.
+            % position when that is inside the cylinder, so Go moves
+            % nothing until the operator changes it.
             limits = [max(app.cfg.posEOT - app.cfg.posMax, 0), ...
                 app.cfg.posEOT - app.cfg.posMin];
             setSpinnerRange(app, app.TargetPositionSpinner, limits);
