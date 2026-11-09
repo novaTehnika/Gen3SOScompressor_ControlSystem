@@ -267,7 +267,7 @@ specified here; the implementation plan decides the files.
 ## Checks on the machine
 
 - [ ] Commission the piston exit guard (`TestPlanOutline.md` 3.5): a jog
-      out through 196 mm on a gas charge that reads above
+      out through 200 mm on a gas charge that reads above
       `G_cfgExitGuardPressure` there must fault and stop about 3 mm inside
       the boundary, at the highest and the lowest jog speed; the same jog
       on a vented chamber must pass; an open transducer loop in the band
@@ -355,7 +355,8 @@ specified here; the implementation plan decides the files.
         `G_cfgPosSoftLimitMin` (-2.5 mm) between it and zero.
   - [ ] End of travel, `posEOT` (367 mm, `master-src/logic/masterConfig.m`),
         which sets the displayed position and volume.
-  - [ ] Cylinder entry, `G_cfgPosCylinderEntry` (176 mm). The simulator's
+  - [ ] Cylinder entry, `G_cfgPosCylinderEntry` (180 mm: 187 mm of travel in the bore
+        from `posEOT`, so it moves with `posEOT`). The simulator's
         `chamberContactPos` is still 200 mm.
   - [ ] Margins between the limits. `posMax` and `G_cfgPosSoftLimitMax`
         are both 367 mm and the switch sits just past them, so a jog the

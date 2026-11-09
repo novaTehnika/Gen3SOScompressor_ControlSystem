@@ -416,10 +416,11 @@ Go Home and the homing moves are not blocked: they lie below
 
 ### Piston Exit Guard (every mode)
 
-Below `G_cfgPosCylinderEntry` (176 mm) the piston has left the cylinder
+Below `G_cfgPosCylinderEntry` (180 mm, 187 mm from the end of travel) the piston has left the cylinder
 bore, and a chamber that is still pressurised would empty through the
 opening. The slave therefore watches the band at and below
-`G_cfgPosCylinderEntry + G_cfgPosExitGuardMargin` (196 mm) in every state.
+`G_cfgPosCylinderEntry + G_cfgPosExitGuardMargin` (200 mm, 167 mm from the
+end of travel) in every state.
 While the pressure reads above `G_cfgExitGuardPressure` (0.1 MPa gauge)
 there, the piston may not back out more than `G_cfgExitGuardRetreat`
 (0.5 mm) from the innermost position it has reached: beyond that the slave

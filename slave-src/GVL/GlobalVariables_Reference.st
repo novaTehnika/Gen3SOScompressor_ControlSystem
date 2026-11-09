@@ -415,7 +415,9 @@
         DEVICE DIMENSIONS (physical landmarks in the coordinate frame)
         ======================================================================== *)
 
-     G_cfgPosCylinderEntry     : LREAL := 176.0       (* Physical cylinder-entry position (mm).
+     G_cfgPosCylinderEntry     : LREAL := 180.0       (* Physical cylinder-entry position (mm):
+                                                          187 mm of travel in the bore below
+                                                          G_cfgPosSoftLimitMax.
                                                           Below this the piston is leaving the
                                                           cylinder. The exit guard's band starts
                                                           G_cfgPosExitGuardMargin above it, whatever

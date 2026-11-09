@@ -178,7 +178,8 @@ chamber was pressurised.
 **Triggered When**:
 All three at once, evaluated by `FB_PistonExitGuard` every scan in every state:
 - Position at or below the exit boundary, `G_cfgPosCylinderEntry` +
-  `G_cfgPosExitGuardMargin` (176 + 20 = 196 mm). This boundary is above the
+  `G_cfgPosExitGuardMargin` (180 + 20 = 200 mm, which the operator app shows as 167 mm from the end
+  of travel). This boundary is above the
   cylinder entry, not at the soft limit (`G_cfgPosSoftLimitMin`), and the
   band below it has no lower edge
 - Chamber pressure (IR19-20) above `G_cfgExitGuardPressure` (0.1 MPa gauge)
@@ -197,7 +198,7 @@ comes to rest about 3 mm inside the boundary, 17 mm short of the entry.
 
 **Symptoms**:
 - A retract (jog, position move, Go Home, homing, or the pressure loop
-  lowering the pressure) halted just below 196 mm
+  lowering the pressure) halted just below 200 mm
 - IR19-20 reads above 0.1 MPa
 
 **Master Recovery**:
@@ -327,7 +328,7 @@ The enum value is retained in `E_FaultCode` for protocol stability but is not cu
 - For longer than `G_cfgPressureSensorFaultTime` (100 ms) after the median and low-pass filters
 - And either of:
   - the state is `ST_PRESSURE_CTRL`
-  - in any state, the piston is in the bore inside the exit guard band (`G_cfgPosCylinderEntry` to `G_cfgPosCylinderEntry` + `G_cfgPosExitGuardMargin`, 176 to 196 mm) and backs out more than `G_cfgExitGuardRetreat` (0.5 mm): the piston exit guard cannot tell whether the chamber is pressurised and takes it to be (see `FAULT_PISTON_EXIT`)
+  - in any state, the piston is in the bore inside the exit guard band (`G_cfgPosCylinderEntry` to `G_cfgPosCylinderEntry` + `G_cfgPosExitGuardMargin`, 180 to 200 mm) and backs out more than `G_cfgExitGuardRetreat` (0.5 mm): the piston exit guard cannot tell whether the chamber is pressurised and takes it to be (see `FAULT_PISTON_EXIT`)
 
 **Symptoms**:
 - `G_mbActualPressure` (IR19-20) reads below zero or above the transducer range
