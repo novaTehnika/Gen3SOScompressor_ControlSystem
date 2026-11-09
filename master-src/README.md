@@ -121,8 +121,8 @@ slave link up and out of E-STOP.
 
 The window is a `MainGrid` of three bands, in nested `uigridlayout`s:
 
-- The readout band (190 px) holds the four readouts (volume, pressure,
-  position, flow) of equal width, the status line and the Fault Active and
+- The readout band (190 px) holds the four readouts (flow, volume,
+  position, pressure) of equal width, the status line and the Fault Active and
   Mixer On lamps under them, and the STOP button pinned at the top right,
   120 px wide over the band's height.
 - The Controls band (128 px) holds three rows: connect, mode and target
@@ -131,7 +131,7 @@ The window is a `MainGrid` of three bands, in nested `uigridlayout`s:
 - The Procedure panel takes the remaining height, so a taller window lengthens
   only its instruction text.
 
-A new window is 940 x 900 px (drawable area); the minimum is 900 x 680. Below
+A new window is 940 x 900 px (drawable area); the minimum is 830 x 680. Below
 the minimum the grid keeps its minimum extent and the window scrolls.
 
 The **View** menu places the windows. The app's monitor is the one containing

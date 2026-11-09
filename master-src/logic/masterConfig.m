@@ -44,6 +44,12 @@ cfg.oxygenRatio  = 1.0;     % oxygen charge as STP volume per saline volume (1.0
 cfg.posMin = 0;             % mm
 cfg.posMax = 367;           % mm
 
+% Manual position target shown before the first connection (mm from the
+% end of travel): inside the cylinder, past the slave's exit-guard band
+% (G_cfgPosCylinderEntry + G_cfgPosExitGuardMargin, 196 mm, is 171 mm from
+% the end of travel). Once connected the target follows the piston.
+cfg.targetFromEotDefault = 150;
+
 % Operator speed: one setting, as a percentage of speedMax, for jog,
 % position moves, Go Home and homing. It is sent as the jog reference and
 % in HR7-8 every exchange; the slave caps each mode by its own ceiling.

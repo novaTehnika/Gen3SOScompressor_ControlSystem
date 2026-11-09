@@ -112,6 +112,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         resetDialogOpen = false
         estopActive = false     % master reports STATUS_ESTOP
         linkReady = false       % master reports the slave link up
+        targetFromPiston = false  % set the manual target to the piston's position once the link is up
 
         % Operation started from a mode button. It stays active until the
         % model reports it ended, so its button can stop it.
@@ -211,7 +212,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % decorations (left, bottom, right, top) used before they can be
         % measured
         DEFAULT_SIZE    = [940 900]
-        MIN_SIZE        = [900 680]
+        MIN_SIZE        = [830 680]
         READOUT_HEIGHT  = 190
         CONTROLS_HEIGHT = 128
         MAIN_PAD        = 6
@@ -860,6 +861,15 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.linkReady = statusCode ~= app.STATUS_LINK_LOST && ...
                 statusCode ~= app.STATUS_LINK_WAIT;
             trackOp(app, statusCode);
+            if app.targetFromPiston && app.linkReady && isfinite(d.position) ...
+                    && app.activeOp ~= app.OP_POSITION
+                % The first position reading of the connection becomes the
+                % manual target, within the spinner's limits.
+                lim = app.TargetPositionSpinner.Limits;
+                app.TargetPositionSpinner.Value = min(max( ...
+                    round(app.cfg.posEOT - d.position), lim(1)), lim(2));
+                app.targetFromPiston = false;
+            end
             app.lastPosition = d.position;
             refreshVolume(app);
             showPressureBlock(app, d.pressureBlock);
@@ -945,11 +955,14 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
             % Manual targets are distances from the end of travel, within
             % the master's soft limits and not past the end of travel. The
-            % initial target is the retracted end, away from compression.
+            % target shown before a connection is the configured in-cylinder
+            % position; once the slave link is up it takes the piston's
+            % position, so Go moves nothing until the operator changes it.
             limits = [max(app.cfg.posEOT - app.cfg.posMax, 0), ...
                 app.cfg.posEOT - app.cfg.posMin];
             setSpinnerRange(app, app.TargetPositionSpinner, limits);
-            app.TargetPositionSpinner.Value = limits(2);
+            app.TargetPositionSpinner.Value = min(max( ...
+                round(app.cfg.targetFromEotDefault), limits(1)), limits(2));
 
             % Pressure targets: the spinner shows the display unit (the one
             % chosen last time), from ambient up to the slave's highest
@@ -1772,6 +1785,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                         app.traceReader = traceStart(readBlock(app, "TraceRing"), false);
                         app.traceAligner = traceAlignNew();
                         app.traceLive = traceLiveBuffer(app.cfg);
+                        app.targetFromPiston = true;
                         app.StatusLabel.Text = "Connected to Simulink";
                     else
                         app.StatusLabel.Text = append(...
@@ -2415,15 +2429,15 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
             % Create readouts
             [app.VolumePanel, app.VolumeValue, grid] = createReadout(app, ...
-                'Swept volume (mL)', 1, 44);
+                'Swept volume (mL)', 2, 44);
             createVolumeControls(app, grid);
             [app.PressurePanel, app.PressureValue, grid] = createReadout(app, ...
-                'Pressure (atm abs)', 2, 44);
+                'Pressure (atm abs)', 4, 44);
             createPressureControls(app, grid);
             [app.PositionPanel, app.PositionValue] = createReadout(app, ...
                 'Position from EOT (mm)', 3, 44);
             [app.FlowPanel, app.FlowValue] = createReadout(app, ...
-                'Flow (mL/s)', 4, 44);
+                'Flow (mL/s)', 1, 44);
 
             % Create StatusLabel
             app.StatusLabel = uilabel(app.ReadoutGrid);
