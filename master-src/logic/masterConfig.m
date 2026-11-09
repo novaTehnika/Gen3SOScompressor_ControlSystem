@@ -43,7 +43,7 @@ cfg.posMax = 367;           % mm
 % in HR7-8 every exchange; the slave caps each mode by its own ceiling.
 cfg.speedMax     = 6;               % mm/s at 100 %; must not exceed G_cfgVelLimitMax
 cfg.speedPresets = [2 5 10 25 50 100];   % % of speedMax, the app's preset buttons
-cfg.speedDefault = 25;             % % at app start and the shell's default
+cfg.speedDefault = 100;             % % at app start and the shell's default
 
 % Position arrival judged from feedback.
 cfg.posTolerance = 0.5;     % mm
