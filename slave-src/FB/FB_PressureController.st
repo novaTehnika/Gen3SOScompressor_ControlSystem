@@ -59,6 +59,8 @@
        IntegScale      : LREAL := 1.0     (* Factor applied to the stored integral at the start of the scan
      VAR_OUTPUT:
        Velocity        : LREAL            (* Commanded velocity (mm/s), within +/-rVelLimit
+       Error           : LREAL            (* Target - Actual this scan (MPa); 0 while disabled
+       Saturated       : BOOL             (* Output is at the clamp this scan; FALSE while disabled
      VAR:
        rError          : LREAL            (* Target - Actual (MPa)
        rVelLimit       : LREAL            (* Clamp applied this scan: min of VelMax and the stop law (mm/s)
@@ -83,6 +85,8 @@ END_IF;
 
 IF (NOT Enable) OR bParamError THEN
     Velocity := LREAL#0.0;
+    Error := LREAL#0.0;
+    Saturated := FALSE;
     RETURN;
 END_IF;
 
@@ -104,6 +108,8 @@ rVelLimit := MIN(VelMax, MAX(StopVelMin, rVelStop));
 rRaw := Kp * rError + Ki * rInteg;
 Velocity := LIMIT(-rVelLimit, rRaw, rVelLimit);
 bSaturated := (rRaw <> Velocity);
+Error := rError;
+Saturated := bSaturated;
 
 IF (NOT bSaturated) OR
    ((rRaw > Velocity) AND (rError < LREAL#0.0)) OR

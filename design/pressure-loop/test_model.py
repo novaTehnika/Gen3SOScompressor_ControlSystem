@@ -722,6 +722,145 @@ def check_closed_loop():
 
 
 # %% ===== STOP-LAW FLOOR POLICIES =======================================
+def check_floor_st():
+    """FB_PressureFloor (the switched floor with the forward stop,
+    translated from ST) against FloorPolicy, and its wiring in PRG_Main
+    against the reference controllers."""
+    class Both:
+        """Runs FloorPolicy and FloorPolicyST on the same inputs, checks
+        they agree every scan and returns the reference's floor."""
+        def __init__(self):
+            self.ref = ctl.FloorPolicy('switched', forward_stop=True)
+            self.port = ctl.FloorPolicyST()
+
+        def reset(self, c):
+            self.ref.reset(c)
+            self.port.reset(c)
+            self.latches = self.releases = self.stops = 0
+
+        @property
+        def latched(self):
+            return self.ref.latched
+
+        def step(self, P, x, err, saturated, v_prev):
+            was = self.ref.latched
+            a = self.ref.step(P, x, err, saturated, v_prev)
+            b = self.port.step(P, x, err, saturated, v_prev)
+            assert a == b and self.ref.latched == self.port.latched, \
+                (a, b, self.ref.latched, self.port.latched)
+            self.latches += self.ref.latched and not was
+            self.releases += was and not self.ref.latched
+            return a
+
+        def limit_forward(self, v, err):
+            a = self.ref.limit_forward(v, err)
+            assert a == self.port.limit_forward(v, err), (v, err)
+            self.stops += a != v
+            return a
+
+    # The policy, scan for scan, through the 1:1 delivery with both hose
+    # procedures and a 1 s closing, under the GVL loop and the scheduled
+    # loop
+    par = StudyParams()
+    cases = (('hose before', par.with_(hose_before=True)),
+             ('hose after', par),
+             ('1 s closing', par.with_(hose_before=True, Tclose=1.0)))
+    for label, q in cases:
+        # The scheduled loop stops the piston at a slow closing before
+        # the pressure rises fast enough to release the latch, so only
+        # the GVL loop must release it there.
+        for gvl, make in ((True, lambda f: ctl.SlaveController(
+                               'g', floor=f)),
+                          (False, lambda f: ctl.ScheduledSlaveController(
+                               's', wc=11.0, V_dead_cfg=109e-6,
+                               C_hose_cfg=1.2e-13, floor=f))):
+            f = Both()
+            r = sim.run(q, scenarios.deliver(q), make(f))
+            assert f.latches >= 1, (label, gvl)
+            assert f.releases >= 1 or not gvl, (label, f.releases)
+            assert r['V_ok'] == r['V_delivered'], label
+    ok('FB_PressureFloor (ST) matches FloorPolicy scan for scan through '
+       'the 1:1 delivery, both hose procedures and a 1 s closing, GVL '
+       'and scheduled loops: the latch sets on the outflow and releases '
+       'at the closing')
+
+    # PRG_Main's wiring: the floor ahead of the schedule and the
+    # controller, the forward stop on the command, with the schedule
+    # off and on
+    class Lockstep:
+        """Runs the reference and the port on the same inputs and
+        returns the reference's command."""
+        mode = 'V'
+
+        def __init__(self, ref, port):
+            self.ref, self.port = ref, port
+            self.name, self.cfg = port.name, port.cfg
+
+        def reset(self, p, sc):
+            u = self.ref.reset(p, sc)
+            assert self.port.reset(p, sc) == u
+            self.accel, self.decel = self.ref.accel, self.ref.decel
+            self.worst, self.floors = 0.0, set()
+            return u
+
+        def step(self, P, tg, t, sc, x=0.0):
+            a = self.ref.step(P, tg, t, sc, x)
+            b = self.port.step(P, tg, t, sc, x)
+            self.worst = max(self.worst, abs(a - b))
+            assert self.ref.fb.StopVelMin == self.port.fb.StopVelMin
+            self.floors.add(self.port.fb.StopVelMin)
+            return a
+
+    q = par.with_(hose_before=True)
+    cq = q.cfg()
+
+    def fs():
+        return ctl.FloorPolicy('switched', forward_stop=True)
+    for sched in (False, True):
+        for name in ('compress', 'deliver'):
+            if sched:
+                ref = ctl.ScheduledSlaveController(
+                    'ref', wc=cq['G_cfgPressureSchedCrossover'],
+                    K_cfg=cq['G_cfgPressureSchedBulkModulus'],
+                    V_l_cfg=q.Vl0,
+                    V_dead_cfg=(cq['G_cfgPressureSchedPassagesVol']
+                                + cq['G_cfgPressureSchedHoseVol'])
+                    * 1e-6,
+                    C_hose_cfg=cq['G_cfgPressureSchedHoseCompl'],
+                    ratio_cfg=None,
+                    ki_ratio=cq['G_cfgPressureSchedKiRatio'],
+                    kp_min=cq['G_cfgPressureSchedKpMin'],
+                    kp_max=cq['G_cfgPressureSchedKpMax'],
+                    e_int=cq['G_cfgPressureSchedArriveBand'], floor=fs())
+                port = ctl.ScheduledSlaveControllerST(
+                    SchedHoseOpen=True, FloorEnable=True)
+            else:
+                ref = ctl.SlaveController('ref', floor=fs())
+                port = ctl.ScheduledSlaveControllerST(
+                    ScheduleEnable=False, FloorEnable=True)
+            L = Lockstep(ref, port)
+            sim.run(q, scenarios.make(name, q), L)
+            assert L.worst < 1e-9, (sched, name, L.worst)       # [m/s]
+            if name == 'deliver':
+                assert L.floors == {cq['G_cfgPressureFloorVelLow'],
+                                    cq['G_cfgPressureStopVelMin']}
+    ok('PRG_Main wiring of FB_PressureFloor matches the reference '
+       'controllers with the floor policy scan for scan, schedule off '
+       'and on, through the compression and the delivery')
+
+    # Disabled, the port is the configured StopVelMin
+    a = ctl.ScheduledSlaveControllerST(ScheduleEnable=False)
+    b = ctl.ScheduledSlaveControllerST(ScheduleEnable=False,
+                                       FloorEnable=False)
+    sc = scenarios.deliver(q)
+    ra, rb = sim.run(q, sc, a), sim.run(q, sc, b)
+    assert np.array_equal(ra.u, rb.u)
+    rc = sim.run(q, sc, ctl.SlaveController())
+    assert np.array_equal(rc.u, ra.u)
+    ok('with G_cfgPressureFloorEnable FALSE the slave loop is the GVL '
+       'loop')
+
+
 def check_floor_policy():
     """FloorPolicy, eqs. (46) to (48)."""
     par = StudyParams().with_(hose_before=True)
@@ -833,4 +972,5 @@ if __name__ == '__main__':
     check_legacy_reference()
     check_closed_loop()
     check_floor_policy()
+    check_floor_st()
     check_runner()

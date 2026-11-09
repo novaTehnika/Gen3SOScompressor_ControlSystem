@@ -430,12 +430,19 @@ specified here; the implementation plan decides the files.
       distal end of the hose gives no usable lead (the pressure wave
       crosses the 6 ft hose in 6 ms). Decide whether the extra input is worth
       it.
-- [ ] Port the stop-law floor policy (the switched floor with the
-      forward stop, `design/pressure-loop/README.md` "Stop-law floor
-      study") into `FB_PressureController` or a block ahead of it. On the
-      GVL gains it removes the purge-closing peak through the ceiling; on
-      the scheduled controller at 11 rad/s it takes 2.5:1 at 11 MPa from
-      81 % to every plausible case.
+- [x] Port the stop-law floor policy (the switched floor with the
+      forward stop) as `FB_PressureFloor`, behind
+      `G_cfgPressureFloorEnable`, off by default.
+- [ ] Commission the stop-law floor: rebuild with `FB_PressureFloor`,
+      its `PRG_Main` wiring, the `G_cfgPressureFloor*` declarations and
+      `FB_PressureController`'s `Saturated` and `Error` outputs; then a
+      water-only delivery with the floor on, checking that the latch sets
+      within a second of the distal valve opening and releases when it
+      shuts, and that the closing peak stays near the model's 10.4 MPa
+      (12.1 without the floor). On the GVL gains it removes the
+      purge-closing peak through the ceiling; on the scheduled controller
+      at 11 rad/s it takes 2.5:1 at 11 MPa from 81 % to every plausible
+      case.
 - [ ] Decide the schedule's default switch and crossover once it has run
       on the machine. With the November drive, 11 rad/s keeps 46° of
       phase margin and 16 rad/s 29°; 2.5:1 at 11 MPa needs 16 rad/s or

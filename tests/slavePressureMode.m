@@ -6,7 +6,8 @@ function slavePressureMode()
 %   mode, fault on a broken transducer loop only while the loop is
 %   closed on it and, with the gain schedule
 %   (G_cfgPressureScheduleEnable), compress to 10 MPa with the gains
-%   following the stiffness bound.
+%   following the stiffness bound and, with the stop-law floor
+%   (G_cfgPressureFloorEnable), latch on outflow and release at a closing.
 %   Run from the repository root after  addpath slave-sim; buildSlaveSim
 %     addpath slave-sim slave-sim/generated tests
 %   Depends on: slave-src slave-sim tools models bench/characterisation
@@ -229,6 +230,58 @@ h.u.modeCode = 0;
 h.u.reference = 0;
 h = runUntil(h, 5, @(h) h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE);
 fprintf('ok  unwritten fill -> schedule ParamError, configured gains\n');
+
+% Stop-law floor (G_cfgPressureFloorEnable): at the target with the outlet
+% shut the floor is G_cfgPressureFloorVelLow; an outflow the piston must
+% follow (4.8 mL/s, the orifice bank at 10 MPa) latches it at
+% G_cfgPressureStopVelMin; shutting the outlet abruptly under the moving
+% piston releases it, and the forward stop holds the pressure down. With
+% the floor off the same closing peaks higher.
+h.sl.G.G_cfgPressureScheduleEnable = false;
+h.sl.G.G_mbSalineVolume = 343;
+h.sl.G.G_mbOxygenRatio = 1;
+peak = zeros(1, 2);
+for on = [true false]
+    h.sl.G.G_cfgPressureFloorEnable = on;
+    h.sl.ax.x = chamberPosition(h.sl, 0.5);
+    h = enterMode(h, MODE_PRESSURE, 10);
+    h = runUntil(h, 30, settled);
+    h = runFor(h, 2);
+    fl = h.sl.s.fbPressureFloor;
+    assert(h.sl.s.bPressureFloorActive == on && h.sl.s.bPressureFloorUsed == on);
+    if on
+        assert(~fl.Latched && fl.StopVelMin == h.sl.G.G_cfgPressureFloorVelLow && ...
+            h.sl.s.fbPressureCtrl.StopVelMin == fl.StopVelMin);
+    else
+        assert(h.sl.s.fbPressureCtrl.StopVelMin == h.sl.G.G_cfgPressureStopVelMin);
+    end
+    h.sl.hook.outflow = 4800;            % mm^3/s
+    h = runFor(h, 4);
+    if on
+        fl = h.sl.s.fbPressureFloor;
+        assert(fl.Latched && fl.StopVelMin == h.sl.G.G_cfgPressureStopVelMin, ...
+            'outflow not latched');
+        assert(h.sl.s.fbPressureCtrl.StopVelMin == h.sl.G.G_cfgPressureStopVelMin);
+    end
+    assert(abs(h.sl.ax.P - 10) < 1.5 && h.sl.ax.v > 1, 'loop did not follow the outflow');
+    h.sl.hook.outflow = 0;               % the outlet shuts under the moving piston
+    h.pMax = 0;
+    h = runFor(h, 3);
+    peak(2 - on) = h.pMax;
+    if on
+        assert(~h.sl.s.fbPressureFloor.Latched, 'latch not released at the closing');
+    end
+    h.u.motionEnable = 0;
+    h = runFor(h, 1);
+    h.u.modeCode = 0;
+    h.u.reference = 0;
+    h = runUntil(h, 5, @(h) h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE);
+end
+h.sl.G.G_cfgPressureFloorEnable = false;
+assert(peak(1) < peak(2) && peak(1) < 10.6, 'closing peak %.2f MPa with the floor, %.2f without', ...
+    peak(1), peak(2));
+fprintf('ok  stop-law floor: latched on outflow, released at the closing, peak %.2f MPa (%.2f without)\n', ...
+    peak(1), peak(2));
 
 fprintf('all passed\n');
 end

@@ -163,6 +163,23 @@ When `G_cfgPressureScheduleEnable` is TRUE on entry to pressure mode, `FB_Pressu
 | `G_cfgPressureSchedDeadTime` | 0.0182 | s | Drive dead time from command to response, measured on the bench (`bench/characterisation`) with `Y_DirectControl`'s FilterTimeConstant at `G_cfgDirectCtrlFilterTime` 0.02 s. Re-measure if that setting changes. |
 | `G_cfgPressureSchedDriveLag` | 0.0075 | s | Drive velocity-loop time constant, measured as above. |
 
+### Stop-law floor
+
+When `G_cfgPressureFloorEnable` is TRUE on entry to pressure mode, `FB_PressureFloor` sets the stop law's floor (the `StopVelMin` of `FB_PressureSchedule` and `FB_PressureController`) every scan in place of `G_cfgPressureStopVelMin`: `G_cfgPressureFloorVelLow` until it detects outflow, and `G_cfgPressureStopVelMin` while the detection is latched. It detects outflow as a piston that moves forward with the controller saturated while the pressure does not rise (over `G_cfgPressureFloorWindow`, with the position delayed by the measurement lag), and releases the latch when the pressure rises fast at or above the target, which is the outlet shutting under a moving piston. While the floor is not latched and the pressure is above the target, a positive pressure-loop command is zeroed (the forward stop, `G_cfgPressureFloorForwardStop`). It needs no stiffness value, so it works with the fixed gains and with the schedule. In the design studies it keeps the purge closing below the ceiling with the fixed gains (10.4 MPa against 12.1) and lets the schedule at 11 rad/s deliver 2.5:1 at 11 MPa (`design/pressure-loop/README.md`, "Stop-law floor study"). The choice is latched on entry; a `ParamError` falls back to `G_cfgPressureStopVelMin` with no forward stop.
+
+| Parameter | Default Value | Units | Description & Tuning Considerations |
+|---|---|---|---|
+| `G_cfgPressureFloorEnable` | FALSE | BOOL | Selects the stop-law floor. Latched on entry to pressure mode. |
+| `G_cfgPressureFloorVelLow` | 0.5 | mm/s | Floor with no outflow detected: low, so the stop law acts in a sealed chamber. The latched floor is `G_cfgPressureStopVelMin`, which must exceed the speed the outflow needs (1.4 mm/s at 10 MPa). |
+| `G_cfgPressureFloorWindow` | 0.1 | s | Window over which the pressure rise rate and the piston speed are taken. 0.04 to 0.2 s work; a longer window releases late. At most 60 scans, and the window plus the measurement lag at most 63 scans. |
+| `G_cfgPressureFloorTrigVel` | 0.2 | mm/s | Least piston speed over the window for the outflow trigger. |
+| `G_cfgPressureFloorTrigRate` | 0.1 | MPa/s | The trigger counts while the pressure rises slower than this. Above about 0.5 MPa/s the latch can set during a compression of a gas-rich chamber. |
+| `G_cfgPressureFloorTrigError` | 0.05 | MPa | The trigger counts while the error (target − actual) exceeds this. |
+| `G_cfgPressureFloorTrigTime` | 0.04 | s | Time the trigger must hold before the latch sets. Zero makes it chatter. |
+| `G_cfgPressureFloorRelRate` | 1.0 | MPa/s | The latch releases when the pressure rises faster than this at or above the target. Must stay below the rise rate of the slowest closing of the outlet (4 MPa/s misses a 1 s closing). |
+| `G_cfgPressureFloorRelError` | 0.0 | MPa | The latch releases only with the error at or below this (the pressure at or above the target). |
+| `G_cfgPressureFloorForwardStop` | TRUE | BOOL | Zero a positive command above the target while outflow is not latched. Without it the floor alone does not stop the closing peak. |
+
 ---
 
 ## 9. Pressure Transducer and Pressure Loop
@@ -192,7 +209,7 @@ The transducer is a 4-20 mA loop read as the voltage across a shunt on the contr
 | `G_cfgPressureAccel` | 50.0 | mm/s² | `Y_DirectControl` acceleration in pressure mode. |
 | `G_cfgPressureDecel` | 50.0 | mm/s² | Deceleration the pressure stop law assumes (`Y_DirectControl` has no decel input). The chamber stiffens by orders of magnitude as the gas dissolves, so the command must reverse within `v²/(2·decel)` of travel. |
 | `G_cfgPressureStopStiffness` | 100.0 | MPa/mm | Chamber stiffness assumed by the stop law: the velocity is clamped to `sqrt(2·Decel·|error|/stiffness)`. Above the liquid-only chamber's about 20 MPa/mm because the filtered reading lags the chamber during the approach. Fallback when the schedule is off. |
-| `G_cfgPressureStopVelMin` | 2.0 | mm/s | The stop law never clamps below this, so outflow can be balanced at zero error. It must exceed the piston speed the outlet needs (1.4 mm/s at 10 MPa through the orifice bank) or the loop holds a steady error below the target. Overshoot from this velocity is at most `stiffness·v²/(2·decel)`. |
+| `G_cfgPressureStopVelMin` | 2.0 | mm/s | The stop law never clamps below this, so outflow can be balanced at zero error. It must exceed the piston speed the outlet needs (1.4 mm/s at 10 MPa through the orifice bank) or the loop holds a steady error below the target. Overshoot from this velocity is at most `stiffness·v²/(2·decel)`. With the stop-law floor (section 8) it is the floor while outflow is latched, and `G_cfgPressureFloorVelLow` otherwise. |
 | `G_cfgPressureTorqueLimit` | 100.0 | % of rated | Torque limit in pressure mode. Caps the piston force if the sensor reads low. |
 | `G_cfgPressureTargetMax` | 15.0 | MPa gauge | Highest target accepted from the master. The effective limit is `MIN(G_cfgPressureTargetMax, G_cfgPressureCeiling - G_cfgPressureCeilingHyst)`. |
 | `G_cfgPressureCeiling` | 12.0 | MPa gauge | Mechanical pressure ceiling. Above it `PRG_Main` zeroes every command in the pressurising (positive) direction in every motion state (`G_sysPressureBlock`, IR9). No fault. Also caps the pressure target at Ceiling − Hyst. |

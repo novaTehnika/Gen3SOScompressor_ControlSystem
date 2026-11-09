@@ -52,6 +52,7 @@
        fbPressureInput     : FB_PressureInput
        fbPressureCtrl      : FB_PressureController
        fbPressureSched     : FB_PressureSchedule
+       fbPressureFloor     : FB_PressureFloor
        fbModeDecoder       : FB_ModeDecoder
        fbHandshake         : FB_HandshakeManager
        fbFaultReset        : FB_FaultResetHandler
@@ -138,6 +139,10 @@
        rPressureVelMax     : LREAL
        rPressureStiffness  : LREAL
        rPressureIntegScale : LREAL := 1.0
+       bPressureFloorActive : BOOL            (* G_cfgPressureFloorEnable latched on entry to pressure mode
+       bPressureFloorUsed  : BOOL             (* fbPressureFloor sets the stop-law floor this scan
+       rPressureStopVelMin : LREAL            (* Stop-law floor passed to fbPressureSched and fbPressureCtrl this scan (mm/s)
+       rPressureLoopVel    : LREAL            (* Pressure-loop command after the forward stop, used by the pressure state on the next scan (mm/s)
        (* Y_DirectControl hand-off to MC_Stop (see Command Arbitration)
        bKeepDirectControl  : BOOL             (* Keep Y_DirectControl enabled (zero command) until MC_Stop aborts it
        eKeepDirectMode     : Y_ControlMode    (* ControlMode of the direct-control session being stopped
@@ -480,6 +485,7 @@ ELSIF G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL THEN
                once per entry, so a change of the switch or of the fill
                registers never changes the gains mid-run. *)
             bPressureSchedActive := G_cfgPressureScheduleEnable;
+            bPressureFloorActive := G_cfgPressureFloorEnable;
             rSchedSaline := G_sysSalineVolume;
             rSchedOxygenRatio := G_sysOxygenRatio;
         END_IF;
@@ -489,10 +495,11 @@ ELSIF G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL THEN
                                      G_cfgPressureCeiling - G_cfgPressureCeilingHyst));
         bPressureCtrlActive := TRUE;
 
-        (* fbPressureCtrl ran at the end of the previous scan. On the entry
-           scan it was disabled, so the command starts from zero. *)
+        (* fbPressureCtrl ran at the end of the previous scan, followed by
+           the floor's forward stop. On the entry scan it was disabled, so
+           the command starts from zero. *)
         G_sysCommandedVelocity := LIMIT(-stCurrentLimits.VelMax,
-                                      fbPressureCtrl.Velocity,
+                                      rPressureLoopVel,
                                       stCurrentLimits.VelMax);
 
         IF bBlockNeg AND (G_sysCommandedVelocity < LREAL#0.0) THEN
@@ -1302,6 +1309,40 @@ fbPosShaper(
     CycleTime := G_cfgScanTime
 );
 
+(* Stop-law floor - follows the detected outflow when selected on entry; a
+   ParamError falls back to the configured StopVelMin. It takes the
+   controller's output and saturation of the previous scan. *)
+fbPressureFloor(
+    Enable := bPressureCtrlActive AND bPressureFloorActive,
+    Reset := bEnterState AND bPressureCtrlActive,
+    Actual := G_sysActualPressure,
+    Position := G_sysActualPosition,
+    Error := rPressureTarget - G_sysActualPressure,
+    Saturated := fbPressureCtrl.Saturated,
+    VelocityPrev := fbPressureCtrl.Velocity,
+    VelLow := G_cfgPressureFloorVelLow,
+    VelHigh := G_cfgPressureStopVelMin,
+    Window := G_cfgPressureFloorWindow,
+    CycleTime := G_cfgScanTime,
+    FilterTime := rAnalogFilterTime,
+    MedianSize := G_cfgAnalogMedianSize,
+    TrigVel := G_cfgPressureFloorTrigVel,
+    TrigRate := G_cfgPressureFloorTrigRate,
+    TrigError := G_cfgPressureFloorTrigError,
+    TrigTime := G_cfgPressureFloorTrigTime,
+    RelRate := G_cfgPressureFloorRelRate,
+    RelError := G_cfgPressureFloorRelError,
+    ForwardStop := G_cfgPressureFloorForwardStop
+);
+
+bPressureFloorUsed := bPressureCtrlActive AND bPressureFloorActive AND
+                      NOT fbPressureFloor.ParamError;
+IF bPressureFloorUsed THEN
+    rPressureStopVelMin := fbPressureFloor.StopVelMin;
+ELSE
+    rPressureStopVelMin := G_cfgPressureStopVelMin;
+END_IF;
+
 (* Pressure-loop gain schedule - Kp, Ki and the stop-law limit from the
    stiffness bound, when selected on entry. A ParamError falls back to the
    configured gains. *)
@@ -1314,7 +1355,7 @@ fbPressureSched(
     EndOfTravel := G_cfgPressureSchedEndOfTravel,
     VelMax := stCurrentLimits.VelMax,
     DecelMax := G_cfgPressureDecel,
-    StopVelMin := G_cfgPressureStopVelMin,
+    StopVelMin := rPressureStopVelMin,
     CycleTime := G_cfgScanTime,
     FilterTime := rAnalogFilterTime,
     MedianSize := G_cfgAnalogMedianSize,
@@ -1370,10 +1411,17 @@ fbPressureCtrl(
     VelMax := rPressureVelMax,
     DecelMax := G_cfgPressureDecel,
     Stiffness := rPressureStiffness,
-    StopVelMin := G_cfgPressureStopVelMin,
+    StopVelMin := rPressureStopVelMin,
     CycleTime := G_cfgScanTime,
     IntegScale := rPressureIntegScale
 );
+
+(* Forward stop above the target while outflow is not latched, eq. (48) *)
+rPressureLoopVel := fbPressureCtrl.Velocity;
+IF bPressureFloorUsed AND fbPressureFloor.StopForward AND
+   (rPressureLoopVel > LREAL#0.0) THEN
+    rPressureLoopVel := LREAL#0.0;
+END_IF;
 
 
 (* --------------------------------------------------------------------------

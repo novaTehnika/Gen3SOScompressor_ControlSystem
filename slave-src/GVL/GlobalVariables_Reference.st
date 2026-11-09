@@ -309,6 +309,22 @@
      G_cfgPressureSchedDeadTime      : LREAL := 0.0182     (* Drive dead time, command to response (s), measured with G_cfgDirectCtrlFilterTime 0.02 s *)
      G_cfgPressureSchedDriveLag      : LREAL := 0.0075     (* Drive velocity-loop time constant (s), measured with G_cfgDirectCtrlFilterTime 0.02 s *)
 
+     (* Stop-law floor (FB_PressureFloor). When enabled, latched on entry to
+        pressure mode, the stop law's floor is G_cfgPressureFloorVelLow until
+        outflow is detected and G_cfgPressureStopVelMin while it is latched,
+        and a forward command above the target is stopped while it is not
+        (design/pressure-loop/README.md, "Stop-law floor study"). *)
+     G_cfgPressureFloorEnable        : BOOL := FALSE       (* Switch the stop-law floor on detected outflow *)
+     G_cfgPressureFloorVelLow        : LREAL := 0.5        (* Floor with no outflow detected (mm/s); the latched floor is G_cfgPressureStopVelMin *)
+     G_cfgPressureFloorWindow        : LREAL := 0.1        (* Window over which the pressure rate and piston speed are taken (s) *)
+     G_cfgPressureFloorTrigVel       : LREAL := 0.2        (* Least piston speed for the outflow trigger (mm/s) *)
+     G_cfgPressureFloorTrigRate      : LREAL := 0.1        (* Pressure rise rate below which the trigger counts (MPa/s) *)
+     G_cfgPressureFloorTrigError     : LREAL := 0.05       (* Error above which the trigger counts (MPa) *)
+     G_cfgPressureFloorTrigTime      : LREAL := 0.04       (* Time the trigger must hold to latch (s) *)
+     G_cfgPressureFloorRelRate       : LREAL := 1.0        (* Pressure rise rate above which the latch releases (MPa/s); below the slowest closing's rise *)
+     G_cfgPressureFloorRelError      : LREAL := 0.0        (* Error at or below which the latch releases (MPa) *)
+     G_cfgPressureFloorForwardStop   : BOOL := TRUE        (* Stop a forward command above the target while outflow is not latched *)
+
 
      (* ========================================================================
         TIMING PARAMETERS

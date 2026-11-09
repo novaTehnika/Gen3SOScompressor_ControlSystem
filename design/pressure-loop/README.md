@@ -864,10 +864,8 @@ closing peak that makes the GVL fail every sample; on the scheduled
 controller at wc = 11 it extends delivery to 2.5:1 at 11 MPa in every
 plausible case. The floor switching on its own is not enough; the
 forward stop is what acts at the closing, and the latch is what lets
-the forward stop run in a delivery. In the slave this would be a latch
-and a direction test in `FB_PressureController` (or a block ahead of
-it), with the windowed position and pressure it already receives;
-it is not yet ported. None of it helps the present procedure with the
+the forward stop run in a delivery. In the slave it is `FB_PressureFloor`,
+ahead of the schedule and the controller ("Porting the floor"). None of it helps the present procedure with the
 6 ft hose, whose limit is the opening drop.
 
 ## Porting the schedule
@@ -921,3 +919,42 @@ the command, and includes a gas-spring compression.
 Left for commissioning: `G_cfgPressureSchedHoseOpen` against the
 procedure (FALSE while the proximal valve opens after mixing), and the
 charge against the recipe.
+
+## Porting the floor
+
+`FB_PressureFloor` (`slave-src/FB/`) is the port of `FloorPolicy` in
+its switched mode with the forward stop, eqs. (46) and (48). It is off
+by default and is selected on entry to pressure mode by
+`G_cfgPressureFloorEnable`; its settings are the `G_cfgPressureFloor*`
+values of the GVL, with the latched floor at `G_cfgPressureStopVelMin`.
+`PRG_Main` calls it ahead of `FB_PressureSchedule` and
+`FB_PressureController` and passes its `StopVelMin` to both, and zeroes
+a positive pressure-loop command while its `StopForward` is set.
+`FB_PressureController` gains the outputs `Saturated` and `Error`,
+because the floor reads the controller's saturation and output of the
+previous scan, which it held in internal variables.
+
+The policy's arguments map to the settings as follows: `v_lo` to
+`FloorVelLow`, `v_hi` to `StopVelMin`, `window` to `FloorWindow`,
+`v_on`, `r_on`, `e_on` and `t_on` to `FloorTrigVel`, `FloorTrigRate`,
+`FloorTrigError` and `FloorTrigTime`, `r_off` and `e_off` to
+`FloorRelRate` and `FloorRelError`, and `forward_stop` to
+`FloorForwardStop`. The position delay is the block's own, from the
+filter time constant and the median window, as
+`measurement_lag_scans()` computes it. The window and the delay are
+held in rings of 64 samples, so the window plus the delay is at most
+63 scans (25 and 9 at the defaults); a longer setting is a
+`ParamError`, which falls back to the configured floor.
+
+`FloorPolicyST` runs the translated block with `FloorPolicy`'s
+interface, and `ScheduledSlaveControllerST` wires it as `PRG_Main` does
+when `G_cfgPressureFloorEnable` is set. `check_floor_st` in
+`test_model.py` runs `FloorPolicy` and the block in lockstep through
+the 1:1 delivery with both hose procedures and a 1 s closing, under the
+GVL loop and the scheduled loop, and requires the floor, the latch and
+the forward stop to agree on every scan; then it runs the wiring
+against `SlaveController` and `ScheduledSlaveController` with the
+policy, with the schedule off and on, and requires the commands to
+agree to 1e-9 m/s. `tests/slavePressureMode.m` runs the compiled slave
+through an outflow and an abrupt closing: the latch sets and releases,
+and the closing peaks at 10.25 MPa against 11.81 without the floor.
