@@ -90,7 +90,7 @@ cfg.procMaxParams    = 8;    % parameters per procedure (the panel's field pool)
 % Trace recorder and live plot (operator app).
 cfg.traceIntervalPresets = [0.05 0.1 0.5 1 10 60];  % s, the Trace panel's record intervals
 cfg.traceIntervalDefault = 0.05;    % s, the interval at app start (every exchange)
-cfg.livePlotSeconds      = 600;     % s of history in the live plot
+cfg.livePlotSeconds      = 120;     % s of history in the live plot
 cfg.livePlotPeriod       = 0.5;     % s between live plot redraws (a multiple of displayPeriod)
 cfg.livePlotPosition     = [];      % [x y width height] px of the live plot window when opened; [] for MATLAB's default. View > Side by side places it regardless
 cfg.procRecordDefault    = 1;       % s, a procedure's record interval when it gives none
