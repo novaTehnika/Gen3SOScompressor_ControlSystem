@@ -5,7 +5,10 @@ function slavePressureMode()
 %   through an outflow disturbance, clamp an excessive target, leave the
 %   mode, fault on a broken transducer loop only while the loop is
 %   closed on it and, with the stop-law floor (G_cfgPressureFloorEnable),
-%   latch on outflow and release at a closing.
+%   latch on outflow and release at a closing. It ends with PRG_Main's scan
+%   order: a step at the transducer reaches the velocity command behind the
+%   median alone, and a drive fault commands the stop in the scan the fault
+%   state is entered.
 %   Run from the repository root after  addpath slave-sim; buildSlaveSim
 %     addpath slave-sim slave-sim/generated tests
 %   Depends on: slave-src slave-sim tools models
@@ -197,6 +200,55 @@ assert(peak(1) < peak(2) && peak(1) < 10.6, 'closing peak %.2f MPa with the floo
     peak(1), peak(2));
 fprintf('ok  stop-law floor: latched on outflow, released at the closing, peak %.2f MPa (%.2f without)\n', ...
     peak(1), peak(2));
+
+% Scan order (PRG_Main's phases). The reading is conditioned, the loop
+% run and the command written in one scan, so a step at the transducer
+% moves the velocity command as soon as the median of five passes it:
+% in the third scan that samples the step, two scans after the first.
+% Any scan between the reading and the command would add to that.
+h.sl.ax.x = chamberPosition(h.sl, 0.5);
+h = enterMode(h, MODE_PRESSURE, 5);
+h = runUntil(h, 30, settled);
+h = runFor(h, 2);
+dt = h.sl.G.G_cfgScanTime;
+voltsAt = @(P) (G.G_cfgPressureZeroMa + G.G_cfgPressureSpanMa * ...
+    (P - G.G_cfgPressureRangeMin) / (G.G_cfgPressureRangeMax - G.G_cfgPressureRangeMin)) ...
+    * G.G_cfgPressureShuntOhms / 1000;
+h.sl.hook.pressureVolt = voltsAt(5);            % hold the reading at the target
+h = runFor(h, 1);
+cmd0 = h.sl.G.G_cmdDirectControl.Velocity;       % steady: the error is near zero
+h = runFor(h, dt);
+assert(abs(h.sl.G.G_cmdDirectControl.Velocity - cmd0) < 1e-3, 'command not steady');
+cmd0 = h.sl.G.G_cmdDirectControl.Velocity;
+h.sl.hook.pressureVolt = voltsAt(4);            % 1 MPa below the target
+first = 0;
+for k = 0:9
+    h = runFor(h, dt);
+    if first == 0 && abs(h.sl.G.G_cmdDirectControl.Velocity - cmd0) > 0.05
+        first = k;
+    end
+end
+cmd1 = h.sl.G.G_cmdDirectControl.Velocity;
+assert(first == 2, 'the command moved %d scans after the step, expected 2', first);
+assert(cmd1 > cmd0 + 0.2, 'command %.3f mm/s after the step', cmd1);
+h.sl.hook.pressureVolt = NaN;
+fprintf(['ok  scan order: a transducer step reaches the velocity command %d scans later ' ...
+    '(the median''s delay alone)\n'], first);
+
+% A drive fault raised by the axis in one scan is seen by the safety
+% monitor at the top of the next, which enters ST_FAULT before the state
+% machine runs: the stop is commanded in that same scan.
+assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_PRESSURE_CTRL);
+h.sl.hook.driveFault = true;
+h = runFor(h, dt);                               % the axis sets the alarm flag
+assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_PRESSURE_CTRL && ...
+    ~h.sl.G.G_cmdStop.Execute);
+h = runFor(h, dt);
+assert(h.sl.G.G_sysCurrentState == E.E_SystemState.ST_FAULT, 'not in ST_FAULT');
+assert(h.sl.G.G_cmdStop.Execute && h.sl.G.G_cmdDirectControl.Velocity == 0 && ...
+    h.y.faultActive == 1, 'the stop was not commanded in the scan of the fault');
+h.sl.hook.driveFault = false;
+fprintf('ok  scan order: a drive fault commands the stop in the scan it enters ST_FAULT\n');
 
 fprintf('all passed\n');
 end

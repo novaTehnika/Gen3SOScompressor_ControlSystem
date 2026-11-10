@@ -36,7 +36,7 @@ script reports, in order:
      nonlinear cases, with and without the integral cleared past the
      target (controllers.VariantController, eq. (52)).
   6. The delay: where the loop's pure delay comes from, and the gain
-     the margins allow with each part of it removed.
+     the margins allow with each part of it changed.
 
 It prints the tables, writes them to compensation_summary.txt and
 compensation.csv, and plots the root locus against stiffness, the phase
@@ -442,26 +442,25 @@ def candidate_table(par, cand, ks, seed, legacy, workers):
 
 # %% ===== DELAY BUDGET ==================================================
 # Changes to the loop's delay: (label, StudyParams overrides, loop
-# arguments). delay is the sensor path's scans (the median's two and
-# the two of PRG_Main's read order) and cmd_delay the command path's
-# (the command's scan and the drive's dead time in scans). The 8 ms
-# dead time is what the bench's two settings of the Y_DirectControl
+# arguments). delay is the sensor path's scans (the median's) and
+# cmd_delay the command path's (the drive's dead time in scans). The
+# 8 ms dead time is what the bench's two settings of the Y_DirectControl
 # command filter extrapolate to with the filter off (5 ms of response
-# per 10 ms of filter); it has not been measured.
+# per 10 ms of filter); it has not been measured. The last row is the
+# loop if PRG_Main read each block's output in the scan after the block
+# ran (the filter, the scaling and the pressure loop: three scans).
 DELAYS = [
     ('as built', {}, {}),
     ('median of 3', {}, {'G_cfgAnalogMedianSize': 3}),
-    ('sensor path read in the same scan', {}, {'delay': 2}),
-    ('and the command applied in the same scan', {},
-     {'delay': 2, 'cmd_delay': 5}),
     ('pressure filter 10 ms', {}, {'G_cfgAnalogFilterTimeConst': 0.010}),
     ('drive dead time 8 ms', {'t_dead': 0.0082}, {}),
     ('scan 2 ms', {'G_cfgScanTime': 0.002}, {}),
-    ('same scan, median of 3, filter 10 ms', {},
-     {'delay': 1, 'cmd_delay': 5, 'G_cfgAnalogFilterTimeConst': 0.010}),
+    ('median of 3 and filter 10 ms', {},
+     {'G_cfgAnalogMedianSize': 3, 'G_cfgAnalogFilterTimeConst': 0.010}),
     ('those and the 8 ms dead time', {'t_dead': 0.0082},
-     {'delay': 1, 'cmd_delay': 2, 'G_cfgAnalogFilterTimeConst': 0.010}),
+     {'G_cfgAnalogMedianSize': 3, 'G_cfgAnalogFilterTimeConst': 0.010}),
     ('no pure delay', {}, {'delay': 0, 'cmd_delay': 0}),
+    ('block outputs read a scan late', {}, {'delay': 4, 'cmd_delay': 6}),
 ]
 
 
@@ -472,12 +471,10 @@ def delay_table(par, ks):
     k_del, k_des, _ = ks
     cfg = par.cfg()
     Ts = cfg['G_cfgScanTime']                               # [s]
-    n_med = lin.sample_delay(cfg) - 2                       # [scans]
+    n_med = lin.sample_delay(cfg)                           # [scans]
     say('\n=== 6. Delay: sources as built')
     for name, t in (
             (f'median of {cfg["G_cfgAnalogMedianSize"]}', n_med * Ts),
-            ('PRG_Main read order, sensor path (2 scans)', 2 * Ts),
-            ('command read in the next scan (1 scan)', Ts),
             ('drive dead time, in whole scans',
              round(par.t_dead / Ts) * Ts)):
         say(f'  pure delay  {name:44s} {t * 1e3:5.1f} ms')

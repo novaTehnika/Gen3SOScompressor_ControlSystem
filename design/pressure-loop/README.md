@@ -423,11 +423,12 @@ Sensor filter:
 
     (28) F(z) = alpha z / (z - (1 - alpha))
 
-Open loop, with d_s = (N - 1)/2 + 2 scans of delay in the sensor path
-(four for N = 5), one scan for the command and n_dead = t_dead / Ts
-scans of drive dead time (six):
+Open loop, with d_s = (N - 1)/2 scans of delay in the sensor path (two
+for N = 5) and n_dead = t_dead / Ts scans of drive dead time (five);
+`PRG_Main` runs the sensor chain and the controller and writes the
+command in one scan, so the program adds none:
 
-    (29) L(z) = C(z) z^-(1 + n_dead) Gd(z) z^-d_s F(z)
+    (29) L(z) = C(z) z^-n_dead Gd(z) z^-d_s F(z)
 
 Sensitivity and complementary sensitivity:
 
@@ -436,7 +437,7 @@ Sensitivity and complementary sensitivity:
 Target to pressure. The target enters at the controller, so the sensor
 path does not act on it:
 
-    (31) R = C z^-(1 + n_dead) Gd S
+    (31) R = C z^-n_dead Gd S
 
 Outflow to pressure. The outflow changes the chamber volume directly, so
 it enters at the integrator, after the drive lag:
@@ -456,12 +457,10 @@ to find its stability margins across the chamber stiffness k = dP/dx.
 The open loop is eq. (29):
 
 - `C(z)` is the PI law of `FB_PressureController`, eq. (27).
-- `z^-(1+n_dead)` is the scan between computing a command and applying
-  it, plus the drive's five scans of dead time.
+- `z^-n_dead` is the drive's five scans of dead time.
 - `Gd(z)` is the drive velocity loop and the chamber integrator,
   eq. (26).
-- `z^-4` is the median of 5 (two scans for a slowly varying signal) and
-  the `PRG_Main` read order (two scans).
+- `z^-2` is the median of 5 (two scans for a slowly varying signal).
 - `F(z)` is the first-order filter, eq. (28).
 
 The outflow enters at the chamber integrator, after the drive lag,
@@ -677,9 +676,8 @@ wall's per unit volume, 1/K + C_hose/V_hose = 1.06e-8 per Pa (an
 effective bulk modulus of 0.09 GPa), so the wave runs at 307 m/s
 (1300 in rigid saline) and crosses the 1.83 m hose in 6.0 ms, under
 two scans. The loop's own delay from a reading to piston motion is
-about 66 ms: the 20 ms filter, the median and pipeline scans (16 ms),
-the command's scan, the 18.2 ms drive dead time and the 7.5 ms
-velocity-loop lag. A lead of 6 ms cannot be turned into feedforward
+about 54 ms: the 20 ms filter, the median's scans (8 ms), the 18.2 ms
+drive dead time and the 7.5 ms velocity-loop lag. A lead of 6 ms cannot be turned into feedforward
 that acts before the dip; the hose would have to be 20 m long. What a
 transducer downstream of the distal valve, in the tube, would give is
 a measurement of the outflow itself, Q = Cd·A_o·√(2P_tube/ρ) by
@@ -886,7 +884,7 @@ scheduled controller at wc = 11 (the measured bounds of
 `study_delivery.py`) alone and with the switched floor and the forward
 stop. The switched floor with the forward stop is the one in the slave
 (`G_cfgPressureFloorEnable`). The policy defaults are a 0.1 s window,
-the position delayed by the measurement lag (9 scans), the trigger at
+the position delayed by the measurement lag (7 scans), the trigger at
 v_on 0.2 mm/s, r_on 0.1 MPa/s, e_on 0.05 MPa held for 40 ms, the release
 at r_off 1 MPa/s with e_off 0, and for the estimate k_lo 4 MPa/mm and a
 0.3 mm/s margin.
@@ -1017,7 +1015,7 @@ The policy's arguments map to the settings as follows: `v_lo` to
 filter time constant and the median window, as
 `measurement_lag_scans()` computes it. The window and the delay are
 held in rings of 64 samples, so the window plus the delay is at most
-63 scans (25 and 9 at the defaults); a longer setting is the block's
+63 scans (25 and 7 at the defaults); a longer setting is the block's
 `FloorError`, which leaves the configured floor and no forward stop.
 The window and the latch are cleared while the block is disabled, so
 each entry to pressure mode starts them afresh. The forward stop acts

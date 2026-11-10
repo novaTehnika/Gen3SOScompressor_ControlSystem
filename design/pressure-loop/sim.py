@@ -18,12 +18,14 @@ The simulation steps in slave scans of length Ts. In each scan:
      controller uses (sensor.py).
   2. The controller computes a new command from the reading
      (controllers.py).
-  3. The plant advances one scan with the command computed in the
-     previous scan, held constant, and with the outlet valve in the
-     state the scenario gives for this scan (plant.py and solver.py).
+  3. The plant advances one scan with that command, held constant,
+     and with the outlet valve in the state the scenario gives for
+     this scan (plant.py and solver.py).
 
-The one-scan delay between steps 2 and 3 reproduces the order in which
-PRG_Main calls its function blocks. The simulation sequences the valves:
+PRG_Main conditions the reading, runs the pressure loop and writes the
+command in the same scan, so no scan lies between steps 1 and 3
+(par.command_scans, 0; the earlier model has 1); the drive's dead time
+is in the plant. The simulation sequences the valves:
 the proximal valve opens at the scenario's t_prox, in one scan (the
 plant equalises the pressure with the hose, eq. (43)) or over
 Topen_prox (the plant throttles the flow into the hose, eq. (45), and
@@ -47,6 +49,7 @@ FILE DEPENDENCY:
     solver.py (through plant.py)
 """
 
+from collections import deque
 from dataclasses import dataclass
 
 import numpy as np
@@ -134,7 +137,9 @@ def run(par, scenario, controller, legacy_sensor=False, seed=1):
         z = np.zeros(N)
 
     # Initial conditions
-    u_applied = controller.reset(par, scenario)
+    # Commands computed and not yet applied: none in flight when the
+    # command acts in its own scan
+    u_wait = deque([controller.reset(par, scenario)] * par.command_scans)
     plant = Plant(par, scenario, controller.mode, controller.accel,
                   controller.decel)
     sensor = make_sensor(par, controller, scenario.P0, legacy_sensor)
@@ -178,8 +183,10 @@ def run(par, scenario, controller, legacy_sensor=False, seed=1):
         # 2. Controller command for the next scan
         u_next = controller.step(reading, target_list[k], t_list[k],
                                  scenario, plant.x)
-        # 3. Plant advance with the previous scan's command and this
-        #    scan's valve states
+        # 3. Plant advance with this scan's command (or the one
+        #    par.command_scans earlier) and this scan's valve states
+        u_wait.append(u_next)
+        u_applied = u_wait.popleft()
         tk = t_list[k]
         prox = 0.0
         if not hose_opened and tk >= scenario.t_prox:
@@ -228,7 +235,6 @@ def run(par, scenario, controller, legacy_sensor=False, seed=1):
             events.append(closed_until)
             if scenario.tube_refills:
                 vented = False
-        u_applied = u_next
 
         P[k] = plant.P
         P_meas[k] = reading

@@ -47,9 +47,9 @@
    StopVelMin while the detection is latched, and no stiffness value is
    needed.
      Window: over W = Window / CycleTime scans, with the position delayed by
-     the measurement lag D (the filter time constant in scans, the median's
-     half-width and the two pipeline scans) so that the two describe the
-     same interval:
+     the measurement lag D (the filter time constant in scans and the
+     median's half-width; PRG_Main passes the reading in the scan it is
+     sampled) so that the two describe the same interval:
        dx = Position[n - D] - Position[n - D - W],   dP = Actual[n] - Actual[n - W]
      The rate is dP / (W CycleTime) and the speed dx / (W CycleTime). In a
      sealed chamber the pressure rises with the piston, so a piston that
@@ -159,7 +159,7 @@ IF FloorEnable AND NOT bParamError THEN
             nMedHalf := 1;
         END_IF;
         nW := LREAL_TO_INT(LIMIT(LREAL#1.0, Window / CycleTime, LREAL#60.0));
-        nD := LREAL_TO_INT(FilterTime / CycleTime) + nMedHalf + 2;
+        nD := LREAL_TO_INT(FilterTime / CycleTime) + nMedHalf;
         nOn := LREAL_TO_INT(TrigTime / CycleTime);
         FloorError := nW + nD + 1 > cDepth;
     END_IF;

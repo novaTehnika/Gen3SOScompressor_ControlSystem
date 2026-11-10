@@ -16,7 +16,7 @@ margins change with the chamber stiffness k = dP/dx [Pa/m], which varies
 by four orders of magnitude between a gas-rich and a liquid-only
 chamber.
 
-The loop has five parts, listed in the order a sample travels around
+The loop has four parts, listed in the order a sample travels around
 it. README equations (26) to (32) give each part.
 
   Plant       The drive's velocity loop is a first-order lag
@@ -24,16 +24,15 @@ it. README equations (26) to (32) give each part.
               pressure with gain k. The product k/(s (tauV s + 1)) is
               discretized with a zero-order hold, because the command is
               constant during a scan: Gd(z), eq. (26).
-  Command     The command computed in scan n acts in scan n + 1, and the
-              drive responds a dead time t_dead later: z^-(1 + n_dead).
+  Command     The command is computed and written in the scan the
+              pressure is sampled in, and the drive responds a dead time
+              t_dead later: z^-n_dead.
   Controller  The PI law of FB_PressureController, C(z), eq. (27). A
               derivative term on the measured pressure, eq. (57), can
               be added for the compensation study; the slave has none.
   Sensor      The median of N samples delays a slowly varying signal by
               (N - 1)/2 scans, and the first-order filter is F(z),
-              eq. (28).
-  Pipeline    PRG_Main reads the block outputs at the top of the scan and
-              calls the blocks at the end, which adds two scans: z^-2.
+              eq. (28). PRG_Main passes the reading on in the same scan.
 
 The open loop is L(z), eq. (29). The sensitivity S, complementary
 sensitivity T, target response R and outflow response D follow from it,
@@ -125,12 +124,12 @@ def sample_delay(cfg):
     """Return the scans of pure delay between the chamber pressure and
     the controller input, excluding the first-order filter.
 
-    The delay is (N - 1)/2 for the median filter plus two for the
-    PRG_Main pipeline. FB_AnalogInputFilter uses a median of 5 for any
-    setting of 5 or more, and a median of 3 otherwise.
+    The delay is (N - 1)/2 for the median filter; PRG_Main adds none.
+    FB_AnalogInputFilter uses a median of 5 for any setting of 5 or
+    more, and a median of 3 otherwise.
     """
     n = 5 if cfg['G_cfgAnalogMedianSize'] >= 5 else 3
-    return (n - 1) // 2 + 2
+    return (n - 1) // 2
 
 
 def filter_alpha(cfg):
@@ -153,9 +152,8 @@ def loop(par, k, delay=None, Kd=0.0, Tf=0.02, cmd_delay=None,
     [(mm/s)/(MPa/s)] adds a derivative term on the measured pressure
     with filter time constant Tf [s], eq. (57); the slave has none.
     cmd_delay [scans] replaces the delay of the command path, which is
-    the scan between computing a command and applying it plus the
-    drive's dead time; the compensation study uses it and delay to
-    remove parts of the loop's delay.
+    the drive's dead time; the compensation study uses it and delay to
+    change parts of the loop's delay.
 
     The result is a dict with these entries:
       L, S, T     open loop, sensitivity, complementary sensitivity
@@ -169,8 +167,8 @@ def loop(par, k, delay=None, Kd=0.0, Tf=0.02, cmd_delay=None,
       Kp, Ki      [(mm/s)/MPa], [(mm/s)/(MPa s)] controller gains
       Kd          [(mm/s)/(MPa/s)] derivative gain
       Ts          [s] scan time
-      delay       [scans] total pure delay, including the command's scan
-                  and the drive's dead time
+      delay       [scans] total pure delay, including the drive's dead
+                  time
       k           [Pa/m] stiffness
     """
     cfg = par.cfg(**cfg_overrides)
@@ -179,8 +177,8 @@ def loop(par, k, delay=None, Kd=0.0, Tf=0.02, cmd_delay=None,
     Ki = cfg['G_cfgPressureKi']                         # [(mm/s)/(MPa s)]
     d_sensor = sample_delay(cfg) if delay is None else delay
     n_dead = int(round(par.t_dead / Ts))        # [scans] drive dead time
-    # [scans] Command path: the command's scan and the dead time
-    n_cmd = 1 + n_dead if cmd_delay is None else cmd_delay
+    # [scans] Command path: the dead time
+    n_cmd = n_dead if cmd_delay is None else cmd_delay
     d = d_sensor + n_cmd                # [scans] total pure delay
 
     # Plant, eq. (26): zero-order-hold discretization of
@@ -232,7 +230,7 @@ def loop(par, k, delay=None, Kd=0.0, Tf=0.02, cmd_delay=None,
         return _poly_ratio(F_num, F_den, w, Ts)
     F = TF(F_num, F_den, Ts, F_freq)
 
-    # Open loop, eq. (29): L(z) = C(z) z^-(1+n_dead) Gd(z) z^-d_sensor
+    # Open loop, eq. (29): L(z) = C(z) z^-n_dead Gd(z) z^-d_sensor
     # F(z). The d scans of delay appear as z^d in the denominator.
     z_pow_d = np.zeros(d + 1)
     z_pow_d[0] = 1.0                                        # z^d
@@ -258,7 +256,7 @@ def loop(par, k, delay=None, Kd=0.0, Tf=0.02, cmd_delay=None,
     S = TF(L_den, cl, Ts, S_freq)
     T = TF(L_num, cl, Ts, T_freq)
 
-    # Target to pressure, eq. (31): R = C z^-(1+n_dead) Gd S. The target
+    # Target to pressure, eq. (31): R = C z^-n_dead Gd S. The target
     # enters at the controller, so the sensor path does not act on it.
     z_pow_rest = np.zeros(d_sensor + 1)
     z_pow_rest[0] = 1.0                                     # z^d_sensor

@@ -105,14 +105,14 @@ def _cfg_name(key, known):
 # %% ===== STOP-LAW FLOOR POLICIES =======================================
 def measurement_lag_scans(c):
     """[-] Scans by which the measured pressure lags the chamber in the
-    slave configuration c: the filter time constant, the median's
-    half-width and the two pipeline scans. The floor policies delay the
-    piston position by this much so that the two signals they compare
-    describe the same interval."""
+    slave configuration c: the filter time constant and the median's
+    half-width (PRG_Main passes the reading in the scan it is sampled).
+    The floor policies delay the piston position by this much so that
+    the two signals they compare describe the same interval."""
     Ts = c['G_cfgScanTime']                                     # [s]
     n_med = 5 if c['G_cfgAnalogMedianSize'] >= 5 else 3         # [-]
     return (round(c['G_cfgAnalogFilterTimeConst'] / Ts)
-            + (n_med - 1) // 2 + 2)
+            + (n_med - 1) // 2)
 
 
 class FloorPolicy:
@@ -610,7 +610,7 @@ class ScheduledSlaveController(SlaveController):
 
       v_stop = -D lag + sqrt((D lag)^2 + 2 D |e| / k_est)
 
-    with lag the filter, median, pipeline and command delays. The block's
+    with lag the filter, median and drive delays. The block's
     own stop law is this with lag equal to one scan and a fixed
     stiffness; here it is disabled (a negligible Stiffness) and the limit
     is applied through the block's VelMax input, which is equivalent to
@@ -692,13 +692,12 @@ class ScheduledSlaveController(SlaveController):
         self.D_mm = c['G_cfgPressureDecel']                     # [mm/s^2]
         self.v_floor = c['G_cfgPressureStopVelMin']             # [mm/s]
         if self.lag is None:
-            # Filter time constant, median and pipeline scans, the scan
-            # in which the command takes effect, and the drive's dead
-            # time and velocity-loop lag
+            # Filter time constant, the median's scans, and the
+            # drive's dead time and velocity-loop lag
             Ts = c['G_cfgScanTime']
             n_med = 5 if c['G_cfgAnalogMedianSize'] >= 5 else 3
             self.lag_run = (c['G_cfgAnalogFilterTimeConst']
-                            + ((n_med - 1) // 2 + 2 + 1) * Ts
+                            + (n_med - 1) // 2 * Ts
                             + par.t_dead + par.tauV)            # [s]
         else:
             self.lag_run = self.lag

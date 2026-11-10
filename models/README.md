@@ -210,10 +210,12 @@ noise specified as an RMS pressure (measured 2.0 mV rms across the shunt, 4.6 kP
 capacitor across the shunt). The slave's median
 and low-pass block filters the voltage, with its coefficient computed as
 `PRG_Main` computes it, and the slave's scaling block converts it to MPa.
-`PRG_Main` reads the filter and scaling outputs at the top of the scan
-and calls the blocks at the end, so the controller sees the filter output
-of two scans earlier. The controller's command takes effect one scan
-later, which matches the order in which `PRG_Main` calls its blocks.
+`PRG_Main` runs the filter, the scaling and the pressure loop in that
+order in one scan and writes the loop's command in the same scan, so the
+controller sees the filter output of the scan it is sampled in, and its
+command meets only the drive's dead time (`Params.command_scans` is 0;
+the earlier model, in which each output was read a scan after it was
+computed, has 1 and is kept by `Params.legacy()`).
 
 ## Model equations
 
@@ -325,10 +327,10 @@ Median of N samples followed by the first-order filter:
 
     (17) y[n] = y[n-1] + alpha (median(V_in[n-N+1 .. n]) - y[n-1])
 
-Pipeline delay. The controller in scan n reads the scaled filter output
-of scan n - 2:
+Reading. The controller in scan n reads the scaled filter output of
+the same scan:
 
-    (18) P_meas[n] = scale(y[n-2])
+    (18) P_meas[n] = scale(y[n])
 
 ### Outlet and charge
 

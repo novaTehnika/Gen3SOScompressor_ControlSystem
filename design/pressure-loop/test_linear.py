@@ -105,9 +105,9 @@ def check_plant_discretisation():
                        rtol=1e-9)
     assert np.allclose(den, lp['Gd'].den, rtol=1e-9)
     n_dead = round(PAR.t_dead / PAR.Ts)
-    assert lp['delay'] == 5 + n_dead and lin.sample_delay(CFG) == 4
+    assert lp['delay'] == 2 + n_dead and lin.sample_delay(CFG) == 2
     ok(f'plant ZOH matches scipy cont2discrete; delay = median 2 + '
-       f'pipeline 2 + command 1 + drive dead time {n_dead} scans')
+       f'drive dead time {n_dead} scans')
 
 
 def check_margins():
@@ -157,7 +157,7 @@ def check_v1_step():
     # Fit the sensor-path delay: only the expected count should match.
     n = len(r.t)
     errs = {}
-    for d in range(2, 8):
+    for d in range(0, 6):
         R = lin.loop(PAR, K_LIQ, delay=d)['R']
         y = model_trace(R, n, n0, amp)
         errs[d] = np.abs(r.P - 10e6 - y).max() / amp
@@ -166,7 +166,7 @@ def check_v1_step():
     assert min(v for d, v in errs.items() if d != best) > 3 * errs[best], \
         errs
     ok(f'V1 step response: linear vs sim max difference '
-       f'{errs[best] * 100:.2f}% of the step (delay {best} + 1 scans fits '
+       f'{errs[best] * 100:.2f}% of the step (delay {best} scans fits '
        f'best; {best - 1} gives {errs[best - 1] * 100:.1f}%, {best + 1} '
        f'gives {errs[best + 1] * 100:.1f}%); max |u| {umax:.3f} mm/s, '
        f'clamp not active')
@@ -350,12 +350,12 @@ def check_v5_soft():
     assert abs(peak / want - 1) < 0.01, (peak, want)
 
     # A fixed gain set keeps its phase margin over a limited range of
-    # stiffness: with Ki = 0.4 Kp at the stiff limit, about 36 to 1.
+    # stiffness: with Ki = 0.4 Kp at the stiff limit, about 46 to 1.
     kd = 7.5 * lin.MPA_MM                                   # [Pa/m]
     kp = lin.kp_for_margins(PAR, kd, 45.0, 6.0, 0.4)
     lo = lin.softest_stiffness(PAR, 45.0, kd, G_cfgPressureKp=kp,
                                G_cfgPressureKi=0.4 * kp)
-    assert abs(kp - 1.49) < 0.02 and 30 < kd / lo < 42, (kp, kd / lo)
+    assert abs(kp - 1.85) < 0.02 and 40 < kd / lo < 52, (kp, kd / lo)
     ok(f'V5 soft chamber: least damped mode within {worst * 100:.0f}% '
        f'of eq. (60) from 0.003 to 0.1 MPa/mm, on the circle of '
        f'eq. (63) within {off * 100:.0f}% and real past '

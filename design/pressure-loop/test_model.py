@@ -413,8 +413,8 @@ def check_sensor():
     assert abs(filter_alpha(cfg) - 0.004 / 0.024) < 1e-15
     assert filter_alpha(par.cfg(G_cfgAnalogFilterTimeConst=0.0)) == 1.0
 
-    # Without noise, the slave chain equals the legacy chain two scans
-    # later.
+    # Without noise, the slave chain equals the legacy chain in the
+    # same scan: PRG_Main scales the filter's output of the scan.
     rng = random.Random(3)
     seq = [rng.choice([2e6, 5e6, 9e6]) + rng.uniform(-1e5, 1e5)
            for _ in range(400)]
@@ -422,7 +422,7 @@ def check_sensor():
     leg = LegacySensor(par, cfg, seq[0])
     a = [slave.read(P, 0.0) for P in seq]
     b = [leg.read(P, 0.0) for P in seq]
-    err = max(abs(a[k] - b[k - 2]) for k in range(2, len(seq)))
+    err = max(abs(a[k] - b[k]) for k in range(len(seq)))
     assert err < 1.0, err
 
     # With noise, the filtered reading is unbiased and much quieter than
@@ -434,7 +434,7 @@ def check_sensor():
     sd = out[10:].std()
     assert (abs(out[10:].mean() - 8e6 - par_n.P_offset) < 2e3
             and 0.02 * par_n.noise < sd < 0.4 * par_n.noise), sd
-    ok(f'slave sensor chain = legacy chain two scans later (max diff '
+    ok(f'slave sensor chain = legacy chain in the same scan (max diff '
        f'{err:.1e} Pa); reads {par_n.P_offset / 1e6:+.2f} MPa off; noise '
        f'rms {sd:.0f} Pa after filtering')
 
