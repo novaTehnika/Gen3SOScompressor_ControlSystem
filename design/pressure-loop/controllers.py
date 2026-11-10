@@ -290,9 +290,10 @@ class SlaveController:
       name         Label used in tables and plots.
       flow_ff      If True, add the expected outflow divided by the
                    piston area to the velocity after the block, eq. (20).
-                   The slave has no flow feedforward and the machine
-                   cannot supply the flow, so this is a bound for the
-                   studies, not a candidate.
+                   The flow is the orifice flow through the valve
+                   fraction of the scan before (valve_seen). The slave
+                   has no flow feedforward and the machine no signal
+                   of the valve, so this is a bound for the studies.
       floor        A FloorPolicy that sets the block's StopVelMin every
                    scan, or None for the configured StopVelMin.
       **overrides  Slave settings, by full G_cfg* name or by the name
@@ -303,6 +304,9 @@ class SlaveController:
     """
 
     mode = 'V'
+    # [-] Distal valve area fraction the plant had in the scan before,
+    # set by sim.run() for the flow feedforward; None outside a run
+    valve_seen = None
 
     def __init__(self, name='slave', flow_ff=False, floor=None,
                  **overrides):
@@ -400,7 +404,8 @@ class SlaveController:
         # Flow feedforward, eq. (20): the piston velocity that displaces
         # the expected outflow. [m^3/s / m^2 -> m/s, * 1e3 -> mm/s]
         if self.flow_ff:
-            v_ff = scenario.Qff(t, self.par, P_meas) / self.A * 1e3
+            v_ff = scenario.Qff(t, self.par, P_meas,
+                                self.valve_seen) / self.A * 1e3
             v = min(max(v + v_ff, -self.vel_max), self.vel_max)
         return v * 1e-3                                 # [mm/s -> m/s]
 
@@ -494,7 +499,9 @@ class LegacyController:
         if self.mode == 'T':
             u_ff = self.A * target                              # [N]
         elif self.vff:
-            u_ff = scenario.Qff(t, self.par, P_meas) / self.A   # [m/s]
+            u_ff = scenario.Qff(t, self.par, P_meas,
+                                getattr(self, 'valve_seen', None)
+                                ) / self.A              # [m/s]
         else:
             u_ff = 0.0
 

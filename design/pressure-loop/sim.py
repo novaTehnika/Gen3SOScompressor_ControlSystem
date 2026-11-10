@@ -140,6 +140,7 @@ def run(par, scenario, controller, legacy_sensor=False, seed=1):
     # Commands computed and not yet applied: none in flight when the
     # command acts in its own scan
     u_wait = deque([controller.reset(par, scenario)] * par.command_scans)
+    controller.valve_seen = None        # no scan of this run seen yet
     plant = Plant(par, scenario, controller.mode, controller.accel,
                   controller.decel)
     sensor = make_sensor(par, controller, scenario.P0, legacy_sensor)
@@ -206,6 +207,9 @@ def run(par, scenario, controller, legacy_sensor=False, seed=1):
             a = scenario.valve(tk, t_from)
         if not plant.hose_open:
             a = 0.0                 # nothing opens before the hose joins
+        # The valve fraction of this scan is what a flow feedforward
+        # knows in the next
+        controller.valve_seen = a
         Q_tube = 0.0
         if a > 0.0 and not vented:
             Q_tube = Q_tube_open

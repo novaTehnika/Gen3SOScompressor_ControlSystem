@@ -222,7 +222,8 @@ pressure error [MPa]:
     (19) v_stop = -D Ts + sqrt((D Ts)^2 + 2 D |e| / S_stop)
          v_lim  = min(VelMax, max(StopVelMin, v_stop))
 
-Optional flow feedforward, added after the block:
+Optional flow feedforward, added after the block, with Q_ff the
+outflow of eq. (36) through the valve fraction of the scan before:
 
     (20) v_ff = Q_ff / A
 
@@ -538,8 +539,8 @@ and 16 rad/s with the measured bounds (K_cfg 1.0 GPa, dead volume
 proposed procedure (the hose opened before the compression). Every
 configuration sees the same samples and noise seeds.
 `--cfg key=value` runs a single custom configuration instead, and
-`--flow-ff` adds a flow feedforward to it as a bound; the machine cannot
-supply the flow, so no built-in configuration uses it.
+`--flow-ff` adds a flow feedforward to it as a bound; the machine has
+no signal of the valve's state, so no built-in configuration uses it.
 
 ## Results with the measured parameters
 
@@ -686,9 +687,15 @@ that acts before the dip; the hose would have to be 20 m long. What a
 transducer downstream of the distal valve, in the tube, would give is
 a measurement of the outflow itself, Q = Cd·A_o·√(2P_tube/ρ) by
 eq. (36), and a valve-state signal. That is the flow feedforward the
-studies carry as a bound, and at the GVL gains it changes nothing: the
-dip is 0.83 MPa with it against 0.81 without. It would need a second
-analog input and a transducer rated for the tube's pressure cycling.
+studies carry as a bound, and the valve state is the part of it that
+matters: a velocity of Q/A added from the scan after the valve opens
+and removed in the scan after it shuts takes the opening dip from 0.81
+to 0.35 MPa (the 0.22 MPa the tube takes as a step, and the loop's
+delay) and the closing peak from 10.84 to 10.14 MPa, and it leaves
+0.6 MPa over saturation at 2.5:1 and 10 MPa, which the loop alone does
+not deliver. A transducer in the tube would need a second analog
+input and a rating for the tube's pressure cycling; a switch on the
+valve gives the state alone, and the orifice law of eq. (36) the flow.
 
 **Delivery and the stop-law floor.** The orifice bank passes 4.8 mL/s
 at 10 MPa (the bench measured it), which needs the piston at
@@ -723,7 +730,7 @@ compression, all with StopVelMin 2 mm/s:
 | GVL + floor | 2.9 / 0.02 | 0.81 / 5.6 / 10.3 / 217 (all) |
 | scheduled, wc 11 | 2.9 / 0.02 | 0.82 / 5.6 / 10.9 / 217 (all) |
 | scheduled, wc 16 | 2.7 / 0.01 | 0.62 / 5.8 / 10.6 / 217 (all) |
-| GVL, flow feedforward (bound, not implementable) | — | 0.83 / 5.6 / 10.9 / 217 |
+| GVL, flow feedforward from the valve state (bound: the machine has no such signal) | — | 0.35 / 6.1 / 10.1 / 217 |
 
 (The solution column is what was delivered before a violation, less
 the 58 mL purge, which the metric `V_ok` counts too: 217 mL of solution
