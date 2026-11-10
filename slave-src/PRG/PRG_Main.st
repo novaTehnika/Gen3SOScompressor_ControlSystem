@@ -1223,7 +1223,9 @@ fbPressureCtrl(
     TrigTime := G_cfgPressureFloorTrigTime,
     RelRate := G_cfgPressureFloorRelRate,
     RelError := G_cfgPressureFloorRelError,
-    ForwardStop := G_cfgPressureFloorForwardStop
+    ForwardStop := G_cfgPressureFloorForwardStop,
+    IntegClearEnable := G_cfgPressureIntegClearEnable,
+    IntegClearError := G_cfgPressureIntegClearError
 );
 
 

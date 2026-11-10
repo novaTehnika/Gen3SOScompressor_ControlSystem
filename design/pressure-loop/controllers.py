@@ -37,9 +37,11 @@ SlaveController runs the slave's FB_PressureController, translated from
 Structured Text, wired as PRG_Main wires it. It is a PI controller whose
 output is clamped by a stop law (README eq. (19)), with the block's own
 floor that follows the outflow and its forward stop, eqs. (46) and (48),
-when G_cfgPressureFloorEnable is set (the override FloorEnable=True). It
-can optionally add a flow feedforward (eq. (20)), which the slave does
-not have.
+when G_cfgPressureFloorEnable is set (the override FloorEnable=True),
+and the block's own integral clear past the target, eq. (52), when
+G_cfgPressureIntegClearEnable is set (IntegClearEnable=True). It can
+optionally add a flow feedforward (eq. (20)), which the slave does not
+have.
 
 ScheduledSlaveController runs the same block with its gains and its
 stop-law stiffness set every scan from an estimate of the chamber
@@ -54,7 +56,9 @@ results of a fixed gain.
 VariantController runs the same block with one change to how its
 integrator is managed (the anti-windup variants of eqs. (50) to (55))
 and an optional derivative term, eq. (56). It is a comparison arm of
-study_antiwindup.py and is not in the slave.
+study_antiwindup.py. Of its rules the slave's block has 'opposed',
+eq. (52), behind G_cfgPressureIntegClearEnable; the others and the
+derivative term are not in the slave.
 
 FloorPolicy sets the stop-law floor (StopVelMin) of either controller
 every scan from the detected outflow instead of the fixed configured
@@ -347,6 +351,9 @@ class SlaveController:
         fb.RelRate = c['G_cfgPressureFloorRelRate']     # [MPa/s]
         fb.RelError = c['G_cfgPressureFloorRelError']   # [MPa]
         fb.ForwardStop = c['G_cfgPressureFloorForwardStop']
+        # The block's own integral clear past the target, eq. (52)
+        fb.IntegClearEnable = c['G_cfgPressureIntegClearEnable']
+        fb.IntegClearError = c['G_cfgPressureIntegClearError']  # [MPa]
         self.fb = fb
         self.first_scan = True
         if self.floor is not None:
@@ -780,7 +787,9 @@ class ScheduledSlaveController(SlaveController):
 # %% ===== ANTI-WINDUP AND DERIVATIVE VARIANTS ===========================
 class VariantController(SlaveController):
     """The slave's block with a different anti-windup rule or a
-    derivative term: comparison arms that are not in the slave.
+    derivative term: comparison arms. The slave's block carries
+    'opposed' itself (IntegClearEnable), which test_model.py holds
+    equal to this class's; the other rules are not in the slave.
 
     The block (FB_PressureController) integrates the error unless its
     output is clamped and the error drives it further into the clamp.

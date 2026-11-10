@@ -5,7 +5,9 @@ function slavePressureMode()
 %   through an outflow disturbance, clamp an excessive target, leave the
 %   mode, fault on a broken transducer loop only while the loop is
 %   closed on it and, with the stop-law floor (G_cfgPressureFloorEnable),
-%   latch on outflow and release at a closing. It ends with PRG_Main's scan
+%   latch on outflow and release at a closing; with the integral clear
+%   (G_cfgPressureIntegClearEnable) the compression overshoot and the
+%   closing peak are lower. It ends with PRG_Main's scan
 %   order: a step at the transducer reaches the velocity command behind the
 %   median alone, and a drive fault commands the stop in the scan the fault
 %   state is entered.
@@ -200,6 +202,46 @@ assert(peak(1) < peak(2) && peak(1) < 10.6, 'closing peak %.2f MPa with the floo
     peak(1), peak(2));
 fprintf('ok  stop-law floor: latched on outflow, released at the closing, peak %.2f MPa (%.2f without)\n', ...
     peak(1), peak(2));
+
+% Integral clear past the target (G_cfgPressureIntegClearEnable): a
+% compression arrives with the integral holding a forward velocity, and an
+% outlet shut under the moving piston leaves it holding the outflow's.
+% With the clear on, the integral is dropped once the pressure is past the
+% target by G_cfgPressureIntegClearError, so the overshoot and the closing
+% peak are lower, and the loop follows the outflow as it does without it.
+over = zeros(1, 2);
+peak = zeros(1, 2);
+for on = [true false]
+    h.sl.G.G_cfgPressureIntegClearEnable = on;
+    h.sl.ax.x = chamberPosition(h.sl, 0.5);
+    h.pMax = 0;
+    h = enterMode(h, MODE_PRESSURE, 10);
+    h = runUntil(h, 30, settled);
+    h = runFor(h, 2);
+    over(2 - on) = h.pMax - 10;
+    pc = h.sl.s.fbPressureCtrl;
+    assert(pc.IntegClearEnable == on && pc.IntegClearError == h.sl.G.G_cfgPressureIntegClearError);
+    h.sl.hook.outflow = 4800;            % mm^3/s
+    h = runFor(h, 4);
+    assert(abs(h.sl.ax.P - 10) < 1.5 && h.sl.ax.v > 1 && h.sl.s.fbPressureCtrl.rInteg > 0, ...
+        'loop did not follow the outflow');
+    h.sl.hook.outflow = 0;               % the outlet shuts under the moving piston
+    h.pMax = 0;
+    h = runFor(h, 3);
+    peak(2 - on) = h.pMax;
+    h.u.motionEnable = 0;
+    h = runFor(h, 1);
+    h.u.modeCode = 0;
+    h.u.reference = 0;
+    h = runUntil(h, 5, @(h) h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE);
+end
+h.sl.G.G_cfgPressureIntegClearEnable = false;
+assert(over(1) < over(2) && over(1) < 0.06, 'overshoot %.3f MPa with the clear, %.3f without', ...
+    over(1), over(2));
+assert(peak(1) < peak(2) - 0.2 && peak(1) < 10.4, 'closing peak %.2f MPa with the clear, %.2f without', ...
+    peak(1), peak(2));
+fprintf(['ok  integral clear: compression overshoot %.3f MPa (%.3f without), ' ...
+    'closing peak %.2f MPa (%.2f without)\n'], over(1), over(2), peak(1), peak(2));
 
 % Scan order (PRG_Main's phases). The reading is conditioned, the loop
 % run and the command written in one scan, so a step at the transducer

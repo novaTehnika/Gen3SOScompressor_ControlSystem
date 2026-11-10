@@ -797,6 +797,84 @@ def check_floor_policy():
        f'(GVL {rg["P_max"]:.2f})')
 
 
+def check_integ_clear_block():
+    """FB_PressureController's own integral clear past the target
+    (translated from ST) against the 'opposed' rule of
+    VariantController, eq. (52)."""
+    class Lockstep:
+        """Runs the reference (the block with the rule applied around
+        it) and the block with its own rule on the same inputs, and
+        returns the reference's command."""
+        mode = 'V'
+
+        def __init__(self, over, **cfg):
+            self.ref = ctl.VariantController('ref', aw='opposed',
+                                             over=over, **cfg)
+            self.port = ctl.SlaveController(
+                'port', IntegClearEnable=True, IntegClearError=over,
+                **cfg)
+            self.name, self.cfg = 'port', self.port.cfg
+
+        def reset(self, p, sc):
+            u = self.ref.reset(p, sc)
+            assert self.port.reset(p, sc) == u
+            assert self.port.fb.IntegClearEnable
+            assert not self.ref.fb.IntegClearEnable
+            self.accel, self.decel = self.ref.accel, self.ref.decel
+            self.worst = 0.0
+            return u
+
+        def step(self, P, tg, t, sc, x=0.0):
+            a = self.ref.step(P, tg, t, sc, x)
+            b = self.port.step(P, tg, t, sc, x)
+            self.worst = max(self.worst, abs(a - b))
+            assert self.port.fb.rInteg == self.ref.fb.rInteg, t
+            return a
+
+    # Scan for scan through the soft chamber stepped to 5 atm, the
+    # compression and the 1:1 delivery (hose opened before the
+    # compression), at the configured threshold and a wider one, with
+    # the block's floor off and on
+    par = StudyParams()
+    q = par.with_(hose_before=True)
+    soft = scenarios.Scenario('soft', T=60.0, tEvent=0.0, P0=0.0,
+                              ratio=0.98, target0=0.405e6,
+                              target1=0.405e6)
+    runs = ((par.with_(Vl0=279e-6), soft), (q, scenarios.compress(q)),
+            (q, scenarios.deliver(q)))
+    clears = 0
+    for over in (0.02, 0.1):
+        for cfg in ({}, {'FloorEnable': True}):
+            for p, sc in runs:
+                L = Lockstep(over, **cfg)
+                sim.run(p, sc, L)
+                assert L.worst == 0.0, (over, cfg, sc.name, L.worst)
+                clears += len(L.ref.changed)
+    assert clears >= 6, clears
+
+    # Off, the default, the block is the block without the rule; on, it
+    # removes the soft chamber's overshoot.
+    c = par.cfg()
+    assert not c['G_cfgPressureIntegClearEnable']
+    p, sc = runs[0]
+    r0 = sim.run(p, sc, ctl.SlaveController())
+    r1 = sim.run(p, sc, ctl.SlaveController(IntegClearEnable=True))
+    over0 = float(np.max(r0.P - r0.target)) / 1e6           # [MPa]
+    over1 = float(np.max(r1.P - r1.target)) / 1e6           # [MPa]
+    assert over0 > 0.3 and over1 < 0.05, (over0, over1)
+
+    # A negative threshold with the clear enabled is a parameter error:
+    # the block commands zero.
+    bad = ctl.SlaveController('bad', IntegClearEnable=True,
+                              IntegClearError=-0.01)
+    bad.reset(par, sc)
+    assert bad.step(0.0, 1e6, 0.0, sc) == 0.0 and bad.fb.bParamError
+    ok(f"FB_PressureController's integral clear matches the 'opposed' "
+       f'rule scan for scan through the soft step, the compression '
+       f'and the delivery ({clears} clears); soft chamber stepped to '
+       f'5 atm: overshoot {over0:.2f} MPa off, {over1:.2f} MPa on')
+
+
 def check_variants():
     par = StudyParams()
     # The unchanged variant is the slave controller, scan for scan.
@@ -918,5 +996,6 @@ if __name__ == '__main__':
     check_closed_loop()
     check_floor_policy()
     check_floor_block()
+    check_integ_clear_block()
     check_variants()
     check_runner()

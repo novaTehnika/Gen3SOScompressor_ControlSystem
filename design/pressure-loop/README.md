@@ -25,7 +25,7 @@ python3 design/pressure-loop/study_floor.py      # stop-law floors that follow t
 python3 design/pressure-loop/study_antiwindup.py # anti-windup rules and a derivative term, about 1 min
 python3 design/pressure-loop/study_compensation.py # choice of compensator: linear design map and a gain grid, about 1 min
 python3 design/pressure-loop/study_linear.py     # margins against chamber stiffness, about 30 s
-python3 design/pressure-loop/study_robust.py     # Monte Carlo over the uncertain parameters, about 5 min on 4 CPUs
+python3 design/pressure-loop/study_robust.py     # Monte Carlo over the uncertain parameters, about 7 min on 4 CPUs
 python3 design/pressure-loop/study_convergence.py # integration error against the time step, about 1 min
 python3 design/pressure-loop/test_linear.py      # linear model against the nonlinear simulation
 python3 design/pressure-loop/test_robust.py      # sampler, criteria and parallel runner
@@ -177,7 +177,10 @@ detected. The `fixed` policy holds `v_hi` with no detection, to isolate
 the forward stop.
 
 **Anti-windup and derivative variants.** `VariantController` is a
-set of comparison arms that are not in the slave. It runs
+set of comparison arms. Of its rules the slave's block carries
+`opposed` itself, selected by `G_cfgPressureIntegClearEnable` (the
+override `IntegClearEnable=True`); the others and the derivative term
+are not in the slave. It runs
 `FB_PressureController` and changes only how the stored integral is
 managed, by adjusting it before or after the block's call, so the stop
 law, the floor and the forward stop stay the slave's. The block itself
@@ -527,8 +530,9 @@ the four most influential parameters, then a Latin hypercube sample
 are the GVL (Kp 1.5, Ki 0.6, a stop-law stiffness of 25 MPa/mm, the
 20 ms filter and StopVelMin 2 mm/s, which passes the 1.4 mm/s the
 measured outflow needs); the GVL with the block's floor that follows
-the outflow; the earlier gains (Kp 0.5, Ki 0.2, 100 MPa/mm) as a
-reference; and, as a comparison, the scheduled controller at wc = 11
+the outflow; the GVL with the block's integral clear past the target,
+alone and with the floor; the earlier gains (Kp 0.5, Ki 0.2,
+100 MPa/mm) as a reference; and, as a comparison, the scheduled controller at wc = 11
 and 16 rad/s with the measured bounds (K_cfg 1.0 GPa, dead volume
 109 mL, hose compliance 0.12 mL/MPa). `--hose-before` runs the
 proposed procedure (the hose opened before the compression). Every
@@ -1186,8 +1190,34 @@ derivative term's benefit is not confirmed by a measurement.
   zero error.
 - A derivative term is a separate lever, for the stiff arrival with the
   hose shut, and the bench has not shown that arrival to need it.
-- None of the variants is in the slave. A candidate would go through
-  the Monte Carlo of `study_robust.py` before it is ported.
+- `opposed` is in the slave's block, off by default (see the next
+  section). The other variants are not in the slave.
+
+## The integral clear in the slave
+
+`FB_PressureController` (`slave-src/FB/`) holds the rule of eq. (52):
+after the error is formed and before the PI terms, a positive integral
+is cleared while the pressure is above the target by more than the
+threshold, and a negative one while it is below it by more. It is off
+by default and is selected by `G_cfgPressureIntegClearEnable`; the
+threshold e_over is `G_cfgPressureIntegClearError`, 0.02 MPa (the
+overrides `IntegClearEnable` and `IntegClearError`). A negative
+threshold with the clear enabled is a parameter error of the block,
+which then commands zero. The rule has no state of its own, and the
+block's conditional integration, its stop law, its floor and its
+forward stop are unchanged around it.
+
+`check_integ_clear_block` in `test_model.py` runs the block with its
+own rule and the block with `VariantController`'s `opposed` rule
+applied around it in lockstep through the soft chamber stepped to
+5 atm, the compression and the 1:1 delivery, at thresholds of 0.02 and
+0.1 MPa and with the block's floor off and on, and requires the
+command and the integral to be equal on every scan.
+`tests/slavePressureMode.m` runs the compiled slave through a
+compression, an outflow and an abrupt closing: with the clear the
+compression overshoots by 0.04 MPa against 0.08 and the closing peaks
+at 10.23 MPa against 10.69, and the loop follows the outflow with its
+integral as it does without it.
 
 ## Choice of compensation
 
@@ -1461,4 +1491,5 @@ target itself.
   soft end needs either a gain that follows the stiffness, which the
   slave cannot measure ahead of the approach, or the integral cleared
   past the target, eq. (52), which needs no stiffness and takes the
-  5 atm overshoot from 0.47 to 0.02 MPa.
+  5 atm overshoot from 0.47 to 0.02 MPa. The block has it, behind
+  `G_cfgPressureIntegClearEnable`.
