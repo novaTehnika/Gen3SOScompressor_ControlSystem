@@ -570,7 +570,7 @@ compliance and the hose do not shrink with it: the liquid chamber is
 7.5 with the hose shut at a full fill, and never above 13 (the series
 compliance with no liquid left). The loop's crossover is about Kp times
 the stiffness, so Kp 1.5 puts it at 5 rad/s with the hose open and
-11 rad/s with it shut at a full fill, with 66° and 45° of phase margin.
+11 rad/s with it shut at a full fill, with 70° and 52° of phase margin.
 A gain scheduled on a bound of the stiffness (`ScheduledSlaveController`
 at wc = 11 rad/s, eqs. (39) to (41)) arrives at the same gain: its Kp is
 1.48 at the target, and it then falls to 0.75 through a delivery because
@@ -580,17 +580,17 @@ every table below, which is why the slave has no schedule.
 
 **Compression** (1:1 charge from a 1 MPa supply): the piston sweeps
 12.5 mm with the hose open (10.9 with it shut), and the GVL loop arrives
-in band after 2.9 s with 0.09 MPa of overshoot (2.3 s and 0.05 MPa with
+in band after 2.9 s with 0.09 MPa of overshoot (2.3 s and 0.04 MPa with
 the hose shut); 2:1 takes 4.9 s with 0.10 MPa. The floor's forward stop
-brings the overshoot to 0.03 MPa. The earlier gains took 5.3 s with
+brings the overshoot to 0.02 MPa. The earlier gains took 5.3 s with
 0.72 MPa of overshoot, their stop law braking for a chamber of
 100 MPa/mm and their integrator winding up on the way; the scheduled
-loop takes the same 2.9 s as the GVL with 0.01 MPa. The chamber
+loop takes the same 2.9 s as the GVL with 0.02 MPa. The chamber
 stiffness rises from 0.1 to 3.1 MPa/mm (6.7 with the hose shut). The
 legacy controllers without the configured stop law overshoot to
 13.5–20 MPa; the stop law is what makes the approach safe. The stop-law
-stiffness trades time for overshoot: 15 MPa/mm arrives 0.3 s sooner
-with twice the overshoot, 100 MPa/mm two seconds later with 0.07 MPa.
+stiffness trades time for overshoot: 15 MPa/mm arrives 0.2 s sooner
+with twice the overshoot, 100 MPa/mm two seconds later with 0.08 MPa.
 
 **Opening the hose at pressure is the first limit.** In the present
 procedure the proximal valve is opened after mixing, with the chamber
@@ -622,10 +622,10 @@ the time the fill takes at the GVL gains:
 | Bore | Fill | 2:1 at 10 MPa: GVL / earlier gains | 2.5:1 at 11 MPa: GVL / earlier gains |
 |---|---|---|---|
 | 6.35 mm (ball valve) | 0.8 s | 4.3 / 4.3 | 4.7 / 4.7 |
-| 1.0 mm | 0.9 s | 6.1 / 5.1 | 6.7 / 5.6 |
-| 0.5 mm | 1.3 s | 8.0 / 6.4 | 8.8 / 7.1 |
-| 0.3 mm | 2.5 s | 9.1 / 7.9 | 10.0 / 8.7 |
-| 0.2 mm | 4.9 s | 9.2 / 8.1 | 10.1 / 9.0 |
+| 1.0 mm | 0.9 s | 6.3 / 5.2 | 6.9 / 5.7 |
+| 0.5 mm | 1.3 s | 8.1 / 6.4 | 8.8 / 7.1 |
+| 0.3 mm | 2.5 s | 9.1 / 7.9 | 10.1 / 8.8 |
+| 0.2 mm | 4.9 s | 9.2 / 8.1 | 10.2 / 9.0 |
 | 0.1 mm | 18 s | 9.2 / 8.1 | 10.1 / 9.0 |
 
 At a 0.3 mm bore and below (an effective area of 0.04 mm², a Cv of
@@ -683,7 +683,7 @@ transducer downstream of the distal valve, in the tube, would give is
 a measurement of the outflow itself, Q = Cd·A_o·√(2P_tube/ρ) by
 eq. (36), and a valve-state signal. That is the flow feedforward the
 studies carry as a bound, and at the GVL gains it changes nothing: the
-dip is 0.85 MPa with it against 0.83 without. It would need a second
+dip is 0.83 MPa with it against 0.81 without. It would need a second
 analog input and a transducer rated for the tube's pressure cycling.
 
 **Delivery and the stop-law floor.** The orifice bank passes 4.8 mL/s
@@ -697,7 +697,7 @@ integrator through its anti-windup. The bench saw this with the earlier
 settings: the loop held 8.1 MPa for a 10 MPa target. `StopVelMin` of
 2 mm/s removes it; the same loop with 0.5 mm/s holds 0.6 MPa low at the
 GVL gains. With the hose open its compliance caps the end stiffness at
-3.8 MPa/mm, where the GVL gain keeps 64° of phase margin and 13 dB of
+3.8 MPa/mm, where the GVL gain keeps 67° of phase margin and 15 dB of
 gain margin, so the emptying chamber does not threaten the loop.
 
 **Closing the purge valve is the second limit.** When the distal valve
@@ -705,8 +705,8 @@ is shut at the end of the purge the piston is running at 1.4 mm/s into
 a chamber of 3.2 MPa/mm, and the pressure rises at 4.5 MPa/s until the
 loop has stopped it. The earlier gains, with Kp 0.5 and an integral
 time of 2.5 s, let it rise 2.1 MPa, to 12.1 MPa from a 10 MPa target:
-through the ceiling. The GVL gains stop it in 0.9 MPa, and with the
-floor's forward stop in 0.4 MPa. A slow hand on the valve helps little,
+through the ceiling. The GVL gains stop it in 0.8 MPa, and with the
+floor's forward stop in 0.3 MPa. A slow hand on the valve helps little,
 because the loop, not the valve, is the slow element.
 
 **Nominal results**, 1:1 at 10 MPa, hose opened before the
@@ -714,24 +714,24 @@ compression, all with StopVelMin 2 mm/s:
 
 | Arm | Compress: arrive s / overshoot MPa | Delivery: dip MPa / margin MPa / peak MPa / solution mL |
 |---|---|---|
-| earlier gains | 5.3 / 0.72 | 1.94 / 4.5 / 12.1 / 0 (ceiling at the purge closing) |
-| GVL | 2.9 / 0.09 | 0.83 / 5.6 / 10.9 / 217 (all) |
-| GVL + floor | 2.9 / 0.03 | 0.83 / 5.6 / 10.4 / 217 (all) |
-| scheduled, wc 11 | 2.9 / 0.01 | 0.84 / 5.6 / 10.9 / 217 (all) |
-| scheduled, wc 16 | 2.7 / 0.01 | 0.66 / 5.8 / 10.7 / 217 (all) |
-| GVL, flow feedforward (bound, not implementable) | — | 0.85 / 5.6 / 10.9 / 217 |
+| earlier gains | 5.3 / 0.72 | 1.93 / 4.5 / 12.1 / 0 (ceiling at the purge closing) |
+| GVL | 2.9 / 0.09 | 0.81 / 5.6 / 10.8 / 217 (all) |
+| GVL + floor | 2.9 / 0.02 | 0.81 / 5.6 / 10.3 / 217 (all) |
+| scheduled, wc 11 | 2.9 / 0.02 | 0.82 / 5.6 / 10.9 / 217 (all) |
+| scheduled, wc 16 | 2.7 / 0.01 | 0.62 / 5.8 / 10.6 / 217 (all) |
+| GVL, flow feedforward (bound, not implementable) | — | 0.83 / 5.6 / 10.9 / 217 |
 
 (The solution column is what was delivered before a violation, less
 the 58 mL purge, which the metric `V_ok` counts too: 217 mL of solution
 reads as 275 mL delivered.) The GVL gains and the schedule at wc = 11
 give the same compression, dip and closing peak. The schedule at
-wc = 16 buys 0.2 MPa of dip for a phase margin of 29°. VelMax and the accel
+wc = 16 buys 0.2 MPa of dip for a phase margin of 39°. VelMax and the accel
 and decel settings are not levers: the drive does not slew, and the
 compression is limited by the stop law, not the clamp.
 
 **The dip and the closing peak set the charge.** The dip at an opening
 is the tube step plus the quasi-static Q/(A·Kp) of eq. (33), recovered
-over the integral time: 0.83 MPa at Kp 1.5 against 1.94 at 0.5. The
+over the integral time: 0.81 MPa at Kp 1.5 against 1.93 at 0.5. The
 saturation pressure is 3.6 MPa per unit of ratio in saline, so each
 megapascal of dip costs about 0.27 in the ratio, and a higher target
 buys 0.27 per megapascal the other way, until the closing peak meets
@@ -744,13 +744,13 @@ where it fails):
 | 1:1 | 3.6 | 0 mL (peak 12.1) | 217 | 217 | 217 |
 | 2:1 | 7.2 | 0 (peak 12.1) | 217 (margin 2.0) | 217 (2.0) | 217 (2.0) |
 | 2.5:1 at 10 MPa | 9.0 | 0 | 0 (0.1) | 0 (0.1) | 0 (0.1) |
-| 2.5:1 at 11 MPa | 9.0 | 0 (peak 13.2) | 216 (1.1, peak 11.9) | 216 (1.1, peak 11.4) | 216 (1.1, peak 11.9) |
+| 2.5:1 at 11 MPa | 9.0 | 0 (peak 13.2) | 216 (1.1, peak 11.9) | 216 (1.1, peak 11.3) | 216 (1.1, peak 11.9) |
 | 3:1 at 11 MPa | 10.9 | 0 | 0 (−0.7) | 0 (−0.7) | 0 (−0.7) |
 | 1:1, hose opened after mixing | 3.6 | 0 (peak 12.1) | 217 (0.7) | 217 (0.7) | 217 (0.7) |
 | 2:1, hose opened after mixing | 7.2 | 0 | 0 (−2.9) | 0 (−2.9) | 0 (−2.9) |
 
 So 2:1 is deliverable at 10 MPa, 2.5:1 needs an 11 MPa target (where
-the closing peak is 11.9 MPa, 0.1 under the ceiling, or 11.4 with the
+the closing peak is 11.9 MPa, 0.1 under the ceiling, or 11.3 with the
 floor), and 3:1 is saturated at 10.9 MPa and out of reach below the
 ceiling. With the hose opened after mixing only 1:1 is deliverable,
 with 0.2 MPa to spare over the margin. The target is a stronger lever
@@ -793,7 +793,7 @@ does no better than the fixed gain anywhere, and worse at 2.5:1.
   stop law at 25 MPa/mm. Against the earlier gains they halve the
   compression time, take the overshoot from 0.7 to 0.1 MPa, cut the
   opening dip from 1.9 to 0.8 MPa and bring the purge-closing peak
-  from 12.1 MPa, through the ceiling, to 10.9. A gain schedule adds
+  from 12.1 MPa, through the ceiling, to 10.8. A gain schedule adds
   nothing to them on the measured chamber.
 - The 6 ft hose makes opening the proximal valve at pressure the
   limit of the present procedure: the chamber drops 5.7 MPa in one
@@ -806,7 +806,7 @@ does no better than the fixed gain anywhere, and worse at 2.5:1.
   10 MPa in every plausible case.
 - The floor that follows the outflow, with its forward stop
   (`G_cfgPressureFloorEnable`), takes the closing peak a further
-  0.5 MPa down and the compression overshoot to 0.03 MPa. It is what
+  0.5 MPa down and the compression overshoot to 0.02 MPa. It is what
   2.5:1 at 11 MPa needs to stay under the ceiling in every plausible
   case (see the stop-law floor study below).
 - `G_cfgPressureStopVelMin` stays at 2 mm/s: below the outflow's
@@ -819,7 +819,7 @@ does no better than the fixed gain anywhere, and worse at 2.5:1.
   takes 58 mL of virgin saline to purge and 58 mL more of dead volume.
 - The gain is fixed, so the stiffest chamber the loop runs on sets its
   margin. Pressure mode with the hose shut and little liquid left is
-  the stiff corner (up to 13 MPa/mm, 16° of phase margin); the
+  the stiff corner (up to 13 MPa/mm, 29° of phase margin); the
   procedure does not run it, and the bench's K ramps check the
   crossover before a new chamber is run
   (`bench/characterisation/README.md` section 9).
@@ -829,17 +829,17 @@ does no better than the fixed gain anywhere, and worse at 2.5:1.
 
 | Chamber | k (MPa/mm) | Gain margin | Phase margin | Crossover (rad/s) | Max stable Kp |
 |---|---|---|---|---|---|
-| liquid, 343 mL + hose, hose open | 3.2 | 14.7 dB | 66° | 4.8 | 8.2 |
-| liquid, 115 mL dead volume (limit switch), hose open | 3.8 | 13.2 dB | 64° | 5.7 | 6.9 |
-| liquid, 343 mL, hose shut | 7.5 | 7.3 dB | 45° | 10.9 | 3.5 |
-| series compliance alone, hose shut (the stiffest possible) | 13.4 | 2.2 dB | 16° | 18.5 | 2.0 |
+| liquid, 343 mL + hose, hose open | 3.2 | 17.0 dB | 70° | 4.8 | 10.7 |
+| liquid, 115 mL dead volume (limit switch), hose open | 3.8 | 15.5 dB | 67° | 5.7 | 9.0 |
+| liquid, 343 mL, hose shut | 7.5 | 9.6 dB | 52° | 10.9 | 4.6 |
+| series compliance alone, hose shut (the stiffest possible) | 13.4 | 4.6 dB | 29° | 18.4 | 2.6 |
 
 With the hose open its compliance and the cylinder's cap the stiffness
 at 3.8 MPa/mm, so the loop keeps its margin to the limit switch. The
 series compliance caps the hose-shut chamber too: however little
 liquid is left, it is no stiffer than 13.4 MPa/mm, where Kp 1.5 is
 still stable. A step of the target in the hose-shut liquid chamber
-shows the thinner margin there: 10 to 12 MPa overshoots by 0.5 MPa.
+shows the thinner margin there: 10 to 12 MPa overshoots by 0.3 MPa.
 
 **Settled:**
 - The mechanical pressure ceiling is 12 MPa (15 MPa may break the
@@ -897,15 +897,15 @@ after the first opening and the release delay after the closing):
 
 | Arm | Overshoot MPa | Closing peak MPa | V_ok mL | Error mean / std MPa | Stopped | Detect / release s |
 |---|---|---|---|---|---|---|
-| GVL (fixed 2) | 0.09 | 10.86 | 275 | 0.01 / 0.02 | 0 | — |
-| earlier gains | 0.72 | 12.14 | 58 | 0.02 / 0.07 | 0 | — |
-| fixed 0.5 | 0.09 | 10.30 | 276 | 0.59 / 0.00 | 0 | — |
-| switched | 0.09 | 10.85 | 275 | 0.01 / 0.02 | 0 | 1.40 / 0.06 |
-| fixed 2, forward stop | 0.03 | 10.25 | 275 | 0.08 / 0.11 | 19 % | — |
-| switched, forward stop | 0.03 | 10.39 | 275 | 0.01 / 0.02 | 0 | 1.40 / 0.06 |
-| estimated, forward stop | 0.03 | 10.77 | 275 | 0.01 / 0.02 | 0 | 0.03 / 0.21 |
-| sched wc 11 | 0.01 | 10.88 | 275 | 0.01 / 0.02 | 0 | — |
-| sched wc 11, switched, forward stop | 0.01 | 10.39 | 275 | 0.01 / 0.02 | 0 | 0.75 / 0.06 |
+| GVL (fixed 2) | 0.09 | 10.84 | 275 | 0.01 / 0.02 | 0 | — |
+| earlier gains | 0.72 | 12.12 | 58 | 0.02 / 0.07 | 0 | — |
+| fixed 0.5 | 0.09 | 10.29 | 276 | 0.59 / 0.00 | 0 | — |
+| switched | 0.09 | 10.84 | 275 | 0.01 / 0.02 | 0 | 1.40 / 0.05 |
+| fixed 2, forward stop | 0.02 | 10.19 | 276 | 0.06 / 0.09 | 19 % | — |
+| switched, forward stop | 0.02 | 10.33 | 275 | 0.01 / 0.02 | 0 | 1.40 / 0.05 |
+| estimated, forward stop | 0.02 | 10.70 | 275 | 0.01 / 0.02 | 0 | 0.02 / 0.18 |
+| sched wc 11 | 0.02 | 10.87 | 275 | 0.01 / 0.02 | 0 | — |
+| sched wc 11, switched, forward stop | 0.01 | 10.33 | 275 | 0.01 / 0.03 | 0 | 1.16 / 0.05 |
 
 (V_ok counts the 58 mL purge: 58 mL is the purge alone, 275 mL the
 purge and all 217 mL of solution.)
@@ -916,20 +916,20 @@ error of 0.5 MPa (at 25 MPa/mm), so the delivery runs 0.59 MPa low; the
 floor must be above the outflow speed while the outlet is open.
 
 **Switching the floor alone does not stop the closing peak.** The
-switched floor releases 60 ms after the valve shuts, yet the pressure
-peaks at 10.85 MPa against the GVL's 10.86. The stop law limits the
+switched floor releases 50 ms after the valve shuts, yet the pressure
+peaks at the GVL's own 10.84 MPa. The stop law limits the
 speed in either direction, and with the error just below zero the
 integrator still holds about 1.4 mm/s forward; once the error grows,
 the stop-law clamp grows with it and lets that velocity through.
 
 **The forward stop removes most of the peak, and needs the
-detection.** With the forward stop the closing peaks at 10.3 to
-10.4 MPa (10.8 with the estimated floor) and the compression
-overshoots by 0.03 MPa, for every floor. Without detection (fixed
+detection.** With the forward stop the closing peaks at 10.2 to
+10.3 MPa (10.7 with the estimated floor) and the compression
+overshoots by 0.02 MPa, for every floor. Without detection (fixed
 2 mm/s with the forward stop) the delivery chatters: every excursion of
 the noisy reading above the target stops the piston, so it is stopped
 19 % of the time and the error's standard deviation rises from 0.02 to
-0.11 MPa, with a mean error of 0.08 MPa. The latch lets the piston run
+0.09 MPa, with a mean error of 0.06 MPa. The latch lets the piston run
 through those excursions while the outlet is open, which removes the
 chatter.
 
@@ -968,29 +968,30 @@ releases on the approach.
 **Policy settings** (the sweep, on the 1:1 delivery for both procedures
 and with the valve shut over 1 s):
 - The latch needs a hold time: with t_on = 0 it chatters (about 70
-  transitions in a delivery and up to 8 latches in the sealed hold),
+  transitions in a delivery and up to 2 latches in the sealed hold),
   and the closing peak rises to 10.8 MPa.
 - With a 1 s closing the GVL loop stops the piston before the pressure
   rises at r_off, so the latch stays set and the peak is the loop's own,
-  10.77 MPa; r_off at 0.25 MPa/s releases it (after 0.14 s) and brings
-  the peak to 10.26. r_off of 4 MPa/s releases late even on the abrupt
-  closing (10.65 MPa).
+  10.76 MPa; r_off at 0.25 MPa/s releases it (after 0.14 s) and brings
+  the peak to 10.20. r_off of 4 MPa/s does not release even on the
+  abrupt closing: the rise over the window stays below it, and the peak
+  is the loop's own 10.84 MPa.
 - r_on from 0.02 to 0.5 MPa/s, e_on from 0 to 0.2 MPa and e_off from
   −0.1 to 0.1 MPa change nothing at these gains.
 - The window works from 0.04 to 0.2 s; at 0.4 s the release is late
-  and the peak rises by 0.25 MPa.
+  and the peak rises by 0.24 MPa.
 - With the forward stop the floors themselves matter little: v_hi from
   1.6 to 3 mm/s and v_lo from 0 to 1 mm/s change the compression
   overshoot by 0.01 MPa.
 - The estimated floor follows a slow closing poorly: with the 1 s
-  closing it releases after 0.98 s.
+  closing it releases after 0.97 s.
 
 **What this means for the machine.** The switched floor with the
 forward stop is in the slave, off by default. It needs no stiffness
 value, keeps the stop law in a sealed chamber, passes the outflow in a
 delivery and stops the piston when the outlet shuts. On the GVL gains
-it takes the closing peak from 10.9 to 10.4 MPa and the compression
-overshoot from 0.09 to 0.03 MPa, and it is what keeps 2.5:1 at 11 MPa
+it takes the closing peak from 10.8 to 10.3 MPa and the compression
+overshoot from 0.09 to 0.02 MPa, and it is what keeps 2.5:1 at 11 MPa
 under the ceiling in every plausible case. The floor switching on its
 own is not enough; the forward stop is what acts at the closing, and
 the latch is what lets the forward stop run in a delivery. A slow
@@ -1030,7 +1031,7 @@ procedures and a 1 s closing, at the GVL gains and at the earlier ones,
 and requires the command, the floor and the latch to be equal on every
 scan. `tests/slavePressureMode.m` runs the compiled slave through an
 outflow and an abrupt closing: the latch sets and releases, and the
-closing peaks at 10.24 MPa against 10.70 without the floor.
+closing peaks at 10.20 MPa against 10.69 without the floor.
 
 ## Anti-windup and derivative study
 
@@ -1072,29 +1073,29 @@ hose opened before the compression):
 
 | Arm | 5 atm step: overshoot / in band | 20 atm step: overshoot / in band | Compression at 10 MPa: overshoot / arrive | Closing: peak MPa / time above band | Dip at the reopening after 0.5 s shut | Delivery error: mean / std |
 |---|---|---|---|---|---|---|
-| GVL | 0.48 (117 %) / 72 | 0.53 (35 %) / 11.3 | 0.09 / 2.9 | 10.85 / 5.4 | 0.15 | 0.01 / 0.02 |
-| arrival, eq. (50) | 0.03 / 34 | 0.06 / 5.8 | 0.04 / 2.9 | 10.85 / 5.4 | 0.15 | 0.01 / 0.02 |
-| crossing, eq. (51) | 0.00 / 34 | 0.04 / 5.8 | 0.03 / 2.9 | 10.24 / 0.2 | 0.83 | 0.12 / 0.20 |
-| opposed, e_over 0.02 MPa, eq. (52) | 0.03 / 34 | 0.06 / 5.8 | 0.04 / 2.9 | 10.29 / 0.3 | 0.83 | 0.01 / 0.02 |
-| opposed, e_over 0.1 MPa | 0.11 / 39 | 0.14 / 6.6 | 0.09 / 2.9 | 10.39 / 0.3 | 0.83 | 0.01 / 0.02 |
-| bleed, T_b 0.2 s, eq. (53) | 0.04 / 34 | 0.13 / 6.7 | 0.06 / 2.9 | 10.55 / 0.6 | 0.79 | 0.01 / 0.02 |
-| backcalc, T_t 0.5 s, eq. (54) | 0.48 / 72 | 0.56 / 11.3 | 0.00 / 8.3 | 10.85 / 5.4 | 0.15 | 0.01 / 0.02 |
-| backcalc, T_t 2.5 s | 0.50 / 73 | 0.84 / 11.6 | 1.55 / 2.7 | 10.85 / 5.4 | 0.15 | 0.01 / 0.02 |
-| band 0.1 MPa, eq. (55) | never arrives | 0.01 / 17.2 | 0.00 / 3.0 | 10.00 / 0 | 0.88 | 0.88 / 0.00 |
-| band 1.5 MPa | 0.48 / 72 | 0.53 / 11.3 | 0.08 / 2.9 | 10.85 / 5.4 | 0.15 | 0.01 / 0.02 |
-| PID, Kd 0.02, eq. (56) | 0.48 / 72 | 0.53 / 11.3 | 0.09 / 2.9 | 10.84 / 5.4 | 0.14 | 0.01 / 0.02 |
-| PID, Kd 0.05 | 0.48 / 72 | 0.53 / 11.3 | 0.10 / 3.0 | 10.82 / 5.4 | 0.14 | 0.01 / 0.02 |
+| GVL | 0.47 (117 %) / 72 | 0.53 (35 %) / 11.3 | 0.09 / 2.9 | 10.84 / 5.4 | 0.14 | 0.01 / 0.02 |
+| arrival, eq. (50) | 0.02 / 34 | 0.05 / 5.8 | 0.04 / 2.9 | 10.84 / 5.4 | 0.14 | 0.01 / 0.02 |
+| crossing, eq. (51) | 0.00 / 34 | 0.04 / 5.8 | 0.02 / 2.9 | 10.19 / 0.2 | 0.81 | 0.12 / 0.20 |
+| opposed, e_over 0.02 MPa, eq. (52) | 0.02 / 34 | 0.05 / 5.8 | 0.04 / 2.9 | 10.24 / 0.2 | 0.81 | 0.01 / 0.02 |
+| opposed, e_over 0.1 MPa | 0.10 / 39 | 0.13 / 6.5 | 0.09 / 2.9 | 10.33 / 0.3 | 0.81 | 0.01 / 0.02 |
+| bleed, T_b 0.2 s, eq. (53) | 0.03 / 34 | 0.12 / 6.7 | 0.05 / 2.9 | 10.50 / 0.6 | 0.78 | 0.01 / 0.02 |
+| backcalc, T_t 0.5 s, eq. (54) | 0.47 / 72 | 0.55 / 11.3 | 0.00 / 8.3 | 10.84 / 5.4 | 0.14 | 0.01 / 0.02 |
+| backcalc, T_t 2.5 s | 0.50 / 72 | 0.83 / 11.6 | 1.52 / 2.7 | 10.84 / 5.4 | 0.14 | 0.01 / 0.02 |
+| band 0.1 MPa, eq. (55) | never arrives | 0.01 / 17.3 | 0.00 / 3.0 | 10.01 / 0 | 0.88 | 0.88 / 0.00 |
+| band 1.5 MPa | 0.47 / 72 | 0.53 / 11.3 | 0.09 / 2.9 | 10.84 / 5.4 | 0.14 | 0.01 / 0.02 |
+| PID, Kd 0.02, eq. (56) | 0.47 / 72 | 0.53 / 11.3 | 0.09 / 3.0 | 10.82 / 5.4 | 0.14 | 0.01 / 0.02 |
+| PID, Kd 0.05 | 0.47 / 72 | 0.53 / 11.4 | 0.10 / 3.1 | 10.81 / 5.4 | 0.14 | 0.01 / 0.02 |
 | PID, Kd 0.1 | 0.47 / 72 | 0.53 / 11.4 | 0.11 / 3.2 | 10.79 / 5.4 | 0.13 | 0.01 / 0.02 |
-| GVL + floor | 0.48 / 72 | 0.53 / 11.3 | 0.03 / 2.9 | 10.38 / 7.1 | 0.53 | 0.01 / 0.02 |
-| arrival + floor | 0.02 / 34 | 0.06 / 5.8 | 0.03 / 2.9 | 10.38 / 7.1 | 0.53 | 0.01 / 0.02 |
-| opposed 0.02 + floor | 0.02 / 34 | 0.06 / 5.8 | 0.03 / 2.9 | 10.29 / 0.3 | 0.83 | 0.01 / 0.02 |
+| GVL + floor | 0.47 / 72 | 0.53 / 11.3 | 0.02 / 2.9 | 10.32 / 7.9 | 0.48 | 0.01 / 0.02 |
+| arrival + floor | 0.02 / 34 | 0.05 / 5.8 | 0.02 / 2.9 | 10.32 / 7.9 | 0.48 | 0.01 / 0.02 |
+| opposed 0.02 + floor | 0.02 / 34 | 0.05 / 5.8 | 0.02 / 2.9 | 10.24 / 0.2 | 0.81 | 0.01 / 0.02 |
 
 **Only removing the integral past the target cures the soft
 overshoot.** The GVL loop crosses the 5 atm target at 1.9 mm/s and
-overshoots by 0.48 MPa, more than the step. `arrival`, `crossing`,
+overshoots by 0.47 MPa, more than the step. `arrival`, `crossing`,
 `opposed` and `bleed` all stop the piston within 0.04 MPa of the
 target and are in band 38 s sooner; at 20 atm they take the
-overshoot from 0.53 to 0.06 MPa (0.13 for the decay). None of them
+overshoot from 0.53 to 0.05 MPa (0.12 for the decay). None of them
 shortens the approach itself, which the stop-law floor paces.
 
 **Clearing on every crossing breaks the delivery.** With the outlet
@@ -1111,7 +1112,7 @@ the floor itself: the 5 atm overshoot is unchanged. A short tracking
 time unwinds the integral on every clamped approach and takes 8.3 s
 over the 10 MPa compression in place of 2.9; a long one lets the
 integral wind up while clamped and overshoots the compression by
-1.55 MPa (3.1 MPa when the bench fill is taken to 100 atm in one
+1.52 MPa (3.0 MPa when the bench fill is taken to 100 atm in one
 step). A band narrower than the opening dip leaves the proportional
 term alone outside it: at 0.1 MPa the 5 atm step does not arrive in
 100 s and the delivery runs 0.88 MPa low. A band wider than the dip
@@ -1124,31 +1125,31 @@ MPa/s (one over 13.4 MPa/mm) is safe in the stiffest chamber whatever
 the delays, and at 0.03 MPa/mm such a gain changes the loop by a fifth
 of a percent: the 5 and 20 atm overshoots are those of the GVL.
 Where the chamber is stiff it helps: Kd 0.05 takes the stiff step's
-overshoot from 0.48 to 0.04 MPa, at three times the command activity
+overshoot from 0.29 to 0.04 MPa, at three times the command activity
 (0.0006 against 0.0002 mm/s per scan), and the arrival of the 20 to
-100 atm step from 0.26 to 0.05 MPa. It moves the opening dip and the
+100 atm step from 0.12 to 0.05 MPa. It moves the opening dip and the
 closing peak by 0.03 MPa.
 
 **`opposed` also acts at a closing.** When the outlet shuts, the
 pressure rises above the target with the integral still holding the
 outflow speed. `opposed` clears it 0.02 MPa above the target: the
-closing peaks at 10.29 MPa against 10.85, and the pressure is back in
-band after 0.3 s against 5.4 s (7.1 s with the forward stop, which
+closing peaks at 10.24 MPa against 10.84, and the pressure is back in
+band after 0.2 s against 5.4 s (7.9 s with the forward stop, which
 holds the piston while the integral unwinds). `arrival` leaves a
 closing alone, since no approach is in progress. The cost is at a
 reopening that follows at once: with the integral cleared, a 0.5 s
-closing is followed by a full opening dip, 0.83 MPa against 0.15. With
+closing is followed by a full opening dip, 0.81 MPa against 0.14. With
 the 10 s pause of the procedure every arm has unwound by the reopening
-and dips the same 0.82 MPa.
+and dips the same 0.8 MPa.
 
 **A false clear needs the reading 0.02 MPa above the target with the
 outlet open.** Through a delivery the error stays positive (the
 pressure about 8 kPa low), and the filtered reading's noise is under a
 kPa. No rule changes the integral during the delivery stage at the
 measured noise (1.7 kPa rms per sample with the capacitor, 4.6 bare) or
-at 10 kPa. At 30 kPa `opposed` with 0.02 MPa clears four times and the
-error's standard deviation rises from 0.02 to 0.20 MPa, with dips of
-0.84 MPa; `bleed` acts five times without effect, because a decay
+at 10 kPa. At 30 kPa `opposed` with 0.02 MPa clears six times and the
+error's standard deviation rises from 0.02 to 0.22 MPa, with dips of
+0.82 MPa; `bleed` acts five times without effect, because a decay
 removes little in the scans a noise excursion lasts; `opposed` with
 0.1 MPa does not act.
 
@@ -1156,14 +1157,14 @@ removes little in the scans a noise excursion lasts; `opposed` with
 the GVL gains and the floor on, `trace_20261109_193852.csv` shows 0.35
 and 0.51 MPa of overshoot at the 5 and 20 atm steps (from 0.14 MPa and
 another fill), a closing peak of 10.40 MPa and 8 s above the band
-after it; the `GVL + floor` arm gives 0.48 and 0.53 MPa, 10.38 MPa and
-7.1 s. With the earlier gains, `trace_20261109_190837.csv` crosses the
+after it; the `GVL + floor` arm gives 0.47 and 0.53 MPa, 10.32 MPa and
+7.9 s. With the earlier gains, `trace_20261109_190837.csv` crosses the
 5 atm target after 45 s at 1.97 mm/s and peaks at 1.77 MPa; the model
 with those gains (`--set G_cfgPressureKp=0.5 --set G_cfgPressureKi=0.2
 --set G_cfgPressureStopStiffness=100`) gives 44.6 s, 1.97 mm/s and
 1.83 MPa. The stiff
 arrival is where the model is pessimistic: the 20 to 100 atm step
-overshoots by 0.02 MPa on the bench and 0.26 MPa in the model, so the
+overshoots by 0.02 MPa on the bench and 0.12 MPa in the model, so the
 derivative term's benefit is not confirmed by a measurement.
 
 **What this means for the machine.**
@@ -1173,9 +1174,9 @@ derivative term's benefit is not confirmed by a measurement.
   the clamp reaches it.
 - `opposed`, eq. (52), is the candidate for the slave: one comparison
   and one assignment per scan, with no state. At 0.02 MPa it takes the
-  5 atm overshoot from 0.48 to 0.03 MPa and the closing peak from 10.85
-  to 10.29 MPa, and it lets the pressure return after a closing in 0.3 s
-  in place of 5 to 7 s. `bleed` trades a little of each for tolerance
+  5 atm overshoot from 0.47 to 0.02 MPa and the closing peak from 10.84
+  to 10.24 MPa, and it lets the pressure return after a closing in 0.2 s
+  in place of 5 to 8 s. `bleed` trades a little of each for tolerance
   of a noisy reading; `arrival` gives the same soft-chamber result and
   leaves the delivery and the closing untouched.
 - Clearing the integral at every crossing is right only for a sealed
@@ -1197,7 +1198,7 @@ margins asked are 45° of phase and 6 dB of gain at the design chamber.
 
 **The loop is one curve, and the stiffness slides the crossover along
 it.** The plant is an integrator, the chamber, whose gain is the
-stiffness, behind 40 ms of pure delay, the drive's 7.5 ms lag and the
+stiffness, behind 28 ms of pure delay, the drive's 7.5 ms lag and the
 20 ms filter. By eq. (62) a change of stiffness changes nothing but
 the loop gain. The phase curve is fixed: it starts at −180° (two
 integrators, the chamber's and the controller's), rises toward −90°
@@ -1207,19 +1208,19 @@ range:
 
 | k MPa/mm | Phase margin | Gain margin dB | Crossover rad/s | Damping of the least damped mode | Target step overshoot |
 |---|---|---|---|---|---|
-| 0.003 | 6° | 75 | 0.04 | 0.05 | 86 % |
-| 0.01 | 11° | 65 | 0.08 | 0.09 | 76 % |
-| 0.03 | 19° | 55 | 0.14 | 0.16 | 63 % |
-| 0.1 | 33° | 45 | 0.27 | 0.30 | 46 % |
-| 0.3 | 52° | 35 | 0.56 | 0.52 | 30 % |
-| 1.0 | 69° | 25 | 1.5 | 0.99 | 15 % |
-| 3.2 (delivery) | 66° | 14.7 | 4.8 | 1.00 | 7 % |
-| 7.5 (design) | 45° | 7.3 | 10.9 | 0.41 | 31 % |
-| 13.4 (stiffest) | 17° | 2.2 | 18.4 | 0.11 | 83 % |
+| 0.003 | 6° | 78 | 0.04 | 0.05 | 85 % |
+| 0.01 | 11° | 67 | 0.08 | 0.09 | 76 % |
+| 0.03 | 19° | 58 | 0.14 | 0.16 | 63 % |
+| 0.1 | 33° | 47 | 0.27 | 0.30 | 45 % |
+| 0.3 | 52° | 38 | 0.56 | 0.52 | 29 % |
+| 1.0 | 70° | 27 | 1.5 | 0.99 | 15 % |
+| 3.2 (delivery) | 70° | 17.0 | 4.8 | 1.00 | 7 % |
+| 7.5 (design) | 52° | 9.6 | 10.9 | 0.54 | 19 % |
+| 13.4 (stiffest) | 29° | 4.6 | 18.4 | 0.22 | 59 % |
 
 The loop is sound over a decade and a half of stiffness and loses its
-margin at both ends, for different reasons. At the stiff end the delay
-has taken the phase. At the soft end the crossover has fallen below the
+margin at both ends, for different reasons. At the stiff end the delay has
+taken the phase. At the soft end the crossover has fallen below the
 integral corner, where the controller's integrator adds its 90° to the
 chamber's; the damping there is that of eq. (60), which the model's
 poles follow within 3 %.
@@ -1236,77 +1237,76 @@ that zero, eq. (63): undamped at first, a damping ratio of 0.16 at
 delivery's 3.2 MPa/mm): it is the integral's mode, the 2.5 s with which
 a dip recovers. The other runs left, meets the filter's pole coming in
 from −45 rad/s, and the pair leaves the axis on the branch that the
-delay bends into the right half plane: a damping of 0.41 at 7.5 MPa/mm,
-0.11 at 13.4, and across the axis at 17.4 MPa/mm and 23 rad/s.
+delay bends into the right half plane: a damping of 0.54 at 7.5 MPa/mm,
+0.22 at 13.4, and across the axis at 22.7 MPa/mm and 28 rad/s.
 
 The zero is two things at once: the centre of the circle the soft
 chamber's poles ride, and the place the slow pole ends in a delivery.
 Moving it toward the origin (a smaller Ki/Kp) shrinks the circle, so
 the poles reach the real axis in a softer chamber, and slows the
 delivery's recovery in the same proportion: at Ki/Kp of 0.1 the radius
-is 0.1 rad/s and the recovery 22 s. A derivative term adds a second
+is 0.1 rad/s and the recovery 20 s. A derivative term adds a second
 zero, at −28 rad/s for the set with the 20 ms filter below, two hundred
 times farther from the origin than the soft chamber's poles at
 0.13 rad/s, so its locus lies on the PI's circle. Where it acts is on
 the delay's branch, which it lifts in frequency and which crosses the
-axis sooner, at 15.0 MPa/mm against 17.4, with the stiffest chamber at
+axis sooner, at 14.9 MPa/mm against 22.7, with the stiffest chamber at
 13.4.
 
 **The delay sets the proportional gain.** A loop gain Kp k of
-11.2 rad/s is the most that keeps 45° and 6 dB, whatever the stiffness.
-At the design chamber that is Kp 1.49: the GVL's 1.5 is at the limit,
-with the phase margin binding. A proportional gain alone could be 1.57.
-A pure delay has no poles or zeros of its own; on the locus it is the
-bend that takes the stiff chamber's branch across the axis, and the
-further branches that come in from the far left. The grey locus of
-`compensation_rlocus.png` is the same PI loop with its pure delay
-removed: its two lags alone take it across the axis at 117 MPa/mm and
-77 rad/s, against 17.4 MPa/mm and 23 rad/s as built.
+13.9 rad/s is the most that keeps 45° and 6 dB, whatever the stiffness.
+At the design chamber that is Kp 1.85, with the phase margin binding;
+a proportional gain alone could be 1.94. The GVL's 1.5 is 81 % of the
+limit and has 52° and 9.6 dB there. A pure delay has no poles or zeros
+of its own; on the locus it is the bend that takes the stiff chamber's
+branch across the axis, and the further branches that come in from the
+far left. The grey locus of `compensation_rlocus.png` is the same PI
+loop with its pure delay removed: its two lags alone take it across the
+axis at 117 MPa/mm and 77 rad/s, against 22.7 MPa/mm and 28 rad/s as
+built.
 
 **Where the delay comes from, and what each part is worth.** The loop
-as built has 40 ms of pure delay and three lags:
+as built has 28 ms of pure delay and three lags:
 
 | Source | Kind | Amount | Set by |
 |---|---|---|---|
 | Median of 5 | delay | 8 ms (2 scans) | `G_cfgAnalogMedianSize` |
-| `PRG_Main` reads the filter and the scaling at the top of the scan and calls them at the end | delay | 8 ms (2 scans) | the order of `PRG_Main` |
-| The state body reads the controller's output of the previous scan | delay | 4 ms (1 scan) | the order of `PRG_Main` |
 | Drive dead time | delay | 18.2 ms (20 ms in whole scans) | the drive and `G_cfgDirectCtrlFilterTime` |
 | Pressure low-pass filter | lag | 20 ms | `G_cfgAnalogFilterTimeConst` |
 | Drive velocity loop | lag | 7.5 ms | the drive's tuning |
 | Sample and hold | lag | 2 ms (half a scan) | `G_cfgScanTime` |
 
-The largest Kp with the margins at the design chamber (Ki = 0.4 Kp),
-with each part changed:
+The program itself adds none: `PRG_Main` runs the filter, the scaling,
+the controller and the command in that order, each reading the output
+the block before it produced in the same scan. The largest Kp with the
+margins at the design chamber (Ki = 0.4 Kp), with each part changed:
 
 | Change | Pure delay | Kp | Dip MPa | Command noise µm/s per kPa |
 |---|---|---|---|---|
-| as built | 40 ms | 1.49 | 0.86 | 0.48 |
-| median of 3 | 36 ms | 1.60 (+7 %) | 0.81 | 0.51 |
-| sensor path read in the same scan | 32 ms | 1.72 (+15 %) | 0.76 | 0.55 |
-| and the command applied in the same scan | 28 ms | 1.85 (+24 %) | 0.70 | 0.60 |
-| pressure filter 10 ms | 40 ms | 1.72 (+15 %) | 0.75 | 0.73 |
-| drive dead time 8 ms | 28 ms | 1.85 (+24 %) | 0.70 | 0.60 |
-| scan 2 ms | 28 ms | 1.88 (+26 %) | 0.69 | 0.44 |
-| same scan, median of 3, filter 10 ms | 24 ms | 2.42 (+63 %) | 0.54 | 1.04 |
-| those and the 8 ms dead time | 12 ms | 3.50 (+135 %) | 0.38 | 1.52 |
-| no pure delay | 0 | 4.59 (+208 %) | 0.31 | 1.45 |
+| as built | 28 ms | 1.85 | 0.70 | 0.60 |
+| median of 3 | 24 ms | 2.02 (+9 %) | 0.65 | 0.65 |
+| pressure filter 10 ms | 28 ms | 2.20 (+19 %) | 0.60 | 0.94 |
+| drive dead time 8 ms | 16 ms | 2.46 (+33 %) | 0.54 | 0.79 |
+| scan 2 ms | 22 ms | 2.15 (+16 %) | 0.61 | 0.50 |
+| median of 3 and filter 10 ms | 24 ms | 2.42 (+31 %) | 0.54 | 1.04 |
+| those and the 8 ms dead time | 12 ms | 3.50 (+89 %) | 0.38 | 1.52 |
+| no pure delay | 0 | 4.59 (+148 %) | 0.31 | 1.45 |
+| block outputs read a scan late | 40 ms | 1.49 (−20 %) | 0.86 | 0.48 |
 
-Three scans of the delay, 12 ms, are the order in which `PRG_Main`
-reads and calls its own blocks, and passing each block the output of
-the block before it in the same scan is worth 24 % of gain, more than
-the derivative term gives at its best and with a wider gain margin
-(7.8 dB) in place of a narrower one. The drive's dead time is the
-largest single part. `Y_DirectControl`'s command filter is inside it:
-the bench measured 22.8 ms of dead time and an 18.2 ms lag with the
-filter at 50 ms and 18.2 and 7.5 ms at 20 ms, so each 10 ms of filter
-was 5 ms of response, and the 8 ms row is that trend taken to a filter
-of zero; it has not been measured. A 2 ms scan halves every delay that
-is counted in scans, but the program takes about 2.5 ms a scan. A
-shorter delay raises the gain the stiff chamber allows and moves the
-soft chamber little: its damping at 0.03 MPa/mm goes from 0.16 to 0.29
-with no pure delay at all.
-
+The drive's dead time is the largest single part. `Y_DirectControl`'s
+command filter is inside it: the bench measured 22.8 ms of dead time
+and an 18.2 ms lag with the filter at 50 ms and 18.2 and 7.5 ms at
+20 ms, so each 10 ms of filter was 5 ms of response, and the 8 ms row
+is that trend taken to a filter of zero; it has not been measured. A
+2 ms scan halves the median's delay, the only one counted in scans that
+the program sets, but the program takes about 2.5 ms a scan. The last
+row is the cost of the order of a program: with the filter and the
+scaling read before they are called (two scans) and the command taken
+from the controller's previous call (one scan), the loop has 12 ms more
+delay and a fifth less gain, more than the derivative term gives back
+at an equal gain margin. A shorter delay raises the gain the stiff
+chamber allows and moves the soft chamber little: its damping at
+0.03 MPa/mm goes from 0.18 to 0.29 with no pure delay at all.
 
 **The integral is for the outflow, and it sets the soft end.** With
 the largest Kp for each Ki/Kp, on the orifice flow at 10 MPa
@@ -1314,42 +1314,43 @@ the largest Kp for each Ki/Kp, on the orifice flow at 10 MPa
 
 | Ki/Kp 1/s | Kp | Ki | Dip MPa | Back within 0.1 MPa after | Softest chamber with 45° | Stiffness range | Damping at 0.03 MPa/mm |
 |---|---|---|---|---|---|---|---|
-| 0 (P) | 1.57 | 0 | 0.89 | never | any | — | 1.00 |
-| 0.1 | 1.55 | 0.16 | 0.87 | 21.8 s | 0.047 MPa/mm | 161 to 1 | 0.34 |
-| 0.2 | 1.53 | 0.31 | 0.87 | 10.9 s | 0.096 | 78 to 1 | 0.24 |
-| 0.4 | 1.49 | 0.60 | 0.86 | 5.5 s | 0.21 | 36 to 1 | 0.16 |
-| 0.8 | 1.40 | 1.12 | 0.87 | 2.7 s | 0.49 | 15 to 1 | 0.11 |
-| 1.6 | 1.17 | 1.87 | 0.92 | 1.4 s | 1.5 | 5 to 1 | 0.07 |
+| 0 (P) | 1.94 | 0 | 0.72 | never | any | — | 1.00 |
+| 0.1 | 1.92 | 0.19 | 0.71 | 19.8 s | 0.038 MPa/mm | 200 to 1 | 0.38 |
+| 0.2 | 1.90 | 0.38 | 0.71 | 9.9 s | 0.077 | 97 to 1 | 0.26 |
+| 0.4 | 1.85 | 0.74 | 0.70 | 5.0 s | 0.16 | 46 to 1 | 0.18 |
+| 0.8 | 1.76 | 1.41 | 0.71 | 2.5 s | 0.37 | 20 to 1 | 0.12 |
+| 1.6 | 1.55 | 2.48 | 0.73 | 1.3 s | 1.0 | 7 to 1 | 0.08 |
 
-Without the integral the pressure stays 0.89 MPa low for the whole
-delivery, eq. (33). With it the dip recovers in about 2.2 integral
+Without the integral the pressure stays 0.72 MPa low for the whole
+delivery, eq. (33). With it the dip recovers in about two integral
 times, and the range of stiffness over which the loop keeps its phase
-margin is roughly 14 times the integral time in seconds: the crossover
+margin is roughly 18 times the integral time in seconds: the crossover
 must stay between the integral corner and the delay limit. The chamber
 spans 0.003 to 13.4 MPa/mm, 4500 to 1. A fixed gain set covers that
-only with an integral time of about five minutes, and a delivery that
-takes over ten minutes to recover. Damping the 0.03 MPa/mm chamber to 0.7 alone takes Ki 0.034
-(an integral time of 44 s) and leaves the delivery 97 s to recover.
+only with an integral time of about four minutes, and a delivery that
+takes over eight minutes to recover. Damping the 0.03 MPa/mm chamber to
+0.7 alone takes Ki 0.034 (an integral time of 44 s) and leaves the
+delivery 97 s to recover.
 
 **A derivative term buys little, and only at the stiff end.** With
 Ki = 0.4 Kp and the largest Kp for each Kd/Kp:
 
 | Derivative filter | Best Kd/Kp | Kp | Kd | Dip MPa | Gain margin, stiffest chamber | Command noise | Kp with the PI's gain margin kept |
 |---|---|---|---|---|---|---|---|
-| none (PI) | — | 1.49 | 0 | 0.86 | 2.3 dB | 0.48 µm/s per kPa | 1.49 |
-| 50 ms | 0.015 s | 1.62 (+9 %) | 0.024 | 0.78 | 1.0 dB | 0.63 | 1.49 (+0 %) |
-| 20 ms | 0.015 s | 1.76 (+18 %) | 0.026 | 0.73 | 1.0 dB | 0.77 | 1.53 (+3 %) |
-| 10 ms | 0.020 s | 1.87 (+25 %) | 0.037 | 0.69 | 1.0 dB | 1.03 | 1.63 (+9 %) |
-| 4 ms | 0.020 s | 2.03 (+36 %) | 0.041 | 0.64 | 1.0 dB | 1.37 | 1.75 (+17 %) |
+| none (PI) | — | 1.85 | 0 | 0.70 | 2.7 dB | 0.60 µm/s per kPa | 1.85 |
+| 50 ms | 0.020 s | 2.00 (+8 %) | 0.040 | 0.63 | 1.0 dB | 0.83 | 1.85 (+0 %) |
+| 20 ms | 0.015 s | 2.24 (+21 %) | 0.034 | 0.58 | 1.0 dB | 0.99 | 1.89 (+2 %) |
+| 10 ms | 0.015 s | 2.38 (+28 %) | 0.036 | 0.55 | 1.3 dB | 1.17 | 2.03 (+9 %) |
+| 4 ms | 0.020 s | 2.66 (+43 %) | 0.053 | 0.50 | 1.0 dB | 1.81 | 2.22 (+20 %) |
 
 The lead lifts the phase near the crossover, so Kp can rise until the
 gain margin binds in place of the phase margin. The gain margin is set
-at the phase crossover, 23 rad/s, by the delay, and the derivative
+at the phase crossover, 28 rad/s, by the delay, and the derivative
 raises the gain there; past Kd/Kp of 0.02 s the largest Kp falls again.
-With the 20 ms filter the term is worth 18 % of gain (0.13 MPa of dip)
-for a gain margin in the stiffest chamber of 1.0 dB in place of 2.3 and
-1.6 times the command noise. Held to the PI loop's own gain margin it
-is worth 3 %. A faster filter gives more, 36 % at 4 ms, for 2.9 times
+With the 20 ms filter the term is worth 21 % of gain (0.12 MPa of dip)
+for a gain margin in the stiffest chamber of 1.0 dB in place of 2.7 and
+1.7 times the command noise. Held to the PI loop's own gain margin it
+is worth 2 %. A faster filter gives more, 43 % at 4 ms, for 3.0 times
 the noise. In the soft chamber the term does nothing: by eq. (60) it
 enters as 1 + k Kd, which is 1.001 at 0.03 MPa/mm. A lead placed at the
 soft chamber's crossover, 0.14 rad/s, would be a Kd of about 10, and
@@ -1363,42 +1364,42 @@ Stiff step, 10 to 12 MPa with the hose shut, overshoot in MPa:
 
 | Kp \ Kd | 0 | 0.02 | 0.04 | 0.06 | 0.08 |
 |---|---|---|---|---|---|
-| 1.0 | 0.22 | 0.11 | 0.11 | 0.12 | 0.13 |
-| 1.5 | 0.48 | 0.27 | 0.08 | 0.04 | 0.05 |
-| 2.0 | 0.61 | 0.40 | 0.21 | 0.06 | 0.06 |
-| 2.5 | 0.69 | 0.49 | 0.30 | 0.12 | 0.07 |
-| 3.0 | 0.75 | 0.55 | 0.36 | 0.19 | 0.09 |
+| 1.0 | 0.13 | 0.11 | 0.11 | 0.12 | 0.13 |
+| 1.5 | 0.29 | 0.09 | 0.03 | 0.04 | 0.05 |
+| 2.0 | 0.41 | 0.22 | 0.05 | 0.02 | 0.03 |
+| 2.5 | 0.49 | 0.31 | 0.15 | 0.03 | 0.02 |
+| 3.0 | 0.55 | 0.37 | 0.22 | 0.09 | 0.04 |
 
 Cycle at 10 MPa, hose opened before the compression, deepest dip in
 MPa:
 
 | Kp \ Kd | 0 | 0.02 | 0.04 | 0.06 | 0.08 |
 |---|---|---|---|---|---|
-| 1.0 | 1.13 | 1.12 | 1.10 | 1.09 | 1.08 |
-| 1.5 | 0.82 | 0.81 | 0.79 | 0.78 | 0.78 |
-| 2.0 | 0.67 | 0.65 | 0.63 | 0.62 | 0.61 |
-| 2.5 | 0.60 | 0.57 | 0.55 | 0.53 | 0.51 |
-| 3.0 | 0.56 | 0.54 | 0.52 | 0.50 | 0.49 |
+| 1.0 | 1.12 | 1.11 | 1.09 | 1.08 | 1.07 |
+| 1.5 | 0.81 | 0.79 | 0.78 | 0.78 | 0.77 |
+| 2.0 | 0.64 | 0.63 | 0.62 | 0.61 | 0.60 |
+| 2.5 | 0.56 | 0.54 | 0.52 | 0.50 | 0.50 |
+| 3.0 | 0.51 | 0.49 | 0.47 | 0.46 | 0.44 |
 
 Soft chamber, the bench fill stepped to 5 atm, overshoot in MPa:
 
 | Kp \ Kd | 0 | 0.02 | 0.04 | 0.06 | 0.08 |
 |---|---|---|---|---|---|
-| 1.0 | 0.70 | 0.70 | 0.70 | 0.70 | 0.70 |
-| 1.5 | 0.48 | 0.48 | 0.48 | 0.47 | 0.47 |
-| 2.0 | 0.37 | 0.37 | 0.37 | 0.36 | 0.36 |
+| 1.0 | 0.70 | 0.70 | 0.69 | 0.69 | 0.69 |
+| 1.5 | 0.47 | 0.47 | 0.47 | 0.47 | 0.47 |
+| 2.0 | 0.36 | 0.36 | 0.36 | 0.36 | 0.36 |
 | 2.5 | 0.30 | 0.30 | 0.30 | 0.30 | 0.30 |
 | 3.0 | 0.25 | 0.25 | 0.25 | 0.25 | 0.25 |
 
 The grid agrees with the linear model on each point. The dip follows
 Kp and hardly Kd. The soft overshoot does not move with Kd at all; it
-falls with Kp, but every row from Kp 2 up is unstable in the stiffest
-chamber in the linear model, and Kp 2 has 32° at the design chamber.
-The stiff step is where Kd shows, 0.48 to 0.04 MPa at Kp 1.5, because
-that step is the stop law running into the measurement lag, which a
-rate term anticipates. The bench has not shown that overshoot (see the
-anti-windup study), and the command activity at rest rises from 0.0002
-to 0.0006 mm/s per scan.
+falls with Kp, but Kp 3 is unstable in the stiffest chamber in the
+linear model, Kp 2.5 has 0.1 dB of gain margin there and 33° at the
+design chamber, and Kp 2 has 42°. The stiff step is where Kd shows,
+0.29 to 0.03 MPa at Kp 1.5, because that step is the stop law running
+into the measurement lag, which a rate term anticipates. The bench has
+not shown that overshoot (see the anti-windup study), and the command
+activity at rest rises from 0.0002 to 0.0005 mm/s per scan.
 
 **The candidate gain sets** the linear model selects, in the same
 cases (the cycle with the hose opened before the compression; "clear"
@@ -1406,26 +1407,28 @@ adds eq. (52) at 0.02 MPa):
 
 | Set | Kp / Ki / Kd | Gain margin, stiffest | 5 atm step: overshoot / in band | 20 atm overshoot | Dip / back in band | Closing peak | Stiff step overshoot |
 |---|---|---|---|---|---|---|---|
-| P | 1.57 / 0 / 0 | 2.0 dB | does not arrive | does not arrive | 0.85 / never | 10.00 | 0.50 |
-| PI, GVL | 1.5 / 0.6 / 0 | 2.2 dB | 0.48 / 72 s | 0.53 | 0.82 / 5.6 s | 10.85 | 0.48 |
-| PI, GVL, clear | 1.5 / 0.6 / 0 | 2.2 dB | 0.02 / 34 s | 0.06 | 0.83 / 5.6 s | 10.29 | 0.48 |
-| PI, Ki/Kp 0.1 | 1.55 / 0.155 / 0 | 2.0 dB | 0.71 / 75 s | 0.26 | 0.83 / 19.3 s | 10.61 | 0.49 |
-| PI, Ki/Kp 1.6 | 1.17 / 1.87 / 0 | 4.0 dB | 0.30 / 69 s | 0.71 | 0.89 / 1.4 s | 10.93 | 0.63 |
-| PI, damped at 0.03 MPa/mm | 1.5 / 0.034 / 0 | 2.4 dB | 0.39 / not in 100 s | 0.34 | 0.87 / never | 10.23 | 0.47 |
-| PID, 20 ms filter | 1.76 / 0.70 / 0.026 | 1.0 dB | 0.41 / 68 s | 0.41 | 0.71 / 5.2 s | 10.73 | 0.29 |
-| PID, 20 ms filter, clear | 1.76 / 0.70 / 0.026 | 1.0 dB | 0.02 / 34 s | 0.05 | 0.71 / 5.2 s | 10.27 | 0.29 |
-| PID, 4 ms filter | 2.03 / 0.81 / 0.041 | 1.0 dB | 0.36 / 49 s | 0.31 | 0.62 / 4.8 s | 10.64 | 0.19 |
+| P | 1.94 / 0 / 0 | 2.5 dB | does not arrive | does not arrive | 0.70 / never | 10.00 | 0.39 |
+| PI, GVL | 1.5 / 0.6 / 0 | 4.6 dB | 0.47 / 72 s | 0.53 | 0.81 / 5.6 s | 10.84 | 0.29 |
+| PI, GVL, clear | 1.5 / 0.6 / 0 | 4.6 dB | 0.02 / 34 s | 0.05 | 0.81 / 5.6 s | 10.24 | 0.29 |
+| PI at the limit | 1.85 / 0.74 / 0 | 2.7 dB | 0.39 / 66 s | 0.37 | 0.68 / 5.0 s | 10.70 | 0.38 |
+| PI at the limit, clear | 1.85 / 0.74 / 0 | 2.7 dB | 0.02 / 34 s | 0.05 | 0.68 / 5.1 s | 10.22 | 0.38 |
+| PI, Ki/Kp 0.1 | 1.92 / 0.19 / 0 | 2.5 dB | 0.56 / 70 s | 0.11 | 0.69 / 17.1 s | 10.50 | 0.39 |
+| PI, Ki/Kp 1.6 | 1.55 / 2.48 / 0 | 3.9 dB | 0.24 / 64 s | 0.54 | 0.72 / 1.3 s | 10.74 | 0.35 |
+| PI, damped at 0.03 MPa/mm | 1.5 / 0.034 / 0 | 4.7 dB | 0.38 / not in 100 s | 0.34 | 0.87 / never | 10.23 | 0.27 |
+| PID, 20 ms filter | 2.24 / 0.90 / 0.034 | 1.0 dB | 0.33 / 48 s | 0.25 | 0.57 / 4.6 s | 10.58 | 0.15 |
+| PID, 20 ms filter, clear | 2.24 / 0.90 / 0.034 | 1.0 dB | 0.02 / 33 s | 0.04 | 0.57 / 4.6 s | 10.22 | 0.15 |
+| PID, 4 ms filter | 2.66 / 1.06 / 0.053 | 1.0 dB | 0.28 / 47 s | 0.17 | 0.49 / 4.1 s | 10.49 | 0.12 |
 
 **A smaller integral gain does not cure the soft overshoot either.**
 The linear step of the first table is not what the machine does: the
 approach is long, the output is at the stop-law floor for most of it,
 and the integral arrives holding that floor, 2 mm/s, whatever the
 gains. From there eq. (61) gives the overshoot, 0.35 to 0.54 MPa at the
-GVL gains for 0.03 to 0.1 MPa/mm (the simulation gives 0.48 and the
+GVL gains for 0.03 to 0.1 MPa/mm (the simulation gives 0.47 and the
 bench 0.35 from a crossing at 1.43 mm/s, for which the equation gives
 0.25 to 0.39). The overshoot grows as Ki falls, as sqrt(k / Ki): the
-loop with Ki/Kp of 0.1 overshoots by 0.71 MPa, and the one damped to
-0.7 by 0.39 MPa without coming into band in 100 s.
+loop with Ki/Kp of 0.1 overshoots by 0.56 MPa, and the one damped to
+0.7 by 0.38 MPa without coming into band in 100 s.
 
 **Why clearing the integral is the right remedy.** In the soft chamber
 the loop has two states, the error and the velocity the integral holds,
@@ -1439,18 +1442,21 @@ piston is then moving faster than the outflow), and never at the
 target itself.
 
 **What this means for the machine.**
-- The loop is a PI controller. The proportional gain is at the limit
-  the delay allows in the hose-shut chamber, and Ki/Kp of 0.4 is the
-  trade between the delivery's recovery (5.5 s) and the margins; both
-  are where the GVL has them.
-- It has no derivative term. The term is worth 18 % of gain for most of
-  the stiffest chamber's gain margin and 1.6 times the command noise,
-  3 % at an equal gain margin, and nothing in the soft chamber.
+- The loop is a PI controller. The delay allows a proportional gain of
+  1.85 in the hose-shut chamber, and Ki/Kp of 0.4 is the trade between
+  the delivery's recovery (5 s) and the margins. The GVL's Kp 1.5 and
+  Ki 0.6 are 81 % of that: 52° and 9.6 dB at the design chamber and
+  4.6 dB in the stiffest. The set at the limit takes the delivery's
+  dip from 0.81 to 0.68 MPa and the closing peak from 10.84 to
+  10.70 MPa, for a gain margin of 2.7 dB in the stiffest chamber and a
+  stiff step that overshoots by 0.38 MPa in place of 0.29.
+- It has no derivative term. The term is worth 21 % of gain for most of
+  the stiffest chamber's gain margin and 1.7 times the command noise,
+  2 % at an equal gain margin, and nothing in the soft chamber.
 - No fixed linear compensator covers the chamber: a gain set keeps its
-  phase margin over a stiffness range of about 14 times its integral
-  time, 36 to 1 here, and the chamber spans 4500 to 1. The soft end
-  needs either a gain that follows the stiffness, which the slave
-  cannot measure ahead of the approach, or the integral cleared past
-  the target, eq. (52), which needs no stiffness and takes the 5 atm
-  overshoot from 0.48 to 0.02 MPa.
-
+  phase margin over a stiffness range of about 18 times its integral
+  time, 46 to 1 at the limit, and the chamber spans 4500 to 1. The
+  soft end needs either a gain that follows the stiffness, which the
+  slave cannot measure ahead of the approach, or the integral cleared
+  past the target, eq. (52), which needs no stiffness and takes the
+  5 atm overshoot from 0.47 to 0.02 MPa.

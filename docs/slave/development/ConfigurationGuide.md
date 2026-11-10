@@ -179,7 +179,7 @@ The transducer is a 4-20 mA loop read as the voltage across a shunt on the contr
 
 | Parameter | Default Value | Units | Description & Tuning Considerations |
 |---|---|---|---|
-| `G_cfgPressureKp` | 1.5 | mm/s per MPa | Velocity per pressure error. The loop's crossover is about Kp times the chamber stiffness: 5 rad/s with the hose open (3.2 MPa/mm, 66° of phase margin) and 11 rad/s with it shut at a full fill (7.5 MPa/mm, 45°). The cylinder's series compliance caps the stiffness at 13 MPa/mm, where 16° remain; lower Kp if pressure mode is to run with the hose shut and little liquid. |
+| `G_cfgPressureKp` | 1.5 | mm/s per MPa | Velocity per pressure error. The loop's crossover is about Kp times the chamber stiffness: 5 rad/s with the hose open (3.2 MPa/mm, 70° of phase margin) and 11 rad/s with it shut at a full fill (7.5 MPa/mm, 52°, where 1.85 is the most that keeps 45° and 6 dB). The cylinder's series compliance caps the stiffness at 13 MPa/mm, where 29° remain; lower Kp if pressure mode is to run with the hose shut and little liquid. |
 | `G_cfgPressureKi` | 0.6 | mm/s per (MPa·s) | Velocity per integrated pressure error: 0.4 Kp. |
 | `G_cfgPressureVelMax` | 5.0 | mm/s | Velocity clamp in pressure mode (also limited by `G_cfgVelLimitMax`). |
 | `G_cfgPressureAccel` | 50.0 | mm/s² | `Y_DirectControl` acceleration in pressure mode. |

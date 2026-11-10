@@ -280,6 +280,7 @@ def linear_tables(par, ks):
     cand = {
         'P': (kp_limit(par, k_des, 1e-4), 0.0, 0.0, 0.02),
         'PI GVL': (Kp0, Ki0, 0.0, 0.02),
+        'PI at the limit': (Kp_pi, 0.4 * Kp_pi, 0.0, 0.02),
         'PI Ki/Kp 0.1': (kp_limit(par, k_des, 0.1),) * 1 + (
             0.1 * kp_limit(par, k_des, 0.1), 0.0, 0.02),
         'PI Ki/Kp 1.6': (kp_limit(par, k_des, 1.6),) * 1 + (
@@ -403,7 +404,7 @@ def candidate_table(par, cand, ks, seed, legacy, workers):
     """Run the candidate gain sets, print their table and return the
     CSV rows."""
     m = nonlinear(par, cand, seed, legacy, workers,
-                  clear=('PI GVL', 'PID, Tf 20 ms'))
+                  clear=('PI GVL', 'PI at the limit', 'PID, Tf 20 ms'))
     say('\n=== 5. Candidate gain sets: linear figures and the nonlinear'
         ' cases')
     say(f'{"set":24s} {"Kp":>5s} {"Ki":>6s} {"Kd":>6s} | {"PM":>4s} '
