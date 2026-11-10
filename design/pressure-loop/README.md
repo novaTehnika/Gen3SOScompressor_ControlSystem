@@ -1258,6 +1258,57 @@ axis sooner, at 15.0 MPa/mm against 17.4, with the stiffest chamber at
 11.2 rad/s is the most that keeps 45° and 6 dB, whatever the stiffness.
 At the design chamber that is Kp 1.49: the GVL's 1.5 is at the limit,
 with the phase margin binding. A proportional gain alone could be 1.57.
+A pure delay has no poles or zeros of its own; on the locus it is the
+bend that takes the stiff chamber's branch across the axis, and the
+further branches that come in from the far left. The grey locus of
+`compensation_rlocus.png` is the same PI loop with its pure delay
+removed: its two lags alone take it across the axis at 117 MPa/mm and
+77 rad/s, against 17.4 MPa/mm and 23 rad/s as built.
+
+**Where the delay comes from, and what each part is worth.** The loop
+as built has 40 ms of pure delay and three lags:
+
+| Source | Kind | Amount | Set by |
+|---|---|---|---|
+| Median of 5 | delay | 8 ms (2 scans) | `G_cfgAnalogMedianSize` |
+| `PRG_Main` reads the filter and the scaling at the top of the scan and calls them at the end | delay | 8 ms (2 scans) | the order of `PRG_Main` |
+| The state body reads the controller's output of the previous scan | delay | 4 ms (1 scan) | the order of `PRG_Main` |
+| Drive dead time | delay | 18.2 ms (20 ms in whole scans) | the drive and `G_cfgDirectCtrlFilterTime` |
+| Pressure low-pass filter | lag | 20 ms | `G_cfgAnalogFilterTimeConst` |
+| Drive velocity loop | lag | 7.5 ms | the drive's tuning |
+| Sample and hold | lag | 2 ms (half a scan) | `G_cfgScanTime` |
+
+The largest Kp with the margins at the design chamber (Ki = 0.4 Kp),
+with each part changed:
+
+| Change | Pure delay | Kp | Dip MPa | Command noise µm/s per kPa |
+|---|---|---|---|---|
+| as built | 40 ms | 1.49 | 0.86 | 0.48 |
+| median of 3 | 36 ms | 1.60 (+7 %) | 0.81 | 0.51 |
+| sensor path read in the same scan | 32 ms | 1.72 (+15 %) | 0.76 | 0.55 |
+| and the command applied in the same scan | 28 ms | 1.85 (+24 %) | 0.70 | 0.60 |
+| pressure filter 10 ms | 40 ms | 1.72 (+15 %) | 0.75 | 0.73 |
+| drive dead time 8 ms | 28 ms | 1.85 (+24 %) | 0.70 | 0.60 |
+| scan 2 ms | 28 ms | 1.88 (+26 %) | 0.69 | 0.44 |
+| same scan, median of 3, filter 10 ms | 24 ms | 2.42 (+63 %) | 0.54 | 1.04 |
+| those and the 8 ms dead time | 12 ms | 3.50 (+135 %) | 0.38 | 1.52 |
+| no pure delay | 0 | 4.59 (+208 %) | 0.31 | 1.45 |
+
+Three scans of the delay, 12 ms, are the order in which `PRG_Main`
+reads and calls its own blocks, and passing each block the output of
+the block before it in the same scan is worth 24 % of gain, more than
+the derivative term gives at its best and with a wider gain margin
+(7.8 dB) in place of a narrower one. The drive's dead time is the
+largest single part. `Y_DirectControl`'s command filter is inside it:
+the bench measured 22.8 ms of dead time and an 18.2 ms lag with the
+filter at 50 ms and 18.2 and 7.5 ms at 20 ms, so each 10 ms of filter
+was 5 ms of response, and the 8 ms row is that trend taken to a filter
+of zero; it has not been measured. A 2 ms scan halves every delay that
+is counted in scans, but the program takes about 2.5 ms a scan. A
+shorter delay raises the gain the stiff chamber allows and moves the
+soft chamber little: its damping at 0.03 MPa/mm goes from 0.16 to 0.29
+with no pure delay at all.
+
 
 **The integral is for the outflow, and it sets the soft end.** With
 the largest Kp for each Ki/Kp, on the orifice flow at 10 MPa

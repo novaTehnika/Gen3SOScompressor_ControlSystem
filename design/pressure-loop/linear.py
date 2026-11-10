@@ -142,7 +142,8 @@ def filter_alpha(cfg):
 
 
 # %% ===== LOOP TRANSFER FUNCTIONS =======================================
-def loop(par, k, delay=None, Kd=0.0, Tf=0.02, **cfg_overrides):
+def loop(par, k, delay=None, Kd=0.0, Tf=0.02, cmd_delay=None,
+         **cfg_overrides):
     """Return the loop transfer functions at chamber stiffness k [Pa/m].
 
     par supplies the piston area A, the drive lag tauV and the slave
@@ -151,6 +152,10 @@ def loop(par, k, delay=None, Kd=0.0, Tf=0.02, **cfg_overrides):
     sample_delay(); the tests use it to confirm the delay count. Kd
     [(mm/s)/(MPa/s)] adds a derivative term on the measured pressure
     with filter time constant Tf [s], eq. (57); the slave has none.
+    cmd_delay [scans] replaces the delay of the command path, which is
+    the scan between computing a command and applying it plus the
+    drive's dead time; the compensation study uses it and delay to
+    remove parts of the loop's delay.
 
     The result is a dict with these entries:
       L, S, T     open loop, sensitivity, complementary sensitivity
@@ -174,7 +179,9 @@ def loop(par, k, delay=None, Kd=0.0, Tf=0.02, **cfg_overrides):
     Ki = cfg['G_cfgPressureKi']                         # [(mm/s)/(MPa s)]
     d_sensor = sample_delay(cfg) if delay is None else delay
     n_dead = int(round(par.t_dead / Ts))        # [scans] drive dead time
-    d = d_sensor + 1 + n_dead           # [scans] plus the command's scan
+    # [scans] Command path: the command's scan and the dead time
+    n_cmd = 1 + n_dead if cmd_delay is None else cmd_delay
+    d = d_sensor + n_cmd                # [scans] total pure delay
 
     # Plant, eq. (26): zero-order-hold discretization of
     # k / (s (tauV s + 1)). With a_v = exp(-Ts/tauV) and
@@ -260,7 +267,7 @@ def loop(par, k, delay=None, Kd=0.0, Tf=0.02, **cfg_overrides):
 
     def R_freq(w):
         return (_poly_ratio(Cpi_num, _poly(1, -1), w, Ts) * Gd_freq(w)
-                * _delay(w, Ts, 1 + n_dead) * S_freq(w))
+                * _delay(w, Ts, n_cmd) * S_freq(w))
     R = TF(R_num, cl, Ts, R_freq)
 
     # Sensor noise to command, eq. (58): N = -C z^-d_sensor F S. The
@@ -268,8 +275,8 @@ def loop(par, k, delay=None, Kd=0.0, Tf=0.02, **cfg_overrides):
     def N_freq(w):
         return (-C_freq(w) * F_freq(w) * _delay(w, Ts, d_sensor)
                 * S_freq(w))
-    z_pow_dead = np.zeros(2 + n_dead)
-    z_pow_dead[0] = 1.0                                 # z^(1 + n_dead)
+    z_pow_dead = np.zeros(1 + n_cmd)
+    z_pow_dead[0] = 1.0                                 # z^n_cmd
     N = TF(-np.polymul(np.polymul(np.polymul(C_num, F_num), Gd_den),
                        z_pow_dead), cl, Ts, N_freq)
 
@@ -457,7 +464,8 @@ def kp_for_pm(par, k, pm_deg, ngrid=120, lo=None, hi=None, ki_ratio=None,
 
 
 def kp_for_margins(par, k, pm_deg, gm_db, ki_ratio, td=0.0, Tf=0.02,
-                   ngrid=81, **cfg_overrides):
+                   ngrid=81, delay=None, cmd_delay=None,
+                   **cfg_overrides):
     """Return the largest Kp [(mm/s)/MPa] with a phase margin of at
     least pm_deg [deg] and a gain margin of at least gm_db [dB] at
     stiffness k [Pa/m], with Ki = ki_ratio Kp and Kd = td Kp, or NaN if
@@ -465,12 +473,13 @@ def kp_for_margins(par, k, pm_deg, gm_db, ki_ratio, td=0.0, Tf=0.02,
 
     With both ratios fixed the loop depends on Kp and k only through
     Kp k, eq. (62), so the result times k is the same at every
-    stiffness.
+    stiffness. delay and cmd_delay are passed to loop().
     """
-    w = freq_grid(par.Ts, 2500, 1e-3)
+    w = freq_grid(par.cfg(**cfg_overrides)['G_cfgScanTime'], 2500, 1e-3)
 
     def passes(kp):
-        lp = loop(par, k, Kd=td * kp, Tf=Tf,
+        lp = loop(par, k, delay=delay, Kd=td * kp, Tf=Tf,
+                  cmd_delay=cmd_delay,
                   **{**cfg_overrides, 'G_cfgPressureKp': kp,
                      'G_cfgPressureKi': ki_ratio * kp})
         if not is_stable(lp):

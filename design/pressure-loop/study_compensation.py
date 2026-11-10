@@ -35,6 +35,8 @@ script reports, in order:
   5. The candidate gain sets the linear model selects, in the same
      nonlinear cases, with and without the integral cleared past the
      target (controllers.VariantController, eq. (52)).
+  6. The delay: where the loop's pure delay comes from, and the gain
+     the margins allow with each part of it removed.
 
 It prints the tables, writes them to compensation_summary.txt and
 compensation.csv, and plots the root locus against stiffness, the phase
@@ -438,6 +440,82 @@ def candidate_table(par, cand, ks, seed, legacy, workers):
     return rows
 
 
+# %% ===== DELAY BUDGET ==================================================
+# Changes to the loop's delay: (label, StudyParams overrides, loop
+# arguments). delay is the sensor path's scans (the median's two and
+# the two of PRG_Main's read order) and cmd_delay the command path's
+# (the command's scan and the drive's dead time in scans). The 8 ms
+# dead time is what the bench's two settings of the Y_DirectControl
+# command filter extrapolate to with the filter off (5 ms of response
+# per 10 ms of filter); it has not been measured.
+DELAYS = [
+    ('as built', {}, {}),
+    ('median of 3', {}, {'G_cfgAnalogMedianSize': 3}),
+    ('sensor path read in the same scan', {}, {'delay': 2}),
+    ('and the command applied in the same scan', {},
+     {'delay': 2, 'cmd_delay': 5}),
+    ('pressure filter 10 ms', {}, {'G_cfgAnalogFilterTimeConst': 0.010}),
+    ('drive dead time 8 ms', {'t_dead': 0.0082}, {}),
+    ('scan 2 ms', {'G_cfgScanTime': 0.002}, {}),
+    ('same scan, median of 3, filter 10 ms', {},
+     {'delay': 1, 'cmd_delay': 5, 'G_cfgAnalogFilterTimeConst': 0.010}),
+    ('those and the 8 ms dead time', {'t_dead': 0.0082},
+     {'delay': 1, 'cmd_delay': 2, 'G_cfgAnalogFilterTimeConst': 0.010}),
+    ('no pure delay', {}, {'delay': 0, 'cmd_delay': 0}),
+]
+
+
+def delay_table(par, ks):
+    """Print the delay budget of the loop as built and the largest Kp
+    with the margins at the design chamber for each change of DELAYS,
+    Ki = 0.4 Kp, and return the CSV rows."""
+    k_del, k_des, _ = ks
+    cfg = par.cfg()
+    Ts = cfg['G_cfgScanTime']                               # [s]
+    n_med = lin.sample_delay(cfg) - 2                       # [scans]
+    say('\n=== 6. Delay: sources as built')
+    for name, t in (
+            (f'median of {cfg["G_cfgAnalogMedianSize"]}', n_med * Ts),
+            ('PRG_Main read order, sensor path (2 scans)', 2 * Ts),
+            ('command read in the next scan (1 scan)', Ts),
+            ('drive dead time, in whole scans',
+             round(par.t_dead / Ts) * Ts)):
+        say(f'  pure delay  {name:44s} {t * 1e3:5.1f} ms')
+    for name, t in (
+            ('pressure low-pass filter',
+             cfg['G_cfgAnalogFilterTimeConst']),
+            ('drive velocity loop', par.tauV),
+            ('sample and hold (half a scan)', Ts / 2)):
+        say(f'  lag         {name:44s} {t * 1e3:5.1f} ms')
+
+    say('\nlargest Kp with the margins at the design chamber, Ki = '
+        '0.4 Kp:')
+    say(f'{"change":42s} {"delay ms":>9s} {"Kp":>5s} {"vs built %":>11s}'
+        f' {"Kp k rad/s":>11s} {"dip MPa":>8s} {"noise um/s/kPa":>15s} '
+        f'{"zeta@0.03":>10s}')
+    rows, Kp0 = [], None
+    for name, pkw, lkw in DELAYS:
+        q = par.with_(**pkw)
+        Kp = lin.kp_for_margins(q, k_des * lin.MPA_MM, PM_MIN, GM_MIN,
+                                0.4, **lkw)
+        Kp0 = Kp if Kp0 is None else Kp0
+        gains = {'G_cfgPressureKp': Kp, 'G_cfgPressureKi': 0.4 * Kp}
+        lp = lin.loop(q, k_del * lin.MPA_MM, **{**lkw, **gains})
+        dip = lin.step_dip(lp, q.Q_orifice(10e6),
+                           int(60.0 / lp['Ts']))[0] / 1e6       # [MPa]
+        # [(m/s)/Pa -> (um/s)/kPa]
+        noise = lin.noise_gain(lp) * 1e9
+        zeta = lin.least_damped(lin.loop(q, 0.03 * lin.MPA_MM,
+                                         **{**lkw, **gains}))[0]
+        t_d = lp['delay'] * lp['Ts'] * 1e3                      # [ms]
+        say(f'{name:42s} {t_d:9.0f} {Kp:5.2f} '
+            f'{100 * (Kp / Kp0 - 1):11.0f} {Kp * k_des:11.1f} '
+            f'{dip:8.2f} {noise:15.2f} {zeta:10.2f}')
+        rows.append(['6 delay', name, t_d, Kp, Kp * k_des, dip, noise,
+                     zeta])
+    return rows
+
+
 # %% ===== PLOTS =========================================================
 def plot_margin(path, par, cand, ks):
     """Plot the phase margin against stiffness for the candidate sets,
@@ -474,15 +552,17 @@ def plot_margin(path, par, cand, ks):
     plt.close(fig)
 
 
-def locus(par, Kp, Ki, Kd, Tf, k, w_max):
+def locus(par, Kp, Ki, Kd, Tf, k, w_max, **loop_kw):
     """Return the closed-loop poles [rad/s] of one gain set at each
     stiffness of k [MPa/mm], as (stiffness, pole) arrays: the roots in
     z mapped by s = ln(z) / Ts, upper half plane, up to w_max [rad/s]
     (which leaves out the poles the pure delay puts near the Nyquist
-    frequency)."""
+    frequency). loop_kw are further arguments of linear.loop()."""
     kk, ss = [], []
     for ki in k:
-        z = lin.poles(loop(par, ki, Kp, Ki, Kd, Tf)).astype(complex)
+        z = lin.poles(lin.loop(
+            par, ki * lin.MPA_MM, Kd=Kd, Tf=Tf, G_cfgPressureKp=Kp,
+            G_cfgPressureKi=Ki, **loop_kw)).astype(complex)
         z = z[np.abs(z) > 1e-9]
         sp = np.log(z) / par.Ts
         sp = sp[(np.abs(sp) <= w_max) & (sp.imag >= -1e-9)]
@@ -493,14 +573,15 @@ def locus(par, Kp, Ki, Kd, Tf, k, w_max):
 
 def plot_rlocus(path, par, cand, ks):
     """Plot the root locus against stiffness: the closed-loop poles as
-    k runs from 0.001 to 25 MPa/mm, over the whole loop (left) and near
-    the origin, where the soft chamber's poles ride the circle of
-    eq. (63) about the integral zero (right, drawn to equal scales).
-    The poles at the chamber's states are marked, and the dotted rays
-    are lines of constant damping ratio."""
+    k runs from 0.001 to 25 MPa/mm (to 250 MPa/mm for the loop with its
+    pure delay removed), over the whole loop (left) and near the
+    origin, where the soft chamber's poles ride the circle of eq. (63)
+    about the integral zero (right, drawn to equal scales). The poles
+    at the chamber's states are marked, and the dotted rays are lines
+    of constant damping ratio."""
     k = np.logspace(-3, math.log10(25.0), 500)              # [MPa/mm]
     marks = (0.03, 0.3) + ks                                # [MPa/mm]
-    views = ((('PI GVL', 'PID, Tf 20 ms'), (-60.0, 8.0), (0.0, 40.0)),
+    views = ((('PI GVL', 'PID, Tf 20 ms'), (-150.0, 30.0), (0.0, 110.0)),
              (('PI GVL', 'PI Ki/Kp 0.1', 'PID, Tf 20 ms'),
               (-1.0, 0.1), (0.0, 0.6)))
     col = studyutil.colors(['PI GVL', 'PID, Tf 20 ms', 'PI Ki/Kp 0.1'])
@@ -527,7 +608,9 @@ def plot_rlocus(path, par, cand, ks):
                    color=col[name])
             if name == 'PI GVL':
                 for ki, si in zip(kk, sm):
-                    if (xlim[0] < si.real < xlim[1]
+                    # Label the dominant branch, not the delay's
+                    # further ones
+                    if (xlim[0] < si.real < xlim[1] and abs(si) < 40.0
                             and 0.02 * ylim[1] < si.imag < ylim[1]):
                         a.annotate(f'{ki:.3g}', (si.real, si.imag),
                                    textcoords='offset points',
@@ -535,13 +618,29 @@ def plot_rlocus(path, par, cand, ks):
                 # The integral zero, where the slow pole ends
                 a.plot(-Ki / Kp, 0.0, 'o', ms=7, mfc='w', color='k',
                        zorder=5)
+        if a is ax[0]:
+            # The same PI loop with its pure delay removed: the lags
+            # alone take it across the axis at a far higher stiffness.
+            Kp, Ki, Kd, Tf = cand['PI GVL']
+            k_far = np.logspace(-3, math.log10(250.0), 700)
+            _, sp = locus(par, Kp, Ki, Kd, Tf, k_far, 400.0, delay=0,
+                          cmd_delay=0)
+            a.plot(sp.real, sp.imag, '.', ms=2.5, color='0.45',
+                   label='PI GVL, no pure delay (to 250 MPa/mm)')
+            kk, sm = locus(par, Kp, Ki, Kd, Tf, ks[1:], 400.0, delay=0,
+                           cmd_delay=0)
+            a.plot(sm.real, sm.imag, 'o', ms=5, mfc='none', color='0.45')
+            a.text(-146.0, 44.0, 'further branches\nof the delay',
+                   fontsize=8, color='0.4', va='top')
         a.axvline(0.0, color='k', lw=0.8)
         a.set_xlim(*xlim)
         a.set_ylim(*ylim)
         a.set_xlabel('real part (rad/s)')
         a.set_ylabel('imaginary part (rad/s)')
         a.grid(alpha=0.3)
-        a.legend(fontsize=8, frameon=False, loc='upper left')
+    ax[0].legend(fontsize=8, frameon=False, loc='upper left',
+                 bbox_to_anchor=(0.0, 0.3))
+    ax[1].legend(fontsize=8, frameon=False, loc='upper left')
     ax[1].set_aspect('equal', adjustable='box')
     ax[0].set_title('Root locus against stiffness, 0.001 to 25 MPa/mm')
     ax[1].set_title('Near the origin: the soft chamber '
@@ -630,6 +729,7 @@ def main():
     rows += g_rows
     rows += candidate_table(par, cand, ks, args.seed, legacy,
                             args.workers)
+    rows += delay_table(par, ks)
 
     (out / 'compensation_summary.txt').write_text('\n'.join(LOG) + '\n')
     with open(out / 'compensation.csv', 'w', newline='') as fh:
