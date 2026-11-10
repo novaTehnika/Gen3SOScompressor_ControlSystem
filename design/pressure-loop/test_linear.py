@@ -36,7 +36,8 @@ act, so the linear model should match them closely. The checks are:
                 pressure matches the simulation, and the command noise
                 matches the noise gain.
   V5 soft       In a soft chamber the least damped mode follows the
-                two-integrator reduction, eq. (60), and the overshoot
+                two-integrator reduction, eq. (60), and lies on the
+                circle about the integral zero, eq. (63); the overshoot
                 from a stored integral velocity follows eq. (61).
 
 Usage:
@@ -320,6 +321,22 @@ def check_v5_soft():
                         abs(wn / wn_want - 1))
     assert worst < 0.06, worst
 
+    # Eq. (63): the soft chamber's poles lie on the circle of radius
+    # Ki/Kp about the zero at -Ki/Kp, and are real past 4 Ki / Kp^2.
+    r0 = Ki / Kp                                            # [rad/s]
+    off = 0.0
+    for k in (0.003, 0.03, 0.1, 0.3):                       # [MPa/mm]
+        z = lin.poles(lin.loop(PAR, k * lin.MPA_MM)).astype(complex)
+        sp = np.log(z[np.abs(z) > 1e-9]) / PAR.Ts
+        s0 = sp[np.argmin(np.abs(sp))]
+        assert abs(s0.imag) > 0.0
+        off = max(off, abs(abs(s0 + r0) - r0) / r0)
+    k_b = 4 * Ki / Kp**2                                    # [MPa/mm]
+    z = lin.poles(lin.loop(PAR, 1.2 * k_b * lin.MPA_MM)).astype(complex)
+    sp = np.log(z[np.abs(z) > 1e-9]) / PAR.Ts
+    slow = sp[np.argsort(np.abs(sp))][:2]
+    assert off < 0.03 and np.all(np.abs(slow.imag) < 1e-6), (off, slow)
+
     # Eq. (61) against the reduction integrated from e = 0 with the
     # integral holding w0: e' = -k (Kp e + w), w' = Ki e.
     k, w0, dt = 0.05, 2.0, 1e-3             # [MPa/mm], [mm/s], [s]
@@ -340,7 +357,9 @@ def check_v5_soft():
                                G_cfgPressureKi=0.4 * kp)
     assert abs(kp - 1.49) < 0.02 and 30 < kd / lo < 42, (kp, kd / lo)
     ok(f'V5 soft chamber: least damped mode within {worst * 100:.0f}% '
-       f'of eq. (60) from 0.003 to 0.1 MPa/mm; stored-velocity '
+       f'of eq. (60) from 0.003 to 0.1 MPa/mm, on the circle of '
+       f'eq. (63) within {off * 100:.0f}% and real past '
+       f'{k_b:.2f} MPa/mm; stored-velocity '
        f'overshoot {peak:.3f} MPa against eq. (61) {want:.3f}; Kp '
        f'{kp:.2f} holds 45 deg over a stiffness range of '
        f'{kd / lo:.0f} to 1')

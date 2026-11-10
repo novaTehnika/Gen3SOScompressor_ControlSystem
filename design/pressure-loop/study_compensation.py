@@ -12,7 +12,7 @@ CREATION DATE:
 PURPOSE/DESCRIPTION:
 This script examines the choice of compensator for the slave's pressure
 loop on the linear model of linear.py (README, "Choice of compensation",
-eqs. (57) to (62)), and confirms what it finds in the nonlinear
+eqs. (57) to (63)), and confirms what it finds in the nonlinear
 simulation.
 
 The loop is an integrator (the chamber, velocity to pressure, with gain
@@ -37,9 +37,10 @@ script reports, in order:
      target (controllers.VariantController, eq. (52)).
 
 It prints the tables, writes them to compensation_summary.txt and
-compensation.csv, and plots the phase margin against stiffness, the
-open loops and the grid to compensation_margin.png,
-compensation_bode.png and compensation_grid.png in the output directory.
+compensation.csv, and plots the root locus against stiffness, the phase
+margin against stiffness, the open loops and the grid to
+compensation_rlocus.png, compensation_margin.png, compensation_bode.png
+and compensation_grid.png in the output directory.
 
 Usage:
     python3 study_compensation.py [--set key=value ...] [--out DIR]
@@ -473,6 +474,83 @@ def plot_margin(path, par, cand, ks):
     plt.close(fig)
 
 
+def locus(par, Kp, Ki, Kd, Tf, k, w_max):
+    """Return the closed-loop poles [rad/s] of one gain set at each
+    stiffness of k [MPa/mm], as (stiffness, pole) arrays: the roots in
+    z mapped by s = ln(z) / Ts, upper half plane, up to w_max [rad/s]
+    (which leaves out the poles the pure delay puts near the Nyquist
+    frequency)."""
+    kk, ss = [], []
+    for ki in k:
+        z = lin.poles(loop(par, ki, Kp, Ki, Kd, Tf)).astype(complex)
+        z = z[np.abs(z) > 1e-9]
+        sp = np.log(z) / par.Ts
+        sp = sp[(np.abs(sp) <= w_max) & (sp.imag >= -1e-9)]
+        kk.extend([ki] * len(sp))
+        ss.extend(sp)
+    return np.array(kk), np.array(ss)
+
+
+def plot_rlocus(path, par, cand, ks):
+    """Plot the root locus against stiffness: the closed-loop poles as
+    k runs from 0.001 to 25 MPa/mm, over the whole loop (left) and near
+    the origin, where the soft chamber's poles ride the circle of
+    eq. (63) about the integral zero (right, drawn to equal scales).
+    The poles at the chamber's states are marked, and the dotted rays
+    are lines of constant damping ratio."""
+    k = np.logspace(-3, math.log10(25.0), 500)              # [MPa/mm]
+    marks = (0.03, 0.3) + ks                                # [MPa/mm]
+    views = ((('PI GVL', 'PID, Tf 20 ms'), (-60.0, 8.0), (0.0, 40.0)),
+             (('PI GVL', 'PI Ki/Kp 0.1', 'PID, Tf 20 ms'),
+              (-1.0, 0.1), (0.0, 0.6)))
+    col = studyutil.colors(['PI GVL', 'PID, Tf 20 ms', 'PI Ki/Kp 0.1'])
+    fig, ax = plt.subplots(1, 2, figsize=(13, 5.8))
+    for a, (names, xlim, ylim) in zip(ax, views):
+        for zeta in (0.2, 0.45, 0.7):
+            # A ray of constant damping: Re = -zeta r, Im = r sqrt(1 -
+            # zeta^2)
+            r = 2.0 * max(-xlim[0], ylim[1])
+            a.plot([0.0, -zeta * r], [0.0, r * math.sqrt(1 - zeta**2)],
+                   color='0.6', lw=0.8, ls=':')
+            y = 0.93 * ylim[1]
+            x = -zeta / math.sqrt(1 - zeta**2) * y
+            if x > xlim[0]:
+                a.text(x, y, f'{zeta:g}', fontsize=7, color='0.4',
+                       ha='right')
+        for name in names:
+            Kp, Ki, Kd, Tf = cand[name]
+            _, sp = locus(par, Kp, Ki, Kd, Tf, k, 2.5 * ylim[1])
+            a.plot(sp.real, sp.imag, '.', ms=2.5, color=col[name],
+                   label=name)
+            kk, sm = locus(par, Kp, Ki, Kd, Tf, marks, 2.5 * ylim[1])
+            a.plot(sm.real, sm.imag, 'o', ms=5, mfc='none',
+                   color=col[name])
+            if name == 'PI GVL':
+                for ki, si in zip(kk, sm):
+                    if (xlim[0] < si.real < xlim[1]
+                            and 0.02 * ylim[1] < si.imag < ylim[1]):
+                        a.annotate(f'{ki:.3g}', (si.real, si.imag),
+                                   textcoords='offset points',
+                                   xytext=(5, 4), fontsize=8)
+                # The integral zero, where the slow pole ends
+                a.plot(-Ki / Kp, 0.0, 'o', ms=7, mfc='w', color='k',
+                       zorder=5)
+        a.axvline(0.0, color='k', lw=0.8)
+        a.set_xlim(*xlim)
+        a.set_ylim(*ylim)
+        a.set_xlabel('real part (rad/s)')
+        a.set_ylabel('imaginary part (rad/s)')
+        a.grid(alpha=0.3)
+        a.legend(fontsize=8, frameon=False, loc='upper left')
+    ax[1].set_aspect('equal', adjustable='box')
+    ax[0].set_title('Root locus against stiffness, 0.001 to 25 MPa/mm')
+    ax[1].set_title('Near the origin: the soft chamber '
+                    '(circles: MPa/mm)')
+    fig.tight_layout()
+    fig.savefig(path, dpi=110)
+    plt.close(fig)
+
+
 def plot_bode(path, par, cand, ks):
     """Plot the open loop per unit of stiffness for the PI and the PID
     sets: its gain, and its phase with the crossover of each stiffness
@@ -558,12 +636,13 @@ def main():
         w = csv.writer(fh)
         w.writerow(['table', 'values'])
         w.writerows(rows)
+    plot_rlocus(out / 'compensation_rlocus.png', par, cand, ks)
     plot_margin(out / 'compensation_margin.png', par, cand, ks)
     plot_bode(out / 'compensation_bode.png', par, cand, ks)
     plot_grid(out / 'compensation_grid.png', grid)
     print(f'\nwrote {out}/compensation_summary.txt, compensation.csv, '
-          f'compensation_margin.png, compensation_bode.png, '
-          f'compensation_grid.png')
+          f'compensation_rlocus.png, compensation_margin.png, '
+          f'compensation_bode.png, compensation_grid.png')
 
 
 if __name__ == '__main__':

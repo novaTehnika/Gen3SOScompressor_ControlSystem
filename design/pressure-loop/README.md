@@ -401,6 +401,13 @@ from the one phase curve:
          PM(k) = 180 deg + arg L_1 at the frequency where
                  |L_1| = 1 / (Kp k)
 
+Root locus of the soft chamber. The stiffness is the gain of the
+locus. For Kd = 0 the complex roots of eq. (59) lie on a circle about
+the integral zero at -Ki/Kp, and they meet on the real axis at the
+stiffness k_b:
+
+    (63) |s + Ki/Kp| = Ki/Kp,   k_b = 4 Ki / Kp^2
+
 ### Linear model
 
 Plant, the zero-order-hold discretization of k / (s (tauV s + 1)), with
@@ -1218,6 +1225,34 @@ has taken the phase. At the soft end the crossover has fallen below the
 integral corner, where the controller's integrator adds its 90° to the
 chamber's; the damping there is that of eq. (60), which the model's
 poles follow within 3 %.
+
+**The root locus against stiffness shows it in one picture**
+(`compensation_rlocus.png`). The stiffness multiplies the loop gain, so
+it is the gain of the locus. Two poles start at the origin, the
+chamber's integrator and the controller's, and the PI term puts a zero
+at −Ki/Kp, 0.4 rad/s. In the soft chamber the poles leave the origin
+straight up the imaginary axis and ride a circle of radius Ki/Kp about
+that zero, eq. (63): undamped at first, a damping ratio of 0.16 at
+0.03 MPa/mm and 0.52 at 0.3. They meet on the real axis at
+4 Ki/Kp², 1.07 MPa/mm. One then closes on the zero (−0.44 rad/s at the
+delivery's 3.2 MPa/mm): it is the integral's mode, the 2.5 s with which
+a dip recovers. The other runs left, meets the filter's pole coming in
+from −45 rad/s, and the pair leaves the axis on the branch that the
+delay bends into the right half plane: a damping of 0.41 at 7.5 MPa/mm,
+0.11 at 13.4, and across the axis at 17.4 MPa/mm and 23 rad/s.
+
+The zero is two things at once: the centre of the circle the soft
+chamber's poles ride, and the place the slow pole ends in a delivery.
+Moving it toward the origin (a smaller Ki/Kp) shrinks the circle, so
+the poles reach the real axis in a softer chamber, and slows the
+delivery's recovery in the same proportion: at Ki/Kp of 0.1 the radius
+is 0.1 rad/s and the recovery 22 s. A derivative term adds a second
+zero, at −28 rad/s for the set with the 20 ms filter below, two hundred
+times farther from the origin than the soft chamber's poles at
+0.13 rad/s, so its locus lies on the PI's circle. Where it acts is on
+the delay's branch, which it lifts in frequency and which crosses the
+axis sooner, at 15.0 MPa/mm against 17.4, with the stiffest chamber at
+13.4.
 
 **The delay sets the proportional gain.** A loop gain Kp k of
 11.2 rad/s is the most that keeps 45° and 6 dB, whatever the stiffness.
