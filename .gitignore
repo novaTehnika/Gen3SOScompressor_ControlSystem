@@ -7,6 +7,9 @@ models/generated/
 *.asv
 slprj/
 master-src/shell/SOS_Gen3_Master_Shell.slx
+SOS_Gen3_Master_Shell.slx
+master-src/shell/SOS_Gen3_Master_Shell.slxc
+SOS_Gen3_Master_Shell.slxc
 *.autosave
 bench/modbus/ModbusBench.slx
 # Wireshark captures from bench runs
@@ -20,5 +23,3 @@ __pycache__/
 .test-cache/
 # Trace recordings saved by the operator app (master-src/captures)
 master-src/captures/
-# Build shell
-master-src\shell\SOS_Gen3_Master_Shell.slx*
