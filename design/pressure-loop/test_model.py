@@ -968,6 +968,83 @@ def check_variants():
        f'integral cleared past the target')
 
 
+def check_feedforward():
+    """FeedforwardController's detector, eqs. (64) and (65), and its
+    feedforward, eq. (66), on readings laid out by hand and in the
+    delivery."""
+    par = StudyParams()
+    sc = scenarios.compress(par)
+
+    def drive(c, readings):
+        """Step c through readings [Pa] at a 10 MPa target and return
+        the detector's state after each scan and the last command."""
+        c.reset(par, sc)
+        on = []
+        for k, P in enumerate(readings):
+            v = c.step(P, 10e6, k * par.Ts, sc)
+            on.append(c.on)
+        return on, v
+
+    hold = [10e6] * 20
+    # An outflow of 4.5 MPa/s: 18 kPa a scan
+    fall = [10e6 - 18e3 * k for k in range(1, 16)]
+    c = ctl.FeedforwardController()
+    on, v = drive(c, hold + fall)
+    k_on = on.index(True)
+    assert not any(on[:20]) and 21 <= k_on <= 26, k_on
+    # The command is the block's with c sqrt(T) added, eq. (66).
+    b = ctl.SlaveController()
+    b.reset(par, sc)
+    for k, P in enumerate(hold + fall):
+        vb = b.step(P, 10e6, k * par.Ts, sc)
+    v_ff = par.Q_orifice(10e6) / par.A                      # [m/s]
+    assert abs((v - vb) - v_ff) < 1e-9, (v, vb, v_ff)
+
+    # The hose joining the chamber: 1 MPa a scan, far too deep
+    deep = [10e6 - 1e6 * min(k, 6) for k in range(1, 40)]
+    on, _ = drive(ctl.FeedforwardController(), hold + deep)
+    assert not any(on)
+
+    # Off: a sharp rise past the target; a slow one only beyond e_hi
+    rise = [fall[-1] + 20e3 * k for k in range(1, 20)]
+    on, _ = drive(ctl.FeedforwardController(), hold + fall + rise)
+    k_off = len(on) - 1 - on[::-1].index(True) + 1
+    P_off = (hold + fall + rise)[k_off]
+    assert not on[-1] and 10.02e6 < P_off < 10.1e6, P_off
+    back = [fall[-1] + 20e3 * k for k in range(1, 14)]      # to 9.99
+    creep = [back[-1] + 2e3 * k for k in range(1, 100)]     # to 10.19
+    on, _ = drive(ctl.FeedforwardController(),
+                  hold + fall + back + creep)
+    assert on[-1]
+    on, _ = drive(ctl.FeedforwardController(),
+                  hold + fall + back + creep + [10.35e6] * 3)
+    assert not on[-1]
+
+    # In the delivery it switches on at each opening and off at the
+    # closing, with either hose procedure, and halves the dip.
+    for q in (par.with_(hose_before=True), par):
+        d = scenarios.deliver(q)
+        c = ctl.FeedforwardController()
+        r = sim.run(q, d, c)
+        flow = r.Qout > 0.0
+        assert len(c.ons) == 2 and len(c.offs) == 1, (c.ons, c.offs)
+        assert all(flow[k] for k in c.ons)
+        assert r.events[-2] < c.offs[0] * q.Ts < r.events[-2] + 0.1
+    r0 = sim.run(q.with_(hose_before=True),
+                 scenarios.deliver(q.with_(hose_before=True)),
+                 ctl.SlaveController())
+    c = ctl.FeedforwardController()
+    r1 = sim.run(q.with_(hose_before=True),
+                 scenarios.deliver(q.with_(hose_before=True)), c)
+    assert r1['dipMax'] < 0.6 * r0['dipMax'], (r0['dipMax'],
+                                               r1['dipMax'])
+    ok(f'outflow feedforward: on {k_on - 20} scans into a 4.5 MPa/s '
+       f'fall, not on a fall of 1 MPa a scan, off on a sharp rise past '
+       f'the target; in the delivery, on at both openings and off at '
+       f'the closing, dip {r1["dipMax"]:.2f} MPa '
+       f'({r0["dipMax"]:.2f} without)')
+
+
 def check_runner():
     par = StudyParams()
     cases = [Case(par, scenarios.stiffstep(par), ctl.SlaveController(Kp=k))
@@ -998,4 +1075,5 @@ if __name__ == '__main__':
     check_floor_block()
     check_integ_clear_block()
     check_variants()
+    check_feedforward()
     check_runner()

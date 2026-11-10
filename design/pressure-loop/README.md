@@ -24,6 +24,7 @@ python3 design/pressure-loop/study_delivery.py   # deliverable volume against ox
 python3 design/pressure-loop/study_floor.py      # stop-law floors that follow the outflow, about 1 min; --mc 100 adds 3 min
 python3 design/pressure-loop/study_antiwindup.py # anti-windup rules and a derivative term, about 1 min
 python3 design/pressure-loop/study_compensation.py # choice of compensator: linear design map and a gain grid, about 1 min
+python3 design/pressure-loop/study_feedforward.py # outflow feedforward switched by the pressure, about 2 min; --mc 100 adds 20 min
 python3 design/pressure-loop/study_linear.py     # margins against chamber stiffness, about 30 s
 python3 design/pressure-loop/study_robust.py     # Monte Carlo over the uncertain parameters, about 7 min on 4 CPUs
 python3 design/pressure-loop/study_convergence.py # integration error against the time step, about 1 min
@@ -55,7 +56,7 @@ The plant, the sensor chain and their parameters are in `models/`
 | `study_convergence.py` | Measures the integration error against the time step for both methods. |
 | `studyparams.py` | Defines `StudyParams`: the models' `Params` (`models/params.py`) and the studies' own settings, the valve timings and procedure, the legacy controller's filter, the target and the requirement limits. A study overrides a model default by redeclaring the field. |
 | `modelpath.py` | Puts `models/` on the import path for the studies. |
-| `controllers.py` | Defines `SlaveController` (the slave's block, with a flow feedforward option kept only as a bound), `ScheduledSlaveController` (the same block with its gains and stop law scheduled on an estimate of the chamber stiffness, equations (39) to (41)), `ScheduledSlaveControllerST` (the ported Structured Text blocks, wired as PRG_Main wires them) and `LegacyController` (PID with a stiffness-estimating stop law and a torque mode). All share the `reset` and `step` interface. `FloorPolicy` sets the stop-law floor of the slave controllers from the detected outflow, equations (46) to (48). `VariantController` runs the slave's block with one anti-windup rule changed around it or a derivative term added, equations (50) to (56). |
+| `controllers.py` | Defines `SlaveController` (the slave's block, with a flow feedforward option kept only as a bound), `ScheduledSlaveController` (the same block with its gains and stop law scheduled on an estimate of the chamber stiffness, equations (39) to (41)), `ScheduledSlaveControllerST` (the ported Structured Text blocks, wired as PRG_Main wires them) and `LegacyController` (PID with a stiffness-estimating stop law and a torque mode). All share the `reset` and `step` interface. `FloorPolicy` sets the stop-law floor of the slave controllers from the detected outflow, equations (46) to (48). `VariantController` runs the slave's block with one anti-windup rule changed around it or a derivative term added, equations (50) to (56). `FeedforwardController` runs the block with a velocity feedforward for the outflow that a detector on the measured pressure switches, equations (64) to (66). |
 | `scenarios.py` | Defines the operating cases `compress`, `deliver`, `cycle` and the `stiffstep` probe, with the hose procedure and the valve timings (proximal opening, purge, pause, delivery). A scenario's target is one step or a schedule of steps (`targets`). |
 | `sim.py` | Runs one closed-loop simulation: `run(params, scenario, controller)` returns a `Result` with traces, the valve event times and metrics. It sequences the valves: the hose opening, the purge, its closing and the reopening. |
 | `metrics.py` | Computes the loop metrics (overshoot, settling time, ripple, stroke) and the process metrics (pressure ceiling, saturation margin, the deepest dip at a valve event, volume delivered before a violation, solution delivered). |
@@ -67,6 +68,7 @@ The plant, the sensor chain and their parameters are in `models/`
 | `study_antiwindup.py` | Compares ways of managing the loop's integrator (clearing it past the target, tracking, an integration band) and a derivative term against the block as it is, on a soft gas-filled chamber at low pressure and on the 10 MPa cycle. |
 | `linear.py`, `study_linear.py` | Build the discrete-time linear model of the velocity-command loop, equations (26) to (33), and use it to find the margins, the stability boundary and the frequency and disturbance responses. `linear.py` also takes a derivative term and gives the noise gain, the least damped mode and the gain and stiffness limits of a margin, equations (57) to (62). |
 | `study_compensation.py` | Examines the choice of compensator on the linear model (the loop across stiffness, the integral, the derivative) and confirms it on a grid of Kp and Kd and on candidate gain sets in the nonlinear simulation. |
+| `study_feedforward.py` | Tests a velocity feedforward for the outflow that a detector on the measured pressure switches on at an opening and off at a closing, against the block alone and against the feedforward told of the valve, with the pressure filter as configured and shorter: nominal cases, the detector's settings and a Monte Carlo. |
 | `robust.py`, `study_robust.py` | Define the uncertain parameters, requirement limits and sampler, and run the tornado, corner and Monte Carlo studies for each controller configuration. |
 | `studyutil.py` | Holds command-line, CSV and plotting helpers for the studies. |
 | `test_model.py`, `test_linear.py`, `test_robust.py` | Check the model, the linear model and the robustness helpers. `tests/run_all.sh` runs them. |
@@ -194,6 +196,19 @@ track the clamp (`backcalc`, eq. (54)); or integrate only inside a band
 about the target (`band`, eq. (55)). A derivative gain `Kd` subtracts
 the filtered rate of the measured pressure from the block's output,
 inside the block's clamp, eq. (56).
+
+**Outflow feedforward.** `FeedforwardController` is a comparison arm
+that is not in the slave. It runs `FB_PressureController` and adds the
+piston speed that displaces the outflow, by the orifice law at the
+target, eq. (66), while a detector finds the outlet open. The valves
+are worked by hand and the slave has no signal of them, so the detector
+reads the pressure the loop already measures: a fall the piston did not
+cause, deeper than `d_on` over the window and no deeper than an outflow
+makes, held for `t_on`, switches the feedforward on, eq. (64), and a
+pressure past the target and rising switches it off, eq. (65). The
+block's integral clear, floor and forward stop are as configured. The
+`flow_ff` option of `SlaveController` is the same feedforward told of
+the valve by the simulation, a bound that the machine cannot reach.
 
 **Legacy controller.** This is a PID controller with a filtered
 derivative, an output clamp and conditional anti-windup: the integrator
@@ -411,6 +426,32 @@ the integral zero at -Ki/Kp, and they meet on the real axis at the
 stiffness k_b:
 
     (63) |s + Ki/Kp| = Ki/Kp,   k_b = 4 Ki / Kp^2
+
+### Outflow feedforward from the pressure
+
+The detector of `FeedforwardController` reads the measured pressure P
+[MPa]. With e the error [MPa], W the window [scans], u the command
+[mm/s] and d the drop of the pressure over the window, the feedforward
+switches on at a fall the piston did not cause, no deeper than an
+outflow makes, that lasts t_on:
+
+    (64) d[n] = P[n - W] - P[n]
+         on   when  d >= d_on,  e_on < e < e_max  and  u[n-1] >= 0
+                    on every scan for t_on
+
+It switches off when the pressure is past the target and rising, or far
+past it:
+
+    (65) off  when  e < -e_off  and  -d >= d_off,
+                or  e < -e_hi
+
+While it is on, the outflow's speed at the piston by the orifice law of
+eq. (36) at the target T [MPa] is added to the block's output inside
+the velocity clamp, with c = Cd A_o sqrt(2 / rho) / A the speed at
+1 MPa (0.440 mm/s per sqrt(MPa) for the measured orifice bank):
+
+    (66) v_ff = c sqrt(T)
+         u <- min(max(u + v_ff, -VelMax), VelMax)
 
 ### Linear model
 

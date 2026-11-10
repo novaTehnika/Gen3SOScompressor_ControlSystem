@@ -60,6 +60,13 @@ study_antiwindup.py. Of its rules the slave's block has 'opposed',
 eq. (52), behind G_cfgPressureIntegClearEnable; the others and the
 derivative term are not in the slave.
 
+FeedforwardController runs the same block and adds the velocity that
+displaces the outflow, eq. (66), while a detector that reads only the
+measured pressure, eqs. (64) and (65), finds the outlet open: a sharp
+fall below the target with the piston not retracting switches it on,
+and a sharp rise above the target switches it off. It is a study arm
+of study_feedforward.py and is not in the slave.
+
 FloorPolicy sets the stop-law floor (StopVelMin) of either controller
 every scan from the detected outflow instead of the fixed configured
 value, eqs. (46) to (48), and can add a forward stop above the target.
@@ -975,4 +982,128 @@ class VariantController(SlaveController):
         self.P_prev = act
         # PRG_Main clamps the block output to VelMax.
         v = min(max(v, -self.vel_max), self.vel_max)
+        return v * 1e-3                                 # [mm/s -> m/s]
+
+
+# %% ===== OUTFLOW FEEDFORWARD FROM THE PRESSURE =========================
+class FeedforwardController(SlaveController):
+    """The slave's block with a velocity feedforward for the outflow,
+    switched by a detector on the measured pressure: a study arm that
+    is not in the slave.
+
+    With the outlet open the piston must move at the outflow's speed to
+    hold the pressure, and the block finds that speed only through its
+    error: the opening dip. The feedforward adds it at once. The slave
+    has no signal of the valves, so the detector reads the pressure the
+    loop already measures. With e the error [MPa], P the reading [MPa],
+    W the window [scans] and u the command of the scan before [mm/s]:
+
+      On, eq. (64). The drop over the window, d = P[n - W] - P[n], is
+      at least d_on with e between e_on and e_max and u not negative,
+      on every scan for t_on. A valve that opens gives a fall the
+      piston did not cause; a fall too deep for an outflow (the hose
+      joining the chamber) leaves the range of e before t_on has run.
+
+      Off, eq. (65). The error is below -e_off with the pressure
+      having risen by d_off over the window (the outlet shut under the
+      moving piston), or the error is below -e_hi (the feedforward
+      exceeds the outflow by more than the proportional term absorbs).
+
+      Feedforward, eq. (66). While on, v_ff = scale coef sqrt(T) is
+      added to the block's output inside the VelMax clamp, with T the
+      target [MPa]: the orifice law, eq. (36), at the target.
+
+    Arguments:
+      name         Label used in tables and plots.
+      coef         [(mm/s)/sqrt(MPa)] Outflow speed at the piston per
+                   root of the target, as configured; None takes the
+                   orifice flow of the run's own parameters.
+      scale        [-] Ratio of the feedforward to coef's flow: an
+                   error in the configured flow.
+      window       [s] Window of the drop and of the rise.
+      d_on         [MPa] Least drop over the window that switches on.
+      e_on, e_max  [MPa] Range of the error in which it may switch on.
+      t_on         [s] Time the on condition must hold.
+      e_off        [MPa] Error past the target that, with the rise,
+                   switches off.
+      d_off        [MPa] Least rise over the window that switches off;
+                   0 switches off on e_off alone.
+      e_hi         [MPa] Error past the target that switches off
+                   whatever the rise.
+      **overrides  Slave settings, as for SlaveController.
+    """
+
+    def __init__(self, name='feedforward', coef=None, scale=1.0,
+                 window=0.02, d_on=0.03, e_on=0.03, e_max=1.0,
+                 t_on=0.008, e_off=0.02, d_off=0.05, e_hi=0.3,
+                 **overrides):
+        super().__init__(name, **overrides)
+        self.coef = coef
+        self.scale = scale
+        self.window = window
+        self.d_on = d_on
+        self.e_on = e_on
+        self.e_max = e_max
+        self.t_on = t_on
+        self.e_off = e_off
+        self.d_off = d_off
+        self.e_hi = e_hi
+
+    def reset(self, par, scenario):
+        u0 = super().reset(par, scenario)
+        # [(mm/s)/sqrt(MPa)] Outflow speed per root of the target; the
+        # run's own orifice law at 1 MPa when none is configured.
+        # [m^3/s / m^2 -> m/s, * 1e3 -> mm/s]
+        self.c_ff = (par.Q_orifice(1e6) / par.A * 1e3
+                     if self.coef is None else self.coef)
+        self.n_w = max(1, round(self.window / self.dt))     # [scans]
+        self.n_on = round(self.t_on / self.dt)              # [scans]
+        self.hist = []          # [MPa] last n_w + 1 readings
+        self.count = 0          # [scans] the on condition has held
+        self.on = False
+        self.u_prev = 0.0       # [mm/s] command of the scan before
+        # [-] Scan numbers of the switchings on and off
+        self.scan = 0
+        self.ons, self.offs = [], []
+        return u0
+
+    def detect(self, act, err):
+        """Update the detector with the reading act and the error err
+        [MPa] of this scan, eqs. (64) and (65), and return True while
+        the feedforward is on."""
+        self.hist.append(act)
+        if len(self.hist) > self.n_w + 1:
+            self.hist.pop(0)
+        full = len(self.hist) == self.n_w + 1
+        drop = self.hist[0] - act if full else 0.0          # [MPa]
+        if not self.on:
+            # Eq. (64): a fall the piston did not cause, within the
+            # depth of an outflow, held for t_on
+            falling = (full and drop >= self.d_on
+                       and self.e_on < err < self.e_max
+                       and self.u_prev >= 0.0)
+            self.count = self.count + 1 if falling else 0
+            if self.count > self.n_on:
+                self.on = True
+                self.count = 0
+                self.ons.append(self.scan)
+        elif (err < -self.e_hi
+              or (err < -self.e_off and -drop >= self.d_off)):
+            # Eq. (65): past the target and rising, or far past it
+            self.on = False
+            self.offs.append(self.scan)
+        self.scan += 1
+        return self.on
+
+    def step(self, P_meas, target, t, scenario, x=0.0):
+        # PRG_Main limits the target to [0, TargetMax]. [Pa -> MPa]
+        tgt = min(max(target * 1e-6, 0.0), self.target_max)
+        act = P_meas * 1e-6                             # [Pa -> MPa]
+        on = self.detect(act, tgt - act)
+        v = super().step(P_meas, target, t, scenario, x) * 1e3  # [mm/s]
+        if on:
+            # Eq. (66): the orifice law at the target, inside the clamp
+            v += self.scale * self.c_ff * math.sqrt(tgt)
+            v = min(max(v, -self.vel_max), self.vel_max)
+        self.u_prev = v
         return v * 1e-3                                 # [mm/s -> m/s]
