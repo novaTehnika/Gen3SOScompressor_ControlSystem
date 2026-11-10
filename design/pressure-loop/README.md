@@ -763,18 +763,18 @@ pass rate for every requirement, in percent):
 
 | Charge, target, procedure | earlier gains | GVL | GVL + floor | sched wc 11 |
 |---|---|---|---|---|
-| 1:1 at 10 MPa, hose before | 1 | **100** | **100** | **100** |
-| 2:1 at 10 MPa, hose before | 1 | **100** | **100** | **100** |
+| 1:1 at 10 MPa, hose before | 2 | **100** | **100** | **100** |
+| 2:1 at 10 MPa, hose before | 2 | **100** | **100** | **100** |
 | 2.5:1 at 10 MPa, hose before | 0 | 0 | 0 | 0 |
-| 2.5:1 at 11 MPa, hose before | 0 | 94 | **100** | 81 |
+| 2.5:1 at 11 MPa, hose before | 0 | **100** | **100** | 91 |
 | 1:1 at 10 MPa, hose after mixing | 1 | 69 | 69 | 69 |
 | 2:1 at 10 MPa, hose after mixing | 0 | 0 | 0 | 0 |
 
-The earlier gains fail all but one sample on the ceiling at the purge
-closing (12.2 MPa at p50). The GVL gains pass every sample at 1:1 and
+The earlier gains fail all but one or two samples on the ceiling at the
+purge closing (12.2 MPa at p50). The GVL gains pass every sample at 1:1 and
 2:1 with the hose opened before the compression, with the closing peak
-at 10.9 MPa and at least 1.8 MPa over saturation at 2:1, and the
-compression arrives in 2.9 s at p50 (4.9 s at 2:1). With the hose
+at 10.9 MPa and at least 1.9 MPa over saturation at 2:1, and the
+compression arrives in 3.0 s at p50 (5.0 s at 2:1). With the hose
 opened after mixing, every arm degasses every sample at 2:1, by the
 equalisation drop, and 31 % of the samples at 1:1, whatever the
 controller: the drop leaves 0.7 MPa at nominal, and a hose compliance
@@ -783,10 +783,11 @@ the lower) or a small series compliance takes it under the 0.5 MPa
 margin. At 2.5:1 the 10 MPa target leaves too little to saturation for
 the dip plus the margin (and a fast dissolution leaves the compression
 itself short in a quarter of the samples); at 11 MPa the GVL gains pass
-94 %, failing on the ceiling where the closing peak reaches 12.0 MPa
-with a high Cd and a slow drive, and the floor's forward stop, which
-holds the peak to 11.4 to 11.6 MPa, passes every sample. The schedule
-does no better than the fixed gain anywhere, and worse at 2.5:1.
+every sample with nothing to spare, the closing peak between 11.8 and
+12.0 MPa (11.999 at worst), and the floor's forward stop holds it to
+11.3 to 11.5 MPa. The schedule does no better than the fixed gain
+anywhere, and worse at 2.5:1, where its peak passes the ceiling in 9 %
+of the samples.
 
 **What this means for the machine.**
 - The pressure loop runs on fixed gains, Kp 1.5 and Ki 0.6, with the
@@ -806,9 +807,10 @@ does no better than the fixed gain anywhere, and worse at 2.5:1.
   10 MPa in every plausible case.
 - The floor that follows the outflow, with its forward stop
   (`G_cfgPressureFloorEnable`), takes the closing peak a further
-  0.5 MPa down and the compression overshoot to 0.02 MPa. It is what
-  2.5:1 at 11 MPa needs to stay under the ceiling in every plausible
-  case (see the stop-law floor study below).
+  0.5 MPa down and the compression overshoot to 0.02 MPa. At 2.5:1 and
+  11 MPa, where the fixed gains pass every plausible case with the
+  peak at the ceiling, it keeps 0.5 MPa below it (see the stop-law
+  floor study below).
 - `G_cfgPressureStopVelMin` stays at 2 mm/s: below the outflow's
   1.4 mm/s the loop holds a steady error through the delivery.
 - 3:1 is saturated at 10.9 MPa and cannot be delivered without bubbles
@@ -945,22 +947,22 @@ rate for every requirement, in percent; the closing peak at p50 / max):
 
 | Case | earlier gains | GVL | switched, fs | estimated, fs | sched wc 11 | sched wc 11, switched, fs |
 |---|---|---|---|---|---|---|
-| 1:1 at 10 MPa | 1 | **100** | **100** | **100** | **100** | **100** |
+| 1:1 at 10 MPa | 2 | **100** | **100** | **100** | **100** | **100** |
 | 1:1 at 10 MPa, hose after mixing | 1 | 69 | 69 | 69 | 69 | 69 |
-| 2:1 at 10 MPa | 1 | **100** | **100** | **100** | **100** | **100** |
-| 2.5:1 at 11 MPa | 0 | 94 | **100** | **100** | 81 | **100** |
-| closing peak, 1:1, MPa | 12.2 / 12.4 | 10.9 / 11.0 | 10.4 / 10.5 | 10.8 / 10.9 | 10.9 / 11.0 | 10.4 / 10.5 |
-| closing peak, 2.5:1 at 11 MPa, MPa | 13.3 / 13.5 | 11.9 / 12.0 | 11.4 / 11.6 | 11.8 / 12.0 | 12.0 / 12.1 | 11.4 / 11.6 |
+| 2:1 at 10 MPa | 2 | **100** | **100** | **100** | **100** | **100** |
+| 2.5:1 at 11 MPa | 0 | **100** | **100** | **100** | 91 | **100** |
+| closing peak, 1:1, MPa | 12.2 / 12.3 | 10.9 / 11.0 | 10.4 / 10.5 | 10.7 / 10.9 | 10.9 / 11.0 | 10.4 / 10.5 |
+| closing peak, 2.5:1 at 11 MPa, MPa | 13.3 / 13.5 | 11.9 / 12.0 | 11.4 / 11.5 | 11.8 / 11.9 | 11.9 / 12.0 | 11.4 / 11.5 |
 
 At 10 MPa the GVL gains clear the ceiling without the floor; the floor
 takes the closing peak from 10.9 to 10.4 MPa. With the hose opened
 after mixing every arm fails the same 31 % of samples, on the degassing
 at the opening drop, which no floor or gain can help. At 2.5:1 and
-11 MPa the GVL gains fail 6 % of samples on the ceiling (the closing
-peak at 12.0 MPa) and the switched floor with the forward stop passes
-them all, with the peak at 11.4 to 11.6 MPa. No arm latches in the
-sealed hold after the compression except the estimated floor (up to 8
-latches at 2:1 and 11 at 2.5:1), whose k_lo reads the dissolution as
+11 MPa the GVL gains pass every sample with the closing peak at the
+ceiling (12.0 MPa at worst), and the switched floor with the forward
+stop holds it at 11.3 to 11.5 MPa. No arm latches in the
+sealed hold after the compression except the estimated floor (up to 11
+latches at 2:1 and 13 at 2.5:1), whose k_lo reads the dissolution as
 outflow. The switched floor latches once during the compression in some
 samples at 2:1 and 2.5:1, where the gas-rich chamber rises slowly, and
 releases on the approach.
@@ -991,8 +993,8 @@ forward stop is in the slave, off by default. It needs no stiffness
 value, keeps the stop law in a sealed chamber, passes the outflow in a
 delivery and stops the piston when the outlet shuts. On the GVL gains
 it takes the closing peak from 10.8 to 10.3 MPa and the compression
-overshoot from 0.09 to 0.02 MPa, and it is what keeps 2.5:1 at 11 MPa
-under the ceiling in every plausible case. The floor switching on its
+overshoot from 0.09 to 0.02 MPa, and at 2.5:1 and 11 MPa, where the
+fixed gains reach the ceiling, it keeps the peak 0.5 MPa below it. The floor switching on its
 own is not enough; the forward stop is what acts at the closing, and
 the latch is what lets the forward stop run in a delivery. A slow
 closing argues for a lower `G_cfgPressureFloorRelRate` (0.25 MPa/s)
