@@ -26,7 +26,9 @@ it. README equations (26) to (32) give each part.
               constant during a scan: Gd(z), eq. (26).
   Command     The command computed in scan n acts in scan n + 1, and the
               drive responds a dead time t_dead later: z^-(1 + n_dead).
-  Controller  The PI law of FB_PressureController, C(z), eq. (27).
+  Controller  The PI law of FB_PressureController, C(z), eq. (27). A
+              derivative term on the measured pressure, eq. (57), can
+              be added for the compensation study; the slave has none.
   Sensor      The median of N samples delays a slowly varying signal by
               (N - 1)/2 scans, and the first-order filter is F(z),
               eq. (28).
@@ -35,7 +37,8 @@ it. README equations (26) to (32) give each part.
 
 The open loop is L(z), eq. (29). The sensitivity S, complementary
 sensitivity T, target response R and outflow response D follow from it,
-eqs. (30) to (32).
+eqs. (30) to (32), and so does the response N of the command to sensor
+noise, eq. (58).
 
 The model omits the output clamp and stop law, the slew limits on the
 command, the nonlinearity of the median filter, and gas dissolution.
@@ -139,22 +142,27 @@ def filter_alpha(cfg):
 
 
 # %% ===== LOOP TRANSFER FUNCTIONS =======================================
-def loop(par, k, delay=None, **cfg_overrides):
+def loop(par, k, delay=None, Kd=0.0, Tf=0.02, **cfg_overrides):
     """Return the loop transfer functions at chamber stiffness k [Pa/m].
 
     par supplies the piston area A, the drive lag tauV and the slave
     configuration. cfg_overrides are G_cfg* settings such as
     G_cfgPressureKp=1.0. delay replaces the sensor-path delay from
-    sample_delay(); the tests use it to confirm the delay count.
+    sample_delay(); the tests use it to confirm the delay count. Kd
+    [(mm/s)/(MPa/s)] adds a derivative term on the measured pressure
+    with filter time constant Tf [s], eq. (57); the slave has none.
 
     The result is a dict with these entries:
       L, S, T     open loop, sensitivity, complementary sensitivity
       R           target to pressure (the target reaches the controller
                   without passing through the sensor)
       D           outflow Q [m^3/s] to pressure [Pa]; negative
-      Gd, C, F    plant, controller and filter
+      Gd, C, F    plant, controller (with the derivative term, if
+                  any) and filter
+      N           sensor noise [Pa] to command [m/s], eq. (58)
       cl          closed-loop characteristic polynomial
       Kp, Ki      [(mm/s)/MPa], [(mm/s)/(MPa s)] controller gains
+      Kd          [(mm/s)/(MPa/s)] derivative gain
       Ts          [s] scan time
       delay       [scans] total pure delay, including the command's scan
                   and the drive's dead time
@@ -186,6 +194,23 @@ def loop(par, k, delay=None, **cfg_overrides):
     # with the gains converted from (mm/s)/MPa to (m/s)/Pa
     C_num = _poly(Kp * KP_UNIT, (-Kp + Ki * Ts) * KP_UNIT)
     C_den = _poly(1, -1)
+
+    # The target sees the PI part alone; R below is built from it.
+    Cpi_num = C_num
+    # [-] Factor that brings the PI part to the denominator of C
+    C_extra = _poly(1)
+    if Kd:
+        # Derivative on the measured pressure, eq. (57): the filtered
+        # rate of eq. (21), a (z - 1) / (Ts (z - (1 - a))) with
+        # a = Ts / (Tf + Ts), times Kd. It acts on the measurement, so
+        # it joins the loop but not the target's path.
+        a_d = Ts / (Tf + Ts)
+        C_extra = _poly(1, -(1 - a_d))
+        C_num = np.polyadd(
+            np.polymul(Cpi_num, C_extra),
+            Kd * KP_UNIT * a_d / Ts * np.polymul(_poly(1, -1),
+                                                 _poly(1, -1)))
+        C_den = np.polymul(C_den, C_extra)
 
     def C_freq(w):
         return _poly_ratio(C_num, C_den, w, Ts)
@@ -230,13 +255,23 @@ def loop(par, k, delay=None, **cfg_overrides):
     # enters at the controller, so the sensor path does not act on it.
     z_pow_rest = np.zeros(d_sensor + 1)
     z_pow_rest[0] = 1.0                                     # z^d_sensor
-    R_num = np.polymul(np.polymul(np.polymul(C_num, Gd_num), F_den),
-                       z_pow_rest)
+    R_num = np.polymul(np.polymul(np.polymul(
+        np.polymul(Cpi_num, C_extra), Gd_num), F_den), z_pow_rest)
 
     def R_freq(w):
-        return (C_freq(w) * Gd_freq(w) * _delay(w, Ts, 1 + n_dead)
-                * S_freq(w))
+        return (_poly_ratio(Cpi_num, _poly(1, -1), w, Ts) * Gd_freq(w)
+                * _delay(w, Ts, 1 + n_dead) * S_freq(w))
     R = TF(R_num, cl, Ts, R_freq)
+
+    # Sensor noise to command, eq. (58): N = -C z^-d_sensor F S. The
+    # noise is added to the sampled pressure, ahead of the sensor path.
+    def N_freq(w):
+        return (-C_freq(w) * F_freq(w) * _delay(w, Ts, d_sensor)
+                * S_freq(w))
+    z_pow_dead = np.zeros(2 + n_dead)
+    z_pow_dead[0] = 1.0                                 # z^(1 + n_dead)
+    N = TF(-np.polymul(np.polymul(np.polymul(C_num, F_num), Gd_den),
+                       z_pow_dead), cl, Ts, N_freq)
 
     # Outflow to pressure, eq. (32): D = -(k Ts / A) / (z - 1) S.
     # The outflow changes the chamber volume directly, so it enters at
@@ -249,8 +284,8 @@ def loop(par, k, delay=None, **cfg_overrides):
         return _poly_ratio(Dq_num, Dq_den, w, Ts) * S_freq(w)
     D = TF(np.polymul(Dq_num, L_den), np.polymul(Dq_den, cl), Ts, D_freq)
 
-    return dict(L=L, S=S, T=T, R=R, Gd=Gd, D=D, C=C, F=F, Kp=Kp, Ki=Ki,
-                Ts=Ts, delay=d, k=k, cl=cl)
+    return dict(L=L, S=S, T=T, R=R, Gd=Gd, D=D, C=C, F=F, N=N, Kp=Kp,
+                Ki=Ki, Kd=Kd, Ts=Ts, delay=d, k=k, cl=cl)
 
 
 def poles(lp):
@@ -419,6 +454,112 @@ def kp_for_pm(par, k, pm_deg, ngrid=120, lo=None, hi=None, ki_ratio=None,
     if i == len(grid) - 1:
         return np.inf
     return _refine(grid[i], grid[i + 1], passes, 30)
+
+
+def kp_for_margins(par, k, pm_deg, gm_db, ki_ratio, td=0.0, Tf=0.02,
+                   ngrid=81, **cfg_overrides):
+    """Return the largest Kp [(mm/s)/MPa] with a phase margin of at
+    least pm_deg [deg] and a gain margin of at least gm_db [dB] at
+    stiffness k [Pa/m], with Ki = ki_ratio Kp and Kd = td Kp, or NaN if
+    no Kp on the grid has them.
+
+    With both ratios fixed the loop depends on Kp and k only through
+    Kp k, eq. (62), so the result times k is the same at every
+    stiffness.
+    """
+    w = freq_grid(par.Ts, 2500, 1e-3)
+
+    def passes(kp):
+        lp = loop(par, k, Kd=td * kp, Tf=Tf,
+                  **{**cfg_overrides, 'G_cfgPressureKp': kp,
+                     'G_cfgPressureKi': ki_ratio * kp})
+        if not is_stable(lp):
+            return False
+        m = margins(lp['L'], w)
+        return m['pm'] >= pm_deg and m['gm_db'] >= gm_db
+
+    grid = _kp_grid(k, 1e-2 / (k / MPA_MM), 1e2 / (k / MPA_MM), ngrid)
+    good = [j for j, x in enumerate(grid) if passes(x)]
+    if not good:
+        return np.nan
+    i = max(good)
+    if i == len(grid) - 1:
+        return np.inf
+    return _refine(grid[i], grid[i + 1], passes, 30)
+
+
+def softest_stiffness(par, pm_deg, k_hi, Kd=0.0, Tf=0.02,
+                      **cfg_overrides):
+    """Return the lowest stiffness [Pa/m] at which the loop keeps a
+    phase margin of pm_deg [deg], searched downward from k_hi [Pa/m];
+    NaN if it has no such margin at k_hi or within a factor of three
+    below it (k_hi may sit exactly at the stiff limit of the margin).
+
+    Below the integral corner Ki/Kp the PI term adds its own 90 deg of
+    lag to the chamber's, so the phase margin falls as the crossover
+    Kp k falls with the stiffness.
+    """
+    w = freq_grid(par.Ts, 2500, 1e-5)
+
+    def passes(k):
+        lp = loop(par, k, Kd=Kd, Tf=Tf, **cfg_overrides)
+        if not is_stable(lp):
+            return False
+        return margins(lp['L'], w)['pm'] >= pm_deg
+
+    for _ in range(12):
+        if passes(k_hi):
+            break
+        k_hi *= 0.9
+    else:
+        return np.nan
+    a, b = k_hi, k_hi
+    while b > 1e-6 * k_hi:
+        b /= 2.0
+        if not passes(b):
+            break
+        a = b
+    else:
+        return b
+    for _ in range(30):
+        m = np.sqrt(a * b)
+        if passes(m):
+            a = m
+        else:
+            b = m
+    return a
+
+
+# %% ===== MODES AND NOISE ===============================================
+def least_damped(lp, w_max=100.0):
+    """Return (zeta [-], wn [rad/s]) of the least damped closed-loop
+    mode of loop dict lp with a natural frequency up to w_max [rad/s]:
+    the smallest damping ratio -Re(s) / |s| among those poles, from
+    s = ln(z) / Ts, and that pole's natural frequency. The limit leaves
+    out the poles the pure delay puts near the origin of the z plane,
+    which map to frequencies near the Nyquist frequency."""
+    z = poles(lp).astype(complex)
+    z = z[np.abs(z) > 1e-9]
+    s = np.log(z) / lp['Ts']                                # [rad/s]
+    s = s[np.abs(s) <= w_max]
+    zeta = -s.real / np.abs(s)
+    j = int(np.argmin(zeta))
+    return float(zeta[j]), float(np.abs(s[j]))
+
+
+def noise_gain(lp, n=20000):
+    """Return the RMS command [m/s] per unit RMS of white sensor noise
+    [Pa] per sample for loop dict lp: the 2-norm of N, eq. (58),
+
+      g^2 = (1 / pi) integral over 0..pi of |N(e^(j theta))|^2 d theta.
+
+    The model passes the noise through the median as a pure delay, and
+    a median of five lowers the variance of white noise, so this is an
+    upper bound on the simulation's.
+    """
+    theta = np.linspace(1e-4, np.pi, n)                     # [rad]
+    H = lp['N'].freq(theta / lp['Ts'])
+    return float(np.sqrt(np.trapezoid(np.abs(H)**2, theta) / np.pi))
 
 
 # %% ===== OUTFLOW DISTURBANCE ===========================================

@@ -23,6 +23,7 @@ python3 design/pressure-loop/study_compare.py    # three scenarios, seven contro
 python3 design/pressure-loop/study_delivery.py   # deliverable volume against oxygen charge
 python3 design/pressure-loop/study_floor.py      # stop-law floors that follow the outflow, about 1 min; --mc 100 adds 3 min
 python3 design/pressure-loop/study_antiwindup.py # anti-windup rules and a derivative term, about 1 min
+python3 design/pressure-loop/study_compensation.py # choice of compensator: linear design map and a gain grid, about 1 min
 python3 design/pressure-loop/study_linear.py     # margins against chamber stiffness, about 30 s
 python3 design/pressure-loop/study_robust.py     # Monte Carlo over the uncertain parameters, about 5 min on 4 CPUs
 python3 design/pressure-loop/study_convergence.py # integration error against the time step, about 1 min
@@ -64,7 +65,8 @@ The plant, the sensor chain and their parameters are in `models/`
 | `study_delivery.py` | Runs the delivery to the empty chamber over a range of oxygen charges and reports the deliverable volume. |
 | `study_floor.py` | Compares stop-law floors that follow the outflow, with and without the forward stop, against the fixed `StopVelMin`: nominal cases, a sweep of the policy settings and a Monte Carlo over the measured ranges. |
 | `study_antiwindup.py` | Compares ways of managing the loop's integrator (clearing it past the target, tracking, an integration band) and a derivative term against the block as it is, on a soft gas-filled chamber at low pressure and on the 10 MPa cycle. |
-| `linear.py`, `study_linear.py` | Build the discrete-time linear model of the velocity-command loop, equations (26) to (33), and use it to find the margins, the stability boundary and the frequency and disturbance responses. |
+| `linear.py`, `study_linear.py` | Build the discrete-time linear model of the velocity-command loop, equations (26) to (33), and use it to find the margins, the stability boundary and the frequency and disturbance responses. `linear.py` also takes a derivative term and gives the noise gain, the least damped mode and the gain and stiffness limits of a margin, equations (57) to (62). |
+| `study_compensation.py` | Examines the choice of compensator on the linear model (the loop across stiffness, the integral, the derivative) and confirms it on a grid of Kp and Kd and on candidate gain sets in the nonlinear simulation. |
 | `robust.py`, `study_robust.py` | Define the uncertain parameters, requirement limits and sampler, and run the tornado, corner and Monte Carlo studies for each controller configuration. |
 | `studyutil.py` | Holds command-line, CSV and plotting helpers for the studies. |
 | `test_model.py`, `test_linear.py`, `test_robust.py` | Check the model, the linear model and the robustness helpers. `tests/run_all.sh` runs them. |
@@ -354,6 +356,50 @@ Derivative term, with d the filtered rate of the measured pressure of
 eq. (21) [MPa/s] and v_lim the block's clamp of eq. (19):
 
     (56) u <- min(max(u - Kd d, -v_lim), v_lim)
+
+### Compensation: derivative term, noise and the soft chamber
+
+Controller with a derivative term on the measured pressure, with
+a = Ts / (Tf + Ts) the coefficient of the derivative filter of eq. (21).
+The term joins the loop; the target's path, eq. (31), keeps the PI part
+alone:
+
+    (57) C(z) = Kp + Ki Ts / (z - 1)
+                + Kd a (z - 1) / (Ts (z - (1 - a)))
+
+Sensor noise to command, with d_s the scans of delay in the sensor path,
+and the RMS command per unit RMS of white noise per sample:
+
+    (58) N = -C z^-d_s F S
+         g^2 = (1 / pi) integral over 0..pi of |N(e^(j theta))|^2 d theta
+
+Soft chamber. Where the crossover lies far below the delay and the
+lags, the loop is the chamber's integrator and the controller's, with
+k the stiffness [MPa/mm], v the piston velocity [mm/s] and w = Ki I the
+velocity held by the integral [mm/s]:
+
+    (59) dP/dt = k v,   v = Kp e + w - Kd dP/dt,   dw/dt = Ki e
+         (1 + k Kd) d2e/dt2 + k Kp de/dt + k Ki e = 0
+
+Its natural frequency and damping ratio:
+
+    (60) wn = sqrt(k Ki / (1 + k Kd))
+         zeta = (Kp / 2) sqrt(k / (Ki (1 + k Kd)))
+
+Overshoot when the error crosses zero with the integral holding the
+velocity w0, for Kd = 0 and zeta < 1:
+
+    (61) e_peak = w0 sqrt(k / Ki) exp(-zeta phi / sqrt(1 - zeta^2))
+         phi = atan(sqrt(1 - zeta^2) / zeta)
+
+One loop for every stiffness. With Ki/Kp, Kd/Kp and Tf fixed, the open
+loop of eq. (29) is a fixed function L_1 scaled by Kp k, so the
+stiffness sets where the gain crosses one and the phase margin is read
+from the one phase curve:
+
+    (62) L(z) = Kp k L_1(z)
+         PM(k) = 180 deg + arg L_1 at the frequency where
+                 |L_1| = 1 / (Kp k)
 
 ### Linear model
 
@@ -1134,3 +1180,193 @@ derivative term's benefit is not confirmed by a measurement.
   hose shut, and the bench has not shown that arrival to need it.
 - None of the variants is in the slave. A candidate would go through
   the Monte Carlo of `study_robust.py` before it is ported.
+
+## Choice of compensation
+
+`study_compensation.py` asks which compensator the loop should have,
+and why, on the linear model of `linear.py`, and then confirms the
+answer in the nonlinear simulation. The design chamber is the liquid
+chamber with the hose shut at a full fill (7.5 MPa/mm); the delivery
+runs at 3.2 MPa/mm and the stiffest possible chamber is 13.4. The
+margins asked are 45° of phase and 6 dB of gain at the design chamber.
+
+**The loop is one curve, and the stiffness slides the crossover along
+it.** The plant is an integrator, the chamber, whose gain is the
+stiffness, behind 40 ms of pure delay, the drive's 7.5 ms lag and the
+20 ms filter. By eq. (62) a change of stiffness changes nothing but
+the loop gain. The phase curve is fixed: it starts at −180° (two
+integrators, the chamber's and the controller's), rises toward −90°
+above the integral corner Ki/Kp, and falls again where the delay takes
+over (`compensation_bode.png`). The GVL loop across the chamber's
+range:
+
+| k MPa/mm | Phase margin | Gain margin dB | Crossover rad/s | Damping of the least damped mode | Target step overshoot |
+|---|---|---|---|---|---|
+| 0.003 | 6° | 75 | 0.04 | 0.05 | 86 % |
+| 0.01 | 11° | 65 | 0.08 | 0.09 | 76 % |
+| 0.03 | 19° | 55 | 0.14 | 0.16 | 63 % |
+| 0.1 | 33° | 45 | 0.27 | 0.30 | 46 % |
+| 0.3 | 52° | 35 | 0.56 | 0.52 | 30 % |
+| 1.0 | 69° | 25 | 1.5 | 0.99 | 15 % |
+| 3.2 (delivery) | 66° | 14.7 | 4.8 | 1.00 | 7 % |
+| 7.5 (design) | 45° | 7.3 | 10.9 | 0.41 | 31 % |
+| 13.4 (stiffest) | 17° | 2.2 | 18.4 | 0.11 | 83 % |
+
+The loop is sound over a decade and a half of stiffness and loses its
+margin at both ends, for different reasons. At the stiff end the delay
+has taken the phase. At the soft end the crossover has fallen below the
+integral corner, where the controller's integrator adds its 90° to the
+chamber's; the damping there is that of eq. (60), which the model's
+poles follow within 3 %.
+
+**The delay sets the proportional gain.** A loop gain Kp k of
+11.2 rad/s is the most that keeps 45° and 6 dB, whatever the stiffness.
+At the design chamber that is Kp 1.49: the GVL's 1.5 is at the limit,
+with the phase margin binding. A proportional gain alone could be 1.57.
+
+**The integral is for the outflow, and it sets the soft end.** With
+the largest Kp for each Ki/Kp, on the orifice flow at 10 MPa
+(4.8 mL/s) in the delivery chamber:
+
+| Ki/Kp 1/s | Kp | Ki | Dip MPa | Back within 0.1 MPa after | Softest chamber with 45° | Stiffness range | Damping at 0.03 MPa/mm |
+|---|---|---|---|---|---|---|---|
+| 0 (P) | 1.57 | 0 | 0.89 | never | any | — | 1.00 |
+| 0.1 | 1.55 | 0.16 | 0.87 | 21.8 s | 0.047 MPa/mm | 161 to 1 | 0.34 |
+| 0.2 | 1.53 | 0.31 | 0.87 | 10.9 s | 0.096 | 78 to 1 | 0.24 |
+| 0.4 | 1.49 | 0.60 | 0.86 | 5.5 s | 0.21 | 36 to 1 | 0.16 |
+| 0.8 | 1.40 | 1.12 | 0.87 | 2.7 s | 0.49 | 15 to 1 | 0.11 |
+| 1.6 | 1.17 | 1.87 | 0.92 | 1.4 s | 1.5 | 5 to 1 | 0.07 |
+
+Without the integral the pressure stays 0.89 MPa low for the whole
+delivery, eq. (33). With it the dip recovers in about 2.2 integral
+times, and the range of stiffness over which the loop keeps its phase
+margin is roughly 14 times the integral time in seconds: the crossover
+must stay between the integral corner and the delay limit. The chamber
+spans 0.003 to 13.4 MPa/mm, 4500 to 1. A fixed gain set covers that
+only with an integral time of about five minutes, and a delivery that
+takes over ten minutes to recover. Damping the 0.03 MPa/mm chamber to 0.7 alone takes Ki 0.034
+(an integral time of 44 s) and leaves the delivery 97 s to recover.
+
+**A derivative term buys little, and only at the stiff end.** With
+Ki = 0.4 Kp and the largest Kp for each Kd/Kp:
+
+| Derivative filter | Best Kd/Kp | Kp | Kd | Dip MPa | Gain margin, stiffest chamber | Command noise | Kp with the PI's gain margin kept |
+|---|---|---|---|---|---|---|---|
+| none (PI) | — | 1.49 | 0 | 0.86 | 2.3 dB | 0.48 µm/s per kPa | 1.49 |
+| 50 ms | 0.015 s | 1.62 (+9 %) | 0.024 | 0.78 | 1.0 dB | 0.63 | 1.49 (+0 %) |
+| 20 ms | 0.015 s | 1.76 (+18 %) | 0.026 | 0.73 | 1.0 dB | 0.77 | 1.53 (+3 %) |
+| 10 ms | 0.020 s | 1.87 (+25 %) | 0.037 | 0.69 | 1.0 dB | 1.03 | 1.63 (+9 %) |
+| 4 ms | 0.020 s | 2.03 (+36 %) | 0.041 | 0.64 | 1.0 dB | 1.37 | 1.75 (+17 %) |
+
+The lead lifts the phase near the crossover, so Kp can rise until the
+gain margin binds in place of the phase margin. The gain margin is set
+at the phase crossover, 23 rad/s, by the delay, and the derivative
+raises the gain there; past Kd/Kp of 0.02 s the largest Kp falls again.
+With the 20 ms filter the term is worth 18 % of gain (0.13 MPa of dip)
+for a gain margin in the stiffest chamber of 1.0 dB in place of 2.3 and
+1.6 times the command noise. Held to the PI loop's own gain margin it
+is worth 3 %. A faster filter gives more, 36 % at 4 ms, for 2.9 times
+the noise. In the soft chamber the term does nothing: by eq. (60) it
+enters as 1 + k Kd, which is 1.001 at 0.03 MPa/mm. A lead placed at the
+soft chamber's crossover, 0.14 rad/s, would be a Kd of about 10, and
+the loop gain of the derivative path in the stiffest chamber, Kd k,
+would be over a hundred.
+
+**The grid in the nonlinear simulation** (Ki = 0.4 Kp, 20 ms derivative
+filter; rows Kp, columns Kd):
+
+Stiff step, 10 to 12 MPa with the hose shut, overshoot in MPa:
+
+| Kp \ Kd | 0 | 0.02 | 0.04 | 0.06 | 0.08 |
+|---|---|---|---|---|---|
+| 1.0 | 0.22 | 0.11 | 0.11 | 0.12 | 0.13 |
+| 1.5 | 0.48 | 0.27 | 0.08 | 0.04 | 0.05 |
+| 2.0 | 0.61 | 0.40 | 0.21 | 0.06 | 0.06 |
+| 2.5 | 0.69 | 0.49 | 0.30 | 0.12 | 0.07 |
+| 3.0 | 0.75 | 0.55 | 0.36 | 0.19 | 0.09 |
+
+Cycle at 10 MPa, hose opened before the compression, deepest dip in
+MPa:
+
+| Kp \ Kd | 0 | 0.02 | 0.04 | 0.06 | 0.08 |
+|---|---|---|---|---|---|
+| 1.0 | 1.13 | 1.12 | 1.10 | 1.09 | 1.08 |
+| 1.5 | 0.82 | 0.81 | 0.79 | 0.78 | 0.78 |
+| 2.0 | 0.67 | 0.65 | 0.63 | 0.62 | 0.61 |
+| 2.5 | 0.60 | 0.57 | 0.55 | 0.53 | 0.51 |
+| 3.0 | 0.56 | 0.54 | 0.52 | 0.50 | 0.49 |
+
+Soft chamber, the bench fill stepped to 5 atm, overshoot in MPa:
+
+| Kp \ Kd | 0 | 0.02 | 0.04 | 0.06 | 0.08 |
+|---|---|---|---|---|---|
+| 1.0 | 0.70 | 0.70 | 0.70 | 0.70 | 0.70 |
+| 1.5 | 0.48 | 0.48 | 0.48 | 0.47 | 0.47 |
+| 2.0 | 0.37 | 0.37 | 0.37 | 0.36 | 0.36 |
+| 2.5 | 0.30 | 0.30 | 0.30 | 0.30 | 0.30 |
+| 3.0 | 0.25 | 0.25 | 0.25 | 0.25 | 0.25 |
+
+The grid agrees with the linear model on each point. The dip follows
+Kp and hardly Kd. The soft overshoot does not move with Kd at all; it
+falls with Kp, but every row from Kp 2 up is unstable in the stiffest
+chamber in the linear model, and Kp 2 has 32° at the design chamber.
+The stiff step is where Kd shows, 0.48 to 0.04 MPa at Kp 1.5, because
+that step is the stop law running into the measurement lag, which a
+rate term anticipates. The bench has not shown that overshoot (see the
+anti-windup study), and the command activity at rest rises from 0.0002
+to 0.0006 mm/s per scan.
+
+**The candidate gain sets** the linear model selects, in the same
+cases (the cycle with the hose opened before the compression; "clear"
+adds eq. (52) at 0.02 MPa):
+
+| Set | Kp / Ki / Kd | Gain margin, stiffest | 5 atm step: overshoot / in band | 20 atm overshoot | Dip / back in band | Closing peak | Stiff step overshoot |
+|---|---|---|---|---|---|---|---|
+| P | 1.57 / 0 / 0 | 2.0 dB | does not arrive | does not arrive | 0.85 / never | 10.00 | 0.50 |
+| PI, GVL | 1.5 / 0.6 / 0 | 2.2 dB | 0.48 / 72 s | 0.53 | 0.82 / 5.6 s | 10.85 | 0.48 |
+| PI, GVL, clear | 1.5 / 0.6 / 0 | 2.2 dB | 0.02 / 34 s | 0.06 | 0.83 / 5.6 s | 10.29 | 0.48 |
+| PI, Ki/Kp 0.1 | 1.55 / 0.155 / 0 | 2.0 dB | 0.71 / 75 s | 0.26 | 0.83 / 19.3 s | 10.61 | 0.49 |
+| PI, Ki/Kp 1.6 | 1.17 / 1.87 / 0 | 4.0 dB | 0.30 / 69 s | 0.71 | 0.89 / 1.4 s | 10.93 | 0.63 |
+| PI, damped at 0.03 MPa/mm | 1.5 / 0.034 / 0 | 2.4 dB | 0.39 / not in 100 s | 0.34 | 0.87 / never | 10.23 | 0.47 |
+| PID, 20 ms filter | 1.76 / 0.70 / 0.026 | 1.0 dB | 0.41 / 68 s | 0.41 | 0.71 / 5.2 s | 10.73 | 0.29 |
+| PID, 20 ms filter, clear | 1.76 / 0.70 / 0.026 | 1.0 dB | 0.02 / 34 s | 0.05 | 0.71 / 5.2 s | 10.27 | 0.29 |
+| PID, 4 ms filter | 2.03 / 0.81 / 0.041 | 1.0 dB | 0.36 / 49 s | 0.31 | 0.62 / 4.8 s | 10.64 | 0.19 |
+
+**A smaller integral gain does not cure the soft overshoot either.**
+The linear step of the first table is not what the machine does: the
+approach is long, the output is at the stop-law floor for most of it,
+and the integral arrives holding that floor, 2 mm/s, whatever the
+gains. From there eq. (61) gives the overshoot, 0.35 to 0.54 MPa at the
+GVL gains for 0.03 to 0.1 MPa/mm (the simulation gives 0.48 and the
+bench 0.35 from a crossing at 1.43 mm/s, for which the equation gives
+0.25 to 0.39). The overshoot grows as Ki falls, as sqrt(k / Ki): the
+loop with Ki/Kp of 0.1 overshoots by 0.71 MPa, and the one damped to
+0.7 by 0.39 MPa without coming into band in 100 s.
+
+**Why clearing the integral is the right remedy.** In the soft chamber
+the loop has two states, the error and the velocity the integral holds,
+eq. (59). When the error crosses zero the whole state is in the
+integral, and the chamber is sealed, so its equilibrium is zero error
+with zero integral: clearing the integral there puts the loop at rest,
+and nothing is left to ring. With the outlet open the equilibrium is
+the outflow velocity, held by the integral at zero error, which is why
+the clear must act only once the pressure is past the target (the
+piston is then moving faster than the outflow), and never at the
+target itself.
+
+**What this means for the machine.**
+- The loop is a PI controller. The proportional gain is at the limit
+  the delay allows in the hose-shut chamber, and Ki/Kp of 0.4 is the
+  trade between the delivery's recovery (5.5 s) and the margins; both
+  are where the GVL has them.
+- It has no derivative term. The term is worth 18 % of gain for most of
+  the stiffest chamber's gain margin and 1.6 times the command noise,
+  3 % at an equal gain margin, and nothing in the soft chamber.
+- No fixed linear compensator covers the chamber: a gain set keeps its
+  phase margin over a stiffness range of about 14 times its integral
+  time, 36 to 1 here, and the chamber spans 4500 to 1. The soft end
+  needs either a gain that follows the stiffness, which the slave
+  cannot measure ahead of the approach, or the integral cleared past
+  the target, eq. (52), which needs no stiffness and takes the 5 atm
+  overshoot from 0.48 to 0.02 MPa.
+
