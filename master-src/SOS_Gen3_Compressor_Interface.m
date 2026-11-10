@@ -98,7 +98,12 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
     % Cost of the display poll in seconds (n polls, mean, max, last) and
     % the polls that took longer than cfg.displayPeriod
     properties (SetAccess = private)
-        PollStats = struct('n', 0, 'mean', 0, 'max', 0, 'last', 0, 'overruns', 0)
+        PollStats = struct('n', 0, 'mean', 0, 'max', 0, 'last', 0, 'overruns', 0, ...
+            'writeGapMax', 0, 'stalls', 0)
+        % One entry per link stall: a gap between master writes of at
+        % least cfg.stallWarn (time, gap_s, activity: what the app last
+        % did that holds MATLAB's thread, or '' when it did nothing)
+        StallLog = struct('time', {}, 'gap_s', {}, 'activity', {})
     end
 
 
@@ -188,6 +193,18 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % (rows 4 and 5 of ProcContentGrid; 0 when the step has none)
         procChecksHeight = 0
         procParamsHeight = 0
+
+        % Link stalls: the last activity that holds MATLAB's thread (and
+        % so the model) and when it was noted, the stall shown on the
+        % status line and since when, whether the windows are locked
+        % against resizing, and recordings stopped while motion was
+        % commanded, written once it ends.
+        activityName = ''
+        activityAt = []
+        stallText = ""
+        stallShownAt = []
+        resizeLocked = false
+        tracePending = {}
     end
 
     properties (Access = private, Constant)
@@ -218,6 +235,14 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         MAIN_PAD        = 6
         TASKBAR_MARGIN  = 48
         DECO_FALLBACK   = [8 8 8 90]
+
+        % A stall is put down to an activity noted at most this long
+        % before it was seen, beyond the stall's own length (s), is
+        % shown on the status line this long (s), and is not looked for
+        % in the first records after the model starts
+        STALL_SLACK = 2
+        STALL_SHOW  = 15
+        STALL_SKIP_RECORDS = 20
 
         COLOR_IDLE     = [0.96 0.96 0.96]
         COLOR_STARTING = [1 0.8 0.3]
@@ -260,6 +285,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 stop(app.Simulation);
                 app.wasRunning = false;     % not an unexpected stop
                 finishRecording(app, false);
+                flushPendingTraces(app);
                 app.StatusLabel.Text = "Disconnected";
             catch ME
                 app.StatusLabel.Text = append("Disconnect failed: ", ME.message);
@@ -382,6 +408,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 [app.traceReader, new] = traceDrain(app.traceReader, ...
                     readBlock(app, "TraceRing"));
                 [app.traceAligner, aligned] = traceAlign(app.traceAligner, new, false);
+                checkStall(app, aligned);
                 app.traceLive = traceLiveAppend(app.traceLive, aligned);
                 if app.traceRecording && ~app.tracePaused
                     takeRecords(app, aligned);
@@ -417,15 +444,24 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 figure(app.liveFig.fig);
                 return
             end
+            noteActivity(app, 'live plot opened');
             try
                 app.liveFig = traceLiveNew('on');
                 set(app.liveFig.fig, 'CloseRequestFcn', @(~, ~) closeLivePlot(app));
+                try
+                    app.liveFig.fig.AutoResizeChildren = 'off';  % so it takes a SizeChangedFcn
+                catch
+                end
+                set(app.liveFig.fig, 'SizeChangedFcn', ...
+                    @(~, ~) noteActivity(app, 'live plot resized'));
                 app.liveFig.fig.Units = 'pixels';
                 if ~isempty(app.cfg.livePlotPosition)
                     app.liveFig.fig.Position = app.cfg.livePlotPosition;
                 end
+                applyResizeLock(app);
                 app.livePolls = 0;
                 traceLiveUpdate(app.liveFig, app.traceLive);
+                noteActivity(app, 'live plot opened');
             catch ME
                 app.liveFig = [];
                 app.TraceStatusLabel.Text = append("Live plot failed: ", ME.message);
@@ -442,7 +478,10 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         % End the recording and save it. The file is written to the
         % captures folder first; an interactive stop then offers to move
-        % it, and cancelling keeps it where it is.
+        % it, and cancelling keeps it where it is. While motion is
+        % commanded nothing is written and no dialog opens, since either
+        % holds the model's thread: the recording is kept and written to
+        % the captures folder once motion ends (flushPendingTraces).
         function finishRecording(app, interactive)
             if ~app.traceRecording
                 return
@@ -471,13 +510,44 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 updateButtons(app);
                 return
             end
+            job = struct('data', app.trace.data(1:app.trace.n, :), ...
+                'meta', traceMeta(struct('n', app.trace.n, 'missed', missed), ...
+                app.cfg, app.traceStartedAt, app.traceIntervalStart), ...
+                'missed', missed, 'stamp', datestr(now, "yyyymmdd_HHMMSS"));
+            if motionCommanded(app)
+                app.tracePending{end + 1} = job;
+                app.TraceStatusLabel.Text = sprintf( ...
+                    "Stopped, %d records: saved when motion ends", size(job.data, 1));
+                updateButtons(app);
+                return
+            end
+            saveTrace(app, job, interactive);
+            updateButtons(app);
+        end
+
+        % Write the recordings kept while motion was commanded, without a
+        % dialog, once motion has ended or the model has stopped
+        function flushPendingTraces(app)
+            if isempty(app.tracePending) || motionCommanded(app)
+                return
+            end
+            jobs = app.tracePending;
+            app.tracePending = {};
+            for k = 1:numel(jobs)
+                saveTrace(app, jobs{k}, false);
+            end
+        end
+
+        % Write one finished recording to the captures folder, offer to
+        % move it when interactive, and name it on the trace status line
+        function saveTrace(app, job, interactive)
+            noteActivity(app, 'trace file written');
             try
                 file = char(fullfile(capturesFolder(app), append("trace_", ...
-                    datestr(now, "yyyymmdd_HHMMSS"), ".csv")));
-                traceWriteCsv(file, app.trace.data(1:app.trace.n, :), ...
-                    traceMeta(struct('n', app.trace.n, 'missed', missed), ...
-                    app.cfg, app.traceStartedAt, app.traceIntervalStart));
+                    job.stamp, ".csv")));
+                traceWriteCsv(file, job.data, job.meta);
                 if interactive
+                    noteActivity(app, 'Save trace dialog');
                     [name, folder] = uiputfile("*.csv", "Save trace", file);
                     figure(app.UIFigure);
                     if ~isequal(name, 0) && ~strcmp(fullfile(folder, name), file)
@@ -489,16 +559,98 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 [~, base, ext] = fileparts(file);
                 app.TraceStatusLabel.Text = append("Saved ", base, ext);
                 app.TraceStatusLabel.Tooltip = string(file);
-                if missed > 0
+                app.TraceStatusLabel.FontColor = [0 0 0];
+                if job.missed > 0
                     app.TraceStatusLabel.Text = append(app.TraceStatusLabel.Text, ...
-                        sprintf(" (%d missed)", missed));
+                        sprintf(" (%d missed)", job.missed));
                     app.TraceStatusLabel.FontColor = [1 0 0];
                 end
             catch ME
                 app.TraceStatusLabel.Text = append("Trace not saved: ", ME.message);
                 app.TraceStatusLabel.FontColor = [1 0 0];
             end
-            updateButtons(app);
+            noteActivity(app, 'trace file written');
+        end
+
+        % Note what the app is doing that holds MATLAB's thread, so that a
+        % link stall seen in the trace afterwards can be put down to it
+        function noteActivity(app, name)
+            app.activityName = name;
+            app.activityAt = tic;
+        end
+
+        % The longest gap between master writes in the new aligned
+        % records. One of at least cfg.stallWarn is counted, logged with
+        % the activity noted just before it (StallLog and the command
+        % window) and shown on the status line for STALL_SHOW. The
+        % records of the model's first second are left out, while the
+        % model and the link settle after Connect.
+        function checkStall(app, rows)
+            L = traceLayout();
+            if ~isempty(rows)
+                rows = rows(rows(:, L.col.seq) > app.STALL_SKIP_RECORDS, :);
+            end
+            gap = traceWriteGap(rows, app.cfg);
+            st = app.PollStats;
+            st.writeGapMax = max(st.writeGapMax, gap);
+            if gap >= app.cfg.stallWarn
+                st.stalls = st.stalls + 1;
+                activity = '';
+                if ~isempty(app.activityAt) && ...
+                        toc(app.activityAt) <= gap + app.STALL_SLACK
+                    activity = app.activityName;
+                end
+                app.StallLog(end + 1) = struct('time', ...
+                    datestr(now, 'yyyy-mm-dd HH:MM:SS'), 'gap_s', gap, ...
+                    'activity', activity);
+                if isempty(activity)
+                    activity = 'no app activity noted';
+                end
+                fprintf('%s  link stall: %.2f s between master writes (%s)\n', ...
+                    app.StallLog(end).time, gap, activity);
+                app.stallText = sprintf(" (link stall %.2f s: %s)", gap, activity);
+                app.stallShownAt = tic;
+            end
+            app.PollStats = st;
+        end
+
+        % The slave watches the master's heartbeat while motion is
+        % commanded: an operation requested, running, starting or
+        % stopping, a held pressure included. A model step held back past
+        % G_cfgCommTimeout then faults it with FAULT_COMM.
+        function tf = motionCommanded(app)
+            tf = isRunning(app) && (app.activeOp ~= app.OP_STOP || ...
+                (app.lastStatusCode >= 1 && app.lastStatusCode <= 8));
+        end
+
+        % Refuse an action that holds MATLAB's thread for long (a file
+        % dialog, a plot, loading a procedure) while motion is commanded,
+        % and say why on the status line
+        function refused = refuseWhileMoving(app, what)
+            refused = motionCommanded(app);
+            if refused
+                app.StatusLabel.Text = append(what, ...
+                    " is not available while the axis is under command: it would hold up the slave link");
+            end
+        end
+
+        % Lock or free the app's and the live plot's window size, as
+        % resizeLocked says
+        function applyResizeLock(app)
+            value = 'on';
+            if app.resizeLocked
+                value = 'off';
+            end
+            try
+                if ~strcmp(char(app.UIFigure.Resize), value)
+                    app.UIFigure.Resize = value;
+                end
+                if ~isempty(app.liveFig) && ishghandle(app.liveFig.fig) && ...
+                        ~strcmp(char(app.liveFig.fig.Resize), value)
+                    app.liveFig.fig.Resize = value;
+                end
+            catch
+            end
         end
 
         % The interval dropdown's text: the interval, and its rate when
@@ -671,6 +823,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % is assigned and the model updated. The first update is timed on
         % the status line.
         function setTrackTable(app, tbl)
+            noteActivity(app, 'track table update');
             t0 = tic;
             try
                 setVariable(app.Simulation, "trackTable", tbl, ...
@@ -682,6 +835,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 set_param(char(app.modelName), "SimulationCommand", "update");
                 path = "model update";
             end
+            noteActivity(app, 'track table update');
             if ~app.trackTableTimed
                 app.trackTableTimed = true;
                 app.procNote = sprintf( ...
@@ -801,7 +955,19 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.RecordButton.Enable = connected || app.traceRecording;
             app.RecordButton.Value = app.traceRecording;
             app.TraceRecordMenu.Enable = app.RecordButton.Enable;
-            app.ProcedureMenu.Enable = ~procActive;
+
+            % While motion is commanded nothing may hold MATLAB's thread
+            % (and so the model) for long: the windows keep their size and
+            % the file dialogs and plots are off. Opening the live plot
+            % and the View menu stay, each a single layout.
+            moving = motionCommanded(app);
+            app.ProcedureMenu.Enable = ~procActive && ~moving;
+            app.TracePlotMenu.Enable = ~moving;
+            lock = app.cfg.lockResizeInMotion && moving;
+            if lock ~= app.resizeLocked
+                app.resizeLocked = lock;
+                applyResizeLock(app);
+            end
             app.IntervalDropDown.Enable = (connected || app.traceRecording) && ~procActive;
             showInterval(app);
             if app.traceRecording
@@ -847,6 +1013,11 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
             st = app.PollStats;
             st.last = toc(t0);
+            if st.last >= app.cfg.stallWarn && ...
+                    (isempty(app.activityAt) || toc(app.activityAt) > st.last)
+                % A long poll with nothing noted inside it
+                noteActivity(app, sprintf('display poll of %.2f s', st.last));
+            end
             st.mean = (st.mean * st.n + st.last) / (st.n + 1);
             st.n = st.n + 1;
             st.max = max(st.max, st.last);
@@ -872,6 +1043,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 app.procIn.connected = false;
                 stepProcedure(app);
                 finishRecording(app, false);
+                flushPendingTraces(app);
                 updateButtons(app);
                 return
             end
@@ -938,6 +1110,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 askFaultReset(app, d.faultCode);
             end
             app.lastStatusCode = statusCode;
+            flushPendingTraces(app);
         end
 
         % Non-blocking, so polling continues while the dialog is open
@@ -1099,6 +1272,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             if nargin < 2
                 name = app.cfg.procedure;
             end
+            noteActivity(app, 'procedure loaded');
             try
                 p = procNew(feval(name), app.cfg);
             catch ME
@@ -1313,6 +1487,13 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
             if app.flagAtEnd && statusCode == 5
                 text = append(text, " (end of travel)");
+            end
+            if strlength(app.stallText) > 0
+                if toc(app.stallShownAt) > app.STALL_SHOW
+                    app.stallText = "";
+                else
+                    text = append(text, app.stallText);
+                end
             end
         end
 
@@ -1881,6 +2062,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 disconnect(app);
             end
             finishRecording(app, false);
+            flushPendingTraces(app);
             closeLivePlot(app);
 
             if ~isempty(app.updateTimer) && isvalid(app.updateTimer)
@@ -2113,14 +2295,20 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         % Menu selected function: TracePlotMenu
         function TracePlotMenuSelected(app, event)
+            if refuseWhileMoving(app, "Plot trace")
+                return
+            end
+            noteActivity(app, 'Plot trace dialog');
             [name, folder] = uigetfile("*.csv", "Plot a trace", ...
                 append(capturesFolder(app), filesep));
             figure(app.UIFigure);
+            noteActivity(app, 'Plot trace dialog');
             if isequal(name, 0)
                 return
             end
             try
                 tracePlot(fullfile(folder, name));
+                noteActivity(app, 'trace plotted');
                 app.TraceStatusLabel.Text = append("Plotted ", name);
                 app.TraceStatusLabel.FontColor = [0 0 0];
             catch ME
@@ -2133,6 +2321,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % The app takes the left half of the monitor it is on, at least
         % its minimum width, and the live plot the rest.
         function ViewSideBySideSelected(app, event)
+            noteActivity(app, 'View: side by side');
             [mons, work] = monitorAreas(app);
             a = work(monitorOf(app, app.UIFigure, mons), :);
             wApp = min(max(round(a(3) / 2), app.MIN_SIZE(1) + 16), a(3));
@@ -2152,6 +2341,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % Menu selected function: ViewSecondMonitorMenu
         % The live plot fills the largest monitor the app is not on.
         function ViewSecondMonitorSelected(app, event)
+            noteActivity(app, 'View: second monitor');
             [mons, work] = monitorAreas(app);
             if size(mons, 1) < 2
                 app.StatusLabel.Text = "Only one monitor";
@@ -2170,6 +2360,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         % Menu selected function: ViewDefaultSizeMenu
         function ViewDefaultSizeSelected(app, event)
+            noteActivity(app, 'View: default size');
             setDefaultSize(app);
         end
 
@@ -2177,6 +2368,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % Below the minimum size the grid keeps its minimum extent and
         % scrolls; above it the grid fills the window.
         function UIFigureSizeChanged(app, event)
+            noteActivity(app, 'app window resized');
             if isempty(app.MainGrid) || ~isvalid(app.MainGrid)
                 return
             end
@@ -2202,6 +2394,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         % Menu selected function: ProcedureFileMenus
         function ProcedureFileSelected(app, event)
+            if refuseWhileMoving(app, "Loading a procedure")
+                return
+            end
             loadProcedure(app, event.Source.UserData);
         end
 
@@ -2209,9 +2404,14 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % Any .m file; its folder joins the path and the function is
         % loaded by name.
         function ProcedureOpenSelected(app, event)
+            if refuseWhileMoving(app, "Opening a procedure")
+                return
+            end
+            noteActivity(app, 'Open procedure dialog');
             [name, folder] = uigetfile("*.m", "Open a procedure", ...
                 append(fullfile(fileparts(mfilename("fullpath")), "procedure"), filesep));
             figure(app.UIFigure);
+            noteActivity(app, 'Open procedure dialog');
             if isequal(name, 0)
                 return
             end
@@ -2225,6 +2425,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % The current choice again, for a file just edited; the SOP when
         % none is loaded.
         function ProcedureReloadSelected(app, event)
+            if refuseWhileMoving(app, "Reloading the procedure")
+                return
+            end
             name = app.procName;
             if isempty(name)
                 name = app.cfg.procedure;

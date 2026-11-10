@@ -25,6 +25,17 @@ cfg.mixingDeadVolume = 57;          % mL, the part of deadVolume that takes part
 cfg.flowDeadband  = 0.01;           % mL/s, a flow smaller than this reads 0.00
 cfg.displayPeriod = 0.1;            % s, the display timer period
 
+% Link stalls. Under Connected IO the model steps on MATLAB's thread, so
+% anything that holds that thread (a window resize, a file dialog, a
+% long file write or plot) holds back the master's writes; the slave
+% faults (FAULT_COMM) once its heartbeat is unchanged for
+% G_cfgCommTimeout while motion is commanded. The app measures the gap
+% between writes from the slave's exchange summary and logs one at or
+% above stallWarn.
+cfg.slaveScanPeriod    = 0.004;     % s, the slave's scan: the unit of the summary's scan count
+cfg.stallWarn          = 0.15;      % s between master writes logged as a link stall (the slave faults at 0.3 s)
+cfg.lockResizeInMotion = true;      % the app and live plot windows cannot be resized while motion is commanded
+
 % Pressure: the app works in atm absolute, the slave in MPa gauge.
 cfg.atmPerMPa   = 9.869;
 cfg.atmAmbient  = 1;        % atm, added to the slave's gauge reading

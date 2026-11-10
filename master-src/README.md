@@ -10,7 +10,7 @@ reading over the link.
 |------|----------|
 | `logic/` | All master logic, as plain `.m` functions that run under MATLAB and GNU Octave. `masterStep.m` is the entry point called once per model step; `masterStateMachine.m` sequences the handshake, motion and fault handling; `masterConfig.m` holds every constant. `proc*.m` is the operator app's procedure engine (`procTrackSeries` and `procTrackCheck` sample and check a track step's series) and `opTrack.m` the rule by which the app and the engine follow an operation through `StatusCode`. `trackStep.m` plays the track table inside the model (the `TrackStep` block). |
 | `procedure/` | The procedure the operator app walks through in non-manual mode, as data: `sopProcedure.m`. The SOP replaces this file; no code changes. `experimentTemplate.m` is a procedure to copy from: every kind of step once, with a comment on its fields, and a track step and the record intervals. |
-| `trace/` | The trace recorder's host-side functions, plain `.m` files that run under MATLAB and GNU Octave: `traceStart`, `traceDrain` and `traceAppend` (collect records from the ring), `traceAlignNew`/`traceAlign` (give each row the slave summary of its own window), `traceDecimateNew`/`traceDecimate` and `traceIntervalExchanges` (combine exchanges into the record interval), `traceLiveBuffer`, `traceLiveAppend`, `traceLiveNew` and `traceLiveUpdate` (the live plot), `traceMeta` and `traceWriteCsv` (write a trace file), `traceReadCsv` and `traceDerive` (read it back and add the displayed quantities), `tracePlot` (three figures) and `traceColumnNames`. The block that fills the ring, `traceStep`, and the ring's layout, `traceLayout`, are in `logic/`. |
+| `trace/` | The trace recorder's host-side functions, plain `.m` files that run under MATLAB and GNU Octave: `traceStart`, `traceDrain` and `traceAppend` (collect records from the ring), `traceAlignNew`/`traceAlign` (give each row the slave summary of its own window), `traceDecimateNew`/`traceDecimate` and `traceIntervalExchanges` (combine exchanges into the record interval), `traceLiveBuffer`, `traceLiveAppend`, `traceLiveNew` and `traceLiveUpdate` (the live plot), `traceWriteGap` (the longest gap between master writes, for the link stall check), `traceMeta` and `traceWriteCsv` (write a trace file), `traceReadCsv` and `traceDerive` (read it back and add the displayed quantities), `tracePlot` (three figures) and `traceColumnNames`. The block that fills the ring, `traceStep`, and the ring's layout, `traceLayout`, are in `logic/`. |
 | `captures/` | Trace files the app saves (gitignored; created on first use). |
 | `shell/buildShell.m` | Generates `shell/SOS_Gen3_Master_Shell.slx`: Modbus Client blocks at the 50 ms exchange, DAQ blocks, one MATLAB Function block calling `masterStep`, a second one (`TraceStep`) calling `traceStep`, a third (`TrackStep`) calling `trackStep`, the Constant blocks the app writes and the Gain blocks it reads. The model holds no logic and is rebuilt from this script, not edited by hand. |
 | `shell/modbusShellDiscover.m` | Prints the Modbus block and client settings of a hand-configured shell so they can be pasted into `buildShell.m`. |
@@ -136,7 +136,9 @@ The window is a `MainGrid` of three bands, in nested `uigridlayout`s:
   only its instruction text.
 
 A new window is 940 x 900 px (drawable area); the minimum is 830 x 680. Below
-the minimum the grid keeps its minimum extent and the window scrolls.
+the minimum the grid keeps its minimum extent and the window scrolls. While
+motion is commanded neither the app's window nor the live plot's can be
+resized by hand (see Link stalls); the View menu still places them.
 
 The **View** menu places the windows. The app's monitor is the one containing
 the centre of its window. A monitor's work area is its area less a 48 px margin
@@ -206,7 +208,8 @@ status, position, velocity and pressure blocks once through cached
 rewritten only when its text changed. The app measures its own poll: in a
 MATLAB session, `app = SOS_Gen3_Compressor_Interface;`, connect, run for a
 while and read `app.PollStats` (`n` polls, `mean`, `max` and `last` in
-seconds, `overruns` the polls longer than `displayPeriod`).
+seconds, `overruns` the polls longer than `displayPeriod`, and `writeGapMax`
+and `stalls` from the link stall check below) and `app.StallLog`.
 
 ## Operator app buttons
 
@@ -288,7 +291,8 @@ line reads `Procedure loaded: <name>` and the panel shows the new procedure; on
 a failure the previously loaded procedure and its check mark stay, and the
 status line gives the reason. Nothing is remembered between sessions. The whole
 menu is disabled while a procedure is active (running, waiting for the
-operator, paused or aborting).
+operator, paused or aborting), and while motion is commanded (see Link
+stalls).
 
 ### Parameters
 
@@ -543,7 +547,8 @@ walks them against the stand-in.
 **Record**, the interval dropdown and the trace status are at the right of the
 Controls band. The **Trace** menu has Record (Stop recording while recording,
 Ctrl+R; enabled as the button is), Plot trace... (Ctrl+P) and Live plot
-(Ctrl+L); the last two are only in the menu and always enabled.
+(Ctrl+L); the last two are only in the menu. Plot trace... is disabled while
+motion is commanded (see Link stalls below); Live plot is always enabled.
 
 **Record** is available while connected. The dropdown chooses the record
 interval: `cfg.traceIntervalPresets` (0.05 s (20 Hz), 0.1 s (10 Hz), 0.5 s
@@ -558,7 +563,10 @@ and the records missed in red. Pressing the button again (**Stop recording**)
 ends the recording, writes the file at once to
 `captures/trace_yyyymmdd_HHMMSS.csv` and then opens a Save dialog proposing that
 path: choosing another name or folder moves the file there, and cancelling keeps
-it in `captures/`. Recording also ends, without a dialog, when the model stops (a
+it in `captures/`. A recording stopped while motion is commanded is kept in
+memory instead, with the label reading "Stopped, N records: saved when motion
+ends", and written to `captures/` without a dialog at the first poll after
+motion ends (or when the model stops, on Disconnect or on closing the app). Recording also ends, without a dialog, when the model stops (a
 lost Modbus connection, for example), when **Disconnect** is pressed and when the
 app is closed; the file is then saved to `captures/` and the trace status names it.
 **Plot trace...** opens a file chooser in `captures/` and plots the file chosen.
@@ -585,14 +593,68 @@ stopping. The first rows of a recording start about two exchanges after the
 button, because the alignment holds the newest two records back.
 
 **Live plot** (Trace > Live plot; View > Side by side places it) opens a figure with four stacked axes over the last
-`cfg.livePlotSeconds` (600 s): the pressure (the snapshot, and the window mean
+`cfg.livePlotSeconds` (120 s): the pressure (the snapshot, and the window mean
 with its minimum and maximum), the position from the end of travel, the velocity
 and the torque, against the time before now. The aligned 20 Hz stream goes into
-a circular buffer of 12000 rows, and the figure is redrawn every
+a circular buffer of `livePlotSeconds / exchangePeriod` rows (2400), and the figure is redrawn every
 `cfg.livePlotPeriod` (0.5 s) while it is open, by setting the line data in place;
 closing it stops the updates. `cfg.livePlotPosition` ([x y width height] px,
 empty for MATLAB's default) sets where the window opens. The redraw is part of
 the poll, so a poll that overruns `displayPeriod` shows in `app.PollStats`.
+The figure is built to be cheap to lay out again when its window is resized:
+fixed normalized inner positions for the axes, time labels on the bottom axes
+only, the pressure lines named in the top title instead of a legend, and
+MATLAB's axes interactions, axes toolbar and line picking off.
+
+## Link stalls
+
+Under Connected IO the shell steps on MATLAB's own thread, the one that also
+runs the app's timer, callbacks, dialogs and figure layout. While anything
+holds that thread the model does not step, so the master writes nothing; the
+steps it missed run back to back afterwards (`MaxMissedTicks` is large), but
+the slave has seen its heartbeat stand still for that long. With motion
+commanded (an operation requested, running, starting or stopping, a held
+pressure included) the slave faults at `G_cfgCommTimeout` (300 ms) with
+`FAULT_COMM`, which the app shows as "Master link lost". With no motion the
+slave ignores the gap, so a stall is harmless then.
+
+Things that hold the thread long enough: resizing a window by dragging its
+edge (every size it passes through lays the window out again: the live plot's
+axes, and every component of the app's grid), a blocking file dialog (Save
+trace, Plot trace..., Procedure > Open...) for as long as it is open, plotting
+a file (`tracePlot`), writing a long recording (about 1.2 s for an hour at
+0.05 s), loading a procedure with a long track series, the track table update
+(`setTrackTable`), and anything typed or run in the MATLAB command window or
+another figure while the app runs.
+
+While motion is commanded the app therefore:
+
+- locks the size of its own window and of the live plot (`Resize` off;
+  `cfg.lockResizeInMotion`, true), and frees them when motion ends;
+- disables Trace > Plot trace... and the whole Procedure menu (Open...,
+  Reload and the file items), and refuses them with a reason on the status
+  line;
+- keeps a recording that is stopped and writes it once motion ends, without
+  the Save dialog (above).
+
+Opening the live plot and the View menu stay available: each is a single
+layout, not a stream of them.
+
+The app also measures every gap between master writes as the slave sees it:
+the exchange summary's scan count of each window (`summaryScans`, IR33) times
+`cfg.slaveScanPeriod` (4 ms), through `traceWriteGap` on the records it drains
+on every poll. A gap of at least `cfg.stallWarn` (0.15 s; the first second
+after Connect is not checked) is a link stall: it is counted in
+`app.PollStats` (`writeGapMax`, the longest gap seen, and `stalls`), added to
+`app.StallLog` (`time`, `gap_s` and `activity`), printed on one line in the
+command window, and shown after the status line for 15 s, "(link stall 0.42 s:
+live plot resized)". The activity is what the app last noted doing that holds
+the thread, if within 2 s plus the gap before the stall was seen: a window
+resized (the app's or the live plot's), the live plot opened, a View menu
+item, a file dialog, a trace file written or plotted, a procedure loaded, the
+track table updated, or a display poll that itself took longer than
+`stallWarn`. A stall with none ("no app activity noted") came from outside the
+app: the command window, another figure, or the PC itself.
 
 ## Trace files
 

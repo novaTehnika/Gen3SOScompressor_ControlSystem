@@ -154,6 +154,16 @@ the reference for each) and confirm:
       an update that blocks the app's thread near that long needs a smaller
       `cfg.trackMaxSeconds`, or the chunked table (a 1000-value constant
       copied into a persistent table over consecutive steps).
+- [ ] Link stalls (master README, Link stalls): with the live plot open and
+      an operation idle, drag-resize the live plot and the app and check
+      that each shows a link stall with its activity on the status line
+      and in `app.StallLog`, and read `app.PollStats.writeGapMax`. Then
+      start a jog and check that neither window can be resized, that
+      Trace > Plot trace... and the Procedure menu are disabled, and that
+      Stop recording during the jog reads "saved when motion ends" and
+      writes the file once the jog is stopped. If a stall still appears
+      during motion, its activity names the cause; one with "no app
+      activity noted" came from outside the app.
 - [ ] Poll cost of the stream: with the live plot open for 10 minutes and a
       recording at 0.05 s, read `app.PollStats` (`mean`, `max`,
       `overruns`). The ring (512 x 45) is read on every poll and the plot
