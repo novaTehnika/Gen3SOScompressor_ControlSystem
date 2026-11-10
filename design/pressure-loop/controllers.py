@@ -51,6 +51,11 @@ the gain that gives the chosen crossover. It is a comparison arm of the
 studies and is not in the slave: with the measured chamber it gives the
 results of a fixed gain.
 
+VariantController runs the same block with one change to how its
+integrator is managed (the anti-windup variants of eqs. (50) to (55))
+and an optional derivative term, eq. (56). It is a comparison arm of
+study_antiwindup.py and is not in the slave.
+
 FloorPolicy sets the stop-law floor (StopVelMin) of either controller
 every scan from the detected outflow instead of the fixed configured
 value, eqs. (46) to (48), and can add a forward stop above the target.
@@ -771,3 +776,188 @@ class ScheduledSlaveController(SlaveController):
         if hold:
             fb.rInteg = 0.0
         return u
+
+
+# %% ===== ANTI-WINDUP AND DERIVATIVE VARIANTS ===========================
+class VariantController(SlaveController):
+    """The slave's block with a different anti-windup rule or a
+    derivative term: comparison arms that are not in the slave.
+
+    The block (FB_PressureController) integrates the error unless its
+    output is clamped and the error drives it further into the clamp.
+    Each variant changes the stored integral rInteg [MPa s] around the
+    block's call and leaves the rest of the block as it is, so the stop
+    law, the floor and the forward stop are the slave's. With e the
+    error [MPa], I the integral and u_raw, u the block's output before
+    and after its clamp [mm/s]:
+
+      'block'     No change: the block's own conditional integration.
+      'arrival'   Eq. (50). An approach starts on the first scan, or
+                  when the target steps by more than step, with |e|
+                  above step. Once e has changed sign, the first error
+                  beyond over on the far side clears the integral that
+                  drives away from the target, and an error back beyond
+                  over on the near side ends the approach with the
+                  integral kept. At most one clear per approach.
+      'crossing'  Eq. (51). The integral is cleared on every scan in
+                  which e changes sign.
+      'opposed'   Eq. (52). The integral is cleared whenever the error
+                  is beyond over on the side the integral drives
+                  toward.
+      'bleed'     Eq. (53). In the same condition the integral decays
+                  with time constant Tb instead of being cleared.
+      'backcalc'  Eq. (54). While the output is clamped the integral
+                  tracks the clamp with time constant Tt:
+                  dI/dt = e + (u - u_raw) / (Ki Tt).
+      'band'      Eq. (55). The integral advances only while |e| is at
+                  most band, and is held outside it.
+
+    The derivative term, eq. (56), subtracts Kd times the filtered rate
+    of the measured pressure from the block's output before the forward
+    stop, within the block's clamp of that scan. The block's anti-windup
+    does not see it.
+
+    Arguments:
+      name         Label used in tables and plots.
+      aw           Anti-windup variant, one of the names above.
+      Kd           [(mm/s)/(MPa/s)] Derivative gain; 0 for none.
+      Tf           [s] Time constant of the derivative filter.
+      step         [MPa] Target step, and error after it, that start an
+                   approach ('arrival').
+      over         [MPa] Error beyond the target that clears the
+                   integral ('arrival', 'opposed') or lets it decay
+                   ('bleed').
+      Tb           [s] Decay time constant ('bleed').
+      Tt           [s] Tracking time constant ('backcalc').
+      band         [MPa] Half-width of the integration band ('band').
+      **overrides  Slave settings, as for SlaveController.
+    """
+
+    VARIANTS = ('block', 'arrival', 'crossing', 'opposed', 'bleed',
+                'backcalc', 'band')
+
+    def __init__(self, name='variant', aw='block', Kd=0.0, Tf=0.02,
+                 step=0.1, over=0.02, Tb=0.2, Tt=0.5, band=0.1,
+                 **overrides):
+        if aw not in self.VARIANTS:
+            raise ValueError(f'unknown anti-windup variant {aw!r}')
+        super().__init__(name, **overrides)
+        self.aw = aw
+        self.Kd = Kd
+        self.Tf = Tf
+        self.e_step = step
+        self.e_over = over
+        self.Tb = Tb
+        self.Tt = Tt
+        self.e_band = band
+
+    def reset(self, par, scenario):
+        u0 = super().reset(par, scenario)
+        # Approach state of eq. (50): 0 none, 1 from below, 2 passed
+        # from below, -1 from above, -2 passed from above
+        self.approach = 0
+        self.tgt_prev = None                    # [MPa] previous target
+        self.err_prev = None                    # [MPa] previous error
+        self.P_prev = None                      # [MPa] previous reading
+        self.dP = 0.0                           # [MPa/s] filtered rate
+        # [-] Scan numbers in which a rule cleared or bled the integral
+        self.scan = 0
+        self.changed = []
+        return u0
+
+    def clear_before(self, err, tgt):
+        """Apply the rules that clear the integral before the block
+        runs, eqs. (50) to (53), for the error err and target tgt
+        [MPa] of this scan."""
+        fb = self.fb
+        I0 = fb.rInteg
+        if self.aw == 'arrival':
+            # Start of an approach: the first scan or a target step
+            if (self.tgt_prev is None
+                    or abs(tgt - self.tgt_prev) > self.e_step):
+                if err > self.e_step:
+                    self.approach = 1
+                elif err < -self.e_step:
+                    self.approach = -1
+                else:
+                    self.approach = 0
+            # The error has changed sign: watch the far side
+            if self.approach == 1 and err <= 0.0:
+                self.approach = 2
+            elif self.approach == -1 and err >= 0.0:
+                self.approach = -2
+            if self.approach == 2:
+                if err < -self.e_over:
+                    fb.rInteg = min(fb.rInteg, 0.0)
+                    self.approach = 0
+                elif err > self.e_over:
+                    self.approach = 0
+            elif self.approach == -2:
+                if err > self.e_over:
+                    fb.rInteg = max(fb.rInteg, 0.0)
+                    self.approach = 0
+                elif err < -self.e_over:
+                    self.approach = 0
+        elif self.aw == 'crossing':
+            if self.err_prev is not None and err * self.err_prev < 0.0:
+                fb.rInteg = 0.0
+        elif self.aw == 'opposed':
+            if err < -self.e_over:
+                fb.rInteg = min(fb.rInteg, 0.0)
+            elif err > self.e_over:
+                fb.rInteg = max(fb.rInteg, 0.0)
+        elif self.aw == 'bleed':
+            if ((err < -self.e_over and fb.rInteg > 0.0)
+                    or (err > self.e_over and fb.rInteg < 0.0)):
+                fb.rInteg *= 1.0 - self.dt / self.Tb
+        if fb.rInteg != I0:
+            self.changed.append(self.scan)
+        self.scan += 1
+
+    def step(self, P_meas, target, t, scenario, x=0.0):
+        fb = self.fb
+        first = self.first_scan
+        self.first_scan = False
+        # PRG_Main limits the target to [0, TargetMax]. [Pa -> MPa]
+        tgt = min(max(target * 1e-6, 0.0), self.target_max)
+        act = P_meas * 1e-6                             # [Pa -> MPa]
+        err = tgt - act                                 # [MPa]
+
+        self.clear_before(err, tgt)
+        # The block clears the integral itself on the entry scan.
+        I0 = 0.0 if first else fb.rInteg                # [MPa s]
+        fb.Reset = first
+        fb.Target = tgt
+        fb.Actual = act
+        fb.Position = x * 1e3                           # [m -> mm]
+        FB_PressureController(fb, self.dt)
+
+        if self.aw == 'backcalc' and fb.bSaturated and fb.Ki > 0.0:
+            # Tracking anti-windup, eq. (54), in place of the block's
+            # conditional integration while the output is clamped
+            fb.rInteg = I0 + (err + (fb.rVelPI - fb.rRaw)
+                              / (fb.Ki * self.Tt)) * self.dt
+        elif self.aw == 'band' and abs(err) > self.e_band:
+            # Integration band, eq. (55): held outside the band
+            fb.rInteg = I0
+
+        v = fb.Velocity                                 # [mm/s]
+        if self.Kd > 0.0:
+            # Filtered rate of the measured pressure, eq. (21), and the
+            # derivative term, eq. (56), inside the block's clamp
+            if self.P_prev is not None:
+                rate = (act - self.P_prev) / self.dt    # [MPa/s]
+                self.dP += self.dt / (self.Tf + self.dt) * (rate - self.dP)
+            v = fb.rVelPI - self.Kd * self.dP
+            v = min(max(v, -fb.rVelLimit), fb.rVelLimit)
+            # The block's forward stop, eq. (48), applied again
+            if (fb.bFloorOn and fb.ForwardStop and not fb.Latched
+                    and err < 0.0 and v > 0.0):
+                v = 0.0
+
+        self.tgt_prev = tgt
+        self.err_prev = err
+        self.P_prev = act
+        # PRG_Main clamps the block output to VelMax.
+        v = min(max(v, -self.vel_max), self.vel_max)
+        return v * 1e-3                                 # [mm/s -> m/s]

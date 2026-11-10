@@ -120,6 +120,10 @@ class Scenario:
     tube: bool = True
     # [-] Ratio of the feedforward flow Qff to the actual outflow
     ff_scale: float = 1.0
+    # ((t [s], P [Pa]), ...) Target schedule in time order: from each
+    # time on the target is that pressure, and target0 holds before the
+    # first. Empty selects target0, t_step and target1.
+    targets: tuple = ()
 
     def with_(self, **kw):
         """Return a copy with the given fields replaced."""
@@ -127,6 +131,12 @@ class Scenario:
 
     def target(self, t):
         """[Pa] Pressure target at time t [s]"""
+        if self.targets:
+            P = self.target0
+            for t_from, P_from in self.targets:
+                if t >= t_from:
+                    P = P_from
+            return P
         return self.target1 if t >= self.t_step else self.target0
 
     def valve(self, t, t_from=None):

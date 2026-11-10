@@ -22,6 +22,7 @@ python3 design/pressure-loop/test_model.py       # model checks, a few seconds
 python3 design/pressure-loop/study_compare.py    # three scenarios, seven controllers, a few seconds
 python3 design/pressure-loop/study_delivery.py   # deliverable volume against oxygen charge
 python3 design/pressure-loop/study_floor.py      # stop-law floors that follow the outflow, about 1 min; --mc 100 adds 3 min
+python3 design/pressure-loop/study_antiwindup.py # anti-windup rules and a derivative term, about 1 min
 python3 design/pressure-loop/study_linear.py     # margins against chamber stiffness, about 30 s
 python3 design/pressure-loop/study_robust.py     # Monte Carlo over the uncertain parameters, about 5 min on 4 CPUs
 python3 design/pressure-loop/study_convergence.py # integration error against the time step, about 1 min
@@ -53,8 +54,8 @@ The plant, the sensor chain and their parameters are in `models/`
 | `study_convergence.py` | Measures the integration error against the time step for both methods. |
 | `studyparams.py` | Defines `StudyParams`: the models' `Params` (`models/params.py`) and the studies' own settings, the valve timings and procedure, the legacy controller's filter, the target and the requirement limits. A study overrides a model default by redeclaring the field. |
 | `modelpath.py` | Puts `models/` on the import path for the studies. |
-| `controllers.py` | Defines `SlaveController` (the slave's block, with a flow feedforward option kept only as a bound), `ScheduledSlaveController` (the same block with its gains and stop law scheduled on an estimate of the chamber stiffness, equations (39) to (41)), `ScheduledSlaveControllerST` (the ported Structured Text blocks, wired as PRG_Main wires them) and `LegacyController` (PID with a stiffness-estimating stop law and a torque mode). All share the `reset` and `step` interface. `FloorPolicy` sets the stop-law floor of the slave controllers from the detected outflow, equations (46) to (48). |
-| `scenarios.py` | Defines the operating cases `compress`, `deliver`, `cycle` and the `stiffstep` probe, with the hose procedure and the valve timings (proximal opening, purge, pause, delivery). |
+| `controllers.py` | Defines `SlaveController` (the slave's block, with a flow feedforward option kept only as a bound), `ScheduledSlaveController` (the same block with its gains and stop law scheduled on an estimate of the chamber stiffness, equations (39) to (41)), `ScheduledSlaveControllerST` (the ported Structured Text blocks, wired as PRG_Main wires them) and `LegacyController` (PID with a stiffness-estimating stop law and a torque mode). All share the `reset` and `step` interface. `FloorPolicy` sets the stop-law floor of the slave controllers from the detected outflow, equations (46) to (48). `VariantController` runs the slave's block with one anti-windup rule changed around it or a derivative term added, equations (50) to (56). |
+| `scenarios.py` | Defines the operating cases `compress`, `deliver`, `cycle` and the `stiffstep` probe, with the hose procedure and the valve timings (proximal opening, purge, pause, delivery). A scenario's target is one step or a schedule of steps (`targets`). |
 | `sim.py` | Runs one closed-loop simulation: `run(params, scenario, controller)` returns a `Result` with traces, the valve event times and metrics. It sequences the valves: the hose opening, the purge, its closing and the reopening. |
 | `metrics.py` | Computes the loop metrics (overshoot, settling time, ripple, stroke) and the process metrics (pressure ceiling, saturation margin, the deepest dip at a valve event, volume delivered before a violation, solution delivered). |
 | `runner.py` | Runs many simulation cases in parallel worker processes. |
@@ -62,6 +63,7 @@ The plant, the sensor chain and their parameters are in `models/`
 | `study_hose_opening.py` | Studies the proximal valve opened at pressure: the chamber floor, the solution admitted into the hose, the part of it that degassed and where it lies, against the valve bore (ball valve to needle valve), per charge and controller. |
 | `study_delivery.py` | Runs the delivery to the empty chamber over a range of oxygen charges and reports the deliverable volume. |
 | `study_floor.py` | Compares stop-law floors that follow the outflow, with and without the forward stop, against the fixed `StopVelMin`: nominal cases, a sweep of the policy settings and a Monte Carlo over the measured ranges. |
+| `study_antiwindup.py` | Compares ways of managing the loop's integrator (clearing it past the target, tracking, an integration band) and a derivative term against the block as it is, on a soft gas-filled chamber at low pressure and on the 10 MPa cycle. |
 | `linear.py`, `study_linear.py` | Build the discrete-time linear model of the velocity-command loop, equations (26) to (33), and use it to find the margins, the stability boundary and the frequency and disturbance responses. |
 | `robust.py`, `study_robust.py` | Define the uncertain parameters, requirement limits and sampler, and run the tornado, corner and Monte Carlo studies for each controller configuration. |
 | `studyutil.py` | Holds command-line, CSV and plotting helpers for the studies. |
@@ -171,6 +173,22 @@ estimated with an assumed stiffness. The forward stop, eq. (48), holds
 a forward command at zero above the target while no outflow is
 detected. The `fixed` policy holds `v_hi` with no detection, to isolate
 the forward stop.
+
+**Anti-windup and derivative variants.** `VariantController` is a
+set of comparison arms that are not in the slave. It runs
+`FB_PressureController` and changes only how the stored integral is
+managed, by adjusting it before or after the block's call, so the stop
+law, the floor and the forward stop stay the slave's. The block itself
+integrates the error unless its output is clamped and the error drives
+it further into the clamp. The variants clear the integral once per
+approach after the target is passed (`arrival`, eq. (50)), on every
+change of the error's sign (`crossing`, eq. (51)), or whenever the
+pressure is past the target on the side the integral drives toward
+(`opposed`, eq. (52)); let it decay there (`bleed`, eq. (53)); make it
+track the clamp (`backcalc`, eq. (54)); or integrate only inside a band
+about the target (`band`, eq. (55)). A derivative gain `Kd` subtracts
+the filtered rate of the measured pressure from the block's output,
+inside the block's clamp, eq. (56).
 
 **Legacy controller.** This is a PID controller with a filtered
 derivative, an output clamp and conditional anti-windup: the integrator
@@ -290,6 +308,52 @@ with L taken as v_min > v_lo. The forward stop limits the command u
 after the block:
 
     (48) u <- min(u, 0)   if e < 0 and not L
+
+### Anti-windup variants and derivative term
+
+The variants of `VariantController` act on the block's stored integral
+I [MPa s]. With e the error [MPa], T the target [MPa], u_raw = Kp e +
+Ki I the block's output before its clamp and u after it [mm/s]:
+
+Clear once per approach. An approach state a is 0 (none), ±1
+(approaching from below or above) or ±2 (the target passed):
+
+    (50) a <- sign(e)   on the first scan, or when |T[n] - T[n-1]| >
+                        e_step, if |e| > e_step (else a <- 0)
+         a <- 2 a       when |a| = 1 and e has changed sign
+         a = 2:   I <- min(I, 0), a <- 0   if e < -e_over
+                  a <- 0                   if e > e_over
+         a = -2:  I <- max(I, 0), a <- 0   if e > e_over
+                  a <- 0                   if e < -e_over
+
+Clear on every change of the error's sign:
+
+    (51) I <- 0   if e[n] e[n-1] < 0
+
+Clear whenever the pressure is past the target, by more than e_over, on
+the side the integral drives toward:
+
+    (52) I <- min(I, 0)   if e < -e_over
+         I <- max(I, 0)   if e > e_over
+
+Decay in the same condition, with time constant T_b:
+
+    (53) I <- I (1 - Ts / T_b)   if (e < -e_over and I > 0)
+                                 or (e > e_over and I < 0)
+
+Tracking (back-calculation) with time constant T_t, in place of the
+block's conditional integration while the output is clamped:
+
+    (54) I <- I + (e + (u - u_raw) / (Ki T_t)) Ts   while u != u_raw
+
+Integration band of half-width e_band:
+
+    (55) I advances only while |e| <= e_band
+
+Derivative term, with d the filtered rate of the measured pressure of
+eq. (21) [MPa/s] and v_lim the block's clamp of eq. (19):
+
+    (56) u <- min(max(u - Kd d, -v_lim), v_lim)
 
 ### Linear model
 
@@ -916,3 +980,157 @@ and requires the command, the floor and the latch to be equal on every
 scan. `tests/slavePressureMode.m` runs the compiled slave through an
 outflow and an abrupt closing: the latch sets and releases, and the
 closing peaks at 10.24 MPa against 10.70 without the floor.
+
+## Anti-windup and derivative study
+
+`study_antiwindup.py` asks what should be done about the integrator in
+a soft chamber. With free gas at a low pressure the chamber is softer
+than the gains are set for by two orders of magnitude: 0.03 MPa/mm at
+5 atm with a 1:1 charge of gas admitted at atmosphere, against the 3.2
+to 7.5 MPa/mm of the liquid chamber. The proportional term then moves
+the piston at a small fraction of a mm/s, the integrator carries the
+piston to the target at the stop-law floor (2 mm/s), and the velocity it
+holds on arrival balances nothing: only an error above the target
+unwinds it. The loop is then two integrators in series, the
+controller's and the chamber's, with a damping ratio of
+(Kp / 2) sqrt(k / Ki), 0.2 at 0.05 MPa/mm. A sealed chamber needs no
+integral at rest, since the chamber is itself an integrator from
+velocity to pressure. A delivery does: the integral is what holds the
+1.4 mm/s that balances the outflow at zero error. A rule that removes
+the integral must tell the two apart.
+
+The arms are `VariantController` (eqs. (50) to (56)) at the GVL gains,
+with the floor that follows the outflow off unless marked. The cases:
+
+- **Soft steps**: the bench fill of 2026-11-09 (279 mL of saline,
+  293 mL of air at atmosphere, hose shut) stepped to 5, 20 and 100 atm
+  absolute, and the same fill taken to 100 atm in one step.
+- **Cycle**: the 1:1 oxygen cycle at 10 MPa, with the hose opened before
+  the compression and after mixing.
+- **Brief closing**: the cycle with the outlet shut for 0.5 s in place
+  of the 10 s pause, so the integral that balanced the outflow is
+  needed again at once.
+- **Delivery step**: a delivery at 9 MPa whose target steps to 10 MPa
+  with the outlet open.
+- **Stiff step**: the liquid-only chamber stepped from 10 to 12 MPa
+  with the hose shut.
+
+**Results** (overshoot in MPa, with the time until the pressure stays
+within 0.1 MPa of the target in seconds; the cycle is the one with the
+hose opened before the compression):
+
+| Arm | 5 atm step: overshoot / in band | 20 atm step: overshoot / in band | Compression at 10 MPa: overshoot / arrive | Closing: peak MPa / time above band | Dip at the reopening after 0.5 s shut | Delivery error: mean / std |
+|---|---|---|---|---|---|---|
+| GVL | 0.48 (117 %) / 72 | 0.53 (35 %) / 11.3 | 0.09 / 2.9 | 10.85 / 5.4 | 0.15 | 0.01 / 0.02 |
+| arrival, eq. (50) | 0.03 / 34 | 0.06 / 5.8 | 0.04 / 2.9 | 10.85 / 5.4 | 0.15 | 0.01 / 0.02 |
+| crossing, eq. (51) | 0.00 / 34 | 0.04 / 5.8 | 0.03 / 2.9 | 10.24 / 0.2 | 0.83 | 0.12 / 0.20 |
+| opposed, e_over 0.02 MPa, eq. (52) | 0.03 / 34 | 0.06 / 5.8 | 0.04 / 2.9 | 10.29 / 0.3 | 0.83 | 0.01 / 0.02 |
+| opposed, e_over 0.1 MPa | 0.11 / 39 | 0.14 / 6.6 | 0.09 / 2.9 | 10.39 / 0.3 | 0.83 | 0.01 / 0.02 |
+| bleed, T_b 0.2 s, eq. (53) | 0.04 / 34 | 0.13 / 6.7 | 0.06 / 2.9 | 10.55 / 0.6 | 0.79 | 0.01 / 0.02 |
+| backcalc, T_t 0.5 s, eq. (54) | 0.48 / 72 | 0.56 / 11.3 | 0.00 / 8.3 | 10.85 / 5.4 | 0.15 | 0.01 / 0.02 |
+| backcalc, T_t 2.5 s | 0.50 / 73 | 0.84 / 11.6 | 1.55 / 2.7 | 10.85 / 5.4 | 0.15 | 0.01 / 0.02 |
+| band 0.1 MPa, eq. (55) | never arrives | 0.01 / 17.2 | 0.00 / 3.0 | 10.00 / 0 | 0.88 | 0.88 / 0.00 |
+| band 1.5 MPa | 0.48 / 72 | 0.53 / 11.3 | 0.08 / 2.9 | 10.85 / 5.4 | 0.15 | 0.01 / 0.02 |
+| PID, Kd 0.02, eq. (56) | 0.48 / 72 | 0.53 / 11.3 | 0.09 / 2.9 | 10.84 / 5.4 | 0.14 | 0.01 / 0.02 |
+| PID, Kd 0.05 | 0.48 / 72 | 0.53 / 11.3 | 0.10 / 3.0 | 10.82 / 5.4 | 0.14 | 0.01 / 0.02 |
+| PID, Kd 0.1 | 0.47 / 72 | 0.53 / 11.4 | 0.11 / 3.2 | 10.79 / 5.4 | 0.13 | 0.01 / 0.02 |
+| GVL + floor | 0.48 / 72 | 0.53 / 11.3 | 0.03 / 2.9 | 10.38 / 7.1 | 0.53 | 0.01 / 0.02 |
+| arrival + floor | 0.02 / 34 | 0.06 / 5.8 | 0.03 / 2.9 | 10.38 / 7.1 | 0.53 | 0.01 / 0.02 |
+| opposed 0.02 + floor | 0.02 / 34 | 0.06 / 5.8 | 0.03 / 2.9 | 10.29 / 0.3 | 0.83 | 0.01 / 0.02 |
+
+**Only removing the integral past the target cures the soft
+overshoot.** The GVL loop crosses the 5 atm target at 1.9 mm/s and
+overshoots by 0.48 MPa, more than the step. `arrival`, `crossing`,
+`opposed` and `bleed` all stop the piston within 0.04 MPa of the
+target and are in band 38 s sooner; at 20 atm they take the
+overshoot from 0.53 to 0.06 MPa (0.13 for the decay). None of them
+shortens the approach itself, which the stop-law floor paces.
+
+**Clearing on every crossing breaks the delivery.** With the outlet
+open the pressure sits at the target with the integral holding the
+outflow speed, and every crossing of the noisy error clears it:
+`crossing` runs the delivery with an error of 0.12 MPa mean and 0.20 MPa
+standard deviation against 0.01 and 0.02, and never reaches the new
+target of the delivery step.
+
+**Back-calculation and an integration band do not help.** Tracking
+acts only while the output is clamped, and in the soft chamber the
+output reaches the clamp at the floor, where the tracked integral is
+the floor itself: the 5 atm overshoot is unchanged. A short tracking
+time unwinds the integral on every clamped approach and takes 8.3 s
+over the 10 MPa compression in place of 2.9; a long one lets the
+integral wind up while clamped and overshoots the compression by
+1.55 MPa (3.1 MPa when the bench fill is taken to 100 atm in one
+step). A band narrower than the opening dip leaves the proportional
+term alone outside it: at 0.1 MPa the 5 atm step does not arrive in
+100 s and the delivery runs 0.88 MPa low. A band wider than the dip
+(1.5 MPa) contains the whole 5 atm step and changes nothing.
+
+**A derivative term does nothing for the soft chamber and is bounded
+by the stiff one.** The loop gain of the derivative path is at most
+Kd times the stiffness at any frequency, so a Kd below 0.07 mm/s per
+MPa/s (one over 13.4 MPa/mm) is safe in the stiffest chamber whatever
+the delays, and at 0.03 MPa/mm such a gain changes the loop by a fifth
+of a percent: the 5 and 20 atm overshoots are those of the GVL.
+Where the chamber is stiff it helps: Kd 0.05 takes the stiff step's
+overshoot from 0.48 to 0.04 MPa, at three times the command activity
+(0.0006 against 0.0002 mm/s per scan), and the arrival of the 20 to
+100 atm step from 0.26 to 0.05 MPa. It moves the opening dip and the
+closing peak by 0.03 MPa.
+
+**`opposed` also acts at a closing.** When the outlet shuts, the
+pressure rises above the target with the integral still holding the
+outflow speed. `opposed` clears it 0.02 MPa above the target: the
+closing peaks at 10.29 MPa against 10.85, and the pressure is back in
+band after 0.3 s against 5.4 s (7.1 s with the forward stop, which
+holds the piston while the integral unwinds). `arrival` leaves a
+closing alone, since no approach is in progress. The cost is at a
+reopening that follows at once: with the integral cleared, a 0.5 s
+closing is followed by a full opening dip, 0.83 MPa against 0.15. With
+the 10 s pause of the procedure every arm has unwound by the reopening
+and dips the same 0.82 MPa.
+
+**A false clear needs the reading 0.02 MPa above the target with the
+outlet open.** Through a delivery the error stays positive (the
+pressure about 8 kPa low), and the filtered reading's noise is under a
+kPa. No rule changes the integral during the delivery stage at the
+measured noise (1.7 kPa rms per sample with the capacitor, 4.6 bare) or
+at 10 kPa. At 30 kPa `opposed` with 0.02 MPa clears four times and the
+error's standard deviation rises from 0.02 to 0.20 MPa, with dips of
+0.84 MPa; `bleed` acts five times without effect, because a decay
+removes little in the scans a noise excursion lasts; `opposed` with
+0.1 MPa does not act.
+
+**The model against the bench** (`bench/captures/`, 2026-11-09). With
+the GVL gains and the floor on, `trace_20261109_193852.csv` shows 0.35
+and 0.51 MPa of overshoot at the 5 and 20 atm steps (from 0.14 MPa and
+another fill), a closing peak of 10.40 MPa and 8 s above the band
+after it; the `GVL + floor` arm gives 0.48 and 0.53 MPa, 10.38 MPa and
+7.1 s. With the earlier gains, `trace_20261109_190837.csv` crosses the
+5 atm target after 45 s at 1.97 mm/s and peaks at 1.77 MPa; the model
+with those gains (`--set G_cfgPressureKp=0.5 --set G_cfgPressureKi=0.2
+--set G_cfgPressureStopStiffness=100`) gives 44.6 s, 1.97 mm/s and
+1.83 MPa. The stiff
+arrival is where the model is pessimistic: the 20 to 100 atm step
+overshoots by 0.02 MPa on the bench and 0.26 MPa in the model, so the
+derivative term's benefit is not confirmed by a measurement.
+
+**What this means for the machine.**
+- The soft-chamber overshoot is the integrator's stored velocity, and
+  the remedy is to remove the integral once the pressure is past the
+  target. Neither a derivative term nor another form of anti-windup at
+  the clamp reaches it.
+- `opposed`, eq. (52), is the candidate for the slave: one comparison
+  and one assignment per scan, with no state. At 0.02 MPa it takes the
+  5 atm overshoot from 0.48 to 0.03 MPa and the closing peak from 10.85
+  to 10.29 MPa, and it lets the pressure return after a closing in 0.3 s
+  in place of 5 to 7 s. `bleed` trades a little of each for tolerance
+  of a noisy reading; `arrival` gives the same soft-chamber result and
+  leaves the delivery and the closing untouched.
+- Clearing the integral at every crossing is right only for a sealed
+  chamber and must not be used: the delivery depends on the integral at
+  zero error.
+- A derivative term is a separate lever, for the stiff arrival with the
+  hose shut, and the bench has not shown that arrival to need it.
+- None of the variants is in the slave. A candidate would go through
+  the Monte Carlo of `study_robust.py` before it is ported.

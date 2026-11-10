@@ -797,6 +797,99 @@ def check_floor_policy():
        f'(GVL {rg["P_max"]:.2f})')
 
 
+def check_variants():
+    par = StudyParams()
+    # The unchanged variant is the slave controller, scan for scan.
+    sc = scenarios.compress(par, T=20.0)
+    a = sim.run(par, sc, ctl.SlaveController())
+    b = sim.run(par, sc, ctl.VariantController())
+    assert np.array_equal(a.u, b.u)
+    ok('VariantController with no change gives the SlaveController '
+       'command exactly through a compression')
+
+    def drive(c, readings, target=10e6):
+        """Step controller c through the readings [Pa] and return the
+        integral [MPa s] after each scan."""
+        c.reset(par, sc)
+        out = []
+        for k, P in enumerate(readings):
+            c.step(P, target, k * par.Ts, sc)
+            out.append(c.fb.rInteg)
+        return out
+
+    # Readings 0.05 MPa below the target for 1 s, then above it: the
+    # integral built below is cleared (or bled) once the error is past
+    # the target by more than `over`; a target step re-arms 'arrival'.
+    below, above = [9.95e6] * 250, [10.05e6] * 50
+    I = drive(ctl.VariantController(), below + above)
+    assert I[249] > 0.04 and I[-1] > 0.03, (I[249], I[-1])
+    I = drive(ctl.VariantController(aw='opposed'), below + above)
+    assert I[249] > 0.04 and I[250] < 0.0 and I[-1] < 0.0
+    I = drive(ctl.VariantController(aw='crossing'), below + above)
+    assert I[249] > 0.04 and I[250] < 0.0
+    I = drive(ctl.VariantController(aw='bleed', Tb=0.1), below + above)
+    assert 0.0 < I[-1] < 0.5 * I[249], (I[249], I[-1])
+    # 'arrival' acts only after an approach: none starts within `step`
+    # of the target, and one from 1 MPa below clears once and no more.
+    I = drive(ctl.VariantController(aw='arrival'), below + above)
+    assert I[-1] > 0.03, I[-1]
+    c = ctl.VariantController(aw='arrival', StopVelMin=0.0)
+    far = [9.0e6] * 250
+    I = drive(c, far + above + below + above)
+    assert I[249] > 0.2 and I[250] < 0.0, (I[249], I[250])
+    assert len(c.changed) == 1 and 0.0 < I[-1] < I[550], I[-1]
+    # The integration band holds the integral outside the band.
+    I = drive(ctl.VariantController(aw='band', band=0.1),
+              [9.0e6] * 100 + below)
+    assert I[99] == 0.0 and I[-1] > 0.04
+    # Clamped from the first scan, the block holds the integral at
+    # zero; tracking settles it where u_raw - u = Ki Tt e, eq. (54).
+    hold = drive(ctl.VariantController(Ki=5.0), [8.0e6] * 250)
+    c = ctl.VariantController(aw='backcalc', Tt=0.1, Ki=5.0)
+    track = drive(c, [8.0e6] * 250)
+    # [MPa s] (u + Ki Tt e - Kp e) / Ki at e = 2 MPa
+    want = (c.fb.rVelLimit + 5.0 * 0.1 * 2.0 - c.fb.Kp * 2.0) / 5.0
+    assert hold[-1] == 0.0 and abs(track[-1] - want) < 1e-3, track[-1]
+    ok('anti-windup variants: opposed, crossing and bleed act past the '
+       'target, arrival once per approach, band outside its band, '
+       'tracking while clamped')
+
+    # The derivative term opposes a rising pressure.
+    ramp = [9.0e6 + 2e3 * k for k in range(100)]        # 0.5 MPa/s
+    c0, c1 = ctl.VariantController(), ctl.VariantController(Kd=0.5)
+    c0.reset(par, sc)
+    c1.reset(par, sc)
+    for k, P in enumerate(ramp):
+        v0 = c0.step(P, 10e6, k * par.Ts, sc)
+        v1 = c1.step(P, 10e6, k * par.Ts, sc)
+    assert abs((v0 - v1) * 1e3 - 0.5 * 0.5) < 0.01, (v0, v1)
+    ok(f'derivative term: Kd 0.5 on a 0.5 MPa/s rise takes '
+       f'{(v0 - v1) * 1e3:.2f} mm/s off the command')
+
+    # Target schedule of a scenario
+    s3 = scenarios.Scenario('s', T=3.0, tEvent=0.0, target0=1e6,
+                            targets=((1.0, 2e6), (2.0, 5e6)))
+    assert [s3.target(t) for t in (0.5, 1.0, 1.9, 2.5)] == \
+        [1e6, 2e6, 2e6, 5e6]
+
+    # Soft chamber: with free gas at a low pressure the integrator
+    # carries the piston to the target and the block's own anti-windup
+    # leaves its velocity to be unwound above it; clearing it past the
+    # target removes the overshoot.
+    q = par.with_(Vl0=279e-6)
+    soft = scenarios.Scenario('soft', T=60.0, tEvent=0.0, P0=0.0,
+                              ratio=0.98, target0=0.405e6,
+                              target1=0.405e6)
+    over = {}
+    for aw in ('block', 'opposed'):
+        r = sim.run(q, soft, ctl.VariantController(aw=aw))
+        over[aw] = float(np.max(r.P - r.target)) / 1e6      # [MPa]
+    assert over['block'] > 0.3 and over['opposed'] < 0.05, over
+    ok(f'soft chamber stepped to 5 atm: overshoot {over["block"]:.2f} '
+       f'MPa with the block alone, {over["opposed"]:.2f} MPa with the '
+       f'integral cleared past the target')
+
+
 def check_runner():
     par = StudyParams()
     cases = [Case(par, scenarios.stiffstep(par), ctl.SlaveController(Kp=k))
@@ -825,4 +918,5 @@ if __name__ == '__main__':
     check_closed_loop()
     check_floor_policy()
     check_floor_block()
+    check_variants()
     check_runner()
