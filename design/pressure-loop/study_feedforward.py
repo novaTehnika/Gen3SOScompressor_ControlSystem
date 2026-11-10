@@ -111,13 +111,15 @@ PLOT_ARMS = ('GVL + clear', 'valve signal + clear', 'detector + clear',
 # The arm whose settings part 2 changes
 SWEEP_ARM = 'detector + clear'
 # (argument, values) of part 2; 'noise' is the sensor noise of the run
-# [Pa rms per sample]
+# [Pa rms per sample], and two arguments joined by a comma change
+# together
 SWEEP = [
     ('scale', (0.7, 1.3, 1.5)),
     ('d_on', (0.02, 0.05, 0.1)),
     ('t_on', (0.0, 0.016)),
     ('window', (0.012, 0.04)),
     ('d_off', (0.0, 0.02)),
+    ('scale,d_off', ((1.3, 0.0),)),
     ('e_hi', (0.15,)),
     ('e_max', (0.5, 100.0)),
     ('noise', (4.6e3, 10e3, 30e3)),
@@ -333,7 +335,7 @@ def sweep(par, coef, seed, workers):
     arm = {a: (kind, kw) for a, kind, kw in ARMS}[SWEEP_ARM]
     d = ctl.FeedforwardController()
     base = ', '.join(f'{k}={getattr(d, k):g}' for k, _ in SWEEP
-                     if k != 'noise')
+                     if k != 'noise' and ',' not in k)
     say(f'\n=== 2. settings of "{SWEEP_ARM}", one at a time '
         f'(defaults: {base}, noise={par.noise / 1e3:g} kPa)')
     todo = [c for c in outflow_cases(par) if c[0] in SWEEP_CASES]
@@ -347,6 +349,11 @@ def sweep(par, coef, seed, workers):
                 if arg == 'noise':
                     p = q.with_(noise=v)
                     label = f'noise={v / 1e3:g} kPa'
+                elif ',' in arg:
+                    names = arg.split(',')
+                    kw.update(zip(names, v))
+                    label = ', '.join(f'{k}={x:g}'
+                                      for k, x in zip(names, v))
                 elif arg:
                     kw[arg] = v
                     label = f'{arg}={v:g}'
@@ -356,7 +363,7 @@ def sweep(par, coef, seed, workers):
     rows, n = [], len(jobs) // len(todo)
     for i, (case, _, _) in enumerate(todo):
         rows += table(case, keys[i * n:(i + 1) * n],
-                      stats[i * n:(i + 1) * n], 18)
+                      stats[i * n:(i + 1) * n], 22)
     return [['settings'] + r for r in rows]
 
 

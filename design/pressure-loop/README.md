@@ -1563,3 +1563,150 @@ target itself.
   past the target, eq. (52), which needs no stiffness and takes the
   5 atm overshoot from 0.47 to 0.02 MPa. The block has it, behind
   `G_cfgPressureIntegClearEnable`.
+
+## Outflow feedforward study
+
+`study_feedforward.py` tests a velocity feedforward for the outflow
+that is switched by the measured pressure, eqs. (64) to (66), against
+the block alone, the block with its integral clear, and the same
+feedforward told of the valve by the simulation (the bound of the
+nominal results above). The feedforward is sized once, for the
+measured orifice bank: 0.440 mm/s per sqrt(MPa), 1.39 mm/s at 10 MPa.
+The detector's defaults are a 20 ms window, d_on 0.03 MPa, the error
+between 0.03 and 1 MPa, held for 8 ms; and for the release 0.02 MPa
+past the target with a rise of 0.05 MPa over the window, or 0.3 MPa
+past it.
+
+**Nominal cases**, hose opened before the compression unless stated
+(the opening dip; the time from the first opening to the pressure back
+in band; the peak after the purge closes the valve; the margin over
+saturation):
+
+| Case | Arm | Dip MPa | Back in band s | Closing peak MPa | Margin MPa |
+|---|---|---|---|---|---|
+| 1:1 at 10 MPa | GVL | 0.81 | 5.6 | 10.84 | 5.6 |
+| | GVL + clear | 0.81 | 5.6 | 10.23 | 5.6 |
+| | valve signal + clear (bound) | 0.35 | 0.25 | 10.14 | 6.1 |
+| | detector + clear | 0.42 | 0.26 | 10.28 | 6.0 |
+| | detector + clear, short filter | 0.41 | 0.27 | 10.21 | 6.0 |
+| 2.5:1 at 10 MPa | GVL + clear | 0.81 | 5.6 | 10.23 | 0.15 (degasses) |
+| | valve signal + clear (bound) | 0.35 | 0.25 | 10.14 | 0.61 |
+| | detector + clear | 0.42 | 0.26 | 10.28 | 0.54 |
+| 2.5:1 at 11 MPa | GVL + clear | 0.85 | 5.7 | 11.25 | 1.1 |
+| | detector + clear | 0.43 | 0.27 | 11.30 | 1.5 |
+| 1:1 at 5 MPa | GVL + clear | 0.57 | 4.8 | 5.17 | 0.9 |
+| | detector + clear | 0.35 | 0.24 | 5.24 | 1.1 |
+| 1:1, valve opened over 0.5 s and shut over 1 s | GVL + clear | 0.79 | 5.8 | 10.05 | 5.7 |
+| | valve signal + clear (bound) | 0.23 | 0.26 | 10.03 | 6.2 |
+| | detector + clear | 0.35 | 0.08 | 10.34 | 6.1 |
+
+**The pressure is enough to switch it.** The detector is on 20 ms
+after the first opening, where the tube takes its volume as a step, and
+36 ms after the reopening, where there is only the outflow's 4.5 MPa/s,
+and off 36 ms after the closing. The dip is 0.42 MPa against the
+bound's 0.35 and the block's 0.81, and the pressure is back in band in
+a quarter of a second in place of five and a half. That is 0.4 MPa of
+margin over saturation, which is what 2.5:1 at 10 MPa lacks without it.
+The closing peak is the integral clear's, 0.05 MPa higher: with the
+feedforward carrying the outflow the integral holds little, and the arm
+without the clear gives the same figures. With the hose opened after
+mixing the fall of 5.7 MPa as the hose joins the chamber does not
+switch it on: the error leaves the range of an outflow within a scan,
+before t_on has run. In a compression, in the soft chamber stepped to
+5, 20 and 100 atm, and with the target taken down 2 MPa and back, it
+never switches on.
+
+**Settings** (one at a time, on the 1:1 delivery with both hose
+procedures and with the slow valve):
+- The trigger must reach the reopening, which has no tube step:
+  d_on of 0.05 MPa finds the abrupt reopening 8 ms later and misses
+  the slow one, and 0.1 MPa misses both (a dip of 0.8 MPa again);
+  0.02 MPa is the same as 0.03 on the abrupt valve and finds the slow
+  one sooner (0.26 MPa of dip against 0.35).
+- t_on is what keeps the hose's joining out: with t_on of 0 it
+  switches on there once, falsely. 16 ms costs 0.02 MPa of dip.
+- The release needs the rise. On the error alone (d_off of 0) a
+  feedforward sized 30 % high leaves the pressure above the target
+  and the detector switches off and on some 200 times in a delivery;
+  with the rise it stays on. A feedforward 30 % low or high gives 0.43
+  and 0.41 MPa of dip, and 30 % high one false switching after the
+  closing (a peak of 10.36 MPa). At 50 % high the error passes e_hi
+  and it switches as often again: the sizing must be within
+  e_hi Kp / v_ff, a third.
+- A window of 12 ms releases late (a peak of 10.41 MPa) and misses the
+  slow reopening; 40 ms is the same as 20 ms on the abrupt valve.
+- Sensor noise of 4.6, 10 and 30 kPa rms changes nothing: the trigger
+  is fifteen times the measured 1.9 kPa.
+- A slow hand on the closing is the one case the feedforward makes
+  worse: it stays on while the outflow fades, and the pressure peaks
+  at 10.34 MPa against the block's 10.05 before e_hi releases it.
+  e_hi of 0.15 MPa brings that to 10.24 MPa and halves the sizing
+  error the detector tolerates.
+
+**The shorter filter.** The pressure input's noise is 1.87 kPa rms per
+sample, white and without spikes (`bench/pressure/README.md`,
+section 5), and none of the readers of the filtered pressure needs the
+20 ms low-pass at that level. A median of 3 with a 5 ms low-pass
+leaves 0.95 kPa rms in place of 0.59 and takes 19 ms out of the loop:
+the linear model's phase margin at the GVL gains goes from 52° to 63°
+in the hose-shut chamber, and the largest Kp with 45° and 6 dB from
+1.85 to 2.71. At the GVL gains the nominal results hardly move (a dip
+of 0.79 MPa and a closing peak of 10.19 MPa with the clear; 0.41 and
+10.21 with the detector, which is on 24 ms after the reopening): the
+shorter filter is margin, and room for gain, and it is not needed for
+the detector.
+
+**Monte Carlo** (`--mc 100`: 100 Latin hypercube samples over the
+ranges of `robust.py`, hose opened before the compression unless
+stated, the feedforward sized for the nominal orifice while Cd runs
+from 0.8 to 0.9; pass rate for every requirement in percent, the
+opening dip at p50 / max and the margin over saturation at p50 / min,
+in MPa):
+
+| Case | GVL + clear | valve signal + clear (bound) | detector + clear | GVL + clear, short filter | detector + clear, short filter |
+|---|---|---|---|---|---|
+| 1:1 at 10 MPa | **100** | **100** | **100** | **100** | **100** |
+| 2:1 at 10 MPa | **100** | **100** | **100** | **100** | **100** |
+| 2.5:1 at 10 MPa | 0 | 73 | 50 | 0 | 64 |
+| 2.5:1 at 11 MPa | **100** | **100** | **100** | **100** | **100** |
+| 1:1 at 10 MPa, hose after mixing | 69 | 69 | 69 | 69 | 69 |
+| dip, 1:1 | 0.84 / 0.93 | 0.37 / 0.48 | 0.44 / 0.57 | 0.81 / 0.88 | 0.41 / 0.53 |
+| margin, 2:1 | 1.95 / 1.86 | 2.42 / 2.31 | 2.34 / 2.22 | 1.98 / 1.91 | 2.37 / 2.26 |
+| margin, 2.5:1 at 10 MPa | 0.12 / 0.03 | 0.59 / 0.48 | 0.51 / 0.39 | 0.15 / 0.08 | 0.55 / 0.43 |
+| margin, 2.5:1 at 11 MPa | 1.08 / 0.99 | 1.58 / 1.47 | 1.50 / 1.38 | 1.11 / 1.03 | 1.53 / 1.41 |
+
+In the thousand runs of each detector arm (a compression and a delivery
+per sample and case) the feedforward never switched on without flow
+through the outlet and never missed an opening: it was on within 40 ms
+of each (within 30 ms with the shorter filter). The dip is about half
+the block's (0.57 MPa against 0.93 at worst) and the margin over
+saturation 0.4 MPa wider.
+That margin does not make 2.5:1 deliverable at 10 MPa: it passes half
+the samples, and the feedforward told of the valve itself passes 73 %,
+because the tube's step and the loop's delay leave too little above a
+saturation pressure of 9.0 MPa. At 11 MPa every arm passes and the
+feedforward widens the smallest margin from 1.0 to 1.4 MPa. The
+closing peak is that of the integral clear, within 0.05 MPa. With the
+hose opened after mixing the failures are the opening drop's, which no
+arm touches.
+
+**What this means for the machine.**
+- A feedforward for the outflow needs no valve signal: the fall of
+  the measured pressure switches it on within five to ten scans and
+  its rise past the target switches it off, with no false switching
+  over the measured ranges. It halves the opening dip (0.44 MPa
+  against 0.84 at p50) and returns the pressure to the band in a
+  quarter of a second.
+- What it buys is margin over saturation at an opening, 0.4 MPa, and
+  with it a higher charge at a given target or a lower target at a
+  given charge. It does not replace the 11 MPa target for 2.5:1.
+- It is sized for one orifice bank, within a third; a bank that
+  passes less than a third of the present flow falls under the
+  trigger. A slow hand on the closing is the case it makes worse, by
+  0.3 MPa of peak.
+- The 20 ms pressure filter is not needed for the noise: a median of
+  3 and 5 ms give 11° more phase margin at the GVL gains and room to
+  raise Kp from 1.85 to 2.7 at the same margins, with every result
+  above unchanged or slightly better. The gains have not been raised
+  in any run here.
+- The detector and the feedforward are not in the slave.
