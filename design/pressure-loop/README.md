@@ -1219,6 +1219,28 @@ compression overshoots by 0.04 MPa against 0.08 and the closing peaks
 at 10.23 MPa against 10.69, and the loop follows the outflow with its
 integral as it does without it.
 
+**Monte Carlo** (`study_robust.py`, arms `GVL+clear` and
+`GVL+floor+clear`; 100 Latin hypercube samples, the sensor noise from
+1.5 to 5 kPa rms among them; pass rate for every requirement in
+percent, and the closing peak at p50 / max in MPa):
+
+| Case | GVL | GVL + floor | GVL + clear | GVL + floor + clear |
+|---|---|---|---|---|
+| 1:1 at 10 MPa, hose before | 100, 10.9 / 11.0 | 100, 10.4 / 10.5 | 100, 10.3 / 10.3 | 100, 10.3 / 10.4 |
+| 2:1 at 10 MPa, hose before | 100, 10.9 / 11.0 | 100, 10.4 / 10.5 | 100, 10.3 / 10.3 | 100, 10.3 / 10.4 |
+| 2.5:1 at 11 MPa, hose before | 100, 11.9 / 12.0 | 100, 11.4 / 11.5 | 100, 11.3 / 11.4 | 100, 11.3 / 11.4 |
+| 1:1 at 10 MPa, hose after mixing | 69, 10.9 / 11.0 | 69, 10.4 / 10.5 | 69, 10.3 / 10.3 | 69, 10.3 / 10.4 |
+
+The clear passes wherever the block passes without it, and fails the
+same samples of the present procedure, which degas at the opening
+drop. The margin over saturation through the delivery and the time to
+arrive are the same to the digits printed in every case, so within the
+measured noise the rule does not act falsely in a delivery. The
+closing peak is 0.6 MPa lower than the block's own and 0.1 MPa lower
+than the floor's; at 2.5:1 and 11 MPa that is 11.4 MPa at worst
+against 12.0. The compression peaks within 0.05 MPa of the target in
+every sample. The rule has not been run on the machine.
+
 ## Choice of compensation
 
 `study_compensation.py` asks which compensator the loop should have,
