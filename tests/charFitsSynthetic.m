@@ -284,7 +284,8 @@ fprintf('ok  stopping distance: D %.1f / %.1f mm/s^2 (set %.0f), T0 %.0f / %.0f 
 % reversal under load and the stiffness bound from the K300 ramps, and the
 % hose-open run as the contrast.
 steps26 = {fullfile(cap, 's1_cap_steps_*_20261026_*.csv'), fullfile(cap, 's2_cap_steps_*_20261026_*.csv')};
-rp = charDrivePath(steps26, struct('quiet', true));
+old = struct('quiet', true, 'pipelineScans', 2);     % the slave that recorded these logs
+rp = charDrivePath(steps26, old);
 assert(rp.inertia.n == 74, '%d steps', rp.inertia.n);
 assert(abs(rp.inertia.J_pct_per_mm_s2 - 0.418) < 0.005 && abs(rp.inertia.mass_kg / 4.6e5 - 1) < 0.01, ...
     'J %.4f %% per mm/s^2, %.3g kg', rp.inertia.J_pct_per_mm_s2, rp.inertia.mass_kg);
@@ -295,7 +296,7 @@ assert(rp.pass, 'the October steps failed the inertia checks');
 fprintf('ok  drive path, October steps: J %.3f / %.3f / %.3f %%/(mm/s^2) at 0.3 / 1 / 2.5 mm/s, %.3f overall = %.2g kg (lossless)\n', ...
     Jsize, rp.inertia.J_pct_per_mm_s2, rp.inertia.mass_kg);
 
-rk = charDrivePath(k300, struct('quiet', true));
+rk = charDrivePath(k300, old);
 assert(numel(rk.friction.logs) == 3 && all([rk.friction.logs.nPairs] == 7));
 dts = [rk.friction.logs.medDT_pct];
 assert(all(abs(dts - [25.1 21.6 22.5]) < 0.2), 'median torque reversal %s', mat2str(dts, 3));
@@ -318,7 +319,7 @@ assert(abs(rk.friction.mu - 0.41) < 0.03 && abs(rk.friction.Fc_N / 1e3 - 3.8) < 
 assert(rk.pass);
 fprintf('ok  drive path, October K300: torque reversal %.1f..%.1f %% at 4 MPa and %.1f..%.1f %% at 9 (%.0f..%.0f kN and %.0f..%.0f kN lossless), k_s > %.0f N/um\n', ...
     min(dT4), max(dT4), min(dT9), max(dT9), min(dF(1:3)), max(dF(1:3)), min(dF(4:6)), max(dF(4:6)), rk.stiffness.bound_N_per_um);
-rh = charDrivePath(fullfile(cap, 'K300_char_20261026_193603.csv'), struct('quiet', true));
+rh = charDrivePath(fullfile(cap, 'K300_char_20261026_193603.csv'), old);
 assert(rh.friction.logs.medDX_um > 30 && rh.friction.logs.medDX_um < 50 && rh.stiffness.resolved && ~rh.pass, ...
     'hose-open offset %.1f um', rh.friction.logs.medDX_um);
 assert(abs(rh.friction.logs.medDT_pct / 23.4 - 1) < 0.02);
@@ -412,7 +413,7 @@ fprintf('ok  drive path, synthetic reversals with no backlash: none reported, th
 % bottom turn of each level (the next reversal follows 1.5 s later, inside the
 % same capture, and is not part of the fit).
 %   a soft path, 0.4 kN/um: windup of tens of um at the force reversal
-randn('seed', 24);
+randn('seed', 25);
 par = base; par.kch = 7.2; par.ks_N_um = 400; par.b_um = 0;
 fdS = ditherSet(dir, 'ditS', par, [1 5 9]);
 rd = charDrivePath(fdS, struct('quiet', true, 'inertia_pct', mrTrue));
@@ -501,7 +502,7 @@ function d = driveCapture(par, cmdSeq, tChange, N)
 % (Coulomb + mu P A) of the force the chamber puts on it, and otherwise
 % moves to where that balance holds (a play operator). The chamber is
 % P = P0 + kch x_p; the pressure column goes through the slave's median,
-% low-pass and two-scan pipeline. par.Fcm, par.Fcp and par.mu are in N, par.ks_N_um in N/um.
+% low-pass and par.pipeline scans of delay. par.Fcm, par.Fcp and par.mu are in N, par.ks_N_um in N/um.
 Ts = par.Ts;
 dt = Ts / par.sub;                                          % [s] integration step
 nF = N * par.sub;

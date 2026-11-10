@@ -101,6 +101,9 @@ function r = charDrivePath(files, opts)
 %   opts.minRampRows     rows a ramp needs to count as a segment (20)
 %   opts.grid_MPa        pressures of the reversal comparison (4:0.5:9)
 %   opts.floor_um        the smallest up/down offset the logs resolve (5)
+%   opts.pipelineScans   scans by which the recorded pressure trails the
+%                        slave's filter (default charConfig: 0; 2 for the
+%                        captures up to 5 November)
 %   opts.motorFriction_pct  motor-side friction in torque percent for the
 %                        path-force bound (default: from the reversal
 %                        captures when there are any, else not applied)
@@ -189,7 +192,8 @@ opts = withDefault(opts, 'pressureBin_MPa', 1);
 opts = withDefault(opts, 'quiet', false);
 say = @(varargin) sayIf(~opts.quiet, varargin{:});
 Ts = opts.rowPeriod_s;                                      % [s]
-sensorLag = cfg.filterTau + ((cfg.medianSize - 1) / 2 + cfg.pipelineScans) * Ts;   % [s] pressure chain, for a ramp
+opts = withDefault(opts, 'pipelineScans', cfg.pipelineScans);
+sensorLag = cfg.filterTau + ((cfg.medianSize - 1) / 2 + opts.pipelineScans) * Ts;   % [s] pressure chain, for a ramp
 
 say('\n=== charDrivePath: %d file(s); %.1f N per %% of rated torque (lossless), scan %.1f ms\n', ...
     numel(files), nPP, 1000 * Ts);

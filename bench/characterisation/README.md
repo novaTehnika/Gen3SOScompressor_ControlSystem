@@ -482,7 +482,10 @@ the pressure channel: the lag model for the piston velocity, integrated
 at the capture's own stiffness (its pressure change over its position
 change) and passed through the slave's median filter (two scans for a
 smooth signal), the low-pass (`G_cfgAnalogFilterTimeConst`, 20 ms on the
-machine, 50 ms earlier) and the two-scan pipeline, eqs. 16 to 18. The
+machine, 50 ms earlier) and the scans by which the recorded pressure
+trails the filter (`opts.pipelineScans`: none for the slave as it is,
+whose `PRG_Main` scales the filter's output of the same scan; two for
+the captures up to 5 November), eqs. 16 to 18. The
 filter constant must be the one loaded. The result is the lag at the
 piston plus its dead time, at the 4 ms scan: behind the sensor chain the
 two trade against each other, so the fit determines their sum, which is
@@ -933,7 +936,8 @@ rh = charDrivePath([logs '/K300_char_20261026_193603.csv']); % the hose-open run
    and 4.9 kN/um (5.0, 4.3 and 4.5 % of rated torque per um), over 200
    times the chamber's 24 N/um. The 5 um floor (`opts.floor_um`) is what
    the logs resolve: the pair-to-pair scatter, and the pressure sensor's
-   lag (36 ms: median 5, low-pass 20 ms, two scans of pipeline), which at
+   lag (36 ms in these logs: median 5, low-pass 20 ms, two scans between
+   the filter and the recorded pressure; 28 ms for the slave as it is), which at
    0.1 mm/s moves the up and down ramps 7 um apart in the same direction a
    stiff path would, so it raises the offset and the bound stays valid.
    The bound takes the whole torque reversal as passing the path, which
