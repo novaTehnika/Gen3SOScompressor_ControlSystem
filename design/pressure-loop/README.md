@@ -1337,6 +1337,20 @@ opening varies from run to run, from about 1 to 5 mL; the recovery to
 within 0.1 MPa takes 4.4 s against 5 to 5.5 s at Kp 2.0. The delivery
 ends at the end-of-travel stop without a fault.
 
+With `G_cfgDirectCtrlFilterTime` at 0 and the same gains
+(`trace_20261110_204936.csv`, 237 mL at the hold with little air,
+9.4 MPa/mm at the arrival) the step from 20 to 100 atm overshoots by
+0.026 MPa and swings 0.024 MPa below the target, and the spread within
+an exchange at the hold is back at 2.4 kPa. The torque reads 100 % for
+one exchange at that step: without the filter the velocity command
+reaches the drive as a step. Eight distal openings drop the chamber by
+0.89 MPa at the first and 0.54 to 0.74 MPa at the others, each within
+one exchange, with the error at 0.4 MPa a second later and back within
+0.1 MPa after 4 to 4.5 s; the closings peak at 10.16 to 10.20 MPa. On
+a chamber and hose with little air the opening is close to the
+model's, whose tube step and loop give 0.5 MPa at this gain: the
+larger drops of the two traces before belong to their air.
+
 ## Choice of compensation
 
 `study_compensation.py` asks which compensator the loop should have,
