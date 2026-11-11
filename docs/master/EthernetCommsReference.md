@@ -34,9 +34,11 @@ Safety and plant I/O do not depend on the network:
 
 ### Master
 
-The shell model runs in Simulink **normal mode** (the app starts it with
-`simulation('SOS_Gen3_Master_Shell')`), which under Simulink Desktop Real-Time is
-**Connected IO mode**. Simulink executes the model on the host and a kernel-mode
+The shell model runs in Simulink **normal mode** (the controller process,
+`master-src/controller/runController`, starts it with
+`simulation('SOS_Gen3_Master_Shell')` in a MATLAB that runs nothing else, so
+the operator app's work never holds its steps back), which under Simulink
+Desktop Real-Time is **Connected IO mode**. Simulink executes the model on the host and a kernel-mode
 process runs the DAQ drivers, exchanging data through shared memory each tick.
 
 Consequences:

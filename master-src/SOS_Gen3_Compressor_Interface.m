@@ -11,6 +11,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         TraceRecordMenu                 matlab.ui.container.Menu
         TracePlotMenu                   matlab.ui.container.Menu
         TraceLiveMenu                   matlab.ui.container.Menu
+        TraceFolderMenu                 matlab.ui.container.Menu
         ViewMenu                        matlab.ui.container.Menu
         ViewSideBySideMenu              matlab.ui.container.Menu
         ViewSecondMonitorMenu           matlab.ui.container.Menu
@@ -90,20 +91,18 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
     end
 
 
-    % Public properties that correspond to the Simulink model
-    properties (Access = public, Transient)
-        Simulation simulink.Simulation
-    end
-
     % Cost of the display poll in seconds (n polls, mean, max, last) and
     % the polls that took longer than cfg.displayPeriod
     properties (SetAccess = private)
-        PollStats = struct('n', 0, 'mean', 0, 'max', 0, 'last', 0, 'overruns', 0)
+        PollStats = struct('n', 0, 'mean', 0, 'max', 0, 'last', 0, 'overruns', 0, ...
+            'writeGapMax', 0, 'stalls', 0)
+        % One entry per link stall: a gap between master writes of at
+        % least cfg.stallWarn (time, gap_s)
+        StallLog = struct('time', {}, 'gap_s', {})
     end
 
 
     properties (Access = private)
-        modelName
         updateTimer
         cfg                 % masterConfig: geometry and limits
         commandSeq = 0      % mirrors the CommandSeq block; a change marks a new command
@@ -122,7 +121,6 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         volumeView = "swept"    % "swept", "mixing" or "sinceZero"
         volumeZeroPosition = NaN    % mm, slave frame, where the incremental volume was zeroed
         lastPosition = NaN      % mm, slave frame, at the last poll
-        rto = struct()          % cached RuntimeObject of each read block
         activeTarget = NaN      % position or pressure sent with activeOp
         opConfirmed = false     % the model has reported activeOp running
         opSentAt = uint64(0)    % tic of the last request
@@ -150,13 +148,14 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         procTick = []
         procNote = ''
 
-        % Trace stream: every poll the new records of the model's TraceRing
-        % block are drained (traceReader, which keeps no records), aligned
-        % (traceAligner) and appended to the live plot's buffer (traceLive).
+        % Trace stream: every poll the new records the controller drained
+        % from the model's TraceRing block (traceReader holds its newest
+        % record number and missed count) are aligned (traceAligner) and
+        % appended to the live plot's buffer (traceLive).
         % While traceRecording is set and not paused, the same aligned rows
         % are combined into one row per record interval (traceDecim) and
         % appended to trace.
-        traceReader = []        % traceStart(ring, false): newest record, missed count
+        traceReader = []        % lastSeq and missed, as the controller reports them
         traceAligner = []       % traceAlignNew state
         traceLive = []          % traceLiveBuffer
         traceDecim = []         % traceDecimateNew state of the recording
@@ -177,17 +176,36 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         livePolls = 0           % polls since the live plot was opened
 
         % Track steps: the number the TrackSeq block holds, whether a
-        % series is being played, the procedure step the ProcStep block
-        % holds and whether the table update has been timed yet.
+        % series is being played and the procedure step the ProcStep block
+        % holds.
         trackSeq = 0
         trackActive = false
         procStepShown = 0
-        trackTableTimed = false
 
         % Height in pixels of the checklist and parameter pools when shown
         % (rows 4 and 5 of ProcContentGrid; 0 when the step has none)
         procChecksHeight = 0
         procParamsHeight = 0
+
+        % The note shown after the status line (a link stall, a message from
+        % the controller) and since when
+        noteText = ""
+        noteShownAt = []
+
+        % The controller (master-src/controller): the TCP connection to it
+        % ([] when none), the bytes received and not yet decoded, the app's
+        % view of it (ctlClientNew), the clock its status times are on,
+        % when this app launched one ([] when it has not), when a
+        % connection was last tried, and whether the app asked it to stop
+        % the model.
+        ctlConn = []
+        ctlBuf = uint8([])
+        ctl = []
+        ctlClock = []
+        ctlLaunchedAt = []
+        ctlTriedAt = []
+        stopRequested = false
+        startingAt = []         % tic of Connect, until the model runs or fails to start
     end
 
     properties (Access = private, Constant)
@@ -219,6 +237,14 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         TASKBAR_MARGIN  = 48
         DECO_FALLBACK   = [8 8 8 90]
 
+        % A note is shown after the status line this long (s), a link
+        % stall is not looked for in the first records after the model
+        % starts, and a connection to the controller is tried this often
+        % (s)
+        NOTE_SHOW  = 15
+        STALL_SKIP_RECORDS = 20
+        CTL_RETRY  = 1
+
         COLOR_IDLE     = [0.96 0.96 0.96]
         COLOR_STARTING = [1 0.8 0.3]
         COLOR_ACTIVE   = [0.4 0.8 0.4]
@@ -233,38 +259,191 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
     methods (Access = private)
 
+        % The model runs: the controller says so, and its last status is
+        % recent
         function tf = isRunning(app)
-            tf = ~isempty(app.Simulation) && isvalid(app.Simulation) && ...
-                app.Simulation.Status == "running";
+            tf = ~isempty(app.ctlConn) && ~isempty(app.ctl) && ...
+                app.ctl.running && controllerAlive(app);
         end
 
-        % Stop any operation, wait for the master to report the axis
-        % stopped (up to its own stop timeout), then stop the model. The
-        % DAQ outputs fall to their final values (safety relay off) with
-        % MotionEnable already low.
+        function tf = controllerAlive(app)
+            tf = ~isempty(app.ctl) && ...
+                toc(app.ctlClock) - app.ctl.statusAt <= app.cfg.controllerTimeout;
+        end
+
+        % Stop any operation and ask the controller to stop the model once
+        % the master reports the axis stopped (up to its own stop timeout),
+        % then wait for it. The DAQ outputs fall to their final values
+        % (safety relay off) with MotionEnable already low. The controller
+        % drains the trace ring a last time before the stop.
         function disconnect(app)
             app.StatusLabel.Text = "Stopping...";
             drawnow;
             try
                 sendCommand(app, app.OP_STOP);
                 clearOp(app);
-                deadline = tic;
-                while toc(deadline) < app.cfg.tStopMax + 0.5
-                    code = readBlock(app, "StatusCode");
-                    if code < 1 || code > 8   % not moving, starting or stopping
-                        break
-                    end
-                    pause(0.05);
+                sendCtl(app, struct('t', 'stop'));
+                app.stopRequested = true;
+                if waitStopped(app, app.cfg.tStopMax + 3)
+                    app.StatusLabel.Text = "Disconnected";
+                else
+                    app.StatusLabel.Text = "Stop requested, but the controller still reports the model running";
                 end
-                streamTrace(app);       % the records since the last poll, while the ring is readable
-                stop(app.Simulation);
+                streamTrace(app);
                 app.wasRunning = false;     % not an unexpected stop
                 finishRecording(app, false);
-                app.StatusLabel.Text = "Disconnected";
             catch ME
                 app.StatusLabel.Text = append("Disconnect failed: ", ME.message);
             end
             updateButtons(app);
+        end
+
+        % Wait up to timeout s for the controller to report the model
+        % stopped, taking its messages meanwhile; true once it has. The
+        % app's waiting holds nothing back: the model runs in the
+        % controller's MATLAB.
+        function stopped = waitStopped(app, timeout)
+            deadline = tic;
+            stopped = ~isRunning(app);
+            while ~stopped && toc(deadline) < timeout
+                pause(0.05);
+                pumpController(app);
+                stopped = ~isRunning(app);
+            end
+        end
+
+        % Keep the connection to the controller: on every poll take its
+        % messages and ping it, and without a connection try one every
+        % CTL_RETRY s, launching the controller the first time none
+        % answers. A controller whose status stops (it is busy starting
+        % the model, or hangs) keeps its connection; the model counts as
+        % not running until the status comes back (isRunning).
+        function serviceController(app)
+            if ~isempty(app.ctlConn)
+                pumpController(app);
+                if ~isempty(app.ctlConn)
+                    try
+                        sendCtl(app, struct('t', 'ping'));
+                    catch
+                    end
+                end
+                return
+            end
+            if ~isempty(app.ctlTriedAt) && toc(app.ctlTriedAt) < app.CTL_RETRY
+                return
+            end
+            app.ctlTriedAt = tic;
+            try
+                c = tcpclient('127.0.0.1', app.cfg.controllerPort, 'ConnectTimeout', 1);
+                app.ctlConn = c;
+                app.ctlBuf = uint8([]);
+                app.ctl = ctlClientNew();
+                app.ctl.statusAt = toc(app.ctlClock);   % counts from now
+                sendCtl(app, struct('t', 'hello'));
+                app.ctlLaunchedAt = [];
+                if ~isRunning(app)
+                    app.StatusLabel.Text = "Controller ready: press Connect";
+                end
+            catch
+                if isempty(app.ctlLaunchedAt)
+                    launchController(app);
+                elseif toc(app.ctlLaunchedAt) > app.cfg.controllerStartMax
+                    app.StatusLabel.Text = ...
+                        "The controller did not start: see master-src/captures/controller.log";
+                else
+                    app.StatusLabel.Text = sprintf( ...
+                        "Starting the controller... %.0f s", toc(app.ctlLaunchedAt));
+                end
+            end
+        end
+
+        % Start the controller in a MATLAB of its own (ctlLaunchCommand)
+        function launchController(app)
+            app.ctlLaunchedAt = tic;
+            folder = fullfile(fileparts(mfilename("fullpath")), "controller");
+            [code, out] = system(ctlLaunchCommand(app.cfg, char(folder)));
+            if code ~= 0
+                app.StatusLabel.Text = append("Controller launch failed: ", strtrim(out));
+            else
+                app.StatusLabel.Text = "Starting the controller...";
+            end
+        end
+
+        % Take the bytes the controller sent into the app's view of it
+        % (ctlClientUpdate); the trace records wait in app.ctl.rows for
+        % streamTrace and the notes go to the status line.
+        function pumpController(app)
+            if isempty(app.ctlConn)
+                return
+            end
+            try
+                n = app.ctlConn.NumBytesAvailable;
+                if n > 0
+                    app.ctlBuf = [app.ctlBuf, read(app.ctlConn, n, "uint8")];
+                end
+            catch ME
+                dropController(app, append("Controller connection lost: ", ME.message));
+                return
+            end
+            [msgs, app.ctlBuf] = ctlDecode(app.ctlBuf);
+            app.ctl = ctlClientUpdate(app.ctl, msgs, toc(app.ctlClock));
+            app.commandSeq = max(app.commandSeq, app.ctl.cmdSeq);
+            app.traceReader = struct('lastSeq', app.ctl.lastSeq, ...
+                'missed', app.ctl.missed);
+            for k = 1:numel(app.ctl.notes)
+                fprintf('%s  controller: %s\n', datestr(now, 'HH:MM:SS'), app.ctl.notes{k});
+                showNote(app, app.ctl.notes{k});
+                if startsWith(app.ctl.notes{k}, "Model unable to start")
+                    app.startingAt = [];
+                end
+            end
+            app.ctl.notes = {};
+        end
+
+        % Send one message to the controller; a failed write drops the
+        % connection
+        function sendCtl(app, msg)
+            if isempty(app.ctlConn)
+                error("The controller is not connected");
+            end
+            try
+                write(app.ctlConn, ctlEncode(msg));
+            catch ME
+                dropController(app, append("Controller connection lost: ", ME.message));
+                rethrow(ME);
+            end
+        end
+
+        function dropController(app, text)
+            app.ctlConn = [];
+            app.ctlBuf = uint8([]);
+            if ~isempty(app.ctl)
+                app.ctl.running = false;
+            end
+            app.StatusLabel.Text = text;
+        end
+
+        % Ask the controller to stop the model (it waits for the axis to
+        % stop) and end, and close the connection
+        function quitController(app)
+            if isempty(app.ctlConn)
+                return
+            end
+            try
+                sendCtl(app, struct('t', 'quit'));
+            catch
+            end
+            app.ctlConn = [];
+        end
+
+        % Show a short note: while the model runs, after the status line
+        % for NOTE_SHOW s (statusText); otherwise as the status line
+        function showNote(app, text)
+            app.noteText = string(text);
+            app.noteShownAt = tic;
+            if ~isRunning(app)
+                app.StatusLabel.Text = app.noteText;
+            end
         end
 
         % Folder the traces are saved in, created when missing
@@ -371,17 +550,20 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.trace = traceAppend(app.trace, out);
         end
 
-        % Drain the ring on every poll while the model runs, recording or
-        % not: the new records are aligned and appended to the live plot's
-        % buffer, and to the recording unless it is paused.
+        % Take the records the controller drained from the ring, on every
+        % poll, recording or not: they are aligned and appended to the live
+        % plot's buffer, and to the recording unless it is paused. The
+        % last records after the model stops are taken too.
         function streamTrace(app)
-            if ~isRunning(app) || isempty(app.traceReader)
+            pumpController(app);
+            if isempty(app.ctl) || isempty(app.ctl.rows)
                 return
             end
+            new = app.ctl.rows;
+            app.ctl.rows = zeros(0, size(new, 2));
             try
-                [app.traceReader, new] = traceDrain(app.traceReader, ...
-                    readBlock(app, "TraceRing"));
                 [app.traceAligner, aligned] = traceAlign(app.traceAligner, new, false);
+                checkStall(app, aligned);
                 app.traceLive = traceLiveAppend(app.traceLive, aligned);
                 if app.traceRecording && ~app.tracePaused
                     takeRecords(app, aligned);
@@ -441,8 +623,12 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         end
 
         % End the recording and save it. The file is written to the
-        % captures folder first; an interactive stop then offers to move
-        % it, and cancelling keeps it where it is.
+        % captures folder at once; an interactive stop then offers to move
+        % it, and cancelling keeps it where it is. While motion is
+        % commanded no dialog opens, since one left open holds the app's
+        % thread past cfg.appTimeout and the controller would stop the
+        % motion: the file stays in the captures folder and the trace
+        % status says so.
         function finishRecording(app, interactive)
             if ~app.traceRecording
                 return
@@ -471,12 +657,26 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 updateButtons(app);
                 return
             end
+            job = struct('data', app.trace.data(1:app.trace.n, :), ...
+                'meta', traceMeta(struct('n', app.trace.n, 'missed', missed), ...
+                app.cfg, app.traceStartedAt, app.traceIntervalStart), ...
+                'missed', missed, 'stamp', datestr(now, "yyyymmdd_HHMMSS"));
+            noDialog = interactive && motionCommanded(app);
+            saveTrace(app, job, interactive && ~noDialog);
+            if noDialog && startsWith(app.TraceStatusLabel.Text, "Saved")
+                app.TraceStatusLabel.Text = append(app.TraceStatusLabel.Text, ...
+                    " in captures (no Save dialog while the axis is under command)");
+            end
+            updateButtons(app);
+        end
+
+        % Write one finished recording to the captures folder, offer to
+        % move it when interactive, and name it on the trace status line
+        function saveTrace(app, job, interactive)
             try
                 file = char(fullfile(capturesFolder(app), append("trace_", ...
-                    datestr(now, "yyyymmdd_HHMMSS"), ".csv")));
-                traceWriteCsv(file, app.trace.data(1:app.trace.n, :), ...
-                    traceMeta(struct('n', app.trace.n, 'missed', missed), ...
-                    app.cfg, app.traceStartedAt, app.traceIntervalStart));
+                    job.stamp, ".csv")));
+                traceWriteCsv(file, job.data, job.meta);
                 if interactive
                     [name, folder] = uiputfile("*.csv", "Save trace", file);
                     figure(app.UIFigure);
@@ -489,16 +689,61 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 [~, base, ext] = fileparts(file);
                 app.TraceStatusLabel.Text = append("Saved ", base, ext);
                 app.TraceStatusLabel.Tooltip = string(file);
-                if missed > 0
+                app.TraceStatusLabel.FontColor = [0 0 0];
+                if job.missed > 0
                     app.TraceStatusLabel.Text = append(app.TraceStatusLabel.Text, ...
-                        sprintf(" (%d missed)", missed));
+                        sprintf(" (%d missed)", job.missed));
                     app.TraceStatusLabel.FontColor = [1 0 0];
                 end
             catch ME
                 app.TraceStatusLabel.Text = append("Trace not saved: ", ME.message);
                 app.TraceStatusLabel.FontColor = [1 0 0];
             end
-            updateButtons(app);
+        end
+
+        % The longest gap between master writes in the new aligned
+        % records. One of at least cfg.stallWarn is counted, logged
+        % (StallLog and the command window) and shown on the status line
+        % for NOTE_SHOW. The records of the model's first second are left
+        % out, while the model and the link settle after Connect. The
+        % model runs in the controller's MATLAB, so a stall comes from
+        % there or from the PC, never from the app.
+        function checkStall(app, rows)
+            L = traceLayout();
+            if ~isempty(rows)
+                rows = rows(rows(:, L.col.seq) > app.STALL_SKIP_RECORDS, :);
+            end
+            gap = traceWriteGap(rows, app.cfg);
+            st = app.PollStats;
+            st.writeGapMax = max(st.writeGapMax, gap);
+            if gap >= app.cfg.stallWarn
+                st.stalls = st.stalls + 1;
+                app.StallLog(end + 1) = struct('time', ...
+                    datestr(now, 'yyyy-mm-dd HH:MM:SS'), 'gap_s', gap);
+                fprintf('%s  link stall: %.2f s between master writes\n', ...
+                    app.StallLog(end).time, gap);
+                showNote(app, sprintf("link stall %.2f s", gap));
+            end
+            app.PollStats = st;
+        end
+
+        % Motion is commanded: an operation requested, running, starting
+        % or stopping, a held pressure included. The controller stops it
+        % when the app stops answering for cfg.appTimeout.
+        function tf = motionCommanded(app)
+            tf = isRunning(app) && (app.activeOp ~= app.OP_STOP || ...
+                (app.lastStatusCode >= 1 && app.lastStatusCode <= 8));
+        end
+
+        % Refuse an action that can hold the app's thread past
+        % cfg.appTimeout (a file dialog, a plot, loading a procedure) while
+        % motion is commanded, and say why on the status line
+        function refused = refuseWhileMoving(app, what)
+            refused = motionCommanded(app);
+            if refused
+                app.StatusLabel.Text = append(what, ...
+                    " is not available while the axis is under command");
+            end
         end
 
         % The interval dropdown's text: the interval, and its rate when
@@ -542,37 +787,23 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 {'running', 'waitOperator', 'paused', 'aborting'}));
         end
 
-        function p = blockPath(app, name)
-            p = append(app.modelName, "/", name);
-        end
-
         % Write a value to one of the model's Constant blocks
+        % (ctlBlocks().write), through the controller, which writes the
+        % app's values in the order sent
         function setBlock(app, name, value)
-            set_param(blockPath(app, name), "Value", num2str(double(value)));
+            sendCtl(app, struct('t', 'set', 'name', char(name), ...
+                'value', double(value)));
         end
 
-        % Read the output of one of the model's named Gain blocks,
-        % through the cached RuntimeObject; a handle that no longer reads
-        % is fetched again.
+        % The output of one of the model's named Gain blocks
+        % (ctlBlocks().read) in the controller's last status. live is
+        % false while the model has not stepped since it started, and the
+        % value is then 0.
         function [value, live] = readBlock(app, name)
-            % live is false when the block has no runtime object yet (the
-            % model has not stepped since it started) and value is 0.
-            key = matlab.lang.makeValidName(name);
-            live = true;
-            if isfield(app.rto, key)
-                try
-                    value = app.rto.(key).OutputPort(1).Data;
-                    return
-                catch
-                end
-            end
-            rto = get_param(blockPath(app, name), "RuntimeObject");
-            if isempty(rto)
-                value = 0;
-                live = false;
-            else
-                app.rto.(key) = rto;
-                value = rto.OutputPort(1).Data;
+            live = ~isempty(app.ctl) && app.ctl.live;
+            value = 0;
+            if live
+                value = app.ctl.values.(char(name));
             end
         end
 
@@ -666,28 +897,20 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
         end
 
-        % Replace the model workspace's trackTable. The variable-tuning
-        % API of the simulation is tried first; without it the variable
-        % is assigned and the model updated. The first update is timed on
-        % the status line.
+        % Replace the model workspace's trackTable: the table goes to a
+        % file in tempdir and the controller loads it (runController), so
+        % the table's size does not pass through the connection. The
+        % controller notes how long the first load took.
         function setTrackTable(app, tbl)
-            t0 = tic;
-            try
-                setVariable(app.Simulation, "trackTable", tbl, ...
-                    "Workspace", char(app.modelName));
-                path = "tuned";
-            catch
-                assignin(get_param(char(app.modelName), "ModelWorkspace"), ...
-                    "trackTable", tbl);
-                set_param(char(app.modelName), "SimulationCommand", "update");
-                path = "model update";
+            file = fullfile(tempdir, sprintf("sos_track_%s.bin", ...
+                datestr(now, "yyyymmdd_HHMMSSFFF")));
+            fid = fopen(file, "w");
+            if fid < 0
+                error("cannot write the track table to %s", file);
             end
-            if ~app.trackTableTimed
-                app.trackTableTimed = true;
-                app.procNote = sprintf( ...
-                    "Track table set in %.2f s (%s, %d values)", toc(t0), path, numel(tbl));
-                app.StatusLabel.Text = app.procNote;
-            end
+            fwrite(fid, double(tbl), "double");
+            fclose(fid);
+            sendCtl(app, struct('t', 'track', 'file', char(file), 'n', numel(tbl)));
         end
 
         % The procedure step's speed cap (mm/s, NaN for none). The
@@ -801,7 +1024,18 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.RecordButton.Enable = connected || app.traceRecording;
             app.RecordButton.Value = app.traceRecording;
             app.TraceRecordMenu.Enable = app.RecordButton.Enable;
-            app.ProcedureMenu.Enable = ~procActive;
+
+            % While motion is commanded nothing may hold the app's thread
+            % for longer than cfg.appTimeout, or the controller stops the
+            % motion: the file dialogs and plots are off. Opening the
+            % captures folder starts Explorer and returns at once.
+            moving = motionCommanded(app);
+            app.ProcedureMenu.Enable = ~procActive && ~moving;
+            app.TracePlotMenu.Enable = ~moving;
+            starting = ~isempty(app.startingAt) && ...
+                toc(app.startingAt) < app.cfg.controllerStartMax;
+            app.ConnectToCompressorButton.Enable = connected || ...
+                (~isempty(app.ctlConn) && ~app.stopRequested && ~starting);
             app.IntervalDropDown.Enable = (connected || app.traceRecording) && ~procActive;
             showInterval(app);
             if app.traceRecording
@@ -841,6 +1075,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
             t0 = tic;
             try
+                serviceController(app);
                 updateFromModel(app);
             catch ME
                 app.StatusLabel.Text = append("Display update failed: ", ME.message);
@@ -857,15 +1092,26 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         function updateFromModel(app)
             if ~isRunning(app)
                 if app.wasRunning
-                    % A lost Modbus connection stops the model with an error;
-                    % the DAQ outputs are at their final values (safety relay off).
-                    app.StatusLabel.Text = append("Model stopped (", ...
-                        string(app.Simulation.Status), "). Check the slave link, then Connect.");
+                    if app.stopRequested
+                        app.StatusLabel.Text = "Disconnected";
+                    elseif isempty(app.ctlConn)
+                        % The controller's MATLAB ended: the model with it.
+                        app.StatusLabel.Text = "Controller lost: starting it again";
+                    elseif ~controllerAlive(app)
+                        app.StatusLabel.Text = "Controller not responding";
+                    else
+                        % A lost Modbus connection stops the model with an
+                        % error; the DAQ outputs are at their final values
+                        % (safety relay off).
+                        app.StatusLabel.Text = append("Model stopped (", ...
+                            string(app.ctl.sim), "). Check the slave link, then Connect.");
+                    end
                     app.wasRunning = false;
                 end
+                app.stopRequested = false;
                 app.estopActive = false;
                 app.linkReady = false;
-                app.rto = struct();
+                streamTrace(app);       % the records drained before the stop
                 showPressureBlock(app, false);
                 app.flagAtEnd = false;
                 clearOp(app);
@@ -875,6 +1121,10 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 updateButtons(app);
                 return
             end
+            if ~app.wasRunning && ~app.stopRequested
+                app.StatusLabel.Text = "Connected";
+            end
+            app.startingAt = [];
             app.wasRunning = true;
 
             d = readDisplay(app);
@@ -971,6 +1221,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
             if exist("traceDrain", "file") ~= 2
                 addpath(fullfile(here, "trace"));
+            end
+            if exist("ctlEncode", "file") ~= 2
+                addpath(fullfile(here, "controller"));
             end
 
             % Manual targets are distances from the end of travel, within
@@ -1313,6 +1566,13 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
             if app.flagAtEnd && statusCode == 5
                 text = append(text, " (end of travel)");
+            end
+            if strlength(app.noteText) > 0
+                if toc(app.noteShownAt) > app.NOTE_SHOW
+                    app.noteText = "";
+                else
+                    text = append(text, " (", app.noteText, ")");
+                end
             end
         end
 
@@ -1758,9 +2018,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         % Code that executes after component creation
         function startupFcn(app)
-            app.modelName = string(app.Simulation.ModelName);
-
+            app.ctlClock = tic;
             applyConfig(app);
+            app.ctl = ctlClientNew();
             setDefaultSize(app);
             app.UIFigure.Visible = 'on';
 
@@ -1773,46 +2033,42 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         end
 
         % Button pushed function: ConnectToCompressorButton
+        % Connect writes the app's blocks through the controller and asks
+        % it to start the model; the status line follows once the
+        % controller reports the model running. Pressed again it
+        % disconnects.
         function ConnectButtonPushed(app, event)
             if isRunning(app)
                 disconnect(app);
                 return
             end
-
-            app.StatusLabel.Text = "Connecting to Simulink...";
-            drawnow;
-
+            if isempty(app.ctlConn)
+                app.StatusLabel.Text = "The controller is not ready yet";
+                return
+            end
             try
-                if isRunning(app)
-                    app.StatusLabel.Text = "Model is already running";
-                else
-                    app.traceReader = [];
-                    start(app.Simulation);
-                    app.rto = struct();
-                    if isRunning(app)
-                        app.commandSeq = 0;
-                        setBlock(app, "RequestedMode", app.OP_STOP);
-                        setBlock(app, "CommandSeq", app.commandSeq);
-                        setBlock(app, "ESTOP", app.ESTOP.Value);
-                        setBlock(app, "Mixer", app.MixerButton.Value);
-                        setBlock(app, "PositionSpeed", speedMmPerS(app));
-                        setBlock(app, "TargetVelocity", speedMmPerS(app));
-                        setBlock(app, "ProcStep", 0);
-                        setBlock(app, "TrackMode", 0);
-                        setBlock(app, "TrackSeq", 0);
-                        app.procStepShown = 0;
-                        app.trackSeq = 0;
-                        app.trackActive = false;
-                        app.traceReader = traceStart(readBlock(app, "TraceRing"), false);
-                        app.traceAligner = traceAlignNew();
-                        app.traceLive = traceLiveBuffer(app.cfg);
-                        app.targetFromPiston = true;
-                        app.StatusLabel.Text = "Connected to Simulink";
-                    else
-                        app.StatusLabel.Text = append(...
-                            "Simulink Status: ", string(app.Simulation.Status));
-                    end
-                end
+                app.commandSeq = 0;
+                setBlock(app, "RequestedMode", app.OP_STOP);
+                setBlock(app, "CommandSeq", app.commandSeq);
+                setBlock(app, "ESTOP", app.ESTOP.Value);
+                setBlock(app, "Mixer", app.MixerButton.Value);
+                setBlock(app, "PositionSpeed", speedMmPerS(app));
+                setBlock(app, "TargetVelocity", speedMmPerS(app));
+                setBlock(app, "ProcStep", 0);
+                setBlock(app, "TrackMode", 0);
+                setBlock(app, "TrackSeq", 0);
+                sendCtl(app, struct('t', 'start'));
+                app.startingAt = tic;
+                app.stopRequested = false;
+                app.procStepShown = 0;
+                app.trackSeq = 0;
+                app.trackActive = false;
+                app.ctl.rows = zeros(0, traceLayout().nCol);
+                app.traceReader = struct('lastSeq', 0, 'missed', 0);
+                app.traceAligner = traceAlignNew();
+                app.traceLive = traceLiveBuffer(app.cfg);
+                app.targetFromPiston = true;
+                app.StatusLabel.Text = "Starting the model...";
             catch ME
                 app.StatusLabel.Text = append("Model unable to start: ", ME.message);
             end
@@ -1882,6 +2138,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
             finishRecording(app, false);
             closeLivePlot(app);
+            quitController(app);        % it stops the model if still running, then ends
 
             if ~isempty(app.updateTimer) && isvalid(app.updateTimer)
                 stop(app.updateTimer);
@@ -2111,8 +2368,26 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             openLivePlot(app);
         end
 
+        % Menu selected function: TraceFolderMenu
+        % The captures folder in Explorer, where every trace is saved
+        function TraceFolderMenuSelected(app, event)
+            folder = capturesFolder(app);
+            try
+                if ispc
+                    winopen(folder);
+                else
+                    app.TraceStatusLabel.Text = append("Traces are in ", folder);
+                end
+            catch ME
+                app.TraceStatusLabel.Text = append("Cannot open the folder: ", ME.message);
+            end
+        end
+
         % Menu selected function: TracePlotMenu
         function TracePlotMenuSelected(app, event)
+            if refuseWhileMoving(app, "Plot trace")
+                return
+            end
             [name, folder] = uigetfile("*.csv", "Plot a trace", ...
                 append(capturesFolder(app), filesep));
             figure(app.UIFigure);
@@ -2202,6 +2477,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         % Menu selected function: ProcedureFileMenus
         function ProcedureFileSelected(app, event)
+            if refuseWhileMoving(app, "Loading a procedure")
+                return
+            end
             loadProcedure(app, event.Source.UserData);
         end
 
@@ -2209,6 +2487,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % Any .m file; its folder joins the path and the function is
         % loaded by name.
         function ProcedureOpenSelected(app, event)
+            if refuseWhileMoving(app, "Opening a procedure")
+                return
+            end
             [name, folder] = uigetfile("*.m", "Open a procedure", ...
                 append(fullfile(fileparts(mfilename("fullpath")), "procedure"), filesep));
             figure(app.UIFigure);
@@ -2225,6 +2506,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % The current choice again, for a file just edited; the SOP when
         % none is loaded.
         function ProcedureReloadSelected(app, event)
+            if refuseWhileMoving(app, "Reloading the procedure")
+                return
+            end
             name = app.procName;
             if isempty(name)
                 name = app.cfg.procedure;
@@ -2411,6 +2695,12 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.TraceLiveMenu.Accelerator = 'L';
             app.TraceLiveMenu.Tooltip = 'Pressure, position, velocity and torque of the last minutes';
             app.TraceLiveMenu.Text = 'Live plot';
+
+            % Create TraceFolderMenu
+            app.TraceFolderMenu = uimenu(app.TraceMenu);
+            app.TraceFolderMenu.MenuSelectedFcn = createCallbackFcn(app, @TraceFolderMenuSelected, true);
+            app.TraceFolderMenu.Tooltip = 'The folder every recording is saved in';
+            app.TraceFolderMenu.Text = 'Open captures folder';
 
             % Create ViewMenu: window placement
             app.ViewMenu = uimenu(app.UIFigure);
@@ -2834,9 +3124,6 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
         % Construct app
         function app = SOS_Gen3_Compressor_Interface
-
-            % Associate the Simulink Model
-            app.Simulation = simulation('SOS_Gen3_Master_Shell');
 
             % Create UIFigure and components
             createComponents(app)

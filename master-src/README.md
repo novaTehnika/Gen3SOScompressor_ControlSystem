@@ -10,12 +10,13 @@ reading over the link.
 |------|----------|
 | `logic/` | All master logic, as plain `.m` functions that run under MATLAB and GNU Octave. `masterStep.m` is the entry point called once per model step; `masterStateMachine.m` sequences the handshake, motion and fault handling; `masterConfig.m` holds every constant. `proc*.m` is the operator app's procedure engine (`procTrackSeries` and `procTrackCheck` sample and check a track step's series) and `opTrack.m` the rule by which the app and the engine follow an operation through `StatusCode`. `trackStep.m` plays the track table inside the model (the `TrackStep` block). |
 | `procedure/` | The procedure the operator app walks through in non-manual mode, as data: `sopProcedure.m`. The SOP replaces this file; no code changes. `experimentTemplate.m` is a procedure to copy from: every kind of step once, with a comment on its fields, and a track step and the record intervals. |
-| `trace/` | The trace recorder's host-side functions, plain `.m` files that run under MATLAB and GNU Octave: `traceStart`, `traceDrain` and `traceAppend` (collect records from the ring), `traceAlignNew`/`traceAlign` (give each row the slave summary of its own window), `traceDecimateNew`/`traceDecimate` and `traceIntervalExchanges` (combine exchanges into the record interval), `traceLiveBuffer`, `traceLiveAppend`, `traceLiveNew` and `traceLiveUpdate` (the live plot), `traceMeta` and `traceWriteCsv` (write a trace file), `traceReadCsv` and `traceDerive` (read it back and add the displayed quantities), `tracePlot` (three figures) and `traceColumnNames`. The block that fills the ring, `traceStep`, and the ring's layout, `traceLayout`, are in `logic/`. |
+| `trace/` | The trace recorder's host-side functions, plain `.m` files that run under MATLAB and GNU Octave: `traceStart`, `traceDrain` and `traceAppend` (collect records from the ring), `traceAlignNew`/`traceAlign` (give each row the slave summary of its own window), `traceDecimateNew`/`traceDecimate` and `traceIntervalExchanges` (combine exchanges into the record interval), `traceLiveBuffer`, `traceLiveAppend`, `traceLiveNew` and `traceLiveUpdate` (the live plot), `traceWriteGap` (the longest gap between master writes, for the link stall check), `traceMeta` and `traceWriteCsv` (write a trace file), `traceReadCsv` and `traceDerive` (read it back and add the displayed quantities), `tracePlot` (three figures) and `traceColumnNames`. The block that fills the ring, `traceStep`, and the ring's layout, `traceLayout`, are in `logic/`. |
 | `captures/` | Trace files the app saves (gitignored; created on first use). |
 | `shell/buildShell.m` | Generates `shell/SOS_Gen3_Master_Shell.slx`: Modbus Client blocks at the 50 ms exchange, DAQ blocks, one MATLAB Function block calling `masterStep`, a second one (`TraceStep`) calling `traceStep`, a third (`TrackStep`) calling `trackStep`, the Constant blocks the app writes and the Gain blocks it reads. The model holds no logic and is rebuilt from this script, not edited by hand. |
 | `shell/modbusShellDiscover.m` | Prints the Modbus block and client settings of a hand-configured shell so they can be pasted into `buildShell.m`. |
 | `shell/addDaq.m` | Creates one Simulink Desktop Real-Time DAQ block. Holds the board setup (PCI-6221, driver options, missed-tick limit) and the digital channel numbering. |
-| `SOS_Gen3_Compressor_Interface.m` | Operator app (programmatic App Designer export). Starts the shell model, writes operator requests to its Constant blocks and polls its outputs. Takes its position target range, speed presets and cylinder geometry from `masterConfig.m` at startup. Laid out with nested `uigridlayout`s. |
+| `controller/` | The controller process, which runs the shell model in a MATLAB of its own: `runController` (the process, MATLAB only), `controllerNew`/`controllerStep` (its decisions, with no I/O), `ctlEncode`/`ctlDecode` (one JSON message per line on the local TCP connection), `ctlStatusMessage` (what it sends the app), `ctlClientNew`/`ctlClientUpdate` (the app's view of it), `ctlBlocks` (the blocks the app writes and reads) and `ctlLaunchCommand` (how the app starts it). See Controller process below. |
+| `SOS_Gen3_Compressor_Interface.m` | Operator app (programmatic App Designer export). Starts the controller, writes operator requests to the shell's Constant blocks through it and shows the outputs it reports. Takes its position target range, speed presets and cylinder geometry from `masterConfig.m` at startup. Laid out with nested `uigridlayout`s. |
 | `legacy/`, `SOS_Gen3_Compressor_Master.slx` | Earlier Stateflow-based app model and its `.mlapp`, and the hand-built `SimulinkMaster.slx` bench model with manual mode control, kept for reference. |
 
 ## Running on the lab PC
@@ -23,9 +24,13 @@ reading over the link.
 ```matlab
 cd master-src
 run('shell/buildShell.m')          % once, and after any change to the block interface
-addpath logic shell trace
+addpath logic shell trace controller
 SOS_Gen3_Compressor_Interface      % then press "Connect to Compressor"
 ```
+
+The app starts the controller, a second MATLAB that runs the shell model,
+minimized; the status line reads "Starting the controller... N s" until it
+answers and then "Controller ready: press Connect". Closing the app ends it.
 
 ### Modbus settings in the shell
 
@@ -48,6 +53,11 @@ Press **Connect** again once the slave is reachable, then Stop to clear the
 link-lost status.
 
 ## App to model interface
+
+The app does not touch the model itself: the controller (Controller process,
+below) writes the app's values to the Constant blocks in the order the app sent
+them and reports the Gain blocks' outputs and the trace records. The blocks and
+their meaning are as follows.
 
 The app writes `RequestedMode` (0 stop, 1 home to the limit switch, 2 position,
 3 jog, 4 pressure, 5 reset fault, 6 go home) and then increments `CommandSeq`; the model acts on an operation
@@ -76,8 +86,10 @@ and the last value holds when the table ends. `TrackIndex` (a Gain block with a
 Display) exposes the index. `TrackTable` is a Constant whose value is the
 model-workspace variable `trackTable` (`cfg.trackTableLength` values, one hour
 at the exchange period), and the model is built with
-`DefaultParameterBehavior` Tunable so the app can replace the variable while the
-model runs (`setTrackTable`). `ProcStep` is a Constant holding the running
+`DefaultParameterBehavior` Tunable so the variable can be replaced while the
+model runs: the app's `setTrackTable` writes the table to a file in `tempdir` and
+the controller loads it (the simulation's `setVariable`, or the variable assigned
+and the model updated) and notes how long the first load took. `ProcStep` is a Constant holding the running
 procedure's step number, 0 outside a run, written only when it changes.
 `SalineVolume` and `OxygenRatio` are Constants holding the fill (mL, and the
 oxygen charge as STP volume per saline volume), written by a procedure's param
@@ -111,12 +123,16 @@ seen, and a lost slave link as status 34 until the operator presses Stop.
 
 ## Connecting and closing
 
-"Connect to Compressor" starts the model; the same button then reads
-"Disconnect". Disconnecting, or closing the app while connected (after a
-confirmation), requests a stop, waits for the master to report the axis
-stopped (at most `tStopMax`) and then stops the model. The DAQ outputs fall to
-0, which drops the safety relay, and MotionEnable is already low, so the slave
-stays stopped once the Modbus exchange ends. Pressing STOP sends a Stop command as well as
+"Connect to Compressor" is enabled once the controller answers. It writes the
+app's starting values (stop, E-STOP, mixer, speed, procedure step, track) and
+asks the controller to start the model; the status line reads "Starting the
+model..." and then "Connected" once the controller reports it running, and the
+button then reads "Disconnect". Disconnecting, or closing the app while
+connected (after a confirmation), requests a stop and asks the controller to
+stop the model once the master reports the axis stopped (at most `tStopMax`);
+the app waits for that. The DAQ outputs fall to 0, which drops the safety relay,
+and MotionEnable is already low, so the slave stays stopped once the Modbus
+exchange ends. Closing the app then ends the controller. Pressing STOP sends a Stop command as well as
 the E-stop, which also clears a lost-link status once the link is back. The
 mode buttons are enabled only in manual control, while connected with the
 slave link up and out of E-STOP.
@@ -200,13 +216,13 @@ Readouts are rounded to their display resolution before the sign is chosen, so
 a zero never reads `-0.00`, and a flow smaller than `flowDeadband` reads 0.00.
 
 Display rate: the display timer runs at `displayPeriod` (`fixedRate`, a tick
-that is still busy when the next is due is dropped). Each poll reads the
-status, position, velocity and pressure blocks once through cached
-`RuntimeObject` handles, and the fault code only while faulted; a label is
-rewritten only when its text changed. The app measures its own poll: in a
+that is still busy when the next is due is dropped). Each poll takes the
+controller's latest status (the status, position, velocity, pressure and fault
+code blocks); a label is rewritten only when its text changed. The app measures its own poll: in a
 MATLAB session, `app = SOS_Gen3_Compressor_Interface;`, connect, run for a
 while and read `app.PollStats` (`n` polls, `mean`, `max` and `last` in
-seconds, `overruns` the polls longer than `displayPeriod`).
+seconds, `overruns` the polls longer than `displayPeriod`, and `writeGapMax`
+and `stalls` from the link stall check below) and `app.StallLog`.
 
 ## Operator app buttons
 
@@ -288,7 +304,8 @@ line reads `Procedure loaded: <name>` and the panel shows the new procedure; on
 a failure the previously loaded procedure and its check mark stay, and the
 status line gives the reason. Nothing is remembered between sessions. The whole
 menu is disabled while a procedure is active (running, waiting for the
-operator, paused or aborting).
+operator, paused or aborting), and while motion is commanded (see Link
+stalls).
 
 ### Parameters
 
@@ -542,8 +559,10 @@ walks them against the stand-in.
 
 **Record**, the interval dropdown and the trace status are at the right of the
 Controls band. The **Trace** menu has Record (Stop recording while recording,
-Ctrl+R; enabled as the button is), Plot trace... (Ctrl+P) and Live plot
-(Ctrl+L); the last two are only in the menu and always enabled.
+Ctrl+R; enabled as the button is), Plot trace... (Ctrl+P), Live plot (Ctrl+L)
+and Open captures folder (Explorer on the folder every trace is saved in); the
+last three are only in the menu. Plot trace... is disabled while motion is
+commanded (see Link stalls below); the others are always enabled.
 
 **Record** is available while connected. The dropdown chooses the record
 interval: `cfg.traceIntervalPresets` (0.05 s (20 Hz), 0.1 s (10 Hz), 0.5 s
@@ -558,7 +577,12 @@ and the records missed in red. Pressing the button again (**Stop recording**)
 ends the recording, writes the file at once to
 `captures/trace_yyyymmdd_HHMMSS.csv` and then opens a Save dialog proposing that
 path: choosing another name or folder moves the file there, and cancelling keeps
-it in `captures/`. Recording also ends, without a dialog, when the model stops (a
+it in `captures/`. While motion is commanded no dialog opens: the file stays in
+`captures/` and the label reads "Saved trace_... in captures (no Save dialog
+while the axis is under command)". Motion is commanded from the request of an
+operation until the master reports it stopped, so a position move that has
+arrived and holds ("At position") or a held pressure counts, though nothing
+moves. Recording also ends, without a dialog, when the model stops (a
 lost Modbus connection, for example), when **Disconnect** is pressed and when the
 app is closed; the file is then saved to `captures/` and the trace status names it.
 **Plot trace...** opens a file chooser in `captures/` and plots the file chosen.
@@ -571,28 +595,128 @@ saved without a dialog when the run ends, and a recording the operator started
 runs and returns to the dropdown's choice afterwards. Stopping a recording
 during a run keeps the procedure from starting another in that run.
 
-The app reads the ring on every display poll (`displayPeriod`, 0.1 s) whether or
-not it is recording, so the live plot is always current; the ring holds 25.6 s,
-so a stall of the app shorter than that loses nothing. Each poll takes the new
-records (`traceDrain`, which keeps none), aligns them (`traceAlign`, below),
-appends them to the live buffer and, while recording and not paused, passes
-them through `traceDecimate` into the recording (`traceAppend`). Records
-overwritten before they were read are counted as missed: the label turns red,
-the file's `missed` entry gives the total and the sequence column jumps where
-they were lost. The records between the last poll and a model stop (at most one
-poll) are not captured; pressing **Disconnect** reads the ring once more before
-stopping. The first rows of a recording start about two exchanges after the
+The controller drains the ring every `controllerPeriod` (50 ms, `traceDrain`,
+which keeps none) whether or not the app is recording, and sends the new records
+with its status; the ring holds 25.6 s. While the app is quiet the controller
+holds them back, up to one ring's worth, so a stall of the app shorter than
+that loses nothing. Each poll takes the records received, aligns them
+(`traceAlign`, below), appends them to the live buffer and, while recording and
+not paused, passes them through `traceDecimate` into the recording
+(`traceAppend`). Records overwritten before the controller read them, or
+dropped while the app was quiet for longer, are counted as missed: the label
+turns red, the file's `missed` entry gives the total and the sequence column
+jumps where they were lost. The controller drains the ring once more before it
+stops the model, so a Disconnect loses nothing; after a model stop it did not
+ask for (a lost Modbus connection) the records of its last pass are lost. The first rows of a recording start about two exchanges after the
 button, because the alignment holds the newest two records back.
 
 **Live plot** (Trace > Live plot; View > Side by side places it) opens a figure with four stacked axes over the last
-`cfg.livePlotSeconds` (600 s): the pressure (the snapshot, and the window mean
+`cfg.livePlotSeconds` (120 s): the pressure (the snapshot, and the window mean
 with its minimum and maximum), the position from the end of travel, the velocity
 and the torque, against the time before now. The aligned 20 Hz stream goes into
-a circular buffer of 12000 rows, and the figure is redrawn every
+a circular buffer of `livePlotSeconds / exchangePeriod` rows (2400), and the figure is redrawn every
 `cfg.livePlotPeriod` (0.5 s) while it is open, by setting the line data in place;
 closing it stops the updates. `cfg.livePlotPosition` ([x y width height] px,
 empty for MATLAB's default) sets where the window opens. The redraw is part of
 the poll, so a poll that overruns `displayPeriod` shows in `app.PollStats`.
+The figure is built to be cheap to lay out again when its window is resized:
+fixed normalized inner positions for the axes, time labels on the bottom axes
+only, the pressure lines named in the top title instead of a legend, and
+MATLAB's axes interactions, axes toolbar and line picking off.
+
+## Link stalls
+
+Under Connected IO the shell steps on its MATLAB's own thread. While anything
+holds that thread the model does not step, so the master writes nothing; the
+steps it missed run back to back afterwards (`MaxMissedTicks` is large), but
+the slave has seen its heartbeat stand still for that long. With motion
+commanded (an operation requested, running, starting or stopping, a held
+pressure included) the slave faults at `G_cfgCommTimeout` (300 ms) with
+`FAULT_COMM`, which the app shows as "Master link lost". With no motion the
+slave ignores the gap.
+
+Window resizes, file dialogs, plots, file writes and anything typed in a
+MATLAB command window would hold that thread long enough. That is why the
+model runs in the controller's MATLAB, which runs nothing else (Controller
+process, below): nothing the app does holds it back.
+
+The app still measures every gap between master writes as the slave sees it:
+the exchange summary's scan count of each window (`summaryScans`, IR33) times
+`cfg.slaveScanPeriod` (4 ms), through `traceWriteGap` on the records it
+receives. A gap of at least `cfg.stallWarn` (0.15 s; the first second after
+Connect is not checked) is a link stall: it is counted in `app.PollStats`
+(`writeGapMax`, the longest gap seen, and `stalls`), added to `app.StallLog`
+(`time` and `gap_s`), printed on one line in the command window, and shown
+after the status line for 15 s, "(link stall 0.42 s)". A stall now comes from
+the controller's MATLAB or the PC, not from the app.
+
+While motion is commanded the app refuses what can hold its own thread past
+`cfg.appTimeout`, since the controller would then stop the motion (below):
+Trace > Plot trace... and the whole Procedure menu (Open..., Reload and the
+file items) are disabled and refused with a reason on the status line, and a
+recording stopped then is saved to `captures/` without the Save dialog
+(Recording a trace, above). Writing the file itself is short of
+`cfg.appTimeout` (about 1.2 s for an hour at 0.05 s).
+
+## Controller process
+
+`controller/runController` runs the shell model in a MATLAB of its own. The app
+starts it at its own start with `ctlLaunchCommand`: on Windows
+`start "SOS Gen3 controller" /min "<matlab>" -batch "cd('<master-src/controller>');
+runController"`, with `<matlab>` the app's own MATLAB, or
+`cfg.controllerMatlab` when set (a compiled app needs it). The `-batch` MATLAB
+ends when `runController` returns.
+
+**Connection.** The controller listens on `127.0.0.1:cfg.controllerPort` (50321;
+local only, so no firewall rule is involved), one app at a time. The app tries
+to connect every second, launching the controller the first time none answers,
+and waits up to `cfg.controllerStartMax` (180 s) for it, the status line
+counting the seconds; a controller that does not come up is reported with a
+pointer to its log. A controller already running (from an app that closed or
+failed within the last minute) is connected to instead, and the app continues
+from its `CommandSeq`. Messages are JSON objects, one per line (`ctlEncode`,
+`ctlDecode`):
+
+| From | `t` | Fields | Meaning |
+|---|---|---|---|
+| app | `hello`, `ping` | | the app is there; it pings on every poll |
+| app | `set` | `name`, `value` | write one Constant block (`ctlBlocks().write`, a finite number); others are refused with a note |
+| app | `start` | | start the model when stopped |
+| app | `stop` | | stop the model once the master reports the axis stopped (status outside 1 to 8), or after `tStopMax` + 0.5 s |
+| app | `track` | `file`, `n` | load the `n` doubles of `file` into `trackTable` |
+| app | `quit` | | stop motion, stop the model as for `stop`, then end |
+| controller | `k` | | keepalive to a quiet app; ignored |
+| controller | `status` | `running`, `sim`, `live`, `cmdSeq`, `values`, `rec`, `cols`, `lastSeq`, `missed`, `notes` | every pass: whether the model runs, the simulation's status, the `ctlBlocks().read` outputs (null when unknown), the CommandSeq it holds, the new trace records row after row, the reader's counts and texts for the app's status line |
+
+**Loop.** Every `cfg.controllerPeriod` (50 ms) the controller reads the app's
+messages and the model's outputs, decides with `controllerStep` (no I/O, tested
+by `tests/controllerBridge.m`), writes the blocks in order, loads a track
+table, starts or stops the model, drains the trace ring and sends the status,
+then pauses, which lets the model step. An app write reaches the model within
+one period. It sends only while the app's last message is at most
+`cfg.controllerSendQuiet` (0.5 s) old, so a stalled app that reads nothing does
+not fill the connection and block the controller; to a quiet app it writes only
+a keepalive line (`{"t":"k"}`) every `cfg.controllerKeepalive` (0.25 s), which
+the app ignores. A connection whose app has died (ended from the Task Manager)
+is seen only when written to: a failed write, or a server that reports no
+client after one, counts as the connection closed, and the controller opens its
+server again so the next app can connect.
+
+**Without the app.** The app is present while its connection is open and its
+last message is at most `cfg.appTimeout` (5 s) old. When it is not and the model
+runs, the controller stops motion once (RequestedMode 0, TrackMode 0, a new
+CommandSeq): within a keepalive period or two when the connection closes (the
+app crashed or was ended), after 5 s of silence when it hangs. The model keeps running, so an app
+reopened within `cfg.controllerOrphanTime` (60 s) finds it connected. After
+60 s without the app the controller stops the model (the safety relay drops)
+and ends; it also ends when no app reaches it within 60 s of its start.
+
+**Log.** The controller's events (start, app connected and gone, model started
+and stopped, refused writes, track loads, errors) go to
+`captures/controller.log` with a timestamp, and to its own window. It can be
+run by hand from a MATLAB session (`cd master-src/controller; runController`)
+to watch them; it then returns instead of ending that MATLAB, and the app
+connects to it as usual.
 
 ## Trace files
 
