@@ -11,6 +11,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         TraceRecordMenu                 matlab.ui.container.Menu
         TracePlotMenu                   matlab.ui.container.Menu
         TraceLiveMenu                   matlab.ui.container.Menu
+        TraceFolderMenu                 matlab.ui.container.Menu
         ViewMenu                        matlab.ui.container.Menu
         ViewSideBySideMenu              matlab.ui.container.Menu
         ViewSecondMonitorMenu           matlab.ui.container.Menu
@@ -187,11 +188,9 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         procParamsHeight = 0
 
         % The note shown after the status line (a link stall, a message from
-        % the controller) and since when, and the recordings stopped while
-        % motion was commanded, written once it ends
+        % the controller) and since when
         noteText = ""
         noteShownAt = []
-        tracePending = {}
 
         % The controller (master-src/controller): the TCP connection to it
         % ([] when none), the bytes received and not yet decoded, the app's
@@ -293,7 +292,6 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 streamTrace(app);
                 app.wasRunning = false;     % not an unexpected stop
                 finishRecording(app, false);
-                flushPendingTraces(app);
             catch ME
                 app.StatusLabel.Text = append("Disconnect failed: ", ME.message);
             end
@@ -625,13 +623,12 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         end
 
         % End the recording and save it. The file is written to the
-        % captures folder first; an interactive stop then offers to move
+        % captures folder at once; an interactive stop then offers to move
         % it, and cancelling keeps it where it is. While motion is
-        % commanded no dialog opens and nothing is written, since a dialog
-        % left open holds the app's thread past cfg.appTimeout and the
-        % controller would stop the motion: the recording is kept and
-        % written to the captures folder once motion ends
-        % (flushPendingTraces).
+        % commanded no dialog opens, since one left open holds the app's
+        % thread past cfg.appTimeout and the controller would stop the
+        % motion: the file stays in the captures folder and the trace
+        % status says so.
         function finishRecording(app, interactive)
             if ~app.traceRecording
                 return
@@ -664,28 +661,13 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 'meta', traceMeta(struct('n', app.trace.n, 'missed', missed), ...
                 app.cfg, app.traceStartedAt, app.traceIntervalStart), ...
                 'missed', missed, 'stamp', datestr(now, "yyyymmdd_HHMMSS"));
-            if motionCommanded(app)
-                app.tracePending{end + 1} = job;
-                app.TraceStatusLabel.Text = sprintf( ...
-                    "Stopped, %d records: saved when motion ends", size(job.data, 1));
-                updateButtons(app);
-                return
+            noDialog = interactive && motionCommanded(app);
+            saveTrace(app, job, interactive && ~noDialog);
+            if noDialog && startsWith(app.TraceStatusLabel.Text, "Saved")
+                app.TraceStatusLabel.Text = append(app.TraceStatusLabel.Text, ...
+                    " in captures (no Save dialog in motion)");
             end
-            saveTrace(app, job, interactive);
             updateButtons(app);
-        end
-
-        % Write the recordings kept while motion was commanded, without a
-        % dialog, once motion has ended or the model has stopped
-        function flushPendingTraces(app)
-            if isempty(app.tracePending) || motionCommanded(app)
-                return
-            end
-            jobs = app.tracePending;
-            app.tracePending = {};
-            for k = 1:numel(jobs)
-                saveTrace(app, jobs{k}, false);
-            end
         end
 
         % Write one finished recording to the captures folder, offer to
@@ -1045,7 +1027,8 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
 
             % While motion is commanded nothing may hold the app's thread
             % for longer than cfg.appTimeout, or the controller stops the
-            % motion: the file dialogs and plots are off.
+            % motion: the file dialogs and plots are off. Opening the
+            % captures folder starts Explorer and returns at once.
             moving = motionCommanded(app);
             app.ProcedureMenu.Enable = ~procActive && ~moving;
             app.TracePlotMenu.Enable = ~moving;
@@ -1135,7 +1118,6 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 app.procIn.connected = false;
                 stepProcedure(app);
                 finishRecording(app, false);
-                flushPendingTraces(app);
                 updateButtons(app);
                 return
             end
@@ -1206,7 +1188,6 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 askFaultReset(app, d.faultCode);
             end
             app.lastStatusCode = statusCode;
-            flushPendingTraces(app);
         end
 
         % Non-blocking, so polling continues while the dialog is open
@@ -2156,7 +2137,6 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
                 disconnect(app);
             end
             finishRecording(app, false);
-            flushPendingTraces(app);
             closeLivePlot(app);
             quitController(app);        % it stops the model if still running, then ends
 
@@ -2386,6 +2366,21 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
         % shows the last cfg.livePlotSeconds whether or not Record is on.
         function TraceLiveMenuSelected(app, event)
             openLivePlot(app);
+        end
+
+        % Menu selected function: TraceFolderMenu
+        % The captures folder in Explorer, where every trace is saved
+        function TraceFolderMenuSelected(app, event)
+            folder = capturesFolder(app);
+            try
+                if ispc
+                    winopen(folder);
+                else
+                    app.TraceStatusLabel.Text = append("Traces are in ", folder);
+                end
+            catch ME
+                app.TraceStatusLabel.Text = append("Cannot open the folder: ", ME.message);
+            end
         end
 
         % Menu selected function: TracePlotMenu
@@ -2700,6 +2695,12 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             app.TraceLiveMenu.Accelerator = 'L';
             app.TraceLiveMenu.Tooltip = 'Pressure, position, velocity and torque of the last minutes';
             app.TraceLiveMenu.Text = 'Live plot';
+
+            % Create TraceFolderMenu
+            app.TraceFolderMenu = uimenu(app.TraceMenu);
+            app.TraceFolderMenu.MenuSelectedFcn = createCallbackFcn(app, @TraceFolderMenuSelected, true);
+            app.TraceFolderMenu.Tooltip = 'The folder every recording is saved in';
+            app.TraceFolderMenu.Text = 'Open captures folder';
 
             % Create ViewMenu: window placement
             app.ViewMenu = uimenu(app.UIFigure);
