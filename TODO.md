@@ -170,21 +170,17 @@ the reference for each) and confirm:
 - [x] Controller process, losing the app: ending the app's MATLAB from
       the Task Manager during a jog stops the jog at once (the controller
       finds the dead connection by a failing keepalive).
-- [ ] Controller process, reattach and close: an app restarted within
-      60 s of the kill connects to the running controller ("Controller
-      ready") instead of starting another; without one, the model stops
-      (safety relay off) and the controller's MATLAB ends after 60 s.
-      Closing the app normally ends the controller within a few seconds.
-- [ ] Desktop shortcut (master README, Desktop shortcut): in MATLAB,
-      `cd master-src/launch; makeDesktopShortcut`, and check that the
-      "SOS Gen3 Compressor" icon appears; double-click it with MATLAB
-      closed: only the operator app shows (MATLAB's command window
-      minimized in the taskbar), the controller starts with no window
-      (a second MATLAB in the Task Manager; `captures/controller.log`
-      shows its start), Connect works, and closing the app ends both
-      MATLABs. Check whether Windows shows
-      a security prompt for the shortcut or PowerShell, and whether the
-      icon looks right. For every account: `makeDesktopShortcut('allUsers')`
+- [x] Controller process, close: closing the app ends the controller's
+      MATLAB on its own.
+- [ ] Controller process, reattach: an app restarted within 60 s of a
+      kill connects to the running controller ("Controller ready")
+      instead of starting another; without one, the model stops (safety
+      relay off) and the controller's MATLAB ends after 60 s.
+- [x] Desktop shortcut: `makeDesktopShortcut` writes the icon; it opens
+      the operator app with MATLAB's command window beside it, the
+      controller starts with no window, and closing the app ends both
+      MATLABs.
+- [ ] Desktop shortcut for every account: `makeDesktopShortcut('allUsers')`
       from a MATLAB run as administrator.
 - [ ] Controller process, track step (only once a procedure uses one;
       the SOP does not): run `experimentTemplate` and read the load time
