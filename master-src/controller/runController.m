@@ -8,8 +8,11 @@ function runController()
 %   cfg.controllerOrphanTime and the model is stopped.
 %
 %   It listens on 127.0.0.1:cfg.controllerPort for the app (one connection
-%   at a time; a reopened app connects again), and every
-%   cfg.controllerPeriod it
+%   at a time; a reopened app connects again). A write that fails, or
+%   leaves the server reporting no client, means the app's connection is
+%   gone (an app ended from the Task Manager is seen only this way): the
+%   server is opened again, so the next pass sees no app and a new app can
+%   connect. Every cfg.controllerPeriod it
 %     1. reads the app's messages (ctlDecode) and the model's outputs
 %        (ctlBlocks().read, through the blocks' RuntimeObject),
 %     2. decides with controllerStep: block writes, the track table,
@@ -45,11 +48,10 @@ logFid = fopen(fullfile(logFolder, 'controller.log'), 'a');
 closeLog = onCleanup(@() closeIfOpen(logFid));
 say(logFid, 'Controller starting (MATLAB %s, port %d)', version, cfg.controllerPort);
 
-try
-    srv = tcpserver('127.0.0.1', cfg.controllerPort);
-catch ME
+[srv, err] = openServer(cfg.controllerPort);
+if isempty(srv)
     say(logFid, 'Cannot listen on port %d (%s): another controller runs?', ...
-        cfg.controllerPort, ME.message);
+        cfg.controllerPort, err);
     return
 end
 
@@ -83,7 +85,10 @@ while true
     notes = {};
 
     % 1. The app's messages and the model's outputs
-    connected = srv.Connected;
+    if isempty(srv)
+        srv = openServer(cfg.controllerPort);   % reopened after a broken connection
+    end
+    connected = ~isempty(srv) && srv.Connected;
     if connected ~= wasConnected
         buf = uint8([]);
         if connected
@@ -189,17 +194,37 @@ while true
     if act.start
         dropped = 0;
     end
-    if act.send
-        counts = [];
-        if isstruct(reader)
-            counts = struct('lastSeq', reader.lastSeq, 'missed', reader.missed + dropped);
+    if act.send || act.keepalive
+        if act.send
+            counts = [];
+            if isstruct(reader)
+                counts = struct('lastSeq', reader.lastSeq, 'missed', reader.missed + dropped);
+            end
+            bytes = ctlEncode(ctlStatusMessage(running, statusText(sim), ...
+                values, heldRows, counts, b.cmdSeq, heldNotes));
+        else
+            bytes = ctlEncode(struct('t', 'k'));
         end
+        ok = false;
         try
-            write(srv, ctlEncode(ctlStatusMessage(running, statusText(sim), ...
-                values, heldRows, counts, b.cmdSeq, heldNotes)));
+            write(srv, bytes);
+            ok = srv.Connected;
+        catch
+        end
+        if ok && act.send
             heldRows = zeros(0, L.nCol);
             heldNotes = {};
-        catch
+        elseif ~ok
+            % The app's connection is gone: open the server again, so the
+            % next pass sees no app (motion stops) and a new app can connect
+            say(logFid, 'App connection broken');
+            try
+                delete(srv);
+            catch
+            end
+            srv = [];
+            wasConnected = false;
+            heldRows = zeros(0, L.nCol);
         end
     elseif ~connected
         heldRows = zeros(0, L.nCol);    % no app to give them to
@@ -218,6 +243,17 @@ say(logFid, 'Controller ended');
 end
 
 % %% ===== LOCAL FUNCTIONS =====
+
+% Listen on 127.0.0.1:port; [] and the reason when that fails
+function [srv, err] = openServer(port)
+srv = [];
+err = '';
+try
+    srv = tcpserver('127.0.0.1', port);
+catch ME
+    err = ME.message;
+end
+end
 
 function tf = modelRunning(sim)
 tf = ~isempty(sim) && isvalid(sim) && sim.Status == "running";

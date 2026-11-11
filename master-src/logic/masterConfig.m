@@ -44,6 +44,7 @@ cfg.controllerPeriod     = 0.05;    % s, the controller's loop: app writes reach
 cfg.appTimeout           = 5;       % s without a message from the app (it pings every poll) before the controller stops motion; a closed connection counts at once
 cfg.controllerOrphanTime = 60;      % s without the app before the controller stops the model and ends
 cfg.controllerSendQuiet  = 0.5;     % s without a message from the app before the controller holds its statuses back (the app is not reading)
+cfg.controllerKeepalive  = 0.25;    % s between the keepalive lines the controller writes to a quiet app: a dead app's connection fails only when written to
 cfg.controllerTimeout    = 2;       % s without a status before the app counts the controller as lost
 cfg.controllerStartMax   = 180;     % s the app waits for a controller it started
 cfg.controllerMatlab     = '';      % MATLAB executable that runs the controller; '' for the app's own MATLAB

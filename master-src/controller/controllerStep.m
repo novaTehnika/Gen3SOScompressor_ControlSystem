@@ -12,7 +12,7 @@ function [b, act] = controllerStep(b, in, cfg)
 %        running    the shell model runs
 %        statusCode masterStep's status code (any value when not running)
 %   cfg  masterConfig: appTimeout, controllerOrphanTime,
-%        controllerSendQuiet, tStopMax
+%        controllerSendQuiet, controllerKeepalive, tStopMax
 %
 %   act  sets   n x 2 cell {block, value}, in the order to write them:
 %               the app's writes as received, then any stop the
@@ -25,6 +25,12 @@ function [b, act] = controllerStep(b, in, cfg)
 %               last message at most cfg.controllerSendQuiet old, so a
 %               stalled app that reads nothing does not fill the
 %               connection and block the controller's writes
+%        keepalive  send a keepalive line instead: the app is connected
+%               but quiet and nothing was sent for
+%               cfg.controllerKeepalive. A connection whose app has died
+%               fails only when written to, so the controller keeps
+%               writing, a few bytes at a time, and takes a failed write
+%               as the connection closed (runController).
 %        notes  cell of texts for the status line and the log
 %
 %   Messages: 'set' (name, value) writes one of ctlBlocks().write, a
@@ -44,7 +50,8 @@ function [b, act] = controllerStep(b, in, cfg)
 %   ends.
 
 act = struct('sets', {cell(0, 2)}, 'track', [], 'start', false, ...
-    'stop', false, 'exit', false, 'send', false, 'notes', {{}});
+    'stop', false, 'exit', false, 'send', false, 'keepalive', false, ...
+    'notes', {{}});
 names = ctlBlocks().write;
 
 for k = 1:numel(in.msgs)
@@ -127,6 +134,11 @@ end
 
 act.exit = b.quitting && ~in.running && ~act.start;
 act.send = in.connected && in.t - b.lastMsgAt <= cfg.controllerSendQuiet;
+act.keepalive = ~act.send && in.connected && ...
+    in.t - b.sentAt >= cfg.controllerKeepalive;
+if act.send || act.keepalive
+    b.sentAt = in.t;
+end
 end
 
 % %% ===== LOCAL FUNCTIONS =====

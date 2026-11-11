@@ -8,8 +8,9 @@ function b = controllerNew()
 %     stopping   a stop of the model waits for the axis to stop
 %     stopSince  when that wait began
 %     quitting   the controller ends once the model is stopped
+%     sentAt     time of the last status or keepalive to the app
 
 b = struct('cmdSeq', 0, 'lastMsgAt', -Inf, 'aliveAt', 0, ...
     'appLost', false, 'stopping', false, 'stopSince', 0, ...
-    'quitting', false);
+    'quitting', false, 'sentAt', -Inf);
 end

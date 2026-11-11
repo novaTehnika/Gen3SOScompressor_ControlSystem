@@ -154,29 +154,23 @@ the reference for each) and confirm:
       an update that blocks the app's thread near that long needs a smaller
       `cfg.trackMaxSeconds`, or the chunked table (a 1000-value constant
       copied into a persistent table over consecutive steps).
-- [ ] Controller process (master README, Controller process): start the
-      app from a MATLAB session and check that a second MATLAB starts
-      minimized, that the status line counts "Starting the controller...",
-      how long it takes, and that it ends with "Controller ready: press
-      Connect"; `master-src/captures/controller.log` shows the start.
-      Check that `-batch` runs the shell in Connected IO (the model
-      starts, the DAQ and the Modbus link work, steps are paced); if not,
-      change `ctlLaunchCommand` to `-nosplash -nodesktop -minimize -r`.
-      Note whether Windows asks a firewall question (it should not:
-      the port is bound to 127.0.0.1).
-- [ ] Controller process, operation: Connect, jog, Disconnect; then a
-      jog with the live plot open while dragging the app's and the live
-      plot's window edges for 10 s: no link stall on the status line,
-      `app.StallLog` empty, `app.PollStats.writeGapMax` under 0.1 s. Run
-      a procedure with a track step and read the track load time the
-      controller notes ("Track table set in ..."). Time a STOP: the
-      write reaches the model within `controllerPeriod`.
+- [x] Controller process: the app starts the controller, Connect runs
+      the shell, and resizing the windows and View > Side by side during
+      motion give no link lost fault (`writeGapMax` 0.12 s).
 - [ ] Controller process, losing the app: during a slow jog, end the
-      app's MATLAB from the Task Manager: the jog stops at once, the
-      model keeps running, and a restarted app within 60 s connects to
-      it ("Controller ready"); without one, the model stops (safety
-      relay off) and the controller's MATLAB ends after 60 s. Close the
-      app normally: the controller ends within a few seconds.
+      app's MATLAB from the Task Manager: the jog stops within about half
+      a second (the controller finds the dead connection by a failing
+      keepalive; `App connection broken` in `captures/controller.log`),
+      the model keeps running, and an app restarted within 60 s connects
+      to it ("Controller ready") instead of starting another. Without
+      one, the model stops (safety relay off) and the controller's
+      MATLAB ends after 60 s. Close the app normally: the controller ends
+      within a few seconds.
+- [ ] Controller process, track step (only once a procedure uses one;
+      the SOP does not): run `experimentTemplate` and read the load time
+      the controller notes ("Track table set in ..."). The load runs in
+      the controller's MATLAB, so a load near 0.3 s during a kept
+      pressure hold would fault the slave.
 - [ ] Poll cost of the stream: with the live plot open for 10 minutes and a
       recording at 0.05 s, read `app.PollStats` (`mean`, `max`,
       `overruns`). The ring (512 x 45) is read on every poll and the plot

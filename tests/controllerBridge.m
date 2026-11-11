@@ -249,6 +249,38 @@ assert(~act.send, 'nothing without a connection');
 assert(act.send);
 fprintf('ok  controller: statuses only while the app has been heard from\n');
 
+% A quiet app still gets a keepalive every controllerKeepalive, so a dead
+% connection is found by a failing write; none while statuses go out or
+% with no connection
+b = controllerNew();
+M = modelNew();
+t = 1;
+[b, M, act] = pass(b, M, t, true, {msg('hello')}, cfg);
+assert(act.send && ~act.keepalive);
+sends = [];
+keeps = [];
+while t < 1 + cfg.controllerSendQuiet + 2
+    t = round((t + 0.05) * 100) / 100;
+    [b, M, act] = pass(b, M, t, true, {}, cfg);
+    assert(~(act.send && act.keepalive));
+    if act.send
+        sends(end + 1) = t; %#ok<AGROW>
+    end
+    if act.keepalive
+        keeps(end + 1) = t; %#ok<AGROW>
+    end
+end
+assert(max(sends) <= 1 + cfg.controllerSendQuiet + 1e-9);
+assert(min(keeps) > 1 + cfg.controllerSendQuiet && ...
+    min(keeps) - max(sends) <= cfg.controllerKeepalive + 0.05 + 1e-9);
+assert(all(abs(diff(keeps) - cfg.controllerKeepalive) <= 0.05 + 1e-9));
+[~, ~, act] = pass(b, M, t + 1, false, {}, cfg);
+assert(~act.send && ~act.keepalive);
+[msgs, ~] = ctlDecode(ctlEncode(struct('t', 'k')));
+c = ctlClientNew();
+assert(isequaln(ctlClientUpdate(c, msgs, 5), c), 'the app ignores a keepalive');
+fprintf('ok  controller: keepalives to a quiet app, none while sending or unconnected\n');
+
 % ----- Launch command -----
 cmd = ctlLaunchCommand(cfg, 'C:\SOS\master-src\controller', ...
     'C:\Program Files\MATLAB\R2025b\bin\matlab.exe', true);

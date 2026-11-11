@@ -681,6 +681,7 @@ from its `CommandSeq`. Messages are JSON objects, one per line (`ctlEncode`,
 | app | `stop` | | stop the model once the master reports the axis stopped (status outside 1 to 8), or after `tStopMax` + 0.5 s |
 | app | `track` | `file`, `n` | load the `n` doubles of `file` into `trackTable` |
 | app | `quit` | | stop motion, stop the model as for `stop`, then end |
+| controller | `k` | | keepalive to a quiet app; ignored |
 | controller | `status` | `running`, `sim`, `live`, `cmdSeq`, `values`, `rec`, `cols`, `lastSeq`, `missed`, `notes` | every pass: whether the model runs, the simulation's status, the `ctlBlocks().read` outputs (null when unknown), the CommandSeq it holds, the new trace records row after row, the reader's counts and texts for the app's status line |
 
 **Loop.** Every `cfg.controllerPeriod` (50 ms) the controller reads the app's
@@ -690,13 +691,18 @@ table, starts or stops the model, drains the trace ring and sends the status,
 then pauses, which lets the model step. An app write reaches the model within
 one period. It sends only while the app's last message is at most
 `cfg.controllerSendQuiet` (0.5 s) old, so a stalled app that reads nothing does
-not fill the connection and block the controller.
+not fill the connection and block the controller; to a quiet app it writes only
+a keepalive line (`{"t":"k"}`) every `cfg.controllerKeepalive` (0.25 s), which
+the app ignores. A connection whose app has died (ended from the Task Manager)
+is seen only when written to: a failed write, or a server that reports no
+client after one, counts as the connection closed, and the controller opens its
+server again so the next app can connect.
 
 **Without the app.** The app is present while its connection is open and its
 last message is at most `cfg.appTimeout` (5 s) old. When it is not and the model
 runs, the controller stops motion once (RequestedMode 0, TrackMode 0, a new
-CommandSeq): at once when the connection closes (the app crashed or was
-ended), after 5 s of silence when it hangs. The model keeps running, so an app
+CommandSeq): within a keepalive period or two when the connection closes (the
+app crashed or was ended), after 5 s of silence when it hangs. The model keeps running, so an app
 reopened within `cfg.controllerOrphanTime` (60 s) finds it connected. After
 60 s without the app the controller stops the model (the safety relay drops)
 and ends; it also ends when no app reaches it within 60 s of its start.
