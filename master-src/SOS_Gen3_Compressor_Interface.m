@@ -665,7 +665,7 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             saveTrace(app, job, interactive && ~noDialog);
             if noDialog && startsWith(app.TraceStatusLabel.Text, "Saved")
                 app.TraceStatusLabel.Text = append(app.TraceStatusLabel.Text, ...
-                    " in captures (no Save dialog in motion)");
+                    " in captures (no Save dialog while the axis is under command)");
             end
             updateButtons(app);
         end

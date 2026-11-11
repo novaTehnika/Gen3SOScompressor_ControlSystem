@@ -604,8 +604,11 @@ ends the recording, writes the file at once to
 `captures/trace_yyyymmdd_HHMMSS.csv` and then opens a Save dialog proposing that
 path: choosing another name or folder moves the file there, and cancelling keeps
 it in `captures/`. While motion is commanded no dialog opens: the file stays in
-`captures/` and the label reads "Saved trace_... in captures (no Save dialog in
-motion)". Recording also ends, without a dialog, when the model stops (a
+`captures/` and the label reads "Saved trace_... in captures (no Save dialog
+while the axis is under command)". Motion is commanded from the request of an
+operation until the master reports it stopped, so a position move that has
+arrived and holds ("At position") or a held pressure counts, though nothing
+moves. Recording also ends, without a dialog, when the model stops (a
 lost Modbus connection, for example), when **Disconnect** is pressed and when the
 app is closed; the file is then saved to `captures/` and the trace status names it.
 **Plot trace...** opens a file chooser in `captures/` and plots the file chosen.
