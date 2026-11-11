@@ -1,8 +1,12 @@
 # Ladder Diagram POU wiring record
 
-The LD POU (`PRG_LD`) that owns the axis and the built-in motion function
-blocks lives only in the MotionWorks IEC project; it cannot be exported as
-text. `slave-src/PRG/PRG_LD.txt` is its specification, in the form of the
+The built-in motion function blocks live in two Ladder Diagram POUs that
+exist only in the MotionWorks IEC project; they cannot be exported as
+text. `PRG_LD_Read` holds the four blocks that only read the axis
+(`fbReadActualPosition`, `fbReadActualVelocity`, `fbReadActualTorque`,
+`fbReadStatus`) and runs first in the scan; `PRG_LD` holds the seven that
+command it and runs last. `slave-src/PRG/PRG_LD_Read.txt` and
+`slave-src/PRG/PRG_LD.txt` are their specifications, in the form of the
 ST headers: the instances to declare and, network by network, what is
 wired to each pin. This directory records the wiring as it is in the
 project: a screenshot of each block, and a table of what is wired to each
@@ -222,6 +226,28 @@ keep the table to what the picture shows.
 | ConstantVelocity | out | not wired | |
 | Accelerating | out | not wired | |
 | Decelerating | out | not wired | |
+
+## To change: move the read blocks to `PRG_LD_Read`
+
+The screenshots of the four read blocks show them on networks 001 to 004
+of `PRG_LD`, ahead of the command blocks, and `PRG_LD` runs last in the
+task: the feedback `PRG_Main` uses was read at the end of the scan
+before. The specification puts them in a POU of their own that runs
+first (`slave-src/PRG/PRG_LD_Read.txt`):
+
+1. Add a Ladder Diagram POU `PRG_LD_Read` with `AXIS1` as `VAR_EXTERNAL`.
+2. Move the four networks into it with their instances
+   (`fbReadActualPosition`, `fbReadActualVelocity`, `fbReadActualTorque`,
+   `fbReadStatus`), wired as they are: `Enable` on the power rail and
+   the outputs to `G_sysActualPosition`, `G_sysActualVelocity`,
+   `G_sysActualTorque` and `G_sysDriveFault`. Delete them from `PRG_LD`.
+3. Order the task's programs `PRG_LD_Read`, `PRG_Input`, `PRG_Main`,
+   `PRG_Output`, `PRG_LD` (`docs/slave/HardwareConfiguration.md`,
+   section 2.3).
+4. Retake the four screenshots, which then show the networks of
+   `PRG_LD_Read`.
+
+No variable, struct or Structured Text changes with it.
 
 ## To change: remove `MC_MoveVelocity`
 

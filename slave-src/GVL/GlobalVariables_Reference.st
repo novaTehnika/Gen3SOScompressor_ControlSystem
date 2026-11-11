@@ -468,7 +468,8 @@
 
      (* ========================================================================
         MOTION FEEDBACK
-        Current state of the servo motor/actuator
+        Current state of the servo motor/actuator, read at the start of the
+        scan by PRG_LD_Read
         ======================================================================== *)
 
      G_sysActualPosition       : LREAL := 0.0     (* Current position (mm) *)
@@ -561,11 +562,14 @@
    5. COMMAND / STATUS INTERFACE (ST <-> LD POU)
    ============================================================================
 
-   These structured globals connect the ST state machine (PRG_Main) to the
-   Ladder Logic POU that owns G_sysAxis and all built-in motion FBs.
+   These structured globals connect the ST state machine (PRG_Main) to
+   PRG_LD, the Ladder Logic POU with the built-in motion FBs that command
+   the axis.
 
-   Commands flow ST -> LD (written by PRG_Main, read by LD POU).
-   Status flows LD -> ST (written by LD POU, read by PRG_Main and custom FBs).
+   Commands flow ST -> LD (written by PRG_Main, read by PRG_LD).
+   Status flows LD -> ST (written by PRG_LD, read by PRG_Main and custom FBs).
+   The axis feedback (G_sysActual*, G_sysDriveFault) is written by the read
+   blocks of PRG_LD_Read, which runs first in the scan.
 
    VAR_GLOBAL
      (* ========================================================================

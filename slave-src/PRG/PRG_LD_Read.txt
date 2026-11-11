@@ -1,0 +1,99 @@
+(* ============================================================================
+   PRG_LD_Read - Ladder Diagram POU: the axis feedback
+
+   Project: Gen3 SOS Compressor Servo Controller
+   Controller: Yaskawa MP2600iec
+
+   Description:
+   The blocks that only read the axis: its position, velocity and torque
+   and its drive alarm flag. They take no command (Enable is the power
+   rail), so they have no G_cmd* struct, and they write the G_sysActual*
+   feedback and G_sysDriveFault that PRG_Main and the user function blocks
+   read. The blocks that command the axis are in PRG_LD.
+
+   The POU is written in Ladder Diagram in MotionWorks IEC and has no text
+   form. This file is its specification, in the form of PRG_LD.txt: the
+   header declares its variables and the body lists every network with
+   the wiring of each pin. The screenshots in docs/slave/ld/ record the
+   wiring as it is in the project.
+
+   Integration:
+   - Runs on the one cyclic task, first, before PRG_Input: the scan's
+     order is PRG_LD_Read, PRG_Input, PRG_Main, PRG_Output, PRG_LD. What
+     PRG_Main reads of the axis is therefore read in the scan that uses
+     it, with the digital and analog inputs PRG_Input copies, and not at
+     the end of the scan before.
+   - No block here acts on the axis, so the order of the networks does
+     not matter, and neither does their order against PRG_LD's commands
+     of the scan before: those were issued at the end of that scan and
+     are in the feedback read here.
+   - Each output has this POU as its one writer: the ST and PRG_LD write
+     none of them.
+   - Units are the axis's engineering units from Hardware Configuration:
+     mm, mm/s and % of rated torque.
+   - ErrorID and the Valid, Busy and Error outputs are left open: the ST
+     uses the feedback every scan without a validity check.
+   - In the simulator, slave-sim/c/slave_sim.c stands in for this POU and
+     for PRG_LD: the axis model runs after PRG_Output, and the feedback it
+     leaves is the plant's state at the start of the next scan, which is
+     what these blocks read.
+
+   Variables (define in MWiec GUI):
+     VAR_EXTERNAL:
+       AXIS1           : AXIS_REF         (* The axis, created by Hardware Configuration (AXIS1 in the project)
+     VAR:
+       (* Built-in read FB instances, one network each
+       fbReadActualPosition : MC_ReadActualPosition  (* Position feedback
+       fbReadActualVelocity : MC_ReadActualVelocity  (* Velocity feedback
+       fbReadActualTorque  : MC_ReadActualTorque     (* Torque feedback
+       fbReadStatus        : MC_ReadStatus    (* Drive alarm flag for FB_SafetyMonitor
+   ============================================================================ *)
+
+(* ============================================================================
+   NETWORKS
+   One block per network, in task order. "<-" is a pin wired from a
+   variable, "->" a pin wired to one. A pin not listed is left open.
+   ============================================================================ *)
+
+(* --------------------------------------------------------------------------
+   fbReadActualPosition : MC_ReadActualPosition - Position feedback
+   Enable is the left power rail, so position is read every scan.
+     Axis            <- AXIS1
+     Enable          <- TRUE (power rail)
+     Axis            -> AXIS1
+     Position        -> G_sysActualPosition   (* mm; the limits, the exit guard, the safety monitor, the path shaper, IR11-12
+   -------------------------------------------------------------------------- *)
+
+(* --------------------------------------------------------------------------
+   fbReadActualVelocity : MC_ReadActualVelocity - Velocity feedback
+   Enable is the left power rail, so velocity is read every scan.
+     Axis            <- AXIS1
+     Enable          <- TRUE (power rail)
+     Axis            -> AXIS1
+     ActualVelocity  -> G_sysActualVelocity   (* mm/s; G_sysInMotion, the exchange summary, the probe, IR13-14
+   -------------------------------------------------------------------------- *)
+
+(* --------------------------------------------------------------------------
+   fbReadActualTorque : MC_ReadActualTorque - Torque feedback
+   Enable is the left power rail, so torque is read every scan.
+     Axis            <- AXIS1
+     Enable          <- TRUE (power rail)
+     Axis            -> AXIS1
+     ActualTorque    -> G_sysActualTorque     (* % of rated; the exchange summary, the probe, IR15-16
+   -------------------------------------------------------------------------- *)
+
+(* --------------------------------------------------------------------------
+   fbReadStatus : MC_ReadStatus - Drive alarm flag
+   G_sysDriveFault is the DriveFault input of FB_SafetyMonitor
+   (FAULT_DRIVE outside the reset and enable states, the path the fault
+   code reference gives for the amplifier's own alarms, encoder alarms
+   included). Nothing else writes it. The axis is in ErrorStop whenever
+   the SERVOPACK holds an alarm and leaves it on fbReset, which is what
+   ST_DRIVE_RESET and the recovery expect of the flag. Enable is the left
+   power rail, as for the feedback readers. The simulator sets the flag
+   directly (sl.hook.driveFault).
+     Axis            <- AXIS1
+     Enable          <- TRUE (power rail)
+     Axis            -> AXIS1
+     ErrorStop       -> G_sysDriveFault
+   -------------------------------------------------------------------------- *)

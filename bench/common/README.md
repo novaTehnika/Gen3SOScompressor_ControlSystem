@@ -66,16 +66,19 @@ and `FB_Probe.st` alone defines the record.
 | IR523-524 | FaultMark: index of the record written in the scan the slave entered `ST_FAULT` |
 
 **What a record's columns are.** The probe is called last in `PRG_Main`.
-The velocity, position and torque it records are the motion status
-`PRG_Main` reads in the scan, which the LD POU's read blocks last updated
-at the end of the previous scan (`PRG_Main` sees motion status one scan
-late), while the commanded velocity is the one `PRG_Main` computes in this
-very scan. A record's feedback is one scan (`G_cfgScanTime`, 4 ms) older
-than the command in the same row. A delay or a stopping travel read
-from a capture's rows (from the command row to the row where the feedback
-responds) includes that scan: allow one scan when comparing it with the
-drive's own response, with a model's dead time or with a figure from the
-50 ms log. `charDriveLag`, `stepResponseFit` and `charStopDistance`
+The velocity, position and torque it records are the axis feedback
+`PRG_Main` reads in the scan, which the read blocks of `PRG_LD_Read` take
+at the start of the scan, while the commanded velocity is the one
+`PRG_Main` computes in the same scan and `PRG_LD` passes to the drive at
+its end. A record's feedback is therefore older than the command in the
+same row by the time the program takes to run, about 2.5 ms of the 4 ms
+scan. The captures in `bench/captures/` were recorded with the read
+blocks in `PRG_LD`, run at the end of the scan before, so in them the
+feedback is a whole scan (`G_cfgScanTime`, 4 ms) older than the command
+in its row. A delay or a stopping travel read from a capture's rows (from
+the command row to the row where the feedback responds) includes that
+offset: allow it when comparing it with the drive's own response, with a
+model's dead time or with a figure from the 50 ms log. `charDriveLag`, `stepResponseFit` and `charStopDistance`
 report what the rows show and do not remove it.
 
 `benchProbe` does the master's part in the gap between two protocol

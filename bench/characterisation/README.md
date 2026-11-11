@@ -404,7 +404,7 @@ velocity command and the piston velocity (eqs. 11 and 12 of the design
 README; the slew limit of eq. 11 is not in evidence on the machine, see
 section 8).
 The slave's velocity feedback (`G_sysActualVelocity`, from
-`MC_ReadActualVelocity` in the LD POU) is the controller's axis velocity:
+`MC_ReadActualVelocity` in `PRG_LD_Read`) is the controller's axis velocity:
 the motor encoder, differentiated by the drive and scaled through the
 70:1 gearbox and the 5.08 mm lead. It measures the motor, so gearbox lost
 motion and screw compliance are invisible to it. The test therefore has
@@ -690,16 +690,19 @@ What to look for in the outputs:
   resolvable) or `G_cfgPressureDecel` for the v² term. The legs are short
   (0.03 to 0.35 mm), so the drive may not have reached speed when a stop
   begins and the delay can fall a few milliseconds short.
-- The delay carries the capture's one-scan offset (below): read
-  `r.T0_s` as including 4 ms.
+- The delay carries the capture's offset between feedback and command
+  (below): read `r.T0_s` as including 4 ms in the captures on record.
 
 **What the capture rows are.** The probe records, in each scan, the
 command of that scan and the velocity and position feedback `PRG_Main`
-sees, which the axis had at the end of the previous scan. A record's
-feedback is therefore one scan (`G_cfgScanTime`, 4 ms) older than the
-command beside it (`bench/common/README.md`, "The step probe"). A delay
-or a stopping travel read from a capture's rows, from the command row to
-the row where the feedback responds, includes that scan: allow one scan when comparing it with the drive's own response, with
+sees, which `PRG_LD_Read` reads at the start of the scan. A record's
+feedback is therefore older than the command beside it by the time the
+program takes to run, about 2.5 ms; in the captures on record, taken
+with the read blocks at the end of the scan before, it is one scan
+(`G_cfgScanTime`, 4 ms) older (`bench/common/README.md`, "The step
+probe"). A delay or a stopping travel read from a capture's rows, from
+the command row to the row where the feedback responds, includes that
+offset: allow it when comparing it with the drive's own response, with
 a model's dead time or with a figure from the 50 ms log. The fits
 (`charDriveLag`, `stepResponseFit`, `charStopDistance`) report what the
 rows show and do not remove it.
