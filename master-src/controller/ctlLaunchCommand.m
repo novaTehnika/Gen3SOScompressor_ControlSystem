@@ -1,15 +1,19 @@
-function cmd = ctlLaunchCommand(cfg, folder, exe, pc)
-%CTLLAUNCHCOMMAND The system command that starts the controller.
-%   cmd = ctlLaunchCommand(cfg, folder) starts a second MATLAB, minimized
-%   and without its desktop, that runs runController from folder (the
-%   controller's own folder) and returns at once, so the app goes on.
-%   cmd = ctlLaunchCommand(cfg, folder, exe, pc) names the MATLAB
-%   executable and the platform (pc true for Windows) instead of taking
-%   cfg.controllerMatlab (or, when empty, the running MATLAB's) and ispc.
+function [exe, args, cmd] = ctlLaunchCommand(cfg, folder, exe, pc)
+%CTLLAUNCHCOMMAND How the app starts the controller.
+%   [exe, args, cmd] = ctlLaunchCommand(cfg, folder) gives the MATLAB that
+%   runs the controller and its arguments: -batch "cd('<folder>');
+%   runController", with folder the controller's own folder (a single
+%   quote doubled for MATLAB). -batch ends that MATLAB when runController
+%   returns. exe is cfg.controllerMatlab or, when empty, the running
+%   MATLAB's bin/matlab.
 %
-%   On Windows the command is start "<title>" /min "<exe>" -batch "...";
-%   elsewhere it runs the same in the background with &. -batch ends the
-%   MATLAB when runController returns.
+%   On Windows the app starts exe with args itself, with no window
+%   (launchController, through .NET). cmd is the system command for where
+%   that is not available: on Windows start "<title>" /min "<exe>" args,
+%   a minimized window; elsewhere "<exe>" args in the background with &.
+%
+%   [exe, args, cmd] = ctlLaunchCommand(cfg, folder, exe, pc) names the
+%   executable and the platform (pc true for Windows) instead.
 
 if nargin < 3 || isempty(exe)
     exe = cfg.controllerMatlab;
@@ -21,10 +25,10 @@ if nargin < 4
     pc = ispc;
 end
 folder = strrep(folder, '''', '''''');
-script = sprintf('cd(''%s''); runController', folder);
+args = sprintf('-batch "cd(''%s''); runController"', folder);
 if pc
-    cmd = sprintf('start "SOS Gen3 controller" /min "%s" -batch "%s"', exe, script);
+    cmd = sprintf('start "SOS Gen3 controller" /min "%s" %s', exe, args);
 else
-    cmd = sprintf('"%s" -batch "%s" > /dev/null 2>&1 &', exe, script);
+    cmd = sprintf('"%s" %s > /dev/null 2>&1 &', exe, args);
 end
 end

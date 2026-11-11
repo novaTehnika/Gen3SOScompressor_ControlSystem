@@ -16,6 +16,7 @@ reading over the link.
 | `shell/modbusShellDiscover.m` | Prints the Modbus block and client settings of a hand-configured shell so they can be pasted into `buildShell.m`. |
 | `shell/addDaq.m` | Creates one Simulink Desktop Real-Time DAQ block. Holds the board setup (PCI-6221, driver options, missed-tick limit) and the digital channel numbering. |
 | `controller/` | The controller process, which runs the shell model in a MATLAB of its own: `runController` (the process, MATLAB only), `controllerNew`/`controllerStep` (its decisions, with no I/O), `ctlEncode`/`ctlDecode` (one JSON message per line on the local TCP connection), `ctlStatusMessage` (what it sends the app), `ctlClientNew`/`ctlClientUpdate` (the app's view of it), `ctlBlocks` (the blocks the app writes and reads) and `ctlLaunchCommand` (how the app starts it). See Controller process below. |
+| `launch/` | How operators start the app: `makeDesktopShortcut` (run once on the lab PC; writes the desktop icon), `launchOperatorApp` (what the icon runs: sets the paths, opens the app, ends its MATLAB when the app closes), `launchArguments` and `shortcutScript` (the icon's MATLAB arguments and the PowerShell that writes it). See Desktop shortcut below. |
 | `SOS_Gen3_Compressor_Interface.m` | Operator app (programmatic App Designer export). Starts the controller, writes operator requests to the shell's Constant blocks through it and shows the outputs it reports. Takes its position target range, speed presets and cylinder geometry from `masterConfig.m` at startup. Laid out with nested `uigridlayout`s. |
 | `legacy/`, `SOS_Gen3_Compressor_Master.slx` | Earlier Stateflow-based app model and its `.mlapp`, and the hand-built `SimulinkMaster.slx` bench model with manual mode control, kept for reference. |
 
@@ -29,8 +30,33 @@ SOS_Gen3_Compressor_Interface      % then press "Connect to Compressor"
 ```
 
 The app starts the controller, a second MATLAB that runs the shell model,
-minimized; the status line reads "Starting the controller... N s" until it
+with no window; the status line reads "Starting the controller... N s" until it
 answers and then "Controller ready: press Connect". Closing the app ends it.
+`launchOperatorApp` sets the paths and opens the app in one call.
+
+### Desktop shortcut
+
+Operators start the app from a desktop icon, with no MATLAB window to work in.
+Make it once on the lab PC, from the MATLAB that is to run the app, after
+`buildShell`:
+
+```matlab
+cd master-src/launch
+makeDesktopShortcut                 % this account's desktop
+makeDesktopShortcut('allUsers')     % or the Public desktop, for every account (MATLAB run as administrator)
+```
+
+The icon, "SOS Gen3 Compressor", runs that MATLAB's `matlab.exe` with
+`-nosplash -nodesktop -minimize -r "cd('<master-src/launch>');
+launchOperatorApp('exit')"`, starting in `master-src`. MATLAB opens with its
+command window minimized and only the operator app showing; the app starts the
+controller as usual. Closing the app ends that MATLAB, after the app has ended
+the controller. When the app cannot open, a dialog gives the reason before
+MATLAB ends. The shortcut holds the paths of MATLAB and of the repository, so
+make it again after moving either or changing MATLAB version
+(`makeDesktopShortcut` writes it over the old one). `makeDesktopShortcut(...,
+'name', text)` names it otherwise. It is written by PowerShell through the
+`WScript.Shell` object, from a script in `tempdir`.
 
 ### Modbus settings in the shell
 
@@ -661,11 +687,14 @@ recording stopped then is saved to `captures/` without the Save dialog
 ## Controller process
 
 `controller/runController` runs the shell model in a MATLAB of its own. The app
-starts it at its own start with `ctlLaunchCommand`: on Windows
-`start "SOS Gen3 controller" /min "<matlab>" -batch "cd('<master-src/controller>');
-runController"`, with `<matlab>` the app's own MATLAB, or
-`cfg.controllerMatlab` when set (a compiled app needs it). The `-batch` MATLAB
-ends when `runController` returns.
+starts it at its own start: `<matlab> -batch "cd('<master-src/controller>');
+runController"` (`ctlLaunchCommand`), with `<matlab>` the app's own MATLAB, or
+`cfg.controllerMatlab` when set (a compiled app needs it). On Windows the app
+starts that process itself through .NET (`System.Diagnostics.ProcessStartInfo`
+with `CreateNoWindow`), so the controller has no window to be closed by
+mistake; it shows only in the Task Manager, as a second MATLAB. Without .NET it
+falls back to `start "SOS Gen3 controller" /min ...`, a minimized window. The
+`-batch` MATLAB ends when `runController` returns.
 
 **Connection.** The controller listens on `127.0.0.1:cfg.controllerPort` (50321;
 local only, so no firewall rule is involved), one app at a time. The app tries
@@ -713,10 +742,11 @@ and ends; it also ends when no app reaches it within 60 s of its start.
 
 **Log.** The controller's events (start, app connected and gone, model started
 and stopped, refused writes, track loads, errors) go to
-`captures/controller.log` with a timestamp, and to its own window. It can be
-run by hand from a MATLAB session (`cd master-src/controller; runController`)
-to watch them; it then returns instead of ending that MATLAB, and the app
-connects to it as usual.
+`captures/controller.log` with a timestamp; with no window, the log is the
+place to look. It can be run by hand from a MATLAB session
+(`cd master-src/controller; runController`) to watch them in that session; it
+then returns instead of ending that MATLAB, and the app connects to it as
+usual.
 
 ## Trace files
 
