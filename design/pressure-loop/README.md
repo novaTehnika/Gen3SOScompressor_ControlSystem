@@ -1797,9 +1797,8 @@ studies above were computed with:
 `--set as_configured=True` runs a study with the GVL's values, and the
 `configured` arm of `study_robust.py` is the same loop. The model's
 drive is the one measured with `Y_DirectControl`'s command filter at
-0.02 s (18.2 ms of dead time and a 7.5 ms lag); the GVL has that filter
-at zero, where the drive has not been measured, so the delay in these
-figures is at least the machine's.
+0.02 s (18.2 ms of dead time and a 7.5 ms lag), which is the GVL's
+setting.
 
 **Margins** (`study_linear.py --set as_configured=True`):
 

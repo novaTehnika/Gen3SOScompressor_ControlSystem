@@ -204,16 +204,16 @@
      G_cfgDirectCtrlAccel      : LREAL := 10.0         (* Accel for Y_DirectControl operating modes (mm/s^2). A
                                                           velocity step on the machine was not slewed at this
                                                           value in VelocityTLMode (bench/characterisation) *)
-     G_cfgDirectCtrlFilterTime : LREAL := 0.0         (* Y_DirectControl FilterTimeConstant (s): the block's own
+     G_cfgDirectCtrlFilterTime : LREAL := 0.02        (* Y_DirectControl FilterTimeConstant (s): the block's own
                                                           filter on the command it sends the drive. Wired from
                                                           G_cmdDirectControl.FilterTimeConstant in the LD POU. A
-                                                          lag inside the pressure loop, so it is off: a step of
-                                                          the velocity command then reaches the drive as a step.
-                                                          In position mode the torque then reads over 100 % of
-                                                          rated, against the motion, from 3 mm/s up (12 % at
-                                                          0.02 s; docs/slave/development/ConfigurationGuide.md).
-                                                          The drive's response has been measured at 0.05 and
-                                                          0.02 s only (bench/characterisation) *)
+                                                          lag inside the pressure loop, which arrives more cleanly
+                                                          without it, but position moves need it: at 0 the torque
+                                                          reads over 100 % of rated, against the motion, from
+                                                          3 mm/s up, and 8 to 13 % at 0.02 s
+                                                          (docs/slave/development/ConfigurationGuide.md). The
+                                                          drive's response is measured at this value
+                                                          (bench/characterisation) *)
 
 
      (* ========================================================================
