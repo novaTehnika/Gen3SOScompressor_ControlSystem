@@ -54,7 +54,9 @@ cfg.gvl = g;
 cfg.scanTime        = g.G_cfgScanTime;                   % s
 cfg.filterTau       = g.G_cfgAnalogFilterTimeConst;      % s, pressure low-pass
 cfg.medianSize      = g.G_cfgAnalogMedianSize;
-cfg.pipelineScans   = 2;        % PRG_Main reads the filter output of two scans earlier
+cfg.pipelineScans   = 0;        % scans between the filter's output and the pressure the slave records: none, PRG_Main
+                                % scales the filter's output of the same scan. A capture made by a slave that read each
+                                % block's output a scan late has 2 (opts.pipelineScans of the fits)
 cfg.velAccel        = g.G_cfgDirectCtrlAccel;            % mm/s^2, Y_DirectControl in velocity mode
 cfg.velDecel        = g.G_cfgDirectCtrlAccel;            % mm/s^2, the block has one rate for both directions
 cfg.velMax          = g.G_cfgVelLimitMax;                % mm/s, velocity mode clamp

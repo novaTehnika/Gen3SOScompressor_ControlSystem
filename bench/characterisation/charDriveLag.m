@@ -17,7 +17,7 @@ function r = charDriveLag(files, opts)
 %   more than opts.minPressureSwing, the pressure is fitted too: the same
 %   lag model for the piston velocity, integrated at the stiffness the
 %   capture's own pressure and position change give, through the slave's
-%   median, low-pass and pipeline delay (eqs. 16 to 18). Only the piston
+%   median and low-pass (eqs. 16 to 18) and opts.pipelineScans. Only the piston
 %   moves the pressure, so that lag (tauP) is the one at the piston, which
 %   is what tauV in the model stands for.
 %
@@ -37,7 +37,10 @@ function r = charDriveLag(files, opts)
 %                           The 26 October captures carry a t written at 2 ms
 %                           per row; the scan was 4 ms.
 %   opts.filterTau, opts.medianSize, opts.pipelineScans
-%                           sensor chain for the pressure fit (default charConfig)
+%                           sensor chain for the pressure fit (default charConfig).
+%                           pipelineScans is the scans by which the recorded
+%                           pressure trails the filter: 0 for the slave as it
+%                           is, 2 for the captures up to 5 November
 %   opts.minStep            mm/s, smaller command changes are ignored (default 0.2)
 %   opts.minPressureSwing   MPa (default 0.1)
 %   opts.logShuntOhms       G_cfgPressureShuntOhms the logs and captures were
@@ -340,7 +343,7 @@ end
 function P = pressModel(th, cmd, Ts, v0, k, P0, opts)
 % Piston velocity through the lag model, integrated into pressure at
 % stiffness k, then the slave's median (a delay of (N-1)/2 scans for a
-% smooth signal), first-order filter and two-scan pipeline.
+% smooth signal), first-order filter and opts.pipelineScans scans of delay.
 tau = exp(th(1));
 Td = max(th(2), 0);
 vref = slew(cmd, Ts, opts.accel, opts.decel);

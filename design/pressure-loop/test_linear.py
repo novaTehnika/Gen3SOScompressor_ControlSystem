@@ -32,6 +32,13 @@ act, so the linear model should match them closely. The checks are:
                 and frequency of the predicted closed-loop pole.
   V3 outflow    The pressure dip after an outflow step matches the
                 simulation in size, time and shape.
+  V4 derivative A target step with a derivative term on the measured
+                pressure matches the simulation, and the command noise
+                matches the noise gain.
+  V5 soft       In a soft chamber the least damped mode follows the
+                two-integrator reduction, eq. (60), and lies on the
+                circle about the integral zero, eq. (63); the overshoot
+                from a stored integral velocity follows eq. (61).
 
 Usage:
     python3 design/pressure-loop/test_linear.py
@@ -98,9 +105,9 @@ def check_plant_discretisation():
                        rtol=1e-9)
     assert np.allclose(den, lp['Gd'].den, rtol=1e-9)
     n_dead = round(PAR.t_dead / PAR.Ts)
-    assert lp['delay'] == 5 + n_dead and lin.sample_delay(CFG) == 4
+    assert lp['delay'] == 2 + n_dead and lin.sample_delay(CFG) == 2
     ok(f'plant ZOH matches scipy cont2discrete; delay = median 2 + '
-       f'pipeline 2 + command 1 + drive dead time {n_dead} scans')
+       f'drive dead time {n_dead} scans')
 
 
 def check_margins():
@@ -150,7 +157,7 @@ def check_v1_step():
     # Fit the sensor-path delay: only the expected count should match.
     n = len(r.t)
     errs = {}
-    for d in range(2, 8):
+    for d in range(0, 6):
         R = lin.loop(PAR, K_LIQ, delay=d)['R']
         y = model_trace(R, n, n0, amp)
         errs[d] = np.abs(r.P - 10e6 - y).max() / amp
@@ -159,7 +166,7 @@ def check_v1_step():
     assert min(v for d, v in errs.items() if d != best) > 3 * errs[best], \
         errs
     ok(f'V1 step response: linear vs sim max difference '
-       f'{errs[best] * 100:.2f}% of the step (delay {best} + 1 scans fits '
+       f'{errs[best] * 100:.2f}% of the step (delay {best} scans fits '
        f'best; {best - 1} gives {errs[best - 1] * 100:.1f}%, {best + 1} '
        f'gives {errs[best + 1] * 100:.1f}%); max |u| {umax:.3f} mm/s, '
        f'clamp not active')
@@ -256,6 +263,108 @@ def check_v3_disturbance():
        f'Q/(A Kp) = {rule * 1e3:.1f} kPa')
 
 
+# %% ===== V4: DERIVATIVE TERM AND NOISE =================================
+def check_v4_derivative():
+    """Target step and command noise with a derivative term on the
+    measured pressure, eqs. (57) and (58), linear against nonlinear."""
+    amp = 0.05e6                            # [Pa] step size
+    Kd = 0.05                               # [(mm/s)/(MPa/s)]
+    s = scenarios.stiffstep(PAR, T=6.0, target1=10e6 + amp)
+    r = sim.run(PAR, s, ctl.VariantController(Kd=Kd))
+    n0 = round(s.t_step / PAR.Ts)           # [-] scan of the step
+    n = len(r.t)
+    y = model_trace(lin.loop(PAR, K_LIQ, Kd=Kd)['R'], n, n0, amp)
+    err = np.abs(r.P - 10e6 - y).max() / amp
+    y0 = model_trace(lin.loop(PAR, K_LIQ)['R'], n, n0, amp)
+    err0 = np.abs(r.P - 10e6 - y0).max() / amp
+    assert err < 0.01 and err0 > 5 * err, (err, err0)
+
+    # The derivative term adds phase lead: the phase margin rises.
+    pm0 = lin.margins(lin.loop(PAR, K_LIQ)['L'])['pm']
+    pm1 = lin.margins(lin.loop(PAR, K_LIQ, Kd=Kd)['L'])['pm']
+    assert pm1 > pm0 + 5, (pm0, pm1)
+
+    # Command noise at rest against the 2-norm of N. The median of five
+    # lowers the variance of white noise and the model passes it as a
+    # delay, so the model is the upper bound.
+    q = PAR.with_(noise=1.7e3)
+    s = scenarios.stiffstep(q, T=30.0, target1=10e6)
+    gains = []
+    for kd in (0.0, Kd):
+        r = sim.run(q, s, ctl.VariantController(Kd=kd))
+        late = r.t > 5.0
+        got = float(np.std(r.u[late]))                      # [m/s]
+        want = lin.noise_gain(lin.loop(PAR, K_LIQ, Kd=kd)) * q.noise
+        assert 0.8 * want < got < 1.05 * want, (kd, got, want)
+        gains.append(got * 1e6)                     # [m/s -> um/s]
+    ok(f'V4 derivative term Kd {Kd}: step response linear vs sim max '
+       f'difference {err * 100:.2f}% of the step ({err0 * 100:.0f}% '
+       f'without it in the model); phase margin {pm0:.0f} to '
+       f'{pm1:.0f} deg; command noise {gains[0]:.2f} to {gains[1]:.2f} '
+       f'um/s rms, within the noise gain')
+
+
+# %% ===== V5: SOFT CHAMBER ==============================================
+def check_v5_soft():
+    """Two-integrator reduction of the soft chamber, eqs. (59) to
+    (61)."""
+    Kp, Ki = CFG['G_cfgPressureKp'], CFG['G_cfgPressureKi']
+    worst = 0.0
+    for k in (0.003, 0.03, 0.1):                            # [MPa/mm]
+        for Kd in (0.0, 0.05):
+            z, wn = lin.least_damped(lin.loop(PAR, k * lin.MPA_MM,
+                                              Kd=Kd))
+            # Eq. (60)
+            z_want = 0.5 * Kp * np.sqrt(k / (Ki * (1 + k * Kd)))
+            wn_want = np.sqrt(k * Ki / (1 + k * Kd))        # [rad/s]
+            worst = max(worst, abs(z / z_want - 1),
+                        abs(wn / wn_want - 1))
+    assert worst < 0.06, worst
+
+    # Eq. (63): the soft chamber's poles lie on the circle of radius
+    # Ki/Kp about the zero at -Ki/Kp, and are real past 4 Ki / Kp^2.
+    r0 = Ki / Kp                                            # [rad/s]
+    off = 0.0
+    for k in (0.003, 0.03, 0.1, 0.3):                       # [MPa/mm]
+        z = lin.poles(lin.loop(PAR, k * lin.MPA_MM)).astype(complex)
+        sp = np.log(z[np.abs(z) > 1e-9]) / PAR.Ts
+        s0 = sp[np.argmin(np.abs(sp))]
+        assert abs(s0.imag) > 0.0
+        off = max(off, abs(abs(s0 + r0) - r0) / r0)
+    k_b = 4 * Ki / Kp**2                                    # [MPa/mm]
+    z = lin.poles(lin.loop(PAR, 1.2 * k_b * lin.MPA_MM)).astype(complex)
+    sp = np.log(z[np.abs(z) > 1e-9]) / PAR.Ts
+    slow = sp[np.argsort(np.abs(sp))][:2]
+    assert off < 0.03 and np.all(np.abs(slow.imag) < 1e-6), (off, slow)
+
+    # Eq. (61) against the reduction integrated from e = 0 with the
+    # integral holding w0: e' = -k (Kp e + w), w' = Ki e.
+    k, w0, dt = 0.05, 2.0, 1e-3             # [MPa/mm], [mm/s], [s]
+    e, w, peak = 0.0, w0, 0.0
+    for _ in range(int(60 / dt)):
+        e, w = e - k * (Kp * e + w) * dt, w + Ki * e * dt
+        peak = max(peak, -e)
+    z = 0.5 * Kp * np.sqrt(k / Ki)
+    phi = np.arctan2(np.sqrt(1 - z * z), z)
+    want = w0 * np.sqrt(k / Ki) * np.exp(-z * phi / np.sqrt(1 - z * z))
+    assert abs(peak / want - 1) < 0.01, (peak, want)
+
+    # A fixed gain set keeps its phase margin over a limited range of
+    # stiffness: with Ki = 0.4 Kp at the stiff limit, about 46 to 1.
+    kd = 7.5 * lin.MPA_MM                                   # [Pa/m]
+    kp = lin.kp_for_margins(PAR, kd, 45.0, 6.0, 0.4)
+    lo = lin.softest_stiffness(PAR, 45.0, kd, G_cfgPressureKp=kp,
+                               G_cfgPressureKi=0.4 * kp)
+    assert abs(kp - 1.85) < 0.02 and 40 < kd / lo < 52, (kp, kd / lo)
+    ok(f'V5 soft chamber: least damped mode within {worst * 100:.0f}% '
+       f'of eq. (60) from 0.003 to 0.1 MPa/mm, on the circle of '
+       f'eq. (63) within {off * 100:.0f}% and real past '
+       f'{k_b:.2f} MPa/mm; stored-velocity '
+       f'overshoot {peak:.3f} MPa against eq. (61) {want:.3f}; Kp '
+       f'{kp:.2f} holds 45 deg over a stiffness range of '
+       f'{kd / lo:.0f} to 1')
+
+
 if __name__ == '__main__':
     t0 = time.time()
     check_plant_discretisation()
@@ -263,4 +372,6 @@ if __name__ == '__main__':
     check_v1_step()
     check_v2_boundary()
     check_v3_disturbance()
+    check_v4_derivative()
+    check_v5_soft()
     print(f'{time.time() - t0:.1f} s')

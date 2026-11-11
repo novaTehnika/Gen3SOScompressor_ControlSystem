@@ -39,6 +39,22 @@
    produces the proportional term only, so entry is bumpless when the error
    is small.
 
+   Integral clear past the target (IntegClearEnable;
+   design/pressure-loop/README.md, "Anti-windup variants and derivative
+   term", equation (52)): the clamp above does not bind once the output has
+   come off it, so an integral built on a long approach arrives at the
+   target still holding its velocity. In a soft, gas-filled chamber that is
+   the stop-law floor, and the loop is then two integrators with little
+   damping. With IntegClearEnable an integral that drives the output
+   further past the target is cleared while the pressure is past the target
+   by more than IntegClearError: a positive integral above the target, a
+   negative one below it. In a sealed chamber the equilibrium is zero error
+   with zero integral, so the clear puts the loop at rest. With the outlet
+   open the integral holds the outflow's velocity at zero error, and the
+   piston outruns the outflow only once the pressure is above the target,
+   so IntegClearError stays above the excursions of the reading at the
+   target.
+
    Floor that follows the outflow (FloorEnable; design/pressure-loop/README.md,
    "Stop-law floor policies", equations (46) and (48)): a fixed StopVelMin
    high enough for the outflow lets an integrator that holds a forward
@@ -47,9 +63,9 @@
    StopVelMin while the detection is latched, and no stiffness value is
    needed.
      Window: over W = Window / CycleTime scans, with the position delayed by
-     the measurement lag D (the filter time constant in scans, the median's
-     half-width and the two pipeline scans) so that the two describe the
-     same interval:
+     the measurement lag D (the filter time constant in scans and the
+     median's half-width; PRG_Main passes the reading in the scan it is
+     sampled) so that the two describe the same interval:
        dx = Position[n - D] - Position[n - D - W],   dP = Actual[n] - Actual[n - W]
      The rate is dP / (W CycleTime) and the speed dx / (W CycleTime). In a
      sealed chamber the pressure rises with the piston, so a piston that
@@ -97,6 +113,8 @@
        RelRate         : LREAL            (* Pressure rise rate above which the release counts (MPa/s)
        RelError        : LREAL            (* Error at or below which the release counts (MPa)
        ForwardStop     : BOOL             (* Zero a forward output above the target while outflow is not latched
+       IntegClearEnable : BOOL            (* Clear an integral that drives the output further past the target
+       IntegClearError : LREAL            (* Error beyond the target at which the integral is cleared (MPa)
      VAR_OUTPUT:
        Velocity        : LREAL            (* Commanded velocity (mm/s), within +/-rVelLimit
        Latched         : BOOL             (* Outflow is detected (floor at StopVelMin)
@@ -105,7 +123,7 @@
        rError          : LREAL            (* Target - Actual (MPa)
        rVelLimit       : LREAL            (* Clamp applied this scan: min of VelMax and the stop law (mm/s)
        bSaturated      : BOOL := FALSE    (* Output is at the clamp this scan
-       bParamError     : BOOL             (* VelMax, DecelMax, Stiffness or CycleTime not positive, or StopVelMin negative
+       bParamError     : BOOL             (* VelMax, DecelMax, Stiffness or CycleTime not positive, StopVelMin negative, or IntegClearError negative with IntegClearEnable
        rInteg          : LREAL := 0.0     (* Integral of the error (MPa * s)
        rRaw            : LREAL            (* Unclamped output this scan
        rVelPI          : LREAL := 0.0     (* Clamped output before the forward stop (mm/s)
@@ -136,7 +154,8 @@
 
 bParamError := (VelMax <= LREAL#0.0) OR (DecelMax <= LREAL#0.0) OR
               (Stiffness <= LREAL#0.0) OR (CycleTime <= LREAL#0.0) OR
-              (StopVelMin < LREAL#0.0);
+              (StopVelMin < LREAL#0.0) OR
+              (IntegClearEnable AND (IntegClearError < LREAL#0.0));
 
 (* --------------------------------------------------------------------------
    Floor settings: the window, the position delay and the trigger hold in
@@ -159,7 +178,7 @@ IF FloorEnable AND NOT bParamError THEN
             nMedHalf := 1;
         END_IF;
         nW := LREAL_TO_INT(LIMIT(LREAL#1.0, Window / CycleTime, LREAL#60.0));
-        nD := LREAL_TO_INT(FilterTime / CycleTime) + nMedHalf + 2;
+        nD := LREAL_TO_INT(FilterTime / CycleTime) + nMedHalf;
         nOn := LREAL_TO_INT(TrigTime / CycleTime);
         FloorError := nW + nD + 1 > cDepth;
     END_IF;
@@ -185,6 +204,18 @@ IF (NOT Enable) OR bParamError THEN
 END_IF;
 
 rError := Target - Actual;
+
+(* --------------------------------------------------------------------------
+   Integral clear past the target, eq. (52): an integral that drives the
+   output further past the target is cleared
+   -------------------------------------------------------------------------- *)
+IF IntegClearEnable THEN
+    IF (rError < -IntegClearError) AND (rInteg > LREAL#0.0) THEN
+        rInteg := LREAL#0.0;
+    ELSIF (rError > IntegClearError) AND (rInteg < LREAL#0.0) THEN
+        rInteg := LREAL#0.0;
+    END_IF;
+END_IF;
 
 (* --------------------------------------------------------------------------
    Floor: VelLow until outflow is latched, eq. (46), from the window and the

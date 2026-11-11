@@ -199,9 +199,9 @@ fprintf('ok  gap between master writes from the window scan counts\n');
 % ----- Live buffer -----
 b = traceLiveBuffer(cfg);
 cap = round(cfg.livePlotSeconds / cfg.exchangePeriod);
-assert(cap >= 1 && isequal(size(b.data), [cap 8]) && b.count == 0 && b.lastSeq == 0);
+assert(cap > 0 && isequal(size(b.data), [cap 8]) && b.count == 0 && b.lastSeq == 0);
 assert(b.span == cfg.livePlotSeconds && b.posEOT == cfg.posEOT);
-N = 15000;
+N = cap + 3000;     % more rows than the buffer holds, so it wraps
 R = liveRows(N);
 at = 0;
 k = 0;

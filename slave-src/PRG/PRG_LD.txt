@@ -1,17 +1,19 @@
 (* ============================================================================
-   PRG_LD - Ladder Diagram POU: the axis and the built-in motion FBs
+   PRG_LD - Ladder Diagram POU: the built-in motion FBs that command the axis
 
    Project: Gen3 SOS Compressor Servo Controller
    Controller: Yaskawa MP2600iec
 
    Description:
-   The one POU that owns the axis and instantiates the built-in motion
-   function blocks (PLCopen MC_*, Yaskawa Y_DirectControl, the PLCopen
-   Toolbox Jog). The Structured Text never calls them: PRG_Main writes the
-   G_cmd* structured globals every scan and reads the G_sta* globals and
-   the G_sysActual* feedback (types in DUT/DataTypes.st). Each network of
-   this POU is one block instance whose pins are wired to the fields of
-   the same name, so the structs are the pin lists.
+   The POU that instantiates the built-in motion function blocks that act
+   on the axis (PLCopen MC_*, Yaskawa Y_DirectControl, the PLCopen Toolbox
+   Jog). The Structured Text never calls them: PRG_Main writes the G_cmd*
+   structured globals every scan and reads the G_sta* globals (types in
+   DUT/DataTypes.st). Each network of this POU is one block instance whose
+   pins are wired to the fields of the same name, so the structs are the
+   pin lists. The blocks that only read the axis (the G_sysActual*
+   feedback and G_sysDriveFault) are in PRG_LD_Read, which runs first in
+   the scan (PRG_LD_Read.txt).
 
    The POU is written in Ladder Diagram in MotionWorks IEC and has no text
    form. This file is its specification: the header declares its
@@ -22,9 +24,12 @@
    file, the LD and the screenshot agree.
 
    Integration:
-   - Runs on the one cyclic task, last, after PRG_Output: the status
-     PRG_Main reads is one scan old, which is the order the simulator runs
-     (PRG_Input, PRG_Main, PRG_Output, axis model) and the tests assume.
+   - Runs on the one cyclic task, last, after PRG_Output: the scan's
+     order is PRG_LD_Read, PRG_Input, PRG_Main, PRG_Output, PRG_LD. A
+     command PRG_Main writes reaches its block in the scan it is written,
+     and the status the block returns (G_sta*) is read by PRG_Main in the
+     next scan, which is the order the simulator runs (PRG_Input,
+     PRG_Main, PRG_Output, axis model) and the tests assume.
    - PRG_Main defaults every command to idle at the top of its command
      arbitration; the owning state, FB_GoHome, FB_HomeLimit or
      FB_PositionPathShaper overwrites what it commands. A dropped
@@ -38,7 +43,8 @@
      carries; wire the others to locals for diagnosis if wanted.
    - Every G_cmd* field has a pin and every wired G_sta* field has a pin:
      the structs hold nothing the POU does not use.
-   - In the simulator, slave-sim/c/slave_sim.c stands in for this POU.
+   - In the simulator, slave-sim/c/slave_sim.c stands in for this POU and
+     for PRG_LD_Read.
 
    Variables (define in MWiec GUI):
      VAR_EXTERNAL:
@@ -52,10 +58,6 @@
        fbJog               : Jog              (* Homing approach and back-off (PLCopen Toolbox)
        fbSetPosition       : MC_SetPosition   (* Sets the homed zero
        fbDirectControl     : Y_DirectControl  (* Position, velocity and torque command of the operating modes
-       fbReadActualPosition : MC_ReadActualPosition  (* Position feedback
-       fbReadActualVelocity : MC_ReadActualVelocity  (* Velocity feedback
-       fbReadActualTorque  : MC_ReadActualTorque     (* Torque feedback
-       fbReadStatus        : MC_ReadStatus    (* Drive alarm flag for FB_SafetyMonitor
    ============================================================================ *)
 
 (* ============================================================================
@@ -184,48 +186,4 @@
      Axis            -> AXIS1
      Active          -> G_staDirectControl.Active   (* The hand-off waits for it to drop
      Error           -> G_staDirectControl.Error    (* Releases the hand-off
-   -------------------------------------------------------------------------- *)
-
-(* --------------------------------------------------------------------------
-   fbReadActualPosition : MC_ReadActualPosition - Position feedback
-   Enable is the left power rail, so position is read every scan.
-     Axis            <- AXIS1
-     Enable          <- TRUE (power rail)
-     Axis            -> AXIS1
-     Position        -> G_sysActualPosition   (* mm, fbReadActualPosition
-   -------------------------------------------------------------------------- *)
-
-(* --------------------------------------------------------------------------
-   fbReadActualVelocity : MC_ReadActualVelocity - Velocity feedback
-   Enable is the left power rail, so velocity is read every scan. 
-   feedback registers.
-     Axis            <- AXIS1
-     Enable          <- TRUE (power rail)
-     Axis            -> AXIS1
-     ActualVelocity  -> G_sysActualVelocity   (* mm/s, fbReadActualVelocity
-   -------------------------------------------------------------------------- *)
-
-(* --------------------------------------------------------------------------
-   fbReadActualTorque   : MC_ReadActualTorque   - Torque feedback
-   Enable is the left power rail, so torque is read every scan.
-     Axis            <- AXIS1
-     Enable          <- TRUE (power rail)
-     Axis            -> AXIS1
-     ActualTorque    -> G_sysActualTorque     (* % of rated, fbReadActualTorque
-   -------------------------------------------------------------------------- *)
-
-(* --------------------------------------------------------------------------
-   fbReadStatus : MC_ReadStatus - Drive alarm flag
-   G_sysDriveFault is the DriveFault input of FB_SafetyMonitor
-   (FAULT_DRIVE outside the reset and enable states, the path the fault
-   code reference gives for the amplifier's own alarms, encoder alarms
-   included). Nothing else writes it. The axis is in ErrorStop whenever
-   the SERVOPACK holds an alarm and leaves it on fbReset, which is what
-   ST_DRIVE_RESET and the recovery expect of the flag. Enable is the left
-   power rail, as for the feedback readers. The simulator sets the flag
-   directly (sl.hook.driveFault).
-     Axis            <- AXIS1
-     Enable          <- TRUE (power rail)
-     Axis            -> AXIS1
-     ErrorStop       -> G_sysDriveFault
    -------------------------------------------------------------------------- *)
