@@ -88,7 +88,8 @@ static double slew(double v, double target, double step)
 
 static double sign(double x) { return (x > 0) - (x < 0); }
 
-/* The LD POU's motion function blocks, the drive and the mechanics. Reads G_cmd*, writes G_sta* and G_sysActual*. */
+/* The motion function blocks of the two LD POUs (PRG_LD's commands, PRG_LD_Read's feedback), the drive and the
+ * mechanics. Reads G_cmd*, writes G_sta* and G_sysActual*. */
 static void axis_model(slave_sim_t *sl, double dt)
 {
     sim_ax_t *ax = &sl->ax;

@@ -47,6 +47,16 @@ the reference for each) and confirm:
       `G_sysSum*` globals (six `LREAL := 0.0`, two `UINT := UINT#0`); the
       `fbExchangeSummary : FB_ExchangeSummary` instance in `PRG_Main`; and
       the input register group (FC04) extended to at least IR34.
+- [ ] LD: move the four read blocks (`fbReadActualPosition`,
+      `fbReadActualVelocity`, `fbReadActualTorque`, `fbReadStatus`) from
+      `PRG_LD` into a new Ladder Diagram POU `PRG_LD_Read`, order the task
+      `PRG_LD_Read`, `PRG_Input`, `PRG_Main`, `PRG_Output`, `PRG_LD`, and
+      retake their screenshots (`slave-src/PRG/PRG_LD_Read.txt`,
+      `docs/slave/ld/README.md`). Then repeat the velocity steps of the
+      characterisation bench: the dead time read from the capture rows
+      (18.2 ms) should fall by 1.5 ms if the read blocks return the
+      axis data of the moment they run, and by 4 ms if the controller
+      refreshes it once a scan.
 - [ ] LD POU: delete the `MC_MoveVelocity` instance if it is still
       there (no recaptured screenshot shows it), with `G_cmdMoveVelocity`,
       `G_staMoveVelocity`, their two types and `G_sysCycleCount`.

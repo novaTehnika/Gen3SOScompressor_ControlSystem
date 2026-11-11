@@ -266,6 +266,11 @@
      G_cfgPressureKp             : LREAL := 1.5        (* Velocity per pressure error (mm/s per MPa): a crossover of 5 rad/s with the
                                                           hose open (3.2 MPa/mm) and 11 rad/s with it shut at a full fill (7.5 MPa/mm) *)
      G_cfgPressureKi             : LREAL := 0.6        (* Velocity per integrated pressure error (mm/s per MPa*s): 0.4 Kp *)
+     G_cfgPressureIntegClearEnable : BOOL := FALSE     (* Clear the integral while the pressure is past the target on the side the
+                                                          integral drives toward (FB_PressureController, IntegClearEnable;
+                                                          design/pressure-loop/README.md, "Anti-windup and derivative study") *)
+     G_cfgPressureIntegClearError  : LREAL := 0.02     (* Error beyond the target at which the integral is cleared (MPa): above the
+                                                          excursions of the filtered reading at the target *)
      G_cfgPressureVelMax         : LREAL := 5.0        (* Velocity clamp in pressure mode (mm/s) *)
      G_cfgPressureAccel          : LREAL := 50.0       (* Y_DirectControl accel in pressure mode (mm/s^2) *)
      G_cfgPressureDecel          : LREAL := 50.0       (* Deceleration the pressure stop law assumes (mm/s^2); the
@@ -463,7 +468,8 @@
 
      (* ========================================================================
         MOTION FEEDBACK
-        Current state of the servo motor/actuator
+        Current state of the servo motor/actuator, read at the start of the
+        scan by PRG_LD_Read
         ======================================================================== *)
 
      G_sysActualPosition       : LREAL := 0.0     (* Current position (mm) *)
@@ -556,11 +562,14 @@
    5. COMMAND / STATUS INTERFACE (ST <-> LD POU)
    ============================================================================
 
-   These structured globals connect the ST state machine (PRG_Main) to the
-   Ladder Logic POU that owns G_sysAxis and all built-in motion FBs.
+   These structured globals connect the ST state machine (PRG_Main) to
+   PRG_LD, the Ladder Logic POU with the built-in motion FBs that command
+   the axis.
 
-   Commands flow ST -> LD (written by PRG_Main, read by LD POU).
-   Status flows LD -> ST (written by LD POU, read by PRG_Main and custom FBs).
+   Commands flow ST -> LD (written by PRG_Main, read by PRG_LD).
+   Status flows LD -> ST (written by PRG_LD, read by PRG_Main and custom FBs).
+   The axis feedback (G_sysActual*, G_sysDriveFault) is written by the read
+   blocks of PRG_LD_Read, which runs first in the scan.
 
    VAR_GLOBAL
      (* ========================================================================

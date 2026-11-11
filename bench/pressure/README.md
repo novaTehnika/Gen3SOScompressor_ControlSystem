@@ -175,6 +175,45 @@ and 0.0005 MPa with 4.7 uF, against the 0.1 MPa in-band threshold.
 Fitted: 4.7 uF electrolytic with 10 nF ceramic in parallel, corner 78 Hz,
 as the anti-alias for the 4 ms sampling. Sensor filter: 20 ms.
 
+**With the cable shield grounded** (2026-11-05, the same capacitors,
+4 ms sampling, the chamber with liquid):
+
+| Source | Condition | Capture rms (mV) | p-p (mV) | Bands 0-25 / 25-100 / 100-125 Hz (mV) |
+|--------|-----------|------------------|----------|----------------------------------------|
+| `idle_20261105_183515` (`pressureNoiseReport`) | at rest, vented | 0.73 | 3.8 | 0.40 / 0.52 / 0.28 |
+| raw input of the day's probe captures, 91 one-second windows | at rest, drive holding, 0 to 13 MPa | 0.75 (0.69 to 0.94) | 4.5 | 0.36 / 0.58 / 0.30 |
+| the same, 233 windows | moving at a constant command | 0.74 (0.68 to 0.95) | 4.4 | 0.38 / 0.57 / 0.30 |
+
+The second and third rows are the `volts` column of the characterisation
+and friction captures in `bench/captures/`, cut into one-second windows
+with a quadratic trend removed; the figure is the median over the
+windows, with the 10th and 90th percentiles in parentheses. The rms per
+sample compares with the table above; the bands do not, since those runs
+sampled every 2 ms and these fold everything above 125 Hz into the band.
+
+The rms is what it was before the shield was grounded (0.76 to 0.80 mV
+with the 4.7 uF capacitor). It does not depend on the pressure, on the
+drive's torque (0.74 mV below 15 % of rated, 0.77 mV above) or on
+motion, and the largest line is 0.3 mV. Over the 39 000 samples at rest
+the distribution is Gaussian (kurtosis 3.2), with no spike: the largest
+excursion is 3.8 mV, 8.9 kPa. The noise is 1.87 kPa rms per sample and
+nearly white (17 % of its variance from 5 to 25 Hz, 46 % above 60 Hz).
+What the slave's filters leave of it, applied to these samples:
+
+| Median | Low-pass | rms (kPa) | Delay and lag (ms) |
+|--------|----------|-----------|--------------------|
+| 5 | 20 ms (as configured) | 0.59 | 28 |
+| 5 | 10 ms | 0.73 | 18 |
+| 3 | 5 ms | 0.95 | 9 |
+| 5 | none | 1.06 | 8 |
+| 3 | none | 1.32 | 4 |
+
+The readers of the filtered pressure are the in-band status (0.1 MPa),
+the integral clear (0.02 MPa) and the stop-law floor's rate (0.1 MPa/s
+over 0.1 s), so none of them needs the low-pass at this noise; what a
+shorter filter does to the pressure loop is in
+`design/pressure-loop/README.md`, "Outflow feedforward study".
+
 Link during the runs (raw frames): exchange median 12.9 ms, p99 22.5 ms;
 longest gap between cycles 108 ms.
 

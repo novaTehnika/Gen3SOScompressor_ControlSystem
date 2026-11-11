@@ -315,6 +315,12 @@ class Params:
     # The velocity command has separate accel and decel limits when it
     # is slewed.
     slew_asym: bool = True
+    # [scans] Scans between the one a command is computed in and the one
+    # it takes effect in, ahead of the drive's dead time. PRG_Main runs
+    # the pressure loop and writes its command in the same scan, so it
+    # is 0; the earlier model, in which the state machine read the
+    # loop's output of the previous scan, had 1.
+    command_scans: int = 0
 
     # ----- Slave configuration overrides ---------------------------------
     # G_cfg* entries that replace the GVL defaults, by full name
@@ -380,10 +386,12 @@ class Params:
 
     def legacy(self):
         """Return a copy with the earlier model: a fixed liquid volume, a
-        single slew limit on the command, no dead time and no air pocket
-        at the transducer."""
+        single slew limit on the command, no dead time, no air pocket
+        at the transducer and a command that takes effect a scan after
+        it is computed."""
         return replace(self, liquid_depletes=False, slew_asym=False,
-                       slew_limited=True, t_dead=0.0, V_air=0.0)
+                       slew_limited=True, t_dead=0.0, V_air=0.0,
+                       command_scans=1)
 
     @classmethod
     def from_overrides(cls, items, base=None):

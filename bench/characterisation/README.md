@@ -404,7 +404,7 @@ velocity command and the piston velocity (eqs. 11 and 12 of the design
 README; the slew limit of eq. 11 is not in evidence on the machine, see
 section 8).
 The slave's velocity feedback (`G_sysActualVelocity`, from
-`MC_ReadActualVelocity` in the LD POU) is the controller's axis velocity:
+`MC_ReadActualVelocity` in `PRG_LD_Read`) is the controller's axis velocity:
 the motor encoder, differentiated by the drive and scaled through the
 70:1 gearbox and the 5.08 mm lead. It measures the motor, so gearbox lost
 motion and screw compliance are invisible to it. The test therefore has
@@ -482,7 +482,10 @@ the pressure channel: the lag model for the piston velocity, integrated
 at the capture's own stiffness (its pressure change over its position
 change) and passed through the slave's median filter (two scans for a
 smooth signal), the low-pass (`G_cfgAnalogFilterTimeConst`, 20 ms on the
-machine, 50 ms earlier) and the two-scan pipeline, eqs. 16 to 18. The
+machine, 50 ms earlier) and the scans by which the recorded pressure
+trails the filter (`opts.pipelineScans`: none for the slave as it is,
+whose `PRG_Main` scales the filter's output of the same scan; two for
+the captures up to 5 November), eqs. 16 to 18. The
 filter constant must be the one loaded. The result is the lag at the
 piston plus its dead time, at the 4 ms scan: behind the sensor chain the
 two trade against each other, so the fit determines their sum, which is
@@ -687,16 +690,19 @@ What to look for in the outputs:
   resolvable) or `G_cfgPressureDecel` for the v² term. The legs are short
   (0.03 to 0.35 mm), so the drive may not have reached speed when a stop
   begins and the delay can fall a few milliseconds short.
-- The delay carries the capture's one-scan offset (below): read
-  `r.T0_s` as including 4 ms.
+- The delay carries the capture's offset between feedback and command
+  (below): read `r.T0_s` as including 4 ms in the captures on record.
 
 **What the capture rows are.** The probe records, in each scan, the
 command of that scan and the velocity and position feedback `PRG_Main`
-sees, which the axis had at the end of the previous scan. A record's
-feedback is therefore one scan (`G_cfgScanTime`, 4 ms) older than the
-command beside it (`bench/common/README.md`, "The step probe"). A delay
-or a stopping travel read from a capture's rows, from the command row to
-the row where the feedback responds, includes that scan: allow one scan when comparing it with the drive's own response, with
+sees, which `PRG_LD_Read` reads at the start of the scan. A record's
+feedback is therefore older than the command beside it by the time the
+program takes to run, about 2.5 ms; in the captures on record, taken
+with the read blocks at the end of the scan before, it is one scan
+(`G_cfgScanTime`, 4 ms) older (`bench/common/README.md`, "The step
+probe"). A delay or a stopping travel read from a capture's rows, from
+the command row to the row where the feedback responds, includes that
+offset: allow it when comparing it with the drive's own response, with
 a model's dead time or with a figure from the 50 ms log. The fits
 (`charDriveLag`, `stepResponseFit`, `charStopDistance`) report what the
 rows show and do not remove it.
@@ -805,7 +811,7 @@ the robustness ranges (see the end of this section).
 | Friction reversal under load, stiffness bound | 15 % at 4 MPa rising to 30 % at 9 MPa; dT = 4.1 + 2.80 P %: Fc 2.25 kN, mu 0.45; drive path ks > 3.9 kN/um | the three K300 runs | Up/down motor offsets of 6 um median, just above the 5 um floor, so a bound. |
 | Bulk modulus, one fill | 6.8 to 7.9 MPa/mm at 362 mL (277.6 to 278.2 mm): K effective 0.77 GPa (0.72 to 0.84); the fit's liquid term 0.88 GPa | `K300_char_20261105_172421`, `_172541`, `_172702` | Up and down agree to 0.5 %, the three runs to 1 %. The gas term, 0.2 to 0.8 mL at P0, fails the 0.3 mL tolerance; the two fills below explain the compliance without gas. |
 | Bulk modulus, two fills | liquid K 1.70 GPa in series with 46 N/um (0.26 mL/MPa, a constant compliance); 9.3 to 11.1 MPa/mm at 144 mL | the K300 runs and `K200_char_20261105_182500`, `_182604` (341.6 mm) | The compliance is V / K + A^2 / ks: the single-fill 0.72 GPa of October and 0.77 now are that sum at 350 to 360 mL. With one K for the liquid the model makes the chamber at 144 mL 18 MPa/mm instead of 10. |
-| Loop crossover at the GVL's Kp of 1.5 (section 9) | 10 to 12 rad/s at 362 mL with the hose shut (6.8 to 7.9 MPa/mm), 14 to 17 rad/s at 144 mL with the hose shut (9.3 to 11.1), 4 to 5 rad/s with the hose open (2.6 to 3.5) | the K300, K200 and hose runs | The delivery runs with the hose open, where the margin is widest. Hose shut at a low fill is the stiff corner (30° of phase margin or less): pressure mode is not run there by the procedure. |
+| Loop crossover at the GVL's Kp of 1.5 (section 9) | 10 to 12 rad/s at 362 mL with the hose shut (6.8 to 7.9 MPa/mm), 14 to 17 rad/s at 144 mL with the hose shut (9.3 to 11.1), 4 to 5 rad/s with the hose open (2.6 to 3.5) | the K300, K200 and hose runs | The delivery runs with the hose open, where the margin is widest. Hose shut at a low fill is the stiff corner (38 to 45° of phase margin): pressure mode is not run there by the procedure. |
 | Hose compliance, 6 ft hose (58 mL with the tube) | the hose adds 0.65 mL/MPa before the purge and 0.61 after; beyond its own liquid (0.03 mL/MPa at 1.7 GPa), 0.58 mL/MPa of wall and 0.04 of air: 0.097 mL/MPa per foot | `K300_hose_char_20261105_180515`, `K300_hose_purged_char_20261105_180933` | The hose is twice October's 3 ft, and its compliance per foot is 20 % above October's 0.08 (0.24 mL/MPa for 3 ft, unpurged). Above the robustness range (0.12 to 0.36) and the GVL's lower bound (0.12, which stays a lower bound). The cylinder's part at the hose runs' 355 mL is taken from the two-fill split (0.465 mL/MPa). |
 | Stopping distance under load | comp x = 0.019 s v + v^2 / (2 x 196 mm/s^2), ret 0.016 s v + v^2 / (2 x 77 mm/s^2); 6 to 12 um at 0.25 and 0.5 mm/s, 7.6 to 10.8 MPa | `stops_hp_char_20261105_175543` (6 captured stops) | Every stop within the slave's allowance (0.05 s, 50 mm/s^2; worst -7 um). The law's residual is 28 % of the stops, which are a few um, so the split between the terms is loose. `_174848` ended on the pressure guard: the path was planned on the October gas-charged stiffness. |
 | Friction at speed under load | mu 0.51 +/- 0.05, Fc not resolved | the legs of the stops run (6) | Agrees with the K300 reversal's 0.45. |
@@ -829,8 +835,8 @@ The pressure loop's crossover is close to its proportional gain times
 the chamber stiffness: `G_cfgPressureKp` [mm/s per MPa] times dP/dx
 [MPa/mm] is in rad/s. The gain is fixed, so the stiffest chamber the
 loop runs on sets its margin: with the 20 ms input filter and the
-measured drive (18.2 ms dead time, 7.5 ms lag) the loop keeps 66° of
-phase margin at a crossover of 5 rad/s, 45° at 11 rad/s and 16° at
+measured drive (18.2 ms dead time, 7.5 ms lag) the loop keeps 70° of
+phase margin at a crossover of 5 rad/s, 52° at 11 rad/s and 29° at
 18 rad/s (`design/pressure-loop/study_linear.py`). The K runs give the
 stiffness, so they check the gain before pressure mode is run on a new
 fill, hose or fitting:
@@ -933,7 +939,8 @@ rh = charDrivePath([logs '/K300_char_20261026_193603.csv']); % the hose-open run
    and 4.9 kN/um (5.0, 4.3 and 4.5 % of rated torque per um), over 200
    times the chamber's 24 N/um. The 5 um floor (`opts.floor_um`) is what
    the logs resolve: the pair-to-pair scatter, and the pressure sensor's
-   lag (36 ms: median 5, low-pass 20 ms, two scans of pipeline), which at
+   lag (36 ms in these logs: median 5, low-pass 20 ms, two scans between
+   the filter and the recorded pressure; 28 ms for the slave as it is), which at
    0.1 mm/s moves the up and down ramps 7 um apart in the same direction a
    stiff path would, so it raises the offset and the bound stays valid.
    The bound takes the whole torque reversal as passing the path, which

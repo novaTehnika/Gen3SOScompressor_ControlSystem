@@ -23,14 +23,13 @@ voltage then passes through the slave's own function blocks, translated
 from Structured Text: FB_AnalogInputFilter (a median filter followed by
 a first-order low-pass filter, eqs. (16) and (17)) and FB_PressureInput
 (scaling from volts to MPa). The blocks are called in the order PRG_Main
-calls them. PRG_Main reads the outputs of both blocks at the top of the
-scan and calls the blocks at the end, so the controller sees the filter
-output from two scans earlier (eq. (18)).
+calls them, in its Sense phase: the scaling takes the filter's output of
+the same scan, so the controller sees the reading of the scan it is
+sampled in, behind the filter alone (eq. (18)).
 
 LegacySensor is the earlier, simpler chain. It applies the median and
-the first-order filter directly to the pressure, and the reading is
-available in the scan it is sampled. Its output equals the slave chain's
-output two scans earlier, apart from the scaling.
+the first-order filter directly to the pressure. Its output equals the
+slave chain's, apart from the scaling.
 
 FILE DEPENDENCY:
 ./
@@ -122,9 +121,8 @@ class SlaveSensor:
         self.inp.FaultTime = cfg['G_cfgPressureSensorFaultTime']
 
         # The blocks hold a settled reading when the pressure mode is
-        # entered, so the chain is primed with three noise-free scans.
-        for _ in range(3):
-            self.read(P0, 0.0)
+        # entered, so the chain is primed with a noise-free scan.
+        self.read(P0, 0.0)
 
     @property
     def fault(self):
@@ -134,29 +132,24 @@ class SlaveSensor:
     def read(self, P, z):
         """Sample pressure P [Pa] with noise draw z and return the reading
         [Pa] the controller uses in this scan."""
-        # Outputs of the previous scan's block calls, read at the top of
-        # the scan as PRG_Main reads them, eq. (18). PRG_Main names them
-        # G_sysActualPressure and rFilteredPressureVolts.
-        P_actual = self.inp.PressureMPa                         # [MPa]
-        V_filtered = self.filt.FilteredOutput                   # [V]
-
         # Sample the shunt voltage with its zero error and noise and run
         # the filter, eqs. (15) to (17)
         self.filt.RawInput = (P * self.V_per_Pa + self.V_offset
                               + self.V_err + self.noise_V * z)   # [V]
         FB_AnalogInputFilter(self.filt, self.dt)
 
-        # Scale the previous filter output to pressure
-        self.inp.Volts = V_filtered
+        # Scale this scan's filter output to pressure, eq. (18).
+        # PRG_Main names the two rFilteredPressureVolts and
+        # G_sysActualPressure.
+        self.inp.Volts = self.filt.FilteredOutput               # [V]
         FB_PressureInput(self.inp, self.dt)
 
-        return P_actual * 1e6                   # [MPa -> Pa]
+        return self.inp.PressureMPa * 1e6       # [MPa -> Pa]
 
 
 # %% ===== LEGACY MEASUREMENT CHAIN ======================================
 class LegacySensor:
-    """Median and first-order filter applied directly to the pressure,
-    with no pipeline delay.
+    """Median and first-order filter applied directly to the pressure.
 
     Arguments are the same as for SlaveSensor.
     """
