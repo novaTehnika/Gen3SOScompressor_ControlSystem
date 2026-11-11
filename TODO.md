@@ -154,16 +154,29 @@ the reference for each) and confirm:
       an update that blocks the app's thread near that long needs a smaller
       `cfg.trackMaxSeconds`, or the chunked table (a 1000-value constant
       copied into a persistent table over consecutive steps).
-- [ ] Link stalls (master README, Link stalls): with the live plot open and
-      an operation idle, drag-resize the live plot and the app and check
-      that each shows a link stall with its activity on the status line
-      and in `app.StallLog`, and read `app.PollStats.writeGapMax`. Then
-      start a jog and check that neither window can be resized, that
-      Trace > Plot trace... and the Procedure menu are disabled, and that
-      Stop recording during the jog reads "saved when motion ends" and
-      writes the file once the jog is stopped. If a stall still appears
-      during motion, its activity names the cause; one with "no app
-      activity noted" came from outside the app.
+- [ ] Controller process (master README, Controller process): start the
+      app from a MATLAB session and check that a second MATLAB starts
+      minimized, that the status line counts "Starting the controller...",
+      how long it takes, and that it ends with "Controller ready: press
+      Connect"; `master-src/captures/controller.log` shows the start.
+      Check that `-batch` runs the shell in Connected IO (the model
+      starts, the DAQ and the Modbus link work, steps are paced); if not,
+      change `ctlLaunchCommand` to `-nosplash -nodesktop -minimize -r`.
+      Note whether Windows asks a firewall question (it should not:
+      the port is bound to 127.0.0.1).
+- [ ] Controller process, operation: Connect, jog, Disconnect; then a
+      jog with the live plot open while dragging the app's and the live
+      plot's window edges for 10 s: no link stall on the status line,
+      `app.StallLog` empty, `app.PollStats.writeGapMax` under 0.1 s. Run
+      a procedure with a track step and read the track load time the
+      controller notes ("Track table set in ..."). Time a STOP: the
+      write reaches the model within `controllerPeriod`.
+- [ ] Controller process, losing the app: during a slow jog, end the
+      app's MATLAB from the Task Manager: the jog stops at once, the
+      model keeps running, and a restarted app within 60 s connects to
+      it ("Controller ready"); without one, the model stops (safety
+      relay off) and the controller's MATLAB ends after 60 s. Close the
+      app normally: the controller ends within a few seconds.
 - [ ] Poll cost of the stream: with the live plot open for 10 minutes and a
       recording at 0.05 s, read `app.PollStats` (`mean`, `max`,
       `overruns`). The ring (512 x 45) is read on every poll and the plot

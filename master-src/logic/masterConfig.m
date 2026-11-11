@@ -25,16 +25,28 @@ cfg.mixingDeadVolume = 57;          % mL, the part of deadVolume that takes part
 cfg.flowDeadband  = 0.01;           % mL/s, a flow smaller than this reads 0.00
 cfg.displayPeriod = 0.1;            % s, the display timer period
 
-% Link stalls. Under Connected IO the model steps on MATLAB's thread, so
-% anything that holds that thread (a window resize, a file dialog, a
-% long file write or plot) holds back the master's writes; the slave
-% faults (FAULT_COMM) once its heartbeat is unchanged for
-% G_cfgCommTimeout while motion is commanded. The app measures the gap
-% between writes from the slave's exchange summary and logs one at or
-% above stallWarn.
+% Link stalls. Under Connected IO the model steps on its MATLAB's
+% thread, so anything that holds that thread holds back the master's
+% writes; the slave faults (FAULT_COMM) once its heartbeat is unchanged
+% for G_cfgCommTimeout while motion is commanded. The model therefore
+% runs in a MATLAB of its own (the controller, below). The app measures
+% the gap between writes from the slave's exchange summary and logs one
+% at or above stallWarn.
 cfg.slaveScanPeriod    = 0.004;     % s, the slave's scan: the unit of the summary's scan count
 cfg.stallWarn          = 0.15;      % s between master writes logged as a link stall (the slave faults at 0.3 s)
-cfg.lockResizeInMotion = true;      % the app and live plot windows cannot be resized while motion is commanded
+
+% Controller process. The shell model runs in a MATLAB of its own
+% (master-src/controller/runController), which the app starts and talks
+% to over a local TCP connection, so the app's own work never holds the
+% model back.
+cfg.controllerPort       = 50321;   % TCP port on 127.0.0.1
+cfg.controllerPeriod     = 0.05;    % s, the controller's loop: app writes reach the model within this
+cfg.appTimeout           = 5;       % s without a message from the app (it pings every poll) before the controller stops motion; a closed connection counts at once
+cfg.controllerOrphanTime = 60;      % s without the app before the controller stops the model and ends
+cfg.controllerSendQuiet  = 0.5;     % s without a message from the app before the controller holds its statuses back (the app is not reading)
+cfg.controllerTimeout    = 2;       % s without a status before the app counts the controller as lost
+cfg.controllerStartMax   = 180;     % s the app waits for a controller it started
+cfg.controllerMatlab     = '';      % MATLAB executable that runs the controller; '' for the app's own MATLAB
 
 % Pressure: the app works in atm absolute, the slave in MPa gauge.
 cfg.atmPerMPa   = 9.869;
