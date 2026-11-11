@@ -75,8 +75,9 @@ def controller_set():
     scheduled arms are ScheduledSlaveController at two crossovers with
     the measured bounds (K 1.0 GPa, dead volume 109 mL, hose compliance
     0.12 mL/MPa), a comparison that is not in the slave. The
-    flow-feedforward arm is a bound; the feedforward is not
-    implementable on the machine.
+    flow-feedforward arm is a bound: it follows the distal valve as
+    the simulation sequences it, and the machine has no signal of
+    that valve.
     """
     S = ctl.SlaveController
     Sch = ctl.ScheduledSlaveController

@@ -37,9 +37,11 @@ SlaveController runs the slave's FB_PressureController, translated from
 Structured Text, wired as PRG_Main wires it. It is a PI controller whose
 output is clamped by a stop law (README eq. (19)), with the block's own
 floor that follows the outflow and its forward stop, eqs. (46) and (48),
-when G_cfgPressureFloorEnable is set (the override FloorEnable=True). It
-can optionally add a flow feedforward (eq. (20)), which the slave does
-not have.
+when G_cfgPressureFloorEnable is set (the override FloorEnable=True),
+and the block's own integral clear past the target, eq. (52), when
+G_cfgPressureIntegClearEnable is set (IntegClearEnable=True). It can
+optionally add a flow feedforward (eq. (20)), which the slave does not
+have.
 
 ScheduledSlaveController runs the same block with its gains and its
 stop-law stiffness set every scan from an estimate of the chamber
@@ -50,6 +52,20 @@ upper bound on the stiffness, so the scheduled gain is a lower bound on
 the gain that gives the chosen crossover. It is a comparison arm of the
 studies and is not in the slave: with the measured chamber it gives the
 results of a fixed gain.
+
+VariantController runs the same block with one change to how its
+integrator is managed (the anti-windup variants of eqs. (50) to (55))
+and an optional derivative term, eq. (56). It is a comparison arm of
+study_antiwindup.py. Of its rules the slave's block has 'opposed',
+eq. (52), behind G_cfgPressureIntegClearEnable; the others and the
+derivative term are not in the slave.
+
+FeedforwardController runs the same block and adds the velocity that
+displaces the outflow, eq. (66), while a detector that reads only the
+measured pressure, eqs. (64) and (65), finds the outlet open: a sharp
+fall below the target with the piston not retracting switches it on,
+and a sharp rise above the target switches it off. It is a study arm
+of study_feedforward.py and is not in the slave.
 
 FloorPolicy sets the stop-law floor (StopVelMin) of either controller
 every scan from the detected outflow instead of the fixed configured
@@ -100,14 +116,14 @@ def _cfg_name(key, known):
 # %% ===== STOP-LAW FLOOR POLICIES =======================================
 def measurement_lag_scans(c):
     """[-] Scans by which the measured pressure lags the chamber in the
-    slave configuration c: the filter time constant, the median's
-    half-width and the two pipeline scans. The floor policies delay the
-    piston position by this much so that the two signals they compare
-    describe the same interval."""
+    slave configuration c: the filter time constant and the median's
+    half-width (PRG_Main passes the reading in the scan it is sampled).
+    The floor policies delay the piston position by this much so that
+    the two signals they compare describe the same interval."""
     Ts = c['G_cfgScanTime']                                     # [s]
     n_med = 5 if c['G_cfgAnalogMedianSize'] >= 5 else 3         # [-]
     return (round(c['G_cfgAnalogFilterTimeConst'] / Ts)
-            + (n_med - 1) // 2 + 2)
+            + (n_med - 1) // 2)
 
 
 class FloorPolicy:
@@ -281,9 +297,10 @@ class SlaveController:
       name         Label used in tables and plots.
       flow_ff      If True, add the expected outflow divided by the
                    piston area to the velocity after the block, eq. (20).
-                   The slave has no flow feedforward and the machine
-                   cannot supply the flow, so this is a bound for the
-                   studies, not a candidate.
+                   The flow is the orifice flow through the valve
+                   fraction of the scan before (valve_seen). The slave
+                   has no flow feedforward and the machine no signal
+                   of the valve, so this is a bound for the studies.
       floor        A FloorPolicy that sets the block's StopVelMin every
                    scan, or None for the configured StopVelMin.
       **overrides  Slave settings, by full G_cfg* name or by the name
@@ -294,6 +311,9 @@ class SlaveController:
     """
 
     mode = 'V'
+    # [-] Distal valve area fraction the plant had in the scan before,
+    # set by sim.run() for the flow feedforward; None outside a run
+    valve_seen = None
 
     def __init__(self, name='slave', flow_ff=False, floor=None,
                  **overrides):
@@ -342,6 +362,9 @@ class SlaveController:
         fb.RelRate = c['G_cfgPressureFloorRelRate']     # [MPa/s]
         fb.RelError = c['G_cfgPressureFloorRelError']   # [MPa]
         fb.ForwardStop = c['G_cfgPressureFloorForwardStop']
+        # The block's own integral clear past the target, eq. (52)
+        fb.IntegClearEnable = c['G_cfgPressureIntegClearEnable']
+        fb.IntegClearError = c['G_cfgPressureIntegClearError']  # [MPa]
         self.fb = fb
         self.first_scan = True
         if self.floor is not None:
@@ -388,7 +411,8 @@ class SlaveController:
         # Flow feedforward, eq. (20): the piston velocity that displaces
         # the expected outflow. [m^3/s / m^2 -> m/s, * 1e3 -> mm/s]
         if self.flow_ff:
-            v_ff = scenario.Qff(t, self.par, P_meas) / self.A * 1e3
+            v_ff = scenario.Qff(t, self.par, P_meas,
+                                self.valve_seen) / self.A * 1e3
             v = min(max(v + v_ff, -self.vel_max), self.vel_max)
         return v * 1e-3                                 # [mm/s -> m/s]
 
@@ -482,7 +506,9 @@ class LegacyController:
         if self.mode == 'T':
             u_ff = self.A * target                              # [N]
         elif self.vff:
-            u_ff = scenario.Qff(t, self.par, P_meas) / self.A   # [m/s]
+            u_ff = scenario.Qff(t, self.par, P_meas,
+                                getattr(self, 'valve_seen', None)
+                                ) / self.A              # [m/s]
         else:
             u_ff = 0.0
 
@@ -605,7 +631,7 @@ class ScheduledSlaveController(SlaveController):
 
       v_stop = -D lag + sqrt((D lag)^2 + 2 D |e| / k_est)
 
-    with lag the filter, median, pipeline and command delays. The block's
+    with lag the filter, median and drive delays. The block's
     own stop law is this with lag equal to one scan and a fixed
     stiffness; here it is disabled (a negligible Stiffness) and the limit
     is applied through the block's VelMax input, which is equivalent to
@@ -687,13 +713,12 @@ class ScheduledSlaveController(SlaveController):
         self.D_mm = c['G_cfgPressureDecel']                     # [mm/s^2]
         self.v_floor = c['G_cfgPressureStopVelMin']             # [mm/s]
         if self.lag is None:
-            # Filter time constant, median and pipeline scans, the scan
-            # in which the command takes effect, and the drive's dead
-            # time and velocity-loop lag
+            # Filter time constant, the median's scans, and the
+            # drive's dead time and velocity-loop lag
             Ts = c['G_cfgScanTime']
             n_med = 5 if c['G_cfgAnalogMedianSize'] >= 5 else 3
             self.lag_run = (c['G_cfgAnalogFilterTimeConst']
-                            + ((n_med - 1) // 2 + 2 + 1) * Ts
+                            + (n_med - 1) // 2 * Ts
                             + par.t_dead + par.tauV)            # [s]
         else:
             self.lag_run = self.lag
@@ -771,3 +796,314 @@ class ScheduledSlaveController(SlaveController):
         if hold:
             fb.rInteg = 0.0
         return u
+
+
+# %% ===== ANTI-WINDUP AND DERIVATIVE VARIANTS ===========================
+class VariantController(SlaveController):
+    """The slave's block with a different anti-windup rule or a
+    derivative term: comparison arms. The slave's block carries
+    'opposed' itself (IntegClearEnable), which test_model.py holds
+    equal to this class's; the other rules are not in the slave.
+
+    The block (FB_PressureController) integrates the error unless its
+    output is clamped and the error drives it further into the clamp.
+    Each variant changes the stored integral rInteg [MPa s] around the
+    block's call and leaves the rest of the block as it is, so the stop
+    law, the floor and the forward stop are the slave's. With e the
+    error [MPa], I the integral and u_raw, u the block's output before
+    and after its clamp [mm/s]:
+
+      'block'     No change: the block's own conditional integration.
+      'arrival'   Eq. (50). An approach starts on the first scan, or
+                  when the target steps by more than step, with |e|
+                  above step. Once e has changed sign, the first error
+                  beyond over on the far side clears the integral that
+                  drives away from the target, and an error back beyond
+                  over on the near side ends the approach with the
+                  integral kept. At most one clear per approach.
+      'crossing'  Eq. (51). The integral is cleared on every scan in
+                  which e changes sign.
+      'opposed'   Eq. (52). The integral is cleared whenever the error
+                  is beyond over on the side the integral drives
+                  toward.
+      'bleed'     Eq. (53). In the same condition the integral decays
+                  with time constant Tb instead of being cleared.
+      'backcalc'  Eq. (54). While the output is clamped the integral
+                  tracks the clamp with time constant Tt:
+                  dI/dt = e + (u - u_raw) / (Ki Tt).
+      'band'      Eq. (55). The integral advances only while |e| is at
+                  most band, and is held outside it.
+
+    The derivative term, eq. (56), subtracts Kd times the filtered rate
+    of the measured pressure from the block's output before the forward
+    stop, within the block's clamp of that scan. The block's anti-windup
+    does not see it.
+
+    Arguments:
+      name         Label used in tables and plots.
+      aw           Anti-windup variant, one of the names above.
+      Kd           [(mm/s)/(MPa/s)] Derivative gain; 0 for none.
+      Tf           [s] Time constant of the derivative filter.
+      step         [MPa] Target step, and error after it, that start an
+                   approach ('arrival').
+      over         [MPa] Error beyond the target that clears the
+                   integral ('arrival', 'opposed') or lets it decay
+                   ('bleed').
+      Tb           [s] Decay time constant ('bleed').
+      Tt           [s] Tracking time constant ('backcalc').
+      band         [MPa] Half-width of the integration band ('band').
+      **overrides  Slave settings, as for SlaveController.
+    """
+
+    VARIANTS = ('block', 'arrival', 'crossing', 'opposed', 'bleed',
+                'backcalc', 'band')
+
+    def __init__(self, name='variant', aw='block', Kd=0.0, Tf=0.02,
+                 step=0.1, over=0.02, Tb=0.2, Tt=0.5, band=0.1,
+                 **overrides):
+        if aw not in self.VARIANTS:
+            raise ValueError(f'unknown anti-windup variant {aw!r}')
+        super().__init__(name, **overrides)
+        self.aw = aw
+        self.Kd = Kd
+        self.Tf = Tf
+        self.e_step = step
+        self.e_over = over
+        self.Tb = Tb
+        self.Tt = Tt
+        self.e_band = band
+
+    def reset(self, par, scenario):
+        u0 = super().reset(par, scenario)
+        # Approach state of eq. (50): 0 none, 1 from below, 2 passed
+        # from below, -1 from above, -2 passed from above
+        self.approach = 0
+        self.tgt_prev = None                    # [MPa] previous target
+        self.err_prev = None                    # [MPa] previous error
+        self.P_prev = None                      # [MPa] previous reading
+        self.dP = 0.0                           # [MPa/s] filtered rate
+        # [-] Scan numbers in which a rule cleared or bled the integral
+        self.scan = 0
+        self.changed = []
+        return u0
+
+    def clear_before(self, err, tgt):
+        """Apply the rules that clear the integral before the block
+        runs, eqs. (50) to (53), for the error err and target tgt
+        [MPa] of this scan."""
+        fb = self.fb
+        I0 = fb.rInteg
+        if self.aw == 'arrival':
+            # Start of an approach: the first scan or a target step
+            if (self.tgt_prev is None
+                    or abs(tgt - self.tgt_prev) > self.e_step):
+                if err > self.e_step:
+                    self.approach = 1
+                elif err < -self.e_step:
+                    self.approach = -1
+                else:
+                    self.approach = 0
+            # The error has changed sign: watch the far side
+            if self.approach == 1 and err <= 0.0:
+                self.approach = 2
+            elif self.approach == -1 and err >= 0.0:
+                self.approach = -2
+            if self.approach == 2:
+                if err < -self.e_over:
+                    fb.rInteg = min(fb.rInteg, 0.0)
+                    self.approach = 0
+                elif err > self.e_over:
+                    self.approach = 0
+            elif self.approach == -2:
+                if err > self.e_over:
+                    fb.rInteg = max(fb.rInteg, 0.0)
+                    self.approach = 0
+                elif err < -self.e_over:
+                    self.approach = 0
+        elif self.aw == 'crossing':
+            if self.err_prev is not None and err * self.err_prev < 0.0:
+                fb.rInteg = 0.0
+        elif self.aw == 'opposed':
+            if err < -self.e_over:
+                fb.rInteg = min(fb.rInteg, 0.0)
+            elif err > self.e_over:
+                fb.rInteg = max(fb.rInteg, 0.0)
+        elif self.aw == 'bleed':
+            if ((err < -self.e_over and fb.rInteg > 0.0)
+                    or (err > self.e_over and fb.rInteg < 0.0)):
+                fb.rInteg *= 1.0 - self.dt / self.Tb
+        if fb.rInteg != I0:
+            self.changed.append(self.scan)
+        self.scan += 1
+
+    def step(self, P_meas, target, t, scenario, x=0.0):
+        fb = self.fb
+        first = self.first_scan
+        self.first_scan = False
+        # PRG_Main limits the target to [0, TargetMax]. [Pa -> MPa]
+        tgt = min(max(target * 1e-6, 0.0), self.target_max)
+        act = P_meas * 1e-6                             # [Pa -> MPa]
+        err = tgt - act                                 # [MPa]
+
+        self.clear_before(err, tgt)
+        # The block clears the integral itself on the entry scan.
+        I0 = 0.0 if first else fb.rInteg                # [MPa s]
+        fb.Reset = first
+        fb.Target = tgt
+        fb.Actual = act
+        fb.Position = x * 1e3                           # [m -> mm]
+        FB_PressureController(fb, self.dt)
+
+        if self.aw == 'backcalc' and fb.bSaturated and fb.Ki > 0.0:
+            # Tracking anti-windup, eq. (54), in place of the block's
+            # conditional integration while the output is clamped
+            fb.rInteg = I0 + (err + (fb.rVelPI - fb.rRaw)
+                              / (fb.Ki * self.Tt)) * self.dt
+        elif self.aw == 'band' and abs(err) > self.e_band:
+            # Integration band, eq. (55): held outside the band
+            fb.rInteg = I0
+
+        v = fb.Velocity                                 # [mm/s]
+        if self.Kd > 0.0:
+            # Filtered rate of the measured pressure, eq. (21), and the
+            # derivative term, eq. (56), inside the block's clamp
+            if self.P_prev is not None:
+                rate = (act - self.P_prev) / self.dt    # [MPa/s]
+                self.dP += self.dt / (self.Tf + self.dt) * (rate - self.dP)
+            v = fb.rVelPI - self.Kd * self.dP
+            v = min(max(v, -fb.rVelLimit), fb.rVelLimit)
+            # The block's forward stop, eq. (48), applied again
+            if (fb.bFloorOn and fb.ForwardStop and not fb.Latched
+                    and err < 0.0 and v > 0.0):
+                v = 0.0
+
+        self.tgt_prev = tgt
+        self.err_prev = err
+        self.P_prev = act
+        # PRG_Main clamps the block output to VelMax.
+        v = min(max(v, -self.vel_max), self.vel_max)
+        return v * 1e-3                                 # [mm/s -> m/s]
+
+
+# %% ===== OUTFLOW FEEDFORWARD FROM THE PRESSURE =========================
+class FeedforwardController(SlaveController):
+    """The slave's block with a velocity feedforward for the outflow,
+    switched by a detector on the measured pressure: a study arm that
+    is not in the slave.
+
+    With the outlet open the piston must move at the outflow's speed to
+    hold the pressure, and the block finds that speed only through its
+    error: the opening dip. The feedforward adds it at once. The slave
+    has no signal of the valves, so the detector reads the pressure the
+    loop already measures. With e the error [MPa], P the reading [MPa],
+    W the window [scans] and u the command of the scan before [mm/s]:
+
+      On, eq. (64). The drop over the window, d = P[n - W] - P[n], is
+      at least d_on with e between e_on and e_max and u not negative,
+      on every scan for t_on. A valve that opens gives a fall the
+      piston did not cause; a fall too deep for an outflow (the hose
+      joining the chamber) leaves the range of e before t_on has run.
+
+      Off, eq. (65). The error is below -e_off with the pressure
+      having risen by d_off over the window (the outlet shut under the
+      moving piston), or the error is below -e_hi (the feedforward
+      exceeds the outflow by more than the proportional term absorbs).
+
+      Feedforward, eq. (66). While on, v_ff = scale coef sqrt(T) is
+      added to the block's output inside the VelMax clamp, with T the
+      target [MPa]: the orifice law, eq. (36), at the target.
+
+    Arguments:
+      name         Label used in tables and plots.
+      coef         [(mm/s)/sqrt(MPa)] Outflow speed at the piston per
+                   root of the target, as configured; None takes the
+                   orifice flow of the run's own parameters.
+      scale        [-] Ratio of the feedforward to coef's flow: an
+                   error in the configured flow.
+      window       [s] Window of the drop and of the rise.
+      d_on         [MPa] Least drop over the window that switches on.
+      e_on, e_max  [MPa] Range of the error in which it may switch on.
+      t_on         [s] Time the on condition must hold.
+      e_off        [MPa] Error past the target that, with the rise,
+                   switches off.
+      d_off        [MPa] Least rise over the window that switches off;
+                   0 switches off on e_off alone.
+      e_hi         [MPa] Error past the target that switches off
+                   whatever the rise.
+      **overrides  Slave settings, as for SlaveController.
+    """
+
+    def __init__(self, name='feedforward', coef=None, scale=1.0,
+                 window=0.02, d_on=0.03, e_on=0.03, e_max=1.0,
+                 t_on=0.008, e_off=0.02, d_off=0.05, e_hi=0.3,
+                 **overrides):
+        super().__init__(name, **overrides)
+        self.coef = coef
+        self.scale = scale
+        self.window = window
+        self.d_on = d_on
+        self.e_on = e_on
+        self.e_max = e_max
+        self.t_on = t_on
+        self.e_off = e_off
+        self.d_off = d_off
+        self.e_hi = e_hi
+
+    def reset(self, par, scenario):
+        u0 = super().reset(par, scenario)
+        # [(mm/s)/sqrt(MPa)] Outflow speed per root of the target; the
+        # run's own orifice law at 1 MPa when none is configured.
+        # [m^3/s / m^2 -> m/s, * 1e3 -> mm/s]
+        self.c_ff = (par.Q_orifice(1e6) / par.A * 1e3
+                     if self.coef is None else self.coef)
+        self.n_w = max(1, round(self.window / self.dt))     # [scans]
+        self.n_on = round(self.t_on / self.dt)              # [scans]
+        self.hist = []          # [MPa] last n_w + 1 readings
+        self.count = 0          # [scans] the on condition has held
+        self.on = False
+        self.u_prev = 0.0       # [mm/s] command of the scan before
+        # [-] Scan numbers of the switchings on and off
+        self.scan = 0
+        self.ons, self.offs = [], []
+        return u0
+
+    def detect(self, act, err):
+        """Update the detector with the reading act and the error err
+        [MPa] of this scan, eqs. (64) and (65), and return True while
+        the feedforward is on."""
+        self.hist.append(act)
+        if len(self.hist) > self.n_w + 1:
+            self.hist.pop(0)
+        full = len(self.hist) == self.n_w + 1
+        drop = self.hist[0] - act if full else 0.0          # [MPa]
+        if not self.on:
+            # Eq. (64): a fall the piston did not cause, within the
+            # depth of an outflow, held for t_on
+            falling = (full and drop >= self.d_on
+                       and self.e_on < err < self.e_max
+                       and self.u_prev >= 0.0)
+            self.count = self.count + 1 if falling else 0
+            if self.count > self.n_on:
+                self.on = True
+                self.count = 0
+                self.ons.append(self.scan)
+        elif (err < -self.e_hi
+              or (err < -self.e_off and -drop >= self.d_off)):
+            # Eq. (65): past the target and rising, or far past it
+            self.on = False
+            self.offs.append(self.scan)
+        self.scan += 1
+        return self.on
+
+    def step(self, P_meas, target, t, scenario, x=0.0):
+        # PRG_Main limits the target to [0, TargetMax]. [Pa -> MPa]
+        tgt = min(max(target * 1e-6, 0.0), self.target_max)
+        act = P_meas * 1e-6                             # [Pa -> MPa]
+        on = self.detect(act, tgt - act)
+        v = super().step(P_meas, target, t, scenario, x) * 1e3  # [mm/s]
+        if on:
+            # Eq. (66): the orifice law at the target, inside the clamp
+            v += self.scale * self.c_ff * math.sqrt(tgt)
+            v = min(max(v, -self.vel_max), self.vel_max)
+        self.u_prev = v
+        return v * 1e-3                                 # [mm/s -> m/s]

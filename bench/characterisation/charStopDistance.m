@@ -37,7 +37,7 @@ function r = charStopDistance(files, opts)
 %                      3 for the log, 10 for a capture)
 %   opts.minSpeed      mm/s, smaller commands are not stops (default 0.2)
 %   opts.lag_s         the slave's delay term for the comparison (default
-%                      0.05: filter, median, pipeline, dead time and drive)
+%                      0.05: filter, median, dead time and drive)
 %   opts.D_cfg         mm/s^2 for the comparison (default charConfig:
 %                      G_cfgPressureDecel)
 %   opts.A_mm2         piston area for the load column (charConfig)

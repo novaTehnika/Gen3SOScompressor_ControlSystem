@@ -28,9 +28,34 @@
    with the chamber pressurised is FAULT_PISTON_EXIT in every state
    (fbPistonExitGuard, which detects and does not alter a command).
 
-   Every user-defined FB is called exactly once at the end of this file.
-   The step probe (fbProbe) is called last, after the state of the scan is
-   final, so its record and its fault mark see the scan's end state.
+   Scan phases. The body runs in six phases, and a phase reads only what an
+   earlier phase produced in this scan, so a reading reaches the command it
+   leads to in the scan it is sampled in:
+     1 Sense      Conditions every input: the debounce filters, the analog
+                  filter and the pressure scaling, the mode decoder, the
+                  limit, ceiling and end-of-travel flags, the piston exit
+                  guard and the link watchdog. None depends on the state.
+     2 Supervise  fbSafetyMonitor, on this scan's conditioned inputs and the
+                  state as the previous scan left it. A fault moves the
+                  state to ST_FAULT before the state machine runs, so the
+                  stop is commanded in the same scan.
+     3 Sequence   The state machine, the state properties and the timers.
+     4 Control    The blocks the state enables: handshake, fault reset, Go
+                  Home, homing, the position path shaper and the pressure
+                  loop, each on this scan's measurement.
+     5 Command    The G_cmd* structs for the LD POU, from the state and the
+                  outputs of the Control blocks.
+     6 Report     The status PRG_Output publishes, the exchange summary and
+                  the step probe (last, so its record and its fault mark
+                  see the scan's end state).
+   Three reads go back one scan. The state machine reads the status of the
+   Control blocks (handshake complete, Go Home done, the shaper's command)
+   and the timers as the previous scan left them, since those blocks are
+   enabled by the state they report to. The pressure loop's integrator is
+   reset by the block of its own command (ceiling, end stop), found in the
+   Command phase of the previous scan. And the LD POU, which runs after
+   this program, returns its status and the axis feedback in the next
+   scan. Every user-defined FB is called exactly once.
 
    State Machine Groups:
    - Idle: ST_IDLE (first scan goes directly here)
@@ -171,20 +196,26 @@ IF bFirstScan THEN
 END_IF;
 
 
+(* ============================================================================
+   PHASE 1 - SENSE
+   Conditions the inputs of this scan. Each block is called and its output
+   read in the same place, so nothing here is a scan old. None of these
+   blocks depends on the state.
+   ============================================================================ *)
+
 (* --------------------------------------------------------------------------
-   Input Processing
-   Read filtered values from FB outputs (FBs called at end of file).
-   Values reflect the previous scan's filter outputs.
+   Input Filters
    -------------------------------------------------------------------------- *)
+
+fbFilterMotionEnable(RawInput := G_mbMotionEnable <> UINT#0, DebounceTime := G_cfgDebounceTimeCommand);
+fbFilterOvertravelNeg(RawInput := G_diOvertravelNeg, DebounceTime := G_cfgDebounceTimeOvertravel);
+fbFilterOvertravelPos(RawInput := G_diOvertravelPos, DebounceTime := G_cfgDebounceTimeOvertravel);
+fbFilterFaultReset(RawInput := G_mbFaultReset <> UINT#0, DebounceTime := G_cfgDebounceTimeCommand);
 
 bFilteredMotionEnable := fbFilterMotionEnable.FilteredOutput;
 bFilteredOvertravelNeg := fbFilterOvertravelNeg.FilteredOutput;
 bFilteredOvertravelPos := fbFilterOvertravelPos.FilteredOutput;
 bFilteredFaultReset := fbFilterFaultReset.FilteredOutput;
-rFilteredPressureVolts := fbFilterPressure.FilteredOutput;
-G_sysActualPressure := fbPressureInput.PressureMPa;
-
-G_sysRequestedMode := fbModeDecoder.DecodedMode;
 
 rTrigMotionEnable(CLK := bFilteredMotionEnable);
 
@@ -193,6 +224,57 @@ G_sysOvertravelPosActive := NOT bFilteredOvertravelPos;
 
 (* Operator speed (HR7-8, set by PRG_Input). *)
 rOperatorSpeed := LIMIT(LREAL#0.0, G_sysPositionSpeed, G_cfgVelLimitMax);
+
+
+
+(* --------------------------------------------------------------------------
+   Pressure
+   The analog filter, then the transducer scaling on its output of this
+   scan: G_sysActualPressure is the reading sampled in this scan, behind
+   the filter alone.
+   -------------------------------------------------------------------------- *)
+
+fbFilterPressure(
+    Enable := TRUE,
+    RawInput := G_aiPressure,
+    Alpha := rAnalogFilterAlpha,
+    MedianFilterSize := G_cfgAnalogMedianSize
+);
+rFilteredPressureVolts := fbFilterPressure.FilteredOutput;
+
+(* Pressure transducer scaling and live-zero supervision *)
+fbPressureInput(
+    Enable := TRUE,
+    Volts := rFilteredPressureVolts,
+    ShuntOhms := G_cfgPressureShuntOhms,
+    ZeroMa := G_cfgPressureZeroMa,
+    SpanMa := G_cfgPressureSpanMa,
+    RangeMin := G_cfgPressureRangeMin,
+    RangeMax := G_cfgPressureRangeMax,
+    MinMa := G_cfgPressureSensorMinMa,
+    MaxMa := G_cfgPressureSensorMaxMa,
+    FaultTime := G_cfgPressureSensorFaultTime
+);
+G_sysActualPressure := fbPressureInput.PressureMPa;
+
+
+(* --------------------------------------------------------------------------
+   Mode Code and Master Link
+   -------------------------------------------------------------------------- *)
+
+(* Mode decoder *)
+fbModeDecoder(
+    Enable := TRUE,
+    ModeCode := G_mbModeCode,
+    DebounceTime := G_cfgDebounceTimeMode
+);
+G_sysRequestedMode := fbModeDecoder.DecodedMode;
+
+(* Fault acknowledgement: the master mirrors the full fault code in the mode register *)
+fbIntToFaultCode(Value := G_mbModeCode);
+
+(* Master link supervision *)
+fbCommWatchdog(Heartbeat := G_mbHeartbeat, Timeout := G_cfgCommTimeout);
 
 
 (* --------------------------------------------------------------------------
@@ -224,6 +306,74 @@ G_sysAtEndOfTravel := G_sysActualPosition >= G_cfgPosSoftLimitMax - G_cfgPressur
 
 
 (* --------------------------------------------------------------------------
+   Piston Exit Guard
+   In every state, on the pressure and the transducer status of this scan.
+   -------------------------------------------------------------------------- *)
+
+fbPistonExitGuard(
+    Enable := TRUE,
+    ActualPosition := G_sysActualPosition,
+    Pressure := fbPressureInput.PressureMPa,
+    SensorFault := fbPressureInput.SensorFault,
+    CylinderEntry := G_cfgPosCylinderEntry,
+    GuardMargin := G_cfgPosExitGuardMargin,
+    PressureThreshold := G_cfgExitGuardPressure,
+    RetreatMax := G_cfgExitGuardRetreat
+);
+
+G_sysExitGuardActive := fbPistonExitGuard.Armed;
+G_sysInCylinderZone := fbPistonExitGuard.InCylinder;
+
+
+(* ============================================================================
+   PHASE 2 - SUPERVISE
+   fbSafetyMonitor on the inputs conditioned above. The state flags it
+   takes (bCommandedMotion, bMotionWatched, bInHoming, bInRecovery,
+   bInFault) were computed after the state machine of the previous scan,
+   and nothing has changed the state since, so they describe
+   G_sysCurrentState as it stands. A fault moves the state to ST_FAULT
+   here, before the state machine: its fault entry runs and the stop is
+   commanded in this scan.
+   ============================================================================ *)
+
+fbSafetyMonitor(
+    Enable := TRUE,
+    OvertravelNegActive := G_sysOvertravelNegActive,
+    OvertravelPosActive := G_sysOvertravelPosActive,
+    ActualPosition := G_sysActualPosition,
+    SoftLimitMin := G_cfgPosSoftLimitMin,
+    SoftLimitMax := G_cfgPosSoftLimitMax,
+    DriveFault := G_sysDriveFault,
+    CurrentState := G_sysCurrentState,
+    InCommandedMotion := bCommandedMotion,
+    InMotionWatched := bMotionWatched,
+    InHoming := bInHoming,
+    (* the activation states on the way to recovery are recovery too: the
+       axis is still outside the limit *)
+    InRecovery := bInRecovery OR bRecoveryPending,
+    InFault := bInFault,
+    ExitGuardTriggered := fbPistonExitGuard.FaultTriggered,
+    CommLost := fbCommWatchdog.Lost,
+    PressureSensorFault := fbPressureInput.SensorFault
+);
+
+IF fbSafetyMonitor.FaultDetected AND NOT bInFault THEN
+    IF NOT (G_sysCurrentState = E_SystemState#ST_DRIVE_RESET AND
+            fbSafetyMonitor.FaultCode = E_FaultCode#FAULT_DRIVE) THEN
+        G_sysActiveFault := fbSafetyMonitor.FaultCode;
+        G_sysCurrentState := E_SystemState#ST_FAULT;
+    END_IF;
+END_IF;
+
+
+(* ============================================================================
+   PHASE 3 - SEQUENCE
+   The state machine, then the properties of the state it ended in and the
+   timers. It reads the Control blocks and the timers as the previous scan
+   left them.
+   ============================================================================ *)
+
+(* --------------------------------------------------------------------------
    State Machine
    No inline FB calls. Uses G_sta* for built-in FB status and
    previous-scan outputs for user FB status.
@@ -238,7 +388,6 @@ bPosShaperActive := FALSE;
 (* Likewise for the pressure loop. The in-band status output is only
    meaningful in pressure mode and is recomputed there. *)
 bPressureCtrlActive := FALSE;
-bPressureCmdBlocked := FALSE;
 G_sysPerformanceStatus := FALSE;
 
 bEnterState := (G_sysCurrentState <> G_sysPreviousState);
@@ -460,13 +609,12 @@ ELSIF G_sysCurrentState = E_SystemState#ST_TORQUE_CTRL THEN
 
 ELSIF G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL THEN
         (* ----------------------------------------------------------------
-           PRESSURE CONTROL - like ST_VELOCITY_CTRL, but the velocity
-           command comes from the pressure loop (fbPressureCtrl) and the
-           reference is the target pressure in MPa gauge. The pressure-mode
-           velocity clamp and torque limit apply; a command toward an active
-           limit is zeroed, as in recovery, and so is a pressurising command
-           above the pressure ceiling or within the end margin of the soft
-           limit.
+           PRESSURE CONTROL - the reference is the target pressure in MPa
+           gauge and the velocity command comes from the pressure loop
+           (fbPressureCtrl), which runs in the Control phase on this
+           scan's pressure. The Command phase takes its output, with the
+           pressure-mode velocity clamp, the limits, the ceiling and the
+           end stop, in the same scan.
            ---------------------------------------------------------------- *)
         IF bEnterState THEN
             G_sysConfirmedMode := E_OperatingMode#MODE_PRESSURE;
@@ -478,28 +626,6 @@ ELSIF G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL THEN
                                  MIN(G_cfgPressureTargetMax,
                                      G_cfgPressureCeiling - G_cfgPressureCeilingHyst));
         bPressureCtrlActive := TRUE;
-
-        (* fbPressureCtrl ran at the end of the previous scan. On the entry
-           scan it was disabled, so the command starts from zero. *)
-        G_sysCommandedVelocity := LIMIT(-stCurrentLimits.VelMax,
-                                      fbPressureCtrl.Velocity,
-                                      stCurrentLimits.VelMax);
-
-        IF bBlockNeg AND (G_sysCommandedVelocity < LREAL#0.0) THEN
-            G_sysCommandedVelocity := LREAL#0.0;
-        END_IF;
-        IF bBlockPos AND (G_sysCommandedVelocity > LREAL#0.0) THEN
-            G_sysCommandedVelocity := LREAL#0.0;
-        END_IF;
-
-        (* Ceiling and end stop: no pressurising command above the ceiling or
-           within G_cfgPressureEndMargin of the soft limit, so a delivery ends
-           at the end of travel without FAULT_POSITION. The integrator is held
-           at zero while the command is zeroed (no windup). *)
-        IF (G_sysPressureBlock OR G_sysAtEndOfTravel) AND (G_sysCommandedVelocity > LREAL#0.0) THEN
-            G_sysCommandedVelocity := LREAL#0.0;
-            bPressureCmdBlocked := TRUE;
-        END_IF;
 
         G_sysInMotion := ABS(G_sysActualVelocity) > G_cfgInMotionVelThreshold;
         G_sysPerformanceStatus := ABS(G_sysActualPressure - rPressureTarget) <= G_cfgPressureInBand;
@@ -870,10 +996,10 @@ END_IF;
    The one place G_sysCurrentState is classified. Computed here, after the
    state machine has made this scan's transitions, so the timers, command
    arbitration, FB enables and fbSafetyMonitor below all see the state the
-   scan ended the state machine in. The safety block at the end of the file
-   can still move the state to ST_FAULT; these flags keep the state the
-   scan ran in, and the outputs that must follow that move read
-   G_sysCurrentState again.
+   scan ended the state machine in. Nothing below changes the state, so
+   the flags hold for the rest of the scan, and fbSafetyMonitor reads
+   them at the top of the next scan as the properties of the state it
+   finds.
    -------------------------------------------------------------------------- *)
 
 (* Drive energised (MC_Power enabled). ST_FAULT_IDLE is not in the list: it
@@ -973,6 +1099,174 @@ tDriveReadyTimer(IN := bDriveReadyTimerIN, PT := G_cfgDriveReadyTimeout);
 tBrakeTimer(IN := bBrakeTimerIN, PT := tBrakeTimerPT);
 tHoldPositionTimer(IN := bHoldPositionTimerIN, PT := G_cfgHoldPositionTimeout);
 tStateTimer(IN := bStateTimerIN, PT := G_cfgFaultIdleTimeout);
+
+
+(* ============================================================================
+   PHASE 4 - CONTROL
+   The blocks the state enables, with this scan's enables, targets and
+   measurements.
+   ============================================================================ *)
+
+(* Handshake manager *)
+fbHandshake(
+    Enable := bHandshakeState,
+    RequestedMode := G_sysRequestedMode,
+    ModeStable := fbModeDecoder.ModeStable,
+    MotionEnable := bFilteredMotionEnable,
+    HandshakeTimeout := G_cfgHandshakeTimeout
+);
+
+(* Fault reset handler - parameters differ by state *)
+IF G_sysCurrentState = E_SystemState#ST_FAULT THEN
+    bFaultResetInFaultState := TRUE;
+    eFaultResetActiveCode := G_sysActiveFault;
+ELSIF G_sysCurrentState = E_SystemState#ST_FAULT_IDLE THEN
+    bFaultResetInFaultState := (G_sysActiveFault <> E_FaultCode#FAULT_NONE);
+    eFaultResetActiveCode := G_sysLastFaultCode;
+ELSE
+    bFaultResetInFaultState := FALSE;
+    eFaultResetActiveCode := E_FaultCode#FAULT_NONE;
+END_IF;
+
+fbFaultReset(
+    Enable := bInFault,
+    FaultReset := bFilteredFaultReset,
+    MotionEnable := bFilteredMotionEnable,
+    InFaultState := bFaultResetInFaultState,
+    CodeStable := fbModeDecoder.ModeStable,
+    ActiveFaultCode := eFaultResetActiveCode,
+    MasterFaultCode := fbIntToFaultCode.Fault
+);
+
+(* Go Home handler *)
+fbGoHome(
+    Enable := bInGoHome,
+    Execute := bInGoHome,
+    HomePosition := G_cfgGoHomePosition,
+    HomeVelocity := MIN(rOperatorSpeed, G_cfgGoHomeVelocity),
+    Acceleration := G_cfgMoveAccel,
+    Deceleration := G_cfgGoHomeDecel,
+    StopDeceleration := G_cfgStopDecel,
+    Abort := NOT bFilteredMotionEnable,
+    StaMoveAbsolute := G_staMoveAbsolute,
+    StaStop := G_staStop
+);
+
+(* Home to Negative Overtravel / Home Reference handler (two-stage + retract) *)
+fbHomeLimit(
+    Enable := bInHomeLimit,
+    Execute := bInHomeLimit,
+    FastApproachVelocity := MIN(G_cfgHomeLimFastApproachVel, G_cfgVelLimitMax),
+    SlowApproachVelocity := MIN(G_cfgHomeLimSlowApproachVel, G_cfgVelLimitMax),
+    BackoffVelocity := MIN(G_cfgHomeLimBackoffVel, G_cfgVelLimitMax),
+    RetractDist := G_cfgHomeLimRetractDist,
+    Acceleration := G_cfgMoveAccel,
+    Deceleration := G_cfgHomeLimDecel,
+    SetPosition := G_cfgHomeLimSetPosition,
+    Timeout := G_cfgHomingTimeout,
+    OvertravelNegActive := G_sysOvertravelNegActive,
+    OvertravelPosActive := G_sysOvertravelPosActive,
+    Abort := NOT bFilteredMotionEnable,
+    ActualPosition := G_sysActualPosition,
+    StaJog := G_staJog,
+    StaMoveAbsolute := G_staMoveAbsolute,
+    StaSetPosition := G_staSetPosition
+);
+
+(* Position path shaper - shapes rPosTarget into the Y_DirectControl command.
+   Enable is bPosShaperActive (set only by a position state body that ran this
+   scan), not the state itself, so the transition scan commands actual position.
+   While disabled it seeds from actual, so every entry is bumpless. *)
+(* A positive command stops at once when the block engages. Pinning the
+   target alone would brake at G_cfgPosShaperAccelMax over v^2/(2*A), which in
+   a liquid-stiff chamber is many MPa. Re-seeding at actual removes the lead
+   and the rate. *)
+bPosBlockReset := G_sysPressureBlock AND bPosShaperActive AND
+                  (fbPosShaper.CommandedRate > LREAL#0.0);
+fbPosShaper(
+    Enable := bPosShaperActive,
+    Reset := (bEnterState AND bPosShaperActive) OR bPosBlockReset,
+    Target := rPosTarget,
+    ActualPosition := G_sysActualPosition,
+    VelMax := rPosShaperVelMax,
+    AccelMax := G_cfgPosShaperAccelMax,
+    MaxDeviation := G_cfgPosShaperMaxDeviation,
+    CycleTime := G_cfgScanTime
+);
+
+(* Pressure loop - on this scan's pressure (Sense). Enabled only on scans
+   where the pressure state body ran, so the transition scan commands zero
+   velocity and the floor's window starts afresh on each entry. Reset on
+   entry, and while a positive command was blocked in the previous scan's
+   Command phase, clears the integrator. *)
+fbPressureCtrl(
+    Enable := bPressureCtrlActive,
+    Reset := (bEnterState AND bPressureCtrlActive) OR bPressureCmdBlocked,
+    Target := rPressureTarget,
+    Actual := G_sysActualPressure,
+    Position := G_sysActualPosition,
+    Kp := G_cfgPressureKp,
+    Ki := G_cfgPressureKi,
+    VelMax := stCurrentLimits.VelMax,
+    DecelMax := G_cfgPressureDecel,
+    Stiffness := G_cfgPressureStopStiffness,
+    StopVelMin := G_cfgPressureStopVelMin,
+    CycleTime := G_cfgScanTime,
+    FloorEnable := G_cfgPressureFloorEnable,
+    VelLow := G_cfgPressureFloorVelLow,
+    Window := G_cfgPressureFloorWindow,
+    FilterTime := rAnalogFilterTime,
+    MedianSize := G_cfgAnalogMedianSize,
+    TrigVel := G_cfgPressureFloorTrigVel,
+    TrigRate := G_cfgPressureFloorTrigRate,
+    TrigError := G_cfgPressureFloorTrigError,
+    TrigTime := G_cfgPressureFloorTrigTime,
+    RelRate := G_cfgPressureFloorRelRate,
+    RelError := G_cfgPressureFloorRelError,
+    ForwardStop := G_cfgPressureFloorForwardStop,
+    IntegClearEnable := G_cfgPressureIntegClearEnable,
+    IntegClearError := G_cfgPressureIntegClearError
+);
+
+
+(* ============================================================================
+   PHASE 5 - COMMAND
+   The G_cmd* structs for the LD POU, which runs after PRG_Output: what is
+   written here reaches the drive in this scan.
+   ============================================================================ *)
+
+(* --------------------------------------------------------------------------
+   Pressure Loop Command
+   The pressure loop's output of this scan, within the pressure-mode
+   velocity clamp. A command toward an active limit is zeroed, as in
+   recovery. Ceiling and end stop: no pressurising command above the
+   ceiling or within G_cfgPressureEndMargin of the soft limit, so a
+   delivery ends at the end of travel without FAULT_POSITION;
+   bPressureCmdBlocked then resets the loop's integrator in the next scan
+   and holds it at zero while the command is zeroed (no windup). On the
+   scan a transition lands in the state the loop has not run and its
+   output is zero.
+   -------------------------------------------------------------------------- *)
+
+bPressureCmdBlocked := FALSE;
+IF G_sysCurrentState = E_SystemState#ST_PRESSURE_CTRL THEN
+    G_sysCommandedVelocity := LIMIT(-stCurrentLimits.VelMax,
+                                    fbPressureCtrl.Velocity,
+                                    stCurrentLimits.VelMax);
+
+    IF bBlockNeg AND (G_sysCommandedVelocity < LREAL#0.0) THEN
+        G_sysCommandedVelocity := LREAL#0.0;
+    END_IF;
+    IF bBlockPos AND (G_sysCommandedVelocity > LREAL#0.0) THEN
+        G_sysCommandedVelocity := LREAL#0.0;
+    END_IF;
+
+    IF (G_sysPressureBlock OR G_sysAtEndOfTravel) AND (G_sysCommandedVelocity > LREAL#0.0) THEN
+        G_sysCommandedVelocity := LREAL#0.0;
+        bPressureCmdBlocked := TRUE;
+    END_IF;
+END_IF;
+
 
 
 (* --------------------------------------------------------------------------
@@ -1129,204 +1423,6 @@ END_IF;
 
 
 (* --------------------------------------------------------------------------
-   Function Block Calls - Exactly one call per instance
-   -------------------------------------------------------------------------- *)
-
-(* Input filters *)
-fbFilterMotionEnable(RawInput := G_mbMotionEnable <> UINT#0, DebounceTime := G_cfgDebounceTimeCommand);
-fbFilterOvertravelNeg(RawInput := G_diOvertravelNeg, DebounceTime := G_cfgDebounceTimeOvertravel);
-fbFilterOvertravelPos(RawInput := G_diOvertravelPos, DebounceTime := G_cfgDebounceTimeOvertravel);
-fbFilterFaultReset(RawInput := G_mbFaultReset <> UINT#0, DebounceTime := G_cfgDebounceTimeCommand);
-
-fbFilterPressure(
-    Enable := TRUE,
-    RawInput := G_aiPressure,
-    Alpha := rAnalogFilterAlpha,
-    MedianFilterSize := G_cfgAnalogMedianSize
-);
-
-(* Pressure transducer scaling and live-zero supervision *)
-fbPressureInput(
-    Enable := TRUE,
-    Volts := rFilteredPressureVolts,
-    ShuntOhms := G_cfgPressureShuntOhms,
-    ZeroMa := G_cfgPressureZeroMa,
-    SpanMa := G_cfgPressureSpanMa,
-    RangeMin := G_cfgPressureRangeMin,
-    RangeMax := G_cfgPressureRangeMax,
-    MinMa := G_cfgPressureSensorMinMa,
-    MaxMa := G_cfgPressureSensorMaxMa,
-    FaultTime := G_cfgPressureSensorFaultTime
-);
-
-(* Mode decoder *)
-fbModeDecoder(
-    Enable := TRUE,
-    ModeCode := G_mbModeCode,
-    DebounceTime := G_cfgDebounceTimeMode
-);
-
-(* Handshake manager *)
-fbHandshake(
-    Enable := bHandshakeState,
-    RequestedMode := G_sysRequestedMode,
-    ModeStable := fbModeDecoder.ModeStable,
-    MotionEnable := bFilteredMotionEnable,
-    HandshakeTimeout := G_cfgHandshakeTimeout
-);
-
-(* Fault reset handler - parameters differ by state *)
-IF G_sysCurrentState = E_SystemState#ST_FAULT THEN
-    bFaultResetInFaultState := TRUE;
-    eFaultResetActiveCode := G_sysActiveFault;
-ELSIF G_sysCurrentState = E_SystemState#ST_FAULT_IDLE THEN
-    bFaultResetInFaultState := (G_sysActiveFault <> E_FaultCode#FAULT_NONE);
-    eFaultResetActiveCode := G_sysLastFaultCode;
-ELSE
-    bFaultResetInFaultState := FALSE;
-    eFaultResetActiveCode := E_FaultCode#FAULT_NONE;
-END_IF;
-
-(* Fault acknowledgement: the master mirrors the full fault code in the mode register *)
-fbIntToFaultCode(Value := G_mbModeCode);
-
-fbFaultReset(
-    Enable := bInFault,
-    FaultReset := bFilteredFaultReset,
-    MotionEnable := bFilteredMotionEnable,
-    InFaultState := bFaultResetInFaultState,
-    CodeStable := fbModeDecoder.ModeStable,
-    ActiveFaultCode := eFaultResetActiveCode,
-    MasterFaultCode := fbIntToFaultCode.Fault
-);
-
-(* Go Home handler *)
-fbGoHome(
-    Enable := bInGoHome,
-    Execute := bInGoHome,
-    HomePosition := G_cfgGoHomePosition,
-    HomeVelocity := MIN(rOperatorSpeed, G_cfgGoHomeVelocity),
-    Acceleration := G_cfgMoveAccel,
-    Deceleration := G_cfgGoHomeDecel,
-    StopDeceleration := G_cfgStopDecel,
-    Abort := NOT bFilteredMotionEnable,
-    StaMoveAbsolute := G_staMoveAbsolute,
-    StaStop := G_staStop
-);
-
-(* Home to Negative Overtravel / Home Reference handler (two-stage + retract) *)
-fbHomeLimit(
-    Enable := bInHomeLimit,
-    Execute := bInHomeLimit,
-    FastApproachVelocity := MIN(G_cfgHomeLimFastApproachVel, G_cfgVelLimitMax),
-    SlowApproachVelocity := MIN(G_cfgHomeLimSlowApproachVel, G_cfgVelLimitMax),
-    BackoffVelocity := MIN(G_cfgHomeLimBackoffVel, G_cfgVelLimitMax),
-    RetractDist := G_cfgHomeLimRetractDist,
-    Acceleration := G_cfgMoveAccel,
-    Deceleration := G_cfgHomeLimDecel,
-    SetPosition := G_cfgHomeLimSetPosition,
-    Timeout := G_cfgHomingTimeout,
-    OvertravelNegActive := G_sysOvertravelNegActive,
-    OvertravelPosActive := G_sysOvertravelPosActive,
-    Abort := NOT bFilteredMotionEnable,
-    ActualPosition := G_sysActualPosition,
-    StaJog := G_staJog,
-    StaMoveAbsolute := G_staMoveAbsolute,
-    StaSetPosition := G_staSetPosition
-);
-
-(* Safety monitors *)
-(* Piston exit guard: in every state, on the pressure and the transducer
-   status of this scan (fbPressureInput is called above). *)
-fbPistonExitGuard(
-    Enable := TRUE,
-    ActualPosition := G_sysActualPosition,
-    Pressure := fbPressureInput.PressureMPa,
-    SensorFault := fbPressureInput.SensorFault,
-    CylinderEntry := G_cfgPosCylinderEntry,
-    GuardMargin := G_cfgPosExitGuardMargin,
-    PressureThreshold := G_cfgExitGuardPressure,
-    RetreatMax := G_cfgExitGuardRetreat
-);
-
-(* Master link supervision *)
-fbCommWatchdog(Heartbeat := G_mbHeartbeat, Timeout := G_cfgCommTimeout);
-
-fbSafetyMonitor(
-    Enable := TRUE,
-    OvertravelNegActive := G_sysOvertravelNegActive,
-    OvertravelPosActive := G_sysOvertravelPosActive,
-    ActualPosition := G_sysActualPosition,
-    SoftLimitMin := G_cfgPosSoftLimitMin,
-    SoftLimitMax := G_cfgPosSoftLimitMax,
-    DriveFault := G_sysDriveFault,
-    CurrentState := G_sysCurrentState,
-    InCommandedMotion := bCommandedMotion,
-    InMotionWatched := bMotionWatched,
-    InHoming := bInHoming,
-    (* the activation states on the way to recovery are recovery too: the
-       axis is still outside the limit *)
-    InRecovery := bInRecovery OR bRecoveryPending,
-    InFault := bInFault,
-    ExitGuardTriggered := fbPistonExitGuard.FaultTriggered,
-    CommLost := fbCommWatchdog.Lost,
-    PressureSensorFault := fbPressureInput.SensorFault
-);
-
-(* Position path shaper - shapes rPosTarget into the Y_DirectControl command.
-   Enable is bPosShaperActive (set only by a position state body that ran this
-   scan), not the state itself, so the transition scan commands actual position.
-   While disabled it seeds from actual, so every entry is bumpless. *)
-(* A positive command stops at once when the block engages. Pinning the
-   target alone would brake at G_cfgPosShaperAccelMax over v^2/(2*A), which in
-   a liquid-stiff chamber is many MPa. Re-seeding at actual removes the lead
-   and the rate. *)
-bPosBlockReset := G_sysPressureBlock AND bPosShaperActive AND
-                  (fbPosShaper.CommandedRate > LREAL#0.0);
-fbPosShaper(
-    Enable := bPosShaperActive,
-    Reset := (bEnterState AND bPosShaperActive) OR bPosBlockReset,
-    Target := rPosTarget,
-    ActualPosition := G_sysActualPosition,
-    VelMax := rPosShaperVelMax,
-    AccelMax := G_cfgPosShaperAccelMax,
-    MaxDeviation := G_cfgPosShaperMaxDeviation,
-    CycleTime := G_cfgScanTime
-);
-
-(* Pressure loop - enabled only on scans where the pressure state body ran,
-   so the transition scan commands zero velocity and the floor's window
-   starts afresh on each entry. Reset on entry, and while a positive command
-   is blocked, clears the integrator. *)
-fbPressureCtrl(
-    Enable := bPressureCtrlActive,
-    Reset := (bEnterState AND bPressureCtrlActive) OR bPressureCmdBlocked,
-    Target := rPressureTarget,
-    Actual := G_sysActualPressure,
-    Position := G_sysActualPosition,
-    Kp := G_cfgPressureKp,
-    Ki := G_cfgPressureKi,
-    VelMax := stCurrentLimits.VelMax,
-    DecelMax := G_cfgPressureDecel,
-    Stiffness := G_cfgPressureStopStiffness,
-    StopVelMin := G_cfgPressureStopVelMin,
-    CycleTime := G_cfgScanTime,
-    FloorEnable := G_cfgPressureFloorEnable,
-    VelLow := G_cfgPressureFloorVelLow,
-    Window := G_cfgPressureFloorWindow,
-    FilterTime := rAnalogFilterTime,
-    MedianSize := G_cfgAnalogMedianSize,
-    TrigVel := G_cfgPressureFloorTrigVel,
-    TrigRate := G_cfgPressureFloorTrigRate,
-    TrigError := G_cfgPressureFloorTrigError,
-    TrigTime := G_cfgPressureFloorTrigTime,
-    RelRate := G_cfgPressureFloorRelRate,
-    RelError := G_cfgPressureFloorRelError,
-    ForwardStop := G_cfgPressureFloorForwardStop
-);
-
-
-(* --------------------------------------------------------------------------
    Route Active FB Command Outputs -> G_cmd*
    Overrides the zeroed defaults from Command Arbitration for states
    where a user FB owns the motion command.
@@ -1349,28 +1445,16 @@ ELSIF bPositionMode THEN
 END_IF;
 
 
-(* --------------------------------------------------------------------------
-   Safety Monitoring
-   Runs after FB calls so safety FBs have fresh outputs.
-   -------------------------------------------------------------------------- *)
-
-G_sysExitGuardActive := fbPistonExitGuard.Armed;
-G_sysInCylinderZone := fbPistonExitGuard.InCylinder;
-
-IF fbSafetyMonitor.FaultDetected AND NOT bInFault THEN
-    IF NOT (G_sysCurrentState = E_SystemState#ST_DRIVE_RESET AND
-            fbSafetyMonitor.FaultCode = E_FaultCode#FAULT_DRIVE) THEN
-        G_sysActiveFault := fbSafetyMonitor.FaultCode;
-        G_sysCurrentState := E_SystemState#ST_FAULT;
-    END_IF;
-END_IF;
-
+(* ============================================================================
+   PHASE 6 - REPORT
+   The status and feedback PRG_Output publishes, the exchange summary and
+   the step probe.
+   ============================================================================ *)
 
 (* --------------------------------------------------------------------------
    Update Outputs
    -------------------------------------------------------------------------- *)
 
-(* Reads the state again: the safety block above may have just entered ST_FAULT *)
 G_sysFaultActive := (G_sysCurrentState = E_SystemState#ST_FAULT) OR
                    (G_sysCurrentState = E_SystemState#ST_FAULT_IDLE);
 
@@ -1414,7 +1498,7 @@ G_sysSumSeq := fbExchangeSummary.Seq;
    Records this scan's values in the probe's ring and serves the master's
    window requests (see FB_Probe). Last in the file: the state, the status
    outputs and the confirmed mode code are final for this scan, and a fault
-   entered by the safety monitor above marks this scan's record. A completed
+   entered in this scan marks this scan's record. A completed
    window is copied to G_sysProbeStage, which PRG_Output publishes.
    -------------------------------------------------------------------------- *)
 fbProbe(

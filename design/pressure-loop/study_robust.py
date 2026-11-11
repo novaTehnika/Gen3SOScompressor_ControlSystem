@@ -84,8 +84,10 @@ COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
 # The GVL carries Kp 1.5, Ki 0.6, a stop-law stiffness of 25 MPa/mm, the
 # 20 ms filter and StopVelMin 2 mm/s, which lets the stop law pass the
 # 1.4 mm/s the measured outflow needs; GVL+floor adds the block's floor
-# that follows the outflow and its forward stop; earlier is the gains
-# before the retune (Kp 0.5, Ki 0.2, 100 MPa/mm), kept as a reference.
+# that follows the outflow and its forward stop; GVL+clear adds the
+# block's integral clear past the target, eq. (52), and
+# GVL+floor+clear both; earlier is the gains before the retune (Kp 0.5,
+# Ki 0.2, 100 MPa/mm), kept as a reference.
 # The scheduled arms are a comparison that is not in the slave; they
 # assume the
 # dead volume at the low end of its range (a lower bound keeps the
@@ -97,6 +99,11 @@ SCHED = {'V_dead_cfg': 109e-6, 'K_cfg': 1.0e9, 'C_hose_cfg': 1.2e-13}
 CONFIGS = {
     'GVL': ControllerSpec('GVL'),
     'GVL+floor': ControllerSpec('GVL+floor', {'FloorEnable': True}),
+    'GVL+clear': ControllerSpec('GVL+clear',
+                                {'IntegClearEnable': True}),
+    'GVL+floor+clear': ControllerSpec(
+        'GVL+floor+clear', {'FloorEnable': True,
+                            'IntegClearEnable': True}),
     'earlier': ControllerSpec('earlier', {'Kp': 0.5, 'Ki': 0.2,
                                           'StopStiffness': 100.0}),
     'sched11': ControllerSpec('sched11', sched=dict(wc=11.0, **SCHED)),

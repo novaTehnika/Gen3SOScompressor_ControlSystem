@@ -330,11 +330,11 @@ def study_lags(par, out, m):
     fast_drive = lin.max_stable_kp(par.with_(tauV=1e-3), k)
     neither = lin.max_stable_kp(par.with_(tauV=1e-3), k,
                                 G_cfgAnalogFilterTimeConst=0.0)
+    delay = lin.loop(par, k)['delay']                       # [scans]
     print(f'\nat the GVL filter and tauV ({par.tauF} s, {par.tauV} s): '
           f'{base:.3g}; filter removed: {no_filter:.3g}; '
-          f'tauV 1 ms: {fast_drive:.3g}; both (only the five scans of '
-          f'delay left): {neither:.3g}')
-    delay = lin.loop(par, k)['delay']                       # [scans]
+          f'tauV 1 ms: {fast_drive:.3g}; both (only the {delay} scans '
+          f'of delay left): {neither:.3g}')
     print(f'lag budget at the liquid-only crossover limit: filter '
           f'{par.tauF * 1e3:.0f} ms, drive {par.tauV * 1e3:.0f} ms, '
           f'pure delay {delay * par.Ts * 1e3:.0f} ms ({delay} scans)')

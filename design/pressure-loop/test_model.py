@@ -413,8 +413,8 @@ def check_sensor():
     assert abs(filter_alpha(cfg) - 0.004 / 0.024) < 1e-15
     assert filter_alpha(par.cfg(G_cfgAnalogFilterTimeConst=0.0)) == 1.0
 
-    # Without noise, the slave chain equals the legacy chain two scans
-    # later.
+    # Without noise, the slave chain equals the legacy chain in the
+    # same scan: PRG_Main scales the filter's output of the scan.
     rng = random.Random(3)
     seq = [rng.choice([2e6, 5e6, 9e6]) + rng.uniform(-1e5, 1e5)
            for _ in range(400)]
@@ -422,7 +422,7 @@ def check_sensor():
     leg = LegacySensor(par, cfg, seq[0])
     a = [slave.read(P, 0.0) for P in seq]
     b = [leg.read(P, 0.0) for P in seq]
-    err = max(abs(a[k] - b[k - 2]) for k in range(2, len(seq)))
+    err = max(abs(a[k] - b[k]) for k in range(len(seq)))
     assert err < 1.0, err
 
     # With noise, the filtered reading is unbiased and much quieter than
@@ -434,7 +434,7 @@ def check_sensor():
     sd = out[10:].std()
     assert (abs(out[10:].mean() - 8e6 - par_n.P_offset) < 2e3
             and 0.02 * par_n.noise < sd < 0.4 * par_n.noise), sd
-    ok(f'slave sensor chain = legacy chain two scans later (max diff '
+    ok(f'slave sensor chain = legacy chain in the same scan (max diff '
        f'{err:.1e} Pa); reads {par_n.P_offset / 1e6:+.2f} MPa off; noise '
        f'rms {sd:.0f} Pa after filtering')
 
@@ -797,6 +797,254 @@ def check_floor_policy():
        f'(GVL {rg["P_max"]:.2f})')
 
 
+def check_integ_clear_block():
+    """FB_PressureController's own integral clear past the target
+    (translated from ST) against the 'opposed' rule of
+    VariantController, eq. (52)."""
+    class Lockstep:
+        """Runs the reference (the block with the rule applied around
+        it) and the block with its own rule on the same inputs, and
+        returns the reference's command."""
+        mode = 'V'
+
+        def __init__(self, over, **cfg):
+            self.ref = ctl.VariantController('ref', aw='opposed',
+                                             over=over, **cfg)
+            self.port = ctl.SlaveController(
+                'port', IntegClearEnable=True, IntegClearError=over,
+                **cfg)
+            self.name, self.cfg = 'port', self.port.cfg
+
+        def reset(self, p, sc):
+            u = self.ref.reset(p, sc)
+            assert self.port.reset(p, sc) == u
+            assert self.port.fb.IntegClearEnable
+            assert not self.ref.fb.IntegClearEnable
+            self.accel, self.decel = self.ref.accel, self.ref.decel
+            self.worst = 0.0
+            return u
+
+        def step(self, P, tg, t, sc, x=0.0):
+            a = self.ref.step(P, tg, t, sc, x)
+            b = self.port.step(P, tg, t, sc, x)
+            self.worst = max(self.worst, abs(a - b))
+            assert self.port.fb.rInteg == self.ref.fb.rInteg, t
+            return a
+
+    # Scan for scan through the soft chamber stepped to 5 atm, the
+    # compression and the 1:1 delivery (hose opened before the
+    # compression), at the configured threshold and a wider one, with
+    # the block's floor off and on
+    par = StudyParams()
+    q = par.with_(hose_before=True)
+    soft = scenarios.Scenario('soft', T=60.0, tEvent=0.0, P0=0.0,
+                              ratio=0.98, target0=0.405e6,
+                              target1=0.405e6)
+    runs = ((par.with_(Vl0=279e-6), soft), (q, scenarios.compress(q)),
+            (q, scenarios.deliver(q)))
+    clears = 0
+    for over in (0.02, 0.1):
+        for cfg in ({}, {'FloorEnable': True}):
+            for p, sc in runs:
+                L = Lockstep(over, **cfg)
+                sim.run(p, sc, L)
+                assert L.worst == 0.0, (over, cfg, sc.name, L.worst)
+                clears += len(L.ref.changed)
+    assert clears >= 6, clears
+
+    # Off, the default, the block is the block without the rule; on, it
+    # removes the soft chamber's overshoot.
+    c = par.cfg()
+    assert not c['G_cfgPressureIntegClearEnable']
+    p, sc = runs[0]
+    r0 = sim.run(p, sc, ctl.SlaveController())
+    r1 = sim.run(p, sc, ctl.SlaveController(IntegClearEnable=True))
+    over0 = float(np.max(r0.P - r0.target)) / 1e6           # [MPa]
+    over1 = float(np.max(r1.P - r1.target)) / 1e6           # [MPa]
+    assert over0 > 0.3 and over1 < 0.05, (over0, over1)
+
+    # A negative threshold with the clear enabled is a parameter error:
+    # the block commands zero.
+    bad = ctl.SlaveController('bad', IntegClearEnable=True,
+                              IntegClearError=-0.01)
+    bad.reset(par, sc)
+    assert bad.step(0.0, 1e6, 0.0, sc) == 0.0 and bad.fb.bParamError
+    ok(f"FB_PressureController's integral clear matches the 'opposed' "
+       f'rule scan for scan through the soft step, the compression '
+       f'and the delivery ({clears} clears); soft chamber stepped to '
+       f'5 atm: overshoot {over0:.2f} MPa off, {over1:.2f} MPa on')
+
+
+def check_variants():
+    par = StudyParams()
+    # The unchanged variant is the slave controller, scan for scan.
+    sc = scenarios.compress(par, T=20.0)
+    a = sim.run(par, sc, ctl.SlaveController())
+    b = sim.run(par, sc, ctl.VariantController())
+    assert np.array_equal(a.u, b.u)
+    ok('VariantController with no change gives the SlaveController '
+       'command exactly through a compression')
+
+    def drive(c, readings, target=10e6):
+        """Step controller c through the readings [Pa] and return the
+        integral [MPa s] after each scan."""
+        c.reset(par, sc)
+        out = []
+        for k, P in enumerate(readings):
+            c.step(P, target, k * par.Ts, sc)
+            out.append(c.fb.rInteg)
+        return out
+
+    # Readings 0.05 MPa below the target for 1 s, then above it: the
+    # integral built below is cleared (or bled) once the error is past
+    # the target by more than `over`; a target step re-arms 'arrival'.
+    below, above = [9.95e6] * 250, [10.05e6] * 50
+    I = drive(ctl.VariantController(), below + above)
+    assert I[249] > 0.04 and I[-1] > 0.03, (I[249], I[-1])
+    I = drive(ctl.VariantController(aw='opposed'), below + above)
+    assert I[249] > 0.04 and I[250] < 0.0 and I[-1] < 0.0
+    I = drive(ctl.VariantController(aw='crossing'), below + above)
+    assert I[249] > 0.04 and I[250] < 0.0
+    I = drive(ctl.VariantController(aw='bleed', Tb=0.1), below + above)
+    assert 0.0 < I[-1] < 0.5 * I[249], (I[249], I[-1])
+    # 'arrival' acts only after an approach: none starts within `step`
+    # of the target, and one from 1 MPa below clears once and no more.
+    I = drive(ctl.VariantController(aw='arrival'), below + above)
+    assert I[-1] > 0.03, I[-1]
+    c = ctl.VariantController(aw='arrival', StopVelMin=0.0)
+    far = [9.0e6] * 250
+    I = drive(c, far + above + below + above)
+    assert I[249] > 0.2 and I[250] < 0.0, (I[249], I[250])
+    assert len(c.changed) == 1 and 0.0 < I[-1] < I[550], I[-1]
+    # The integration band holds the integral outside the band.
+    I = drive(ctl.VariantController(aw='band', band=0.1),
+              [9.0e6] * 100 + below)
+    assert I[99] == 0.0 and I[-1] > 0.04
+    # Clamped from the first scan, the block holds the integral at
+    # zero; tracking settles it where u_raw - u = Ki Tt e, eq. (54).
+    hold = drive(ctl.VariantController(Ki=5.0), [8.0e6] * 250)
+    c = ctl.VariantController(aw='backcalc', Tt=0.1, Ki=5.0)
+    track = drive(c, [8.0e6] * 250)
+    # [MPa s] (u + Ki Tt e - Kp e) / Ki at e = 2 MPa
+    want = (c.fb.rVelLimit + 5.0 * 0.1 * 2.0 - c.fb.Kp * 2.0) / 5.0
+    assert hold[-1] == 0.0 and abs(track[-1] - want) < 1e-3, track[-1]
+    ok('anti-windup variants: opposed, crossing and bleed act past the '
+       'target, arrival once per approach, band outside its band, '
+       'tracking while clamped')
+
+    # The derivative term opposes a rising pressure.
+    ramp = [9.0e6 + 2e3 * k for k in range(100)]        # 0.5 MPa/s
+    c0, c1 = ctl.VariantController(), ctl.VariantController(Kd=0.5)
+    c0.reset(par, sc)
+    c1.reset(par, sc)
+    for k, P in enumerate(ramp):
+        v0 = c0.step(P, 10e6, k * par.Ts, sc)
+        v1 = c1.step(P, 10e6, k * par.Ts, sc)
+    assert abs((v0 - v1) * 1e3 - 0.5 * 0.5) < 0.01, (v0, v1)
+    ok(f'derivative term: Kd 0.5 on a 0.5 MPa/s rise takes '
+       f'{(v0 - v1) * 1e3:.2f} mm/s off the command')
+
+    # Target schedule of a scenario
+    s3 = scenarios.Scenario('s', T=3.0, tEvent=0.0, target0=1e6,
+                            targets=((1.0, 2e6), (2.0, 5e6)))
+    assert [s3.target(t) for t in (0.5, 1.0, 1.9, 2.5)] == \
+        [1e6, 2e6, 2e6, 5e6]
+
+    # Soft chamber: with free gas at a low pressure the integrator
+    # carries the piston to the target and the block's own anti-windup
+    # leaves its velocity to be unwound above it; clearing it past the
+    # target removes the overshoot.
+    q = par.with_(Vl0=279e-6)
+    soft = scenarios.Scenario('soft', T=60.0, tEvent=0.0, P0=0.0,
+                              ratio=0.98, target0=0.405e6,
+                              target1=0.405e6)
+    over = {}
+    for aw in ('block', 'opposed'):
+        r = sim.run(q, soft, ctl.VariantController(aw=aw))
+        over[aw] = float(np.max(r.P - r.target)) / 1e6      # [MPa]
+    assert over['block'] > 0.3 and over['opposed'] < 0.05, over
+    ok(f'soft chamber stepped to 5 atm: overshoot {over["block"]:.2f} '
+       f'MPa with the block alone, {over["opposed"]:.2f} MPa with the '
+       f'integral cleared past the target')
+
+
+def check_feedforward():
+    """FeedforwardController's detector, eqs. (64) and (65), and its
+    feedforward, eq. (66), on readings laid out by hand and in the
+    delivery."""
+    par = StudyParams()
+    sc = scenarios.compress(par)
+
+    def drive(c, readings):
+        """Step c through readings [Pa] at a 10 MPa target and return
+        the detector's state after each scan and the last command."""
+        c.reset(par, sc)
+        on = []
+        for k, P in enumerate(readings):
+            v = c.step(P, 10e6, k * par.Ts, sc)
+            on.append(c.on)
+        return on, v
+
+    hold = [10e6] * 20
+    # An outflow of 4.5 MPa/s: 18 kPa a scan
+    fall = [10e6 - 18e3 * k for k in range(1, 16)]
+    c = ctl.FeedforwardController()
+    on, v = drive(c, hold + fall)
+    k_on = on.index(True)
+    assert not any(on[:20]) and 21 <= k_on <= 26, k_on
+    # The command is the block's with c sqrt(T) added, eq. (66).
+    b = ctl.SlaveController()
+    b.reset(par, sc)
+    for k, P in enumerate(hold + fall):
+        vb = b.step(P, 10e6, k * par.Ts, sc)
+    v_ff = par.Q_orifice(10e6) / par.A                      # [m/s]
+    assert abs((v - vb) - v_ff) < 1e-9, (v, vb, v_ff)
+
+    # The hose joining the chamber: 1 MPa a scan, far too deep
+    deep = [10e6 - 1e6 * min(k, 6) for k in range(1, 40)]
+    on, _ = drive(ctl.FeedforwardController(), hold + deep)
+    assert not any(on)
+
+    # Off: a sharp rise past the target; a slow one only beyond e_hi
+    rise = [fall[-1] + 20e3 * k for k in range(1, 20)]
+    on, _ = drive(ctl.FeedforwardController(), hold + fall + rise)
+    k_off = len(on) - 1 - on[::-1].index(True) + 1
+    P_off = (hold + fall + rise)[k_off]
+    assert not on[-1] and 10.02e6 < P_off < 10.1e6, P_off
+    back = [fall[-1] + 20e3 * k for k in range(1, 14)]      # to 9.99
+    creep = [back[-1] + 2e3 * k for k in range(1, 100)]     # to 10.19
+    on, _ = drive(ctl.FeedforwardController(),
+                  hold + fall + back + creep)
+    assert on[-1]
+    on, _ = drive(ctl.FeedforwardController(),
+                  hold + fall + back + creep + [10.35e6] * 3)
+    assert not on[-1]
+
+    # In the delivery it switches on at each opening and off at the
+    # closing, with either hose procedure, and halves the dip.
+    for q in (par.with_(hose_before=True), par):
+        d = scenarios.deliver(q)
+        c = ctl.FeedforwardController()
+        r = sim.run(q, d, c)
+        flow = r.Qout > 0.0
+        assert len(c.ons) == 2 and len(c.offs) == 1, (c.ons, c.offs)
+        assert all(flow[k] for k in c.ons)
+        assert r.events[-2] < c.offs[0] * q.Ts < r.events[-2] + 0.1
+    r0 = sim.run(q.with_(hose_before=True),
+                 scenarios.deliver(q.with_(hose_before=True)),
+                 ctl.SlaveController())
+    c = ctl.FeedforwardController()
+    r1 = sim.run(q.with_(hose_before=True),
+                 scenarios.deliver(q.with_(hose_before=True)), c)
+    assert r1['dipMax'] < 0.6 * r0['dipMax'], (r0['dipMax'],
+                                               r1['dipMax'])
+    ok(f'outflow feedforward: on {k_on - 20} scans into a 4.5 MPa/s '
+       f'fall, not on a fall of 1 MPa a scan, off on a sharp rise past '
+       f'the target; in the delivery, on at both openings and off at '
+       f'the closing, dip {r1["dipMax"]:.2f} MPa '
+       f'({r0["dipMax"]:.2f} without)')
+
+
 def check_runner():
     par = StudyParams()
     cases = [Case(par, scenarios.stiffstep(par), ctl.SlaveController(Kp=k))
@@ -825,4 +1073,7 @@ if __name__ == '__main__':
     check_closed_loop()
     check_floor_policy()
     check_floor_block()
+    check_integ_clear_block()
+    check_variants()
+    check_feedforward()
     check_runner()

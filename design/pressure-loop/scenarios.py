@@ -44,8 +44,9 @@ chamber pressure, StudyParams.Q_orifice(P), scaled by the valve's area
 fraction valve(t), which rises from 0 to 1 over Topen (a step when Topen
 is 0). A scenario may instead prescribe a fixed flow Qf, which the
 linear-model tests use. Qff(t) is the outflow a controller with flow
-feedforward is told about; the machine cannot supply it, so it is kept
-only as a bound.
+feedforward is told about, with the valve fraction the simulation
+applied in the scan before; the machine has no signal of the valve, so
+it is kept only as a bound.
 
 FILE DEPENDENCY:
 None. The functions take a StudyParams object (studyparams.py),
@@ -120,6 +121,10 @@ class Scenario:
     tube: bool = True
     # [-] Ratio of the feedforward flow Qff to the actual outflow
     ff_scale: float = 1.0
+    # ((t [s], P [Pa]), ...) Target schedule in time order: from each
+    # time on the target is that pressure, and target0 holds before the
+    # first. Empty selects target0, t_step and target1.
+    targets: tuple = ()
 
     def with_(self, **kw):
         """Return a copy with the given fields replaced."""
@@ -127,6 +132,12 @@ class Scenario:
 
     def target(self, t):
         """[Pa] Pressure target at time t [s]"""
+        if self.targets:
+            P = self.target0
+            for t_from, P_from in self.targets:
+                if t >= t_from:
+                    P = P_from
+            return P
         return self.target1 if t >= self.t_step else self.target0
 
     def valve(self, t, t_from=None):
@@ -155,19 +166,22 @@ class Scenario:
             return min((t - self.t_prox) / self.Topen_prox, 1.0)
         return 1.0
 
-    def Qout(self, t, par, P):
-        """[m^3/s] Outflow at time t [s] and chamber pressure P [Pa] with
-        the distal valve as first opened: the valve fraction times the
-        prescribed flow or the orifice flow. The feedforward bound uses
-        it; the simulation sequences the valve itself."""
-        a = self.valve(t)
-        if a == 0.0 or not self.hose_open(t):
+    def Qout(self, t, par, P, valve=None):
+        """[m^3/s] Outflow at time t [s] and chamber pressure P [Pa]:
+        the valve fraction times the prescribed flow or the orifice
+        flow. valve is the distal valve's area fraction as the
+        simulation sequenced it (the purge's closing and reopening
+        included); None takes the valve as first opened."""
+        if valve is None:
+            valve = self.valve(t) if self.hose_open(t) else 0.0
+        if valve == 0.0:
             return 0.0
-        return a * (self.Qf if self.Qf > 0 else par.Q_orifice(P))
+        return valve * (self.Qf if self.Qf > 0 else par.Q_orifice(P))
 
-    def Qff(self, t, par, P):
-        """[m^3/s] Outflow a feedforward controller expects at time t"""
-        return self.ff_scale * self.Qout(t, par, P)
+    def Qff(self, t, par, P, valve=None):
+        """[m^3/s] Outflow a feedforward controller expects at time t
+        [s], with the valve fraction it has seen (see Qout)."""
+        return self.ff_scale * self.Qout(t, par, P, valve)
 
     def initial(self, par):
         """Return the chamber contents at the start for StudyParams par,
