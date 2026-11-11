@@ -42,6 +42,7 @@ tests/traceRecorder.m
 tests/traceCsvPlot.m
 tests/traceStream.m
 tests/trackPlayback.m
+tests/controllerBridge.m
 tests/smokeMasterStateMachine.m
 tests/smokeProcedureEngine.m
 "
@@ -142,7 +143,7 @@ printf '%s\n' $torun | xargs -P "$jobs" -I {} sh -c '
     t=$1; c=$2; mrunner=$3
     key=$(echo "$t" | tr / _)
     b=${t##*/}; name=${b%.*}
-    paths="addpath(\"master-src/logic\", \"master-src/trace\", \"slave-sim\", \"slave-sim/generated\", \"tests\")"
+    paths="addpath(\"master-src/logic\", \"master-src/trace\", \"master-src/controller\", \"slave-sim\", \"slave-sim/generated\", \"tests\")"
     start=$(date +%s)
     case $t in
         *.py) set -- python3 "$t" ;;

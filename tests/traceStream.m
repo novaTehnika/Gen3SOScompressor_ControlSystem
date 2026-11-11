@@ -1,8 +1,9 @@
 function traceStream()
 %TRACESTREAM Host side of the trace recorder: the alignment of the window
 %   summaries (traceAlign), the combination of records into intervals
-%   (traceDecimate, traceIntervalExchanges) and the live plot's buffer and
-%   figure (traceLive*), on synthetic records.
+%   (traceDecimate, traceIntervalExchanges), the gap between master
+%   writes (traceWriteGap) and the live plot's buffer and figure
+%   (traceLive*), on synthetic records.
 %
 %   The synthetic raw records follow the slave's lag: record k+2 carries
 %   the window of record k, with a window number, 10 to 12 scans and
@@ -183,6 +184,17 @@ assert(isequal(arrayfun(@(v) traceIntervalExchanges(v, cx), [0.01 0.05 0.12 1 60
     [1 1 2 20 1200]));
 assert(traceIntervalExchanges(0.5, cfg) == round(0.5 / cfg.exchangePeriod));
 fprintf('ok  record interval in exchanges\n');
+
+% ----- Gap between master writes -----
+assert(traceWriteGap(zeros(0, L.nCol), cfg) == 0);
+assert(traceWriteGap(out, cfg) == max([win(1:nRec - 2).scans]) * cfg.slaveScanPeriod);
+g = out;
+g(:, c.summaryScans) = 0;
+assert(traceWriteGap(g, cfg) == 0);
+g(7, c.summaryScans) = 80;                  % a stalled model: 0.32 s at 4 ms
+assert(abs(traceWriteGap(g, cfg) - 0.32) < 1e-12);
+assert(traceWriteGap(raw, cfg) == traceWriteGap(out, cfg));
+fprintf('ok  gap between master writes from the window scan counts\n');
 
 % ----- Live buffer -----
 b = traceLiveBuffer(cfg);

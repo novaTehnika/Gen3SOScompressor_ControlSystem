@@ -164,6 +164,22 @@ the reference for each) and confirm:
       an update that blocks the app's thread near that long needs a smaller
       `cfg.trackMaxSeconds`, or the chunked table (a 1000-value constant
       copied into a persistent table over consecutive steps).
+- [x] Controller process: the app starts the controller, Connect runs
+      the shell, and resizing the windows and View > Side by side during
+      motion give no link lost fault (`writeGapMax` 0.12 s).
+- [x] Controller process, losing the app: ending the app's MATLAB from
+      the Task Manager during a jog stops the jog at once (the controller
+      finds the dead connection by a failing keepalive).
+- [ ] Controller process, reattach and close: an app restarted within
+      60 s of the kill connects to the running controller ("Controller
+      ready") instead of starting another; without one, the model stops
+      (safety relay off) and the controller's MATLAB ends after 60 s.
+      Closing the app normally ends the controller within a few seconds.
+- [ ] Controller process, track step (only once a procedure uses one;
+      the SOP does not): run `experimentTemplate` and read the load time
+      the controller notes ("Track table set in ..."). The load runs in
+      the controller's MATLAB, so a load near 0.3 s during a kept
+      pressure hold would fault the slave.
 - [ ] Poll cost of the stream: with the live plot open for 10 minutes and a
       recording at 0.05 s, read `app.PollStats` (`mean`, `max`,
       `overruns`). The ring (512 x 45) is read on every poll and the plot
