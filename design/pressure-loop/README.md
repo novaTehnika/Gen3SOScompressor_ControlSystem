@@ -1287,7 +1287,23 @@ measured noise the rule does not act falsely in a delivery. The
 closing peak is 0.6 MPa lower than the block's own and 0.1 MPa lower
 than the floor's; at 2.5:1 and 11 MPa that is 11.4 MPa at worst
 against 12.0. The compression peaks within 0.05 MPa of the target in
-every sample. The rule has not been run on the machine.
+every sample.
+
+**On the machine** (`bench/captures/trace_20261110_193733.csv`: the
+GVL gains with the clear at 0.02 MPa, on about 430 mL of liquid and
+142 mL of air). The steps to 5, 20 and 100 atm overshoot by 0.023,
+0.040 and 0.020 MPa. Without the clear the steps to 5 and 20 atm
+overshot by 0.35 and 0.51 MPa (`trace_20261109_193852.csv`, another
+fill). The piston crosses the 5 atm target at 1.86 mm/s, the stop-law
+floor's speed held by the integral, and is at rest two exchanges
+later. The study's soft steps, on its own fill, give 0.02, 0.05 and
+0.12 MPa. In the same trace a proximal valve opened onto a hose full
+of air takes the chamber from 10 to 0.4 MPa; the loop returns at
+5 mm/s into a chamber that stiffens to 6 MPa/mm in the last half
+millimetre and overshoots by 0.015 MPa. At Kp 2.0 and Ki 0.8
+(`trace_20261110_195235.csv`) a step from atmosphere to 100 atm
+overshoots by 0.018 MPa, with the same 2 kPa of spread within an
+exchange at the hold as at Kp 1.5.
 
 ## Choice of compensation
 
