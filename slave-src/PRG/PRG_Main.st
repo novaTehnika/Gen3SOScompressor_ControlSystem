@@ -9,10 +9,13 @@
    Coordinates all function blocks, handles state transitions, and manages
    the handshake protocol with the master controller.
 
-   All built-in motion FBs (MC_Power, MC_Stop, MC_Reset, MC_MoveAbsolute,
-   MC_ReadActual*, Y_DirectControl, MC_SetPosition) and
-   the PLCopen Toolbox Jog FB are instantiated in the LD POU and communicate
-   via G_cmd*/G_sta* structured globals. Homing (ST_HOME_LIMIT) uses Jog.
+   All built-in motion FBs are instantiated in the two LD POUs. PRG_LD,
+   after this program, holds those that command the axis (MC_Power,
+   MC_Stop, MC_Reset, MC_MoveAbsolute, Y_DirectControl, MC_SetPosition and
+   the PLCopen Toolbox Jog FB) and communicates via G_cmd*/G_sta*
+   structured globals. PRG_LD_Read, before PRG_Input, holds those that
+   read it (MC_ReadActual*, MC_ReadStatus) and writes G_sysActual* and
+   G_sysDriveFault. Homing (ST_HOME_LIMIT) uses Jog.
 
    Pressure ceiling and end of travel: above G_cfgPressureCeiling every
    command in the pressurising (positive) direction is zeroed in every
@@ -43,7 +46,7 @@
      4 Control    The blocks the state enables: handshake, fault reset, Go
                   Home, homing, the position path shaper and the pressure
                   loop, each on this scan's measurement.
-     5 Command    The G_cmd* structs for the LD POU, from the state and the
+     5 Command    The G_cmd* structs for PRG_LD, from the state and the
                   outputs of the Control blocks.
      6 Report     The status PRG_Output publishes, the exchange summary and
                   the step probe (last, so its record and its fault mark
@@ -53,9 +56,10 @@
    and the timers as the previous scan left them, since those blocks are
    enabled by the state they report to. The pressure loop's integrator is
    reset by the block of its own command (ceiling, end stop), found in the
-   Command phase of the previous scan. And the LD POU, which runs after
-   this program, returns its status and the axis feedback in the next
-   scan. Every user-defined FB is called exactly once.
+   Command phase of the previous scan. And PRG_LD, which runs after this
+   program, returns its blocks' status in the next scan; the axis
+   feedback is this scan's, read by PRG_LD_Read before it. Every
+   user-defined FB is called exactly once.
 
    State Machine Groups:
    - Idle: ST_IDLE (first scan goes directly here)
@@ -1231,7 +1235,7 @@ fbPressureCtrl(
 
 (* ============================================================================
    PHASE 5 - COMMAND
-   The G_cmd* structs for the LD POU, which runs after PRG_Output: what is
+   The G_cmd* structs for PRG_LD, which runs after PRG_Output: what is
    written here reaches the drive in this scan.
    ============================================================================ *)
 
@@ -1270,7 +1274,7 @@ END_IF;
 
 
 (* --------------------------------------------------------------------------
-   Command Arbitration (ST -> LD POU via G_cmd* )
+   Command Arbitration (ST -> PRG_LD via G_cmd* )
    Default all commands to idle, then override per state.
    -------------------------------------------------------------------------- *)
 

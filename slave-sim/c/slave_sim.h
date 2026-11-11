@@ -1,6 +1,6 @@
 /* Simulated slave: the C translation of slave-src (st_slave.h, generated
  * by tools/st_translate.py --target c) plus the axis model, which stands in
- * for the LD POU's motion function blocks, the drive and the mechanics,
+ * for the LD POUs' motion function blocks, the drive and the mechanics,
  * run one controller scan at a time. slaveSimMex.c exposes it to Octave and
  * MATLAB, and SlaveSim.m, slaveInit.m and slaveStep.m wrap that.
  *

@@ -12,9 +12,11 @@ function [sl, y] = slaveStep(sl, u)
 %      from DO7
 %
 %   Scan order: inputs -> PRG_Input -> PRG_Main -> PRG_Output -> axis model
-%   (slave-sim/c/slave_sim.c). The axis model stands in for the LD POU that
-%   owns the motion function blocks, so PRG_Main sees motion status one scan
-%   late. sl is a handle; it is returned for the callers' [sl, y] = form.
+%   (slave-sim/c/slave_sim.c). The axis model stands in for the two LD
+%   POUs: for PRG_LD, which runs last, so PRG_Main sees the motion blocks'
+%   status one scan late, and for PRG_LD_Read, which runs first: the
+%   feedback the model leaves is the plant's state at the start of the next
+%   scan. sl is a handle; it is returned for the callers' [sl, y] = form.
 %
 %   This is the engineering-units view. For the registers as 16-bit words,
 %   use writeHoldingRegisters(sl, start, words), y = scan(sl) and
