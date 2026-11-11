@@ -38,7 +38,7 @@ accept these options:
 | Option | Effect |
 |---|---|
 | `--sweeps` (compare only) | Also runs the gain sweeps of the legacy and slave controllers. |
-| `--set key=value` | Overrides a `StudyParams` field (a model parameter or a study setting) (`K=2.2e9`, `solver=heun`) or a slave setting by its GVL name (`G_cfgPressureKp=1`). The option can be repeated. |
+| `--set key=value` | Overrides a `StudyParams` field (a model parameter or a study setting) (`K=2.2e9`, `solver=heun`) or a slave setting by its GVL name (`G_cfgPressureKp=1`). The option can be repeated. `as_configured=True` drops the settings the studies hold (`STUDY_CFG` in `studyparams.py`: the gains, the pressure filter and the integral clear the results here were computed with) and runs the slave as the GVL has it. |
 | `--out DIR` | Sets where the CSV traces and PNG plots go. The default is `out/`, which git ignores. |
 | `--legacy` | Uses the earlier plant and sensor: a fixed liquid volume, a single slew limit, and the median and first-order filter applied directly to pressure. |
 | `--workers N`, `--seed N` | Set the number of processes (default one per CPU) and the sensor noise seed. |
@@ -574,9 +574,10 @@ are the GVL (Kp 1.5, Ki 0.6, a stop-law stiffness of 25 MPa/mm, the
 measured outflow needs); the GVL with the block's floor that follows
 the outflow; the GVL with the block's integral clear past the target,
 alone and with the floor; the earlier gains (Kp 0.5, Ki 0.2,
-100 MPa/mm) as a reference; and, as a comparison, the scheduled controller at wc = 11
+100 MPa/mm) as a reference; as a comparison, the scheduled controller at wc = 11
 and 16 rad/s with the measured bounds (K_cfg 1.0 GPa, dead volume
-109 mL, hose compliance 0.12 mL/MPa). `--hose-before` runs the
+109 mL, hose compliance 0.12 mL/MPa); and `configured`, the loop with
+the gains, pressure filter and integral clear the GVL has now. `--hose-before` runs the
 proposed procedure (the hose opened before the compression). Every
 configuration sees the same samples and noise seeds.
 `--cfg key=value` runs a single custom configuration instead, and
@@ -586,10 +587,15 @@ no signal of the valve's state, so no built-in configuration uses it.
 ## Results with the measured parameters
 
 Gains are in mm/s per MPa (Kp) and mm/s per MPa·s (Ki). "GVL" is the
-slave's `FB_PressureController` as now configured: Kp 1.5, Ki 0.6,
-VelMax 5 mm/s, accel and decel 50 mm/s² (which the drive does not
-apply), stop-law stiffness 25 MPa/mm, StopVelMin 2 mm/s and the 20 ms
-filter, with the floor that follows the outflow off. "GVL + floor" turns
+slave's `FB_PressureController` at the settings the studies hold
+(`studyparams.STUDY_CFG`): Kp 1.5, Ki 0.6, the median of 5 and the
+20 ms filter on the pressure input, and the integral clear off. Every
+other setting is the GVL's: VelMax 5 mm/s, accel and decel 50 mm/s²
+(which the drive does not apply), stop-law stiffness 25 MPa/mm and
+StopVelMin 2 mm/s, with the floor that follows the outflow off. The
+GVL itself has moved on from those five settings, on the bench's
+evidence; "The loop as configured" at the end gives the figures for
+what it has now, and `--set as_configured=True` runs a study with it. "GVL + floor" turns
 that floor and its forward stop on (`G_cfgPressureFloorEnable`).
 "Earlier gains" is the setting before these studies' retune: Kp 0.5,
 Ki 0.2 and a stop-law stiffness of 100 MPa/mm. "Scheduled" is
@@ -917,7 +923,9 @@ shows the thinner margin there: 10 to 12 MPa overshoots by 0.3 MPa.
 - The hose: whether the 6 ft length is needed (with the 3 ft one the
   opening drop was 3.6 MPa, and it held 29 mL less); whether the whole
   58 mL is purged; how long the pause between the purge and the
-  delivery is, and whether the tube drains during it (`tube_refills` in
+  delivery is, and whether the tube drains during it (the bench's second
+  opening, 15 s after the first closing, drops the chamber 2.2 MPa in
+  one exchange, so something downstream does; `tube_refills` in
   the scenario, off by default); and how fast the distal valve is shut
   (`StudyParams.Tclose`, 0 by default, which is the worst case).
 - Whether a bypass orifice of 0.3 mm (Cv 0.003), opened ahead of the
@@ -1085,7 +1093,9 @@ procedures and a 1 s closing, at the GVL gains and at the earlier ones,
 and requires the command, the floor and the latch to be equal on every
 scan. `tests/slavePressureMode.m` runs the compiled slave through an
 outflow and an abrupt closing: the latch sets and releases, and the
-closing peaks at 10.20 MPa against 10.69 without the floor.
+closing peaks at 10.13 MPa against 10.15 without the floor: the
+integral clear, on in the GVL, has taken the peak the floor's forward
+stop would.
 
 ## Anti-windup and derivative study
 
@@ -1263,9 +1273,9 @@ applied around it in lockstep through the soft chamber stepped to
 command and the integral to be equal on every scan.
 `tests/slavePressureMode.m` runs the compiled slave through a
 compression, an outflow and an abrupt closing: with the clear the
-compression overshoots by 0.04 MPa against 0.08 and the closing peaks
-at 10.23 MPa against 10.69, and the loop follows the outflow with its
-integral as it does without it.
+compression overshoots by 0.03 MPa against 0.04 and the closing peaks
+at 10.15 MPa against 10.52 (at the GVL's Kp 2.0 and Ki 0.8), and the
+loop follows the outflow with its integral as it does without it.
 
 **Monte Carlo** (`study_robust.py`, arms `GVL+clear` and
 `GVL+floor+clear`; 100 Latin hypercube samples, the sensor noise from
@@ -1287,7 +1297,67 @@ measured noise the rule does not act falsely in a delivery. The
 closing peak is 0.6 MPa lower than the block's own and 0.1 MPa lower
 than the floor's; at 2.5:1 and 11 MPa that is 11.4 MPa at worst
 against 12.0. The compression peaks within 0.05 MPa of the target in
-every sample. The rule has not been run on the machine.
+every sample.
+
+**On the machine** (`bench/captures/trace_20261110_193733.csv`: the
+GVL gains with the clear at 0.02 MPa and, as in every trace of that
+day, the pressure filter at a median of 3 and 5 ms, on about 430 mL of
+liquid and 142 mL of air). The steps to 5, 20 and 100 atm overshoot by 0.023,
+0.040 and 0.020 MPa. Without the clear the steps to 5 and 20 atm
+overshot by 0.35 and 0.51 MPa (`trace_20261109_193852.csv`, another
+fill). The piston crosses the 5 atm target at 1.86 mm/s, the stop-law
+floor's speed held by the integral, and is at rest two exchanges
+later. The study's soft steps, on its own fill, give 0.02, 0.05 and
+0.12 MPa. In the same trace a proximal valve opened onto a hose full
+of air takes the chamber from 10 to 0.4 MPa; the loop returns at
+5 mm/s into a chamber that stiffens to 6 MPa/mm in the last half
+millimetre and overshoots by 0.015 MPa. At Kp 2.0 and Ki 0.8
+(`trace_20261110_195235.csv`) a step from atmosphere to 100 atm
+overshoots by 0.018 MPa, with the same 2 kPa of spread within an
+exchange at the hold as at Kp 1.5.
+
+A delivery at Kp 2.0 and Ki 0.8 with the clear on
+(`trace_20261110_195648.csv`, a chamber that held undissolved air)
+agrees with the model where the loop is concerned and not where the
+outlet is. The steady outflow takes the piston at 1.38 mm/s, 4.73 mL/s
+against the orifice law's 4.78, with the error under 0.005 MPa. The
+pressure peaks at 10.23 MPa when the distal valve shuts, at both
+closings, and is back in band 0.2 s later; the simulation gives
+10.2 MPa. A second after an opening the error is 0.6 to 1.0 MPa and
+decays over the integral time, as the quasi-static dip of eq. (33)
+(0.7 MPa at this gain) does. But the opening itself takes the chamber from 10.03 to 4.57 MPa
+inside one 50 ms exchange, and a second opening 15 s after the first
+closing to 7.88 MPa, where the model's tube takes 0.2 MPa: at about
+1 mL/MPa the outlet takes some 5 mL at the first opening and 2 mL at
+the second, not the tube's 0.24 mL, and takes it again after a pause.
+A proximal valve opened slowly by hand in the same trace fills the
+hose with a dip of 0.2 to 0.4 MPa.
+
+At Kp 2.4 and Ki 0.96 on a small chamber (`trace_20261110_200342.csv`,
+129 mL at the hold, 7 MPa/mm at the arrival) the step from atmosphere
+to 100 atm overshoots by 0.14 MPa and swings 0.12 MPa below the target
+before it settles, 0.3 s after the crossing, and the pressure's spread
+within an exchange at the hold is 3.1 kPa against 2.1 to 2.4 kPa at
+the lower gains, where the linear model gives that gain 50° and
+7.9 dB at 7.5 MPa/mm with this filter. Its two distal openings drop the chamber by 1.4 and
+0.9 MPa within an exchange, so the volume the outlet takes at an
+opening varies from run to run, from about 1 to 5 mL; the recovery to
+within 0.1 MPa takes 4.4 s against 5 to 5.5 s at Kp 2.0. The delivery
+ends at the end-of-travel stop without a fault.
+
+With `G_cfgDirectCtrlFilterTime` at 0 and the same gains
+(`trace_20261110_204936.csv`, 237 mL at the hold with little air,
+9.4 MPa/mm at the arrival) the step from 20 to 100 atm overshoots by
+0.026 MPa and swings 0.024 MPa below the target, and the spread within
+an exchange at the hold is back at 2.4 kPa. The torque reads 100 % for
+one exchange at that step: without the filter the velocity command
+reaches the drive as a step. Eight distal openings drop the chamber by
+0.89 MPa at the first and 0.54 to 0.74 MPa at the others, each within
+one exchange, with the error at 0.4 MPa a second later and back within
+0.1 MPa after 4 to 4.5 s; the closings peak at 10.16 to 10.20 MPa. On
+a chamber and hose with little air the opening is close to the
+model's, whose tube step and loop give 0.5 MPa at this gain: the
+larger drops of the two traces before belong to their air.
 
 ## Choice of compensation
 
@@ -1710,3 +1780,67 @@ arm touches.
   above unchanged or slightly better. The gains have not been raised
   in any run here.
 - The detector and the feedforward are not in the slave.
+
+## The loop as configured
+
+The GVL carries what the bench settled on, which is not the loop the
+studies above were computed with:
+
+| Setting | Studies (`STUDY_CFG`) | GVL |
+|---|---|---|
+| `G_cfgPressureKp` | 1.5 | 2.0 |
+| `G_cfgPressureKi` | 0.6 | 0.8 |
+| `G_cfgPressureIntegClearEnable` | off | on |
+| `G_cfgAnalogMedianSize` | 5 | 3 |
+| `G_cfgAnalogFilterTimeConst` | 20 ms | 5 ms |
+
+`--set as_configured=True` runs a study with the GVL's values, and the
+`configured` arm of `study_robust.py` is the same loop. The model's
+drive is the one measured with `Y_DirectControl`'s command filter at
+0.02 s (18.2 ms of dead time and a 7.5 ms lag), which is the GVL's
+setting.
+
+**Margins** (`study_linear.py --set as_configured=True`):
+
+| Chamber | k (MPa/mm) | Gain margin | Phase margin | Crossover (rad/s) | Max stable Kp |
+|---|---|---|---|---|---|
+| liquid, 343 mL + hose, hose open | 3.2 | 16.8 dB | 72° | 6.4 | 14.0 |
+| liquid, 115 mL dead volume (limit switch), hose open | 3.8 | 15.4 dB | 70° | 7.6 | 11.8 |
+| liquid, 343 mL, hose shut | 7.5 | 9.5 dB | 56° | 14.8 | 6.0 |
+
+The largest Kp with 45° and 6 dB in the hose-shut chamber is 2.7
+(1.85 with the studies' filter), so Kp 2.0 is 74 % of the limit, where
+the studies' 1.5 was 81 % of theirs.
+
+**Nominal delivery** (`study_delivery.py --set as_configured=True`,
+hose opened before the compression): the opening dip is 0.62 MPa, the
+peak after the purge closing 10.19 MPa, and the margin over saturation
+5.8 MPa at 1:1, 2.2 MPa at 2:1 and 0.3 MPa at 2.5:1, against 0.81 MPa,
+10.84 MPa and 5.6, 2.0 and 0.15 MPa for the studies' loop. With the
+clear on, the floor that follows the outflow adds nothing: its arm
+gives the same figures.
+
+A compression with the hose shut overshoots by 0.02 MPa, and the stiff
+step from 10 to 12 MPa by 0.12 MPa (`study_compare.py --set
+as_configured=True`; 0.04 and 0.29 MPa for the studies' loop).
+
+**Monte Carlo** (`study_robust.py --configs GVL,configured --n 100`
+with the charge, target and procedure of each row; pass rate for every
+requirement in percent, the closing peak at p50 / max and the margin
+over saturation through the delivery at p50 / min, in MPa):
+
+| Case | Studies' loop: pass, peak, margin | As configured: pass, peak, margin |
+|---|---|---|
+| 1:1 at 10 MPa, hose after mixing | 69, 10.9 / 11.0, 0.69 / −0.20 | 69, 10.2 / 10.3, 0.69 / −0.20 |
+| 1:1 at 10 MPa, hose before | 100, 10.9 / 11.0, 5.61 / 5.52 | 100, 10.2 / 10.3, 5.80 / 5.73 |
+| 2:1 at 10 MPa, hose before | 100, 10.9 / 11.0, 1.95 / 1.86 | 100, 10.2 / 10.3, 2.15 / 2.07 |
+| 2.5:1 at 11 MPa, hose before | 100, 11.9 / 12.0, 1.08 / 0.99 | 100, 11.2 / 11.3, 1.29 / 1.21 |
+
+The configured loop passes wherever the studies' loop does, with the
+closing peak 0.7 MPa lower and 0.2 MPa more margin over saturation at
+the openings; at 2.5:1 and 11 MPa the peak is 0.7 MPa under the
+ceiling in place of at it. With the hose opened after mixing the
+failures are the opening drop's, as before.
+
+The bench's traces at these settings are under "On the machine" in
+"The integral clear in the slave".

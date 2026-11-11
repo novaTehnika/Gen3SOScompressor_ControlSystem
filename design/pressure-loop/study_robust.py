@@ -69,6 +69,7 @@ matplotlib.use('Agg')           # write image files; no display needed
 import matplotlib.pyplot as plt  # noqa: E402
 
 import robust as R  # noqa: E402
+from studyparams import STUDY_CFG  # noqa: E402
 from robust import (ControllerSpec, UNCERTAIN, NAMES,  # noqa: E402
                     SCENARIOS, THRESH)
 
@@ -88,6 +89,9 @@ COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
 # block's integral clear past the target, eq. (52), and
 # GVL+floor+clear both; earlier is the gains before the retune (Kp 0.5,
 # Ki 0.2, 100 MPa/mm), kept as a reference.
+# These arms run at the studies' own settings (studyparams.STUDY_CFG);
+# configured undoes the pins, so it is the loop as the GVL now has it,
+# with the gains, pressure filter and integral clear of the machine.
 # The scheduled arms are a comparison that is not in the slave; they
 # assume the
 # dead volume at the low end of its range (a lower bound keeps the
@@ -96,6 +100,10 @@ COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
 # the run: the passages' low end, 52 mL, and the 6 ft hose, 57.9 mL,
 # rounded down.
 SCHED = {'V_dead_cfg': 109e-6, 'K_cfg': 1.0e9, 'C_hose_cfg': 1.2e-13}
+# The GVL's own values of the settings the studies pin, by the short
+# names SlaveController takes
+CONFIGURED = {k[len('G_cfg'):]: v for k, v in R.slave_config().items()
+              if k in STUDY_CFG}
 CONFIGS = {
     'GVL': ControllerSpec('GVL'),
     'GVL+floor': ControllerSpec('GVL+floor', {'FloorEnable': True}),
@@ -108,6 +116,7 @@ CONFIGS = {
                                           'StopStiffness': 100.0}),
     'sched11': ControllerSpec('sched11', sched=dict(wc=11.0, **SCHED)),
     'sched16': ControllerSpec('sched16', sched=dict(wc=16.0, **SCHED)),
+    'configured': ControllerSpec('configured', CONFIGURED),
 }
 
 

@@ -418,10 +418,21 @@ specified here; the implementation plan decides the files.
       pressure-dependent series term.
 - [ ] The drive changed between the October and November benches
       because `Y_DirectControl`'s FilterTimeConstant went from a
-      hard-wired 0.05 s to `G_cfgDirectCtrlFilterTime` 0.02 s. Decide the
-      setting (a lag inside the pressure loop: shorter raises the
-      loop's margin) and remeasure the drive with
-      `frictionRun('s1', 'steps')` whenever it changes.
+      hard-wired 0.05 s to `G_cfgDirectCtrlFilterTime` 0.02 s. At 0 the
+      pressure loop arrives more cleanly but position moves read over
+      100 % of rated torque against the motion
+      (`bench/captures/trace_20261110_210004.csv`), so it is back at
+      0.02 s. To have both: give pressure mode its own filter setting
+      (0) in `PRG_Main`, confirm with a scan-rate probe capture of a
+      position move at each setting what the torque does within a scan,
+      and remeasure the drive with `frictionRun('s1', 'steps')` at 0.
+- [ ] Pressure loop: Kp 2.0 and Ki 0.8 are on the machine, with the
+      command filter at 0.02 s. Kp 2.4 and Ki 0.96 arrived cleanly only
+      with that filter at 0 (`bench/captures/trace_20261110_204936.csv`),
+      so raising the gains waits for the pressure-mode filter setting
+      above; then repeat the step from atmosphere to 100 atm on a small
+      volume and decide whether the torque reading 100 % for an exchange
+      at a large target step is acceptable.
 - [ ] `frictionRun`'s 90 % torque abort trips on the inertia of a 5 mm/s
       start or stop (80 to 100 % for tens of ms), so the unloaded sets
       stop at 3 mm/s. If the 5 mm/s point is wanted, make the abort act

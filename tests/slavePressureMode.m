@@ -211,6 +211,7 @@ fprintf('ok  stop-law floor: latched on outflow, released at the closing, peak %
 % peak are lower, and the loop follows the outflow as it does without it.
 over = zeros(1, 2);
 peak = zeros(1, 2);
+clearCfg = h.sl.G.G_cfgPressureIntegClearEnable;     % the GVL's setting, restored below
 for on = [true false]
     h.sl.G.G_cfgPressureIntegClearEnable = on;
     h.sl.ax.x = chamberPosition(h.sl, 0.5);
@@ -235,7 +236,7 @@ for on = [true false]
     h.u.reference = 0;
     h = runUntil(h, 5, @(h) h.sl.G.G_sysCurrentState == E.E_SystemState.ST_IDLE);
 end
-h.sl.G.G_cfgPressureIntegClearEnable = false;
+h.sl.G.G_cfgPressureIntegClearEnable = clearCfg;
 assert(over(1) < over(2) && over(1) < 0.06, 'overshoot %.3f MPa with the clear, %.3f without', ...
     over(1), over(2));
 assert(peak(1) < peak(2) - 0.2 && peak(1) < 10.4, 'closing peak %.2f MPa with the clear, %.2f without', ...
@@ -245,8 +246,8 @@ fprintf(['ok  integral clear: compression overshoot %.3f MPa (%.3f without), ' .
 
 % Scan order (PRG_Main's phases). The reading is conditioned, the loop
 % run and the command written in one scan, so a step at the transducer
-% moves the velocity command as soon as the median of five passes it:
-% in the third scan that samples the step, two scans after the first.
+% moves the velocity command as soon as the median passes it: with a
+% median of n, (n - 1) / 2 scans after the first that samples the step.
 % Any scan between the reading and the command would add to that.
 h.sl.ax.x = chamberPosition(h.sl, 0.5);
 h = enterMode(h, MODE_PRESSURE, 5);
@@ -271,7 +272,8 @@ for k = 0:9
     end
 end
 cmd1 = h.sl.G.G_cmdDirectControl.Velocity;
-assert(first == 2, 'the command moved %d scans after the step, expected 2', first);
+nMed = (double(h.sl.G.G_cfgAnalogMedianSize) - 1) / 2;   % scans the median holds a step back
+assert(first == nMed, 'the command moved %d scans after the step, expected %d', first, nMed);
 assert(cmd1 > cmd0 + 0.2, 'command %.3f mm/s after the step', cmd1);
 h.sl.hook.pressureVolt = NaN;
 fprintf(['ok  scan order: a transducer step reaches the velocity command %d scans later ' ...
