@@ -30,7 +30,7 @@ SOS_Gen3_Compressor_Interface      % then press "Connect to Compressor"
 ```
 
 The app starts the controller, a second MATLAB that runs the shell model,
-minimized; the status line reads "Starting the controller... N s" until it
+with no window; the status line reads "Starting the controller... N s" until it
 answers and then "Controller ready: press Connect". Closing the app ends it.
 `launchOperatorApp` sets the paths and opens the app in one call.
 
@@ -687,11 +687,14 @@ recording stopped then is saved to `captures/` without the Save dialog
 ## Controller process
 
 `controller/runController` runs the shell model in a MATLAB of its own. The app
-starts it at its own start with `ctlLaunchCommand`: on Windows
-`start "SOS Gen3 controller" /min "<matlab>" -batch "cd('<master-src/controller>');
-runController"`, with `<matlab>` the app's own MATLAB, or
-`cfg.controllerMatlab` when set (a compiled app needs it). The `-batch` MATLAB
-ends when `runController` returns.
+starts it at its own start: `<matlab> -batch "cd('<master-src/controller>');
+runController"` (`ctlLaunchCommand`), with `<matlab>` the app's own MATLAB, or
+`cfg.controllerMatlab` when set (a compiled app needs it). On Windows the app
+starts that process itself through .NET (`System.Diagnostics.ProcessStartInfo`
+with `CreateNoWindow`), so the controller has no window to be closed by
+mistake; it shows only in the Task Manager, as a second MATLAB. Without .NET it
+falls back to `start "SOS Gen3 controller" /min ...`, a minimized window. The
+`-batch` MATLAB ends when `runController` returns.
 
 **Connection.** The controller listens on `127.0.0.1:cfg.controllerPort` (50321;
 local only, so no firewall rule is involved), one app at a time. The app tries
@@ -739,10 +742,11 @@ and ends; it also ends when no app reaches it within 60 s of its start.
 
 **Log.** The controller's events (start, app connected and gone, model started
 and stopped, refused writes, track loads, errors) go to
-`captures/controller.log` with a timestamp, and to its own window. It can be
-run by hand from a MATLAB session (`cd master-src/controller; runController`)
-to watch them; it then returns instead of ending that MATLAB, and the app
-connects to it as usual.
+`captures/controller.log` with a timestamp; with no window, the log is the
+place to look. It can be run by hand from a MATLAB session
+(`cd master-src/controller; runController`) to watch them in that session; it
+then returns instead of ending that MATLAB, and the app connects to it as
+usual.
 
 ## Trace files
 

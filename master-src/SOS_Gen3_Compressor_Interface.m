@@ -357,15 +357,31 @@ classdef SOS_Gen3_Compressor_Interface < matlab.apps.AppBase
             end
         end
 
-        % Start the controller in a MATLAB of its own (ctlLaunchCommand)
+        % Start the controller in a MATLAB of its own (ctlLaunchCommand).
+        % On Windows it gets no window at all (.NET's process start with
+        % CreateNoWindow), so it cannot be closed by mistake; its events
+        % are in captures/controller.log. Without .NET the system command
+        % starts it minimized instead.
         function launchController(app)
             app.ctlLaunchedAt = tic;
-            folder = fullfile(fileparts(mfilename("fullpath")), "controller");
-            [code, out] = system(ctlLaunchCommand(app.cfg, char(folder)));
-            if code ~= 0
-                app.StatusLabel.Text = append("Controller launch failed: ", strtrim(out));
-            else
+            folder = char(fullfile(fileparts(mfilename("fullpath")), "controller"));
+            [exe, args, cmd] = ctlLaunchCommand(app.cfg, folder);
+            try
+                if ispc && NET.isNETSupported
+                    psi = System.Diagnostics.ProcessStartInfo(exe, args);
+                    psi.UseShellExecute = false;
+                    psi.CreateNoWindow = true;
+                    psi.WorkingDirectory = folder;
+                    System.Diagnostics.Process.Start(psi);
+                else
+                    [code, out] = system(cmd);
+                    if code ~= 0
+                        error("%s", strtrim(out));
+                    end
+                end
                 app.StatusLabel.Text = "Starting the controller...";
+            catch ME
+                app.StatusLabel.Text = append("Controller launch failed: ", ME.message);
             end
         end
 

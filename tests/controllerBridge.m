@@ -282,14 +282,19 @@ assert(isequaln(ctlClientUpdate(c, msgs, 5), c), 'the app ignores a keepalive');
 fprintf('ok  controller: keepalives to a quiet app, none while sending or unconnected\n');
 
 % ----- Launch command -----
-cmd = ctlLaunchCommand(cfg, 'C:\SOS\master-src\controller', ...
+[exe, args, cmd] = ctlLaunchCommand(cfg, 'C:\SOS\master-src\controller', ...
     'C:\Program Files\MATLAB\R2025b\bin\matlab.exe', true);
+assert(strcmp(exe, 'C:\Program Files\MATLAB\R2025b\bin\matlab.exe'));
+assert(strcmp(args, '-batch "cd(''C:\SOS\master-src\controller''); runController"'));
 assert(strcmp(cmd, ['start "SOS Gen3 controller" /min ' ...
-    '"C:\Program Files\MATLAB\R2025b\bin\matlab.exe" -batch ' ...
-    '"cd(''C:\SOS\master-src\controller''); runController"']));
-cmd = ctlLaunchCommand(cfg, '/opt/o''brien/controller', '/usr/bin/matlab', false);
-assert(~isempty(strfind(cmd, 'cd(''/opt/o''''brien/controller'')')) && cmd(end) == '&');
-fprintf('ok  launch command: Windows start /min with -batch, quoting\n');
+    '"C:\Program Files\MATLAB\R2025b\bin\matlab.exe" ' args]));
+[~, args, cmd] = ctlLaunchCommand(cfg, '/opt/o''brien/controller', '/usr/bin/matlab', false);
+assert(~isempty(strfind(args, 'cd(''/opt/o''''brien/controller'')')) && cmd(end) == '&');
+% What the controller's MATLAB runs: the text between the double quotes
+inner = regexp(args, '^-batch "(.*)"$', 'tokens', 'once');
+parts = regexp(inner{1}, '^cd\((.*)\); runController$', 'tokens', 'once');
+assert(strcmp(eval(parts{1}), '/opt/o''brien/controller'));
+fprintf('ok  launch command: -batch arguments, the minimized fallback, quoting\n');
 end
 
 % %% ===== LOCAL FUNCTIONS =====

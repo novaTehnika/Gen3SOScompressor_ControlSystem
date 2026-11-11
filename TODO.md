@@ -179,8 +179,10 @@ the reference for each) and confirm:
       `cd master-src/launch; makeDesktopShortcut`, and check that the
       "SOS Gen3 Compressor" icon appears; double-click it with MATLAB
       closed: only the operator app shows (MATLAB's command window
-      minimized in the taskbar), the controller starts, Connect works,
-      and closing the app ends both MATLABs. Check whether Windows shows
+      minimized in the taskbar), the controller starts with no window
+      (a second MATLAB in the Task Manager; `captures/controller.log`
+      shows its start), Connect works, and closing the app ends both
+      MATLABs. Check whether Windows shows
       a security prompt for the shortcut or PowerShell, and whether the
       icon looks right. For every account: `makeDesktopShortcut('allUsers')`
       from a MATLAB run as administrator.

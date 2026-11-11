@@ -362,7 +362,9 @@ line = sprintf('%s  %s\n', datestr(now, 'yyyy-mm-dd HH:MM:SS.FFF'), ...
 if fid > 0
     fprintf(fid, '%s', line);
 end
-fprintf('%s', line);
+if ~batchStartupOptionUsed     % run by hand: shown in that session too
+    fprintf('%s', line);
+end
 end
 
 function closeIfOpen(fid)
