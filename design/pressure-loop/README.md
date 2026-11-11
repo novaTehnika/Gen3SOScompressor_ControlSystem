@@ -1324,6 +1324,18 @@ the second, not the tube's 0.24 mL, and takes it again after a pause.
 A proximal valve opened slowly by hand in the same trace fills the
 hose with a dip of 0.2 to 0.4 MPa.
 
+At Kp 2.4 and Ki 0.96 on a small chamber (`trace_20261110_200342.csv`,
+129 mL at the hold, 7 MPa/mm at the arrival) the step from atmosphere
+to 100 atm overshoots by 0.14 MPa and swings 0.12 MPa below the target
+before it settles, 0.3 s after the crossing, and the pressure's spread
+within an exchange at the hold is 3.1 kPa against 2.1 to 2.4 kPa at
+the lower gains: the first sign of the margin the linear model gives
+that gain. Its two distal openings drop the chamber by 1.4 and
+0.9 MPa within an exchange, so the volume the outlet takes at an
+opening varies from run to run, from about 1 to 5 mL; the recovery to
+within 0.1 MPa takes 4.4 s against 5 to 5.5 s at Kp 2.0. The delivery
+ends at the end-of-travel stop without a fault.
+
 ## Choice of compensation
 
 `study_compensation.py` asks which compensator the loop should have,
