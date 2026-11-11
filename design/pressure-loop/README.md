@@ -1292,8 +1292,9 @@ against 12.0. The compression peaks within 0.05 MPa of the target in
 every sample.
 
 **On the machine** (`bench/captures/trace_20261110_193733.csv`: the
-GVL gains with the clear at 0.02 MPa, on about 430 mL of liquid and
-142 mL of air). The steps to 5, 20 and 100 atm overshoot by 0.023,
+GVL gains with the clear at 0.02 MPa and, as in every trace of that
+day, the pressure filter at a median of 3 and 5 ms, on about 430 mL of
+liquid and 142 mL of air). The steps to 5, 20 and 100 atm overshoot by 0.023,
 0.040 and 0.020 MPa. Without the clear the steps to 5 and 20 atm
 overshot by 0.35 and 0.51 MPa (`trace_20261109_193852.csv`, another
 fill). The piston crosses the 5 atm target at 1.86 mm/s, the stop-law
@@ -1329,8 +1330,8 @@ At Kp 2.4 and Ki 0.96 on a small chamber (`trace_20261110_200342.csv`,
 to 100 atm overshoots by 0.14 MPa and swings 0.12 MPa below the target
 before it settles, 0.3 s after the crossing, and the pressure's spread
 within an exchange at the hold is 3.1 kPa against 2.1 to 2.4 kPa at
-the lower gains: the first sign of the margin the linear model gives
-that gain. Its two distal openings drop the chamber by 1.4 and
+the lower gains, where the linear model gives that gain 50° and
+7.9 dB at 7.5 MPa/mm with this filter. Its two distal openings drop the chamber by 1.4 and
 0.9 MPa within an exchange, so the volume the outlet takes at an
 opening varies from run to run, from about 1 to 5 mL; the recovery to
 within 0.1 MPa takes 4.4 s against 5 to 5.5 s at Kp 2.0. The delivery
