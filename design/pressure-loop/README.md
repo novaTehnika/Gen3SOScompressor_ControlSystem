@@ -917,7 +917,9 @@ shows the thinner margin there: 10 to 12 MPa overshoots by 0.3 MPa.
 - The hose: whether the 6 ft length is needed (with the 3 ft one the
   opening drop was 3.6 MPa, and it held 29 mL less); whether the whole
   58 mL is purged; how long the pause between the purge and the
-  delivery is, and whether the tube drains during it (`tube_refills` in
+  delivery is, and whether the tube drains during it (the bench's second
+  opening, 15 s after the first closing, drops the chamber 2.2 MPa in
+  one exchange, so something downstream does; `tube_refills` in
   the scenario, off by default); and how fast the distal valve is shut
   (`StudyParams.Tclose`, 0 by default, which is the worst case).
 - Whether a bypass orifice of 0.3 mm (Cv 0.003), opened ahead of the
@@ -1304,6 +1306,23 @@ millimetre and overshoots by 0.015 MPa. At Kp 2.0 and Ki 0.8
 (`trace_20261110_195235.csv`) a step from atmosphere to 100 atm
 overshoots by 0.018 MPa, with the same 2 kPa of spread within an
 exchange at the hold as at Kp 1.5.
+
+A delivery at Kp 2.0 and Ki 0.8 with the clear on
+(`trace_20261110_195648.csv`, a chamber that held undissolved air)
+agrees with the model where the loop is concerned and not where the
+outlet is. The steady outflow takes the piston at 1.38 mm/s, 4.73 mL/s
+against the orifice law's 4.78, with the error under 0.005 MPa. The
+pressure peaks at 10.23 MPa when the distal valve shuts, at both
+closings, and is back in band 0.2 s later; the simulation gives
+10.2 MPa. A second after an opening the error is 0.6 to 1.0 MPa and
+decays over the integral time, as the quasi-static dip of eq. (33)
+(0.7 MPa at this gain) does. But the opening itself takes the chamber from 10.03 to 4.57 MPa
+inside one 50 ms exchange, and a second opening 15 s after the first
+closing to 7.88 MPa, where the model's tube takes 0.2 MPa: at about
+1 mL/MPa the outlet takes some 5 mL at the first opening and 2 mL at
+the second, not the tube's 0.24 mL, and takes it again after a pause.
+A proximal valve opened slowly by hand in the same trace fills the
+hose with a dip of 0.2 to 0.4 MPa.
 
 ## Choice of compensation
 
