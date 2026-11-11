@@ -204,11 +204,16 @@
      G_cfgDirectCtrlAccel      : LREAL := 10.0         (* Accel for Y_DirectControl operating modes (mm/s^2). A
                                                           velocity step on the machine was not slewed at this
                                                           value in VelocityTLMode (bench/characterisation) *)
-     G_cfgDirectCtrlFilterTime : LREAL := 0.02        (* Y_DirectControl FilterTimeConstant (s): the block's own
+     G_cfgDirectCtrlFilterTime : LREAL := 0.0         (* Y_DirectControl FilterTimeConstant (s): the block's own
                                                           filter on the command it sends the drive. Wired from
                                                           G_cmdDirectControl.FilterTimeConstant in the LD POU. A
-                                                          lag inside the pressure loop; tune on the bench with
-                                                          a velocity step (bench/friction 'steps') *)
+                                                          lag inside the pressure loop, so it is off: a step of
+                                                          the velocity command then reaches the drive as a step.
+                                                          In position mode the torque then reads over 100 % of
+                                                          rated, against the motion, from 3 mm/s up (12 % at
+                                                          0.02 s; docs/slave/development/ConfigurationGuide.md).
+                                                          The drive's response has been measured at 0.05 and
+                                                          0.02 s only (bench/characterisation) *)
 
 
      (* ========================================================================
@@ -263,10 +268,10 @@
      G_cfgPressureSensorMinMa    : LREAL := 3.6        (* Loop current below this: open loop or unpowered transducer (mA) *)
      G_cfgPressureSensorMaxMa    : LREAL := 20.5       (* Loop current above this: over range or shorted shunt (mA) *)
      G_cfgPressureSensorFaultTime: TIME := T#100MS     (* Out-of-range current must persist this long before FAULT_PRESSURE_SENSOR *)
-     G_cfgPressureKp             : LREAL := 1.5        (* Velocity per pressure error (mm/s per MPa): a crossover of 5 rad/s with the
-                                                          hose open (3.2 MPa/mm) and 11 rad/s with it shut at a full fill (7.5 MPa/mm) *)
-     G_cfgPressureKi             : LREAL := 0.6        (* Velocity per integrated pressure error (mm/s per MPa*s): 0.4 Kp *)
-     G_cfgPressureIntegClearEnable : BOOL := FALSE     (* Clear the integral while the pressure is past the target on the side the
+     G_cfgPressureKp             : LREAL := 2.0        (* Velocity per pressure error (mm/s per MPa): a crossover of 6 rad/s with the
+                                                          hose open (3.2 MPa/mm) and 15 rad/s with it shut at a full fill (7.5 MPa/mm) *)
+     G_cfgPressureKi             : LREAL := 0.8        (* Velocity per integrated pressure error (mm/s per MPa*s): 0.4 Kp *)
+     G_cfgPressureIntegClearEnable : BOOL := TRUE      (* Clear the integral while the pressure is past the target on the side the
                                                           integral drives toward (FB_PressureController, IntegClearEnable;
                                                           design/pressure-loop/README.md, "Anti-windup and derivative study") *)
      G_cfgPressureIntegClearError  : LREAL := 0.02     (* Error beyond the target at which the integral is cleared (MPa): above the
@@ -348,8 +353,9 @@
      G_cfgDebounceTimeOvertravel   : TIME := T#10MS   (* Both overtravel inputs; short for the negative switch's homing precision *)
 
      (* Analog input filter parameters (pressure channel) *)
-     G_cfgAnalogFilterTimeConst: TIME := T#20MS       (* Low-pass filter time constant *)
-     G_cfgAnalogMedianSize     : INT := 5             (* Median filter size (3 or 5) *)
+     G_cfgAnalogFilterTimeConst: TIME := T#5MS        (* Low-pass filter time constant: a lag inside the pressure loop; the input's
+                                                          noise (1.9 kPa rms per sample, white) does not call for more *)
+     G_cfgAnalogMedianSize     : INT := 3             (* Median filter size (3 or 5): one scan of delay at 3, two at 5 *)
 
 
      (* ========================================================================

@@ -64,7 +64,7 @@ import scenarios  # noqa: E402
 import sim  # noqa: E402
 from FB_PressureController import (FB_PressureController,  # noqa: E402
                                    new_FB_PressureController)
-from studyparams import StudyParams  # noqa: E402
+from studyparams import STUDY_CFG, StudyParams  # noqa: E402
 import modelpath  # noqa: F401, E402  (puts models/ on sys.path)
 from plant import (Plant, iy_ndis, iy_nout, iy_ntot,  # noqa: E402
                    iy_Vl, iy_Vout, iy_Vvir)
@@ -82,11 +82,18 @@ def check_config():
     c = slave_config()
     assert c['G_cfgPressureSensorFaultTime'] == 0.1, \
         c['G_cfgPressureSensorFaultTime']
-    assert c['G_cfgScanTime'] == 0.004 and c['G_cfgAnalogMedianSize'] == 5
+    assert c['G_cfgScanTime'] == 0.004
+    # The studies hold the settings of STUDY_CFG at their own values,
+    # whatever the GVL has; as_configured gives the GVL's.
     par = StudyParams()
+    assert all(par.cfg()[k] == v for k, v in STUDY_CFG.items())
     assert (par.Ts == 0.004 and par.vmax == 5e-3 and par.medN == 5
             and par.tauF == 0.02
             and par.cfg()['G_cfgPressureStopVelMin'] == 2.0)
+    q = par.with_(as_configured=True)
+    assert all(q.cfg()[k] == c[k] for k in STUDY_CFG)
+    assert (q.medN == c['G_cfgAnalogMedianSize']
+            and q.cfg(G_cfgPressureKp=3.0)['G_cfgPressureKp'] == 3.0)
     q = par.with_(G_cfgPressureKp=2.0, K=2e9)
     assert (q.cfg()['G_cfgPressureKp'] == 2.0 and q.K == 2e9
             and par.cfg()['G_cfgPressureKp'] == 1.5)
