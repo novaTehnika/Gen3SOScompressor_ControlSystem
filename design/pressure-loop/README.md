@@ -1821,5 +1821,27 @@ peak after the purge closing 10.19 MPa, and the margin over saturation
 clear on, the floor that follows the outflow adds nothing: its arm
 gives the same figures.
 
+A compression with the hose shut overshoots by 0.02 MPa, and the stiff
+step from 10 to 12 MPa by 0.12 MPa (`study_compare.py --set
+as_configured=True`; 0.04 and 0.29 MPa for the studies' loop).
+
+**Monte Carlo** (`study_robust.py --configs GVL,configured --n 100`
+with the charge, target and procedure of each row; pass rate for every
+requirement in percent, the closing peak at p50 / max and the margin
+over saturation through the delivery at p50 / min, in MPa):
+
+| Case | Studies' loop: pass, peak, margin | As configured: pass, peak, margin |
+|---|---|---|
+| 1:1 at 10 MPa, hose after mixing | 69, 10.9 / 11.0, 0.69 / −0.20 | 69, 10.2 / 10.3, 0.69 / −0.20 |
+| 1:1 at 10 MPa, hose before | 100, 10.9 / 11.0, 5.61 / 5.52 | 100, 10.2 / 10.3, 5.80 / 5.73 |
+| 2:1 at 10 MPa, hose before | 100, 10.9 / 11.0, 1.95 / 1.86 | 100, 10.2 / 10.3, 2.15 / 2.07 |
+| 2.5:1 at 11 MPa, hose before | 100, 11.9 / 12.0, 1.08 / 0.99 | 100, 11.2 / 11.3, 1.29 / 1.21 |
+
+The configured loop passes wherever the studies' loop does, with the
+closing peak 0.7 MPa lower and 0.2 MPa more margin over saturation at
+the openings; at 2.5:1 and 11 MPa the peak is 0.7 MPa under the
+ceiling in place of at it. With the hose opened after mixing the
+failures are the opening drop's, as before.
+
 The bench's traces at these settings are under "On the machine" in
 "The integral clear in the slave".
