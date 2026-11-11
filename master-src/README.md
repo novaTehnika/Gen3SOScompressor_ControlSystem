@@ -585,9 +585,10 @@ walks them against the stand-in.
 
 **Record**, the interval dropdown and the trace status are at the right of the
 Controls band. The **Trace** menu has Record (Stop recording while recording,
-Ctrl+R; enabled as the button is), Plot trace... (Ctrl+P) and Live plot
-(Ctrl+L); the last two are only in the menu. Plot trace... is disabled while
-motion is commanded (see Link stalls below); Live plot is always enabled.
+Ctrl+R; enabled as the button is), Plot trace... (Ctrl+P), Live plot (Ctrl+L)
+and Open captures folder (Explorer on the folder every trace is saved in); the
+last three are only in the menu. Plot trace... is disabled while motion is
+commanded (see Link stalls below); the others are always enabled.
 
 **Record** is available while connected. The dropdown chooses the record
 interval: `cfg.traceIntervalPresets` (0.05 s (20 Hz), 0.1 s (10 Hz), 0.5 s
@@ -602,10 +603,9 @@ and the records missed in red. Pressing the button again (**Stop recording**)
 ends the recording, writes the file at once to
 `captures/trace_yyyymmdd_HHMMSS.csv` and then opens a Save dialog proposing that
 path: choosing another name or folder moves the file there, and cancelling keeps
-it in `captures/`. A recording stopped while motion is commanded is kept in
-memory instead, with the label reading "Stopped, N records: saved when motion
-ends", and written to `captures/` without a dialog at the first poll after
-motion ends (or when the model stops, on Disconnect or on closing the app). Recording also ends, without a dialog, when the model stops (a
+it in `captures/`. While motion is commanded no dialog opens: the file stays in
+`captures/` and the label reads "Saved trace_... in captures (no Save dialog in
+motion)". Recording also ends, without a dialog, when the model stops (a
 lost Modbus connection, for example), when **Disconnect** is pressed and when the
 app is closed; the file is then saved to `captures/` and the trace status names it.
 **Plot trace...** opens a file chooser in `captures/` and plots the file chosen.
@@ -677,8 +677,9 @@ While motion is commanded the app refuses what can hold its own thread past
 `cfg.appTimeout`, since the controller would then stop the motion (below):
 Trace > Plot trace... and the whole Procedure menu (Open..., Reload and the
 file items) are disabled and refused with a reason on the status line, and a
-recording that is stopped is kept and written to `captures/` once motion ends,
-without the Save dialog (Recording a trace, above).
+recording stopped then is saved to `captures/` without the Save dialog
+(Recording a trace, above). Writing the file itself is short of
+`cfg.appTimeout` (about 1.2 s for an hour at 0.05 s).
 
 ## Controller process
 
