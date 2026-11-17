@@ -378,7 +378,7 @@ fields it uses (`procNew` fills the defaults).
 | `signal` | track | required | a function `@(t, p)` of the time column `t` (s) and the parameter values `p` (a struct, key to value), or a two-column matrix `[t value]` |
 | `relative` | track | `false` | the series is added to the reading at the step's first issue |
 | `record` | all | the procedure's | this step's record interval in s, or `'off'` (see Recording from a procedure) |
-| `target` | position, pressure; settled wait | required; `[]` (the background hold's) | a number, a parameter key, or a function handle `@(values, cfg)` returning a finite scalar, evaluated whenever the step issues its operation (on entry and again on resume); `procNew` evaluates it once on the parameter defaults and rejects a failure. A settled wait takes a number or a key (atm absolute) and settles about it with no pressure control |
+| `target` | position, pressure | required | a number, a parameter key, or a function handle `@(values, cfg)` returning a finite scalar, evaluated whenever the step issues its operation (on entry and again on resume); `procNew` evaluates it once on the parameter defaults and rejects a failure |
 | `unit` | position | `'mm'` | `mm` from the end of travel, or `mL` chamber volume (`deadVolume` plus the swept volume); a pressure is atm absolute |
 | `speed` | position | NaN (none) | mm/s the move is capped at; the operator's speed still wins when it is lower (0 holds) |
 | `pressureMax` | machine | `Inf` | atm absolute; above it the step pauses (below) |
@@ -386,8 +386,6 @@ fields it uses (`procNew` fills the defaults).
 | `until` | machine, wait | by op | the completion condition (below); a track has only `elapsed` |
 | `keep` | position, pressure (not track) | `false` | leave the operation running as the background operation; otherwise the engine stops it once the step completes |
 | `tolerance` | settled | `cfg.procPressureTol` | atm |
-| `volume` | volume wait | required | mL discharged since the last `zeroVolume` (a number above 0 or a parameter key) |
-| `capture` | confirm | `''` | key of a pressure parameter: on Confirm the pressure reading becomes its value (and goes to its sink); a reading outside the parameter's range is refused with "<label> reading is out of range" and the step waits on |
 | `duration` | timed wait; settled; track | required for a timed wait and a track; `cfg.procSettleTime` | s: a number, or for a timed wait and a track a parameter key |
 | `timeout` | machine, wait | `Inf` | when exceeded the procedure pauses (and stops a non-kept operation) |
 | `timerStart`, `timerStop` | all | `false` | start the procedure timer when the step completes; stop it on entering the step |
@@ -400,13 +398,8 @@ status 3 (the note reads "<title> reached its target"); `home`/`goHome` `ended` 
 operation confirmed, its status gone and the master back at status 0;
 `pressure` `running` is status 5 seen, and `settled` also needs the pressure
 within `tolerance` of the target for `duration`; `stop` `stopped` is a status
-outside 1 to 8. A wait is timed (`duration`); `settled` about its `target`, or
-about the background pressure target when it has none (the pressure within
-`tolerance` for `duration`); `volume`, until the volume discharged since the
-last `zeroVolume` reaches `volume` (the end of travel first pauses it with "End
-of travel before the volume was reached"); or `endOfTravel`, until
-`atEndOfTravel` is set or the swept volume is at or below `cfg.procEndVolume`.
-A wait's `timeout` pauses it. A step whose operation ends early (not confirmed by the slave,
+outside 1 to 8. A wait is timed (`duration`) or `settled` about the background
+pressure target. A step whose operation ends early (not confirmed by the slave,
 not reported stopped, left by the master) pauses with a message naming the
 status.
 
@@ -432,10 +425,7 @@ or one with `repeatFrom`; too many checks or parameters; an
 unknown sink or kind; a pressure parameter with a unit; `keep` on a step that
 cannot hold or on a move with `until` `'confirm'`; `speed` outside a position step or not above 0; `pressureMax` not
 above 0; an unknown `alsoWhen` or one on another step; a target function that
-fails on the defaults; a settled wait with neither a `target` nor an earlier
-pressure step with `keep`; a `target` on another wait; a volume wait without a
-`volume` above 0 or without `zeroVolume` on it or an earlier step; `volume` on
-another step; a `capture` off a confirm step or naming no pressure parameter;
+fails on the defaults; a settled wait with no earlier pressure step with `keep`;
 a `record` that is not a number above 0 or `'off'`; a `duration` key that names
 no parameter; a track without `mode`, `signal` or `duration`, or with `target`,
 `unit`, `speed`, `alsoWhen` or `keep`; `mode`, `signal` or `relative` on another
@@ -506,8 +496,7 @@ completion end the track too, and the app ends it whenever it clears its
 operation.
 
 *Progress.* While a timed wait runs or a track has been issued, the panel's
-title line shows `(m:ss / m:ss)`, the elapsed time against the duration, and
-during a volume wait `(n / N mL)`, the volume discharged against the volume
+title line shows `(m:ss / m:ss)`, the elapsed time against the duration
 (`stepProgress` of `procView`).
 
 ### Recording from a procedure
@@ -584,18 +573,18 @@ through `procNew` and walks it against the stand-in. Pressure parameters are
 so write `Holding {targetPressure}.` and not `... atm.`. The shipped procedure
 runs the machine from the reset of a previous experiment to the clean-up; its
 header comment describes the valves and each section. The operator works the
-valves and the procedure does the rest, with no move left to the operator: the
-first step offers to skip the homing (`skipTo`), a draw ends when the pressure
-has settled back at ambient (a settled wait with a `target`), the hose fill and
-the purge are counted in volume (volume waits) and the discharges run to the
-end of travel (`endOfTravel` waits), and the oxygen loading pressure is the
-reading taken when the operator confirms the regulator (`capture`). It computes
-the saline draw and the oxygen fill volumes from its parameters in function
-targets (`salineDrawVolume`, `oxygenFillVolume`, with the equation in the
-comment) and writes the saline volume and the oxygen ratio to the shell's
-`SalineVolume` and `OxygenRatio` blocks (sinks), which the trace records; its
-constants are at the top of the file. It records each run at 1 s and the
-mixing at 10 s (`record`).
+valves and the procedure moves the piston and holds the pressure, with no move
+left to the operator: the first step offers to skip the homing (`skipTo`), the
+hose is filled by a slow move of the hose volume (the slave's pressure ceiling
+stops it if a valve is shut) and the purge is read on the volume discharged
+readout (`zeroVolume`). It computes the saline draw and the oxygen fill
+volumes from its parameters in function targets (`salineDrawVolume`,
+`oxygenFillVolume`, with the equation in the comment), moves again for the
+oxygen loading pressure the operator enters once the regulator is set, and
+writes the saline volume and the oxygen ratio to the shell's `SalineVolume`
+and `OxygenRatio` blocks (sinks), which the trace records; its constants are
+at the top of the file. It records each run at 1 s and the mixing at 10 s
+(`record`).
 
 `procedure/experimentTemplate.m` is the file to copy from for an experiment: it
 sets the record interval for the run and per step, has one step of each kind

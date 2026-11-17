@@ -37,8 +37,7 @@ function v = procView(p, opts)
 %     pressureTargetText  that pressure in the display unit with its label,
 %                    or '--'
 %     stepProgress   'm:ss / m:ss' (elapsed of total) for a timed wait and
-%                    for a track step once issued, 'n / N mL' (discharged
-%                    of the volume) for a volume wait, else ''
+%                    for a track step once issued, else ''
 %     message        why the procedure paused or ended, or the last refusal;
 %                    the note of a step that ended on its own when there is
 %                    none
@@ -237,14 +236,6 @@ if active && ~isempty(st)
     elseif strcmp(st.type, 'machine') && strcmp(st.op, 'track') ...
             && ~isnan(p.trk.duration)
         v.stepProgress = progressText(p.trk.t, p.trk.duration);
-    elseif strcmp(st.type, 'wait') && strcmp(st.until, 'volume') ...
-            && ~isnan(p.volumeDischarged)
-        total = st.volume;
-        if ischar(total)
-            total = p.values.(total);
-        end
-        v.stepProgress = sprintf('%.0f / %.0f mL', ...
-            max(p.volumeDischarged, 0), total);
     end
 end
 end

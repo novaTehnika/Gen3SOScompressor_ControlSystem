@@ -218,18 +218,15 @@ the reference for each) and confirm:
       stopcock and the hose, and the oxygen loading pressure default
       against the regulator.
 - [ ] Walk the SOP procedure on the lab PC with water: the second button
-      reading "Skip Homing" and jumping to the flush; each draw ending
-      once the pressure settles back at ambient (`SETTLE_TOL`,
-      `SETTLE_TIME` against the bag's head and the transducer's noise);
-      the hose fill under pressure control reaching the needle at
-      `HOSE_FILL`; the purge's volume progress; "Take Reading" storing
-      the regulator's pressure; the physical emergency stop during "Vent
-      and free the chamber" (whether the procedure pauses and what has to
-      be reset before Resume). The pushes out of the stopcock pause above
-      `PUSH_GUARD` (0.5 atm gauge), but the engine sees the pressure only
-      at the app's poll: against a blocked outlet with a liquid-full
-      chamber the pressure overshoots it, and only the slave's ceiling
-      bounds it.
+      reading "Skip Homing" and jumping to the flush; the hose fill at
+      `HOSE_SPEED` reaching the needle with `HOSE_FILL`, and the pressure
+      it builds across the orifices; the physical emergency stop during
+      "Vent and free the chamber" (whether the procedure pauses and what
+      has to be reset before Resume). The pushes out of the stopcock
+      pause above `PUSH_GUARD` (0.5 atm gauge), but the engine sees the
+      pressure only at the app's poll: against a blocked outlet with a
+      liquid-full chamber the pressure overshoots it, and only the
+      slave's ceiling bounds it.
 - [ ] Relaunch the operator app and check the new speed control (percent field and presets).
       Outside a procedure the trace's `salineVolume_mL` and `oxygenRatio`
       hold the `buildShell` defaults (`masterConfig.m`: 343 mL, 1.0).

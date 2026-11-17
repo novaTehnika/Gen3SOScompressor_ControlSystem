@@ -24,12 +24,8 @@ function p = procNew(proc, cfg, values)
 %   a position step), pressureMax (atm absolute, a machine step) and
 %   alsoWhen ('endOfTravel', a confirm step or a pressure step), skipTo and
 %   skipLabel (a confirm step: the second button jumps forward to the step
-%   of that id), until 'confirm' on a position step (the operator ends
-%   the move, or it ends on arrival), capture (a confirm step: the pressure
-%   reading is stored in the pressure parameter of that key on confirm),
-%   and the waits until 'settled' with a target (about that pressure, with
-%   no hold), 'volume' (volume, mL discharged since the last zeroVolume)
-%   and 'endOfTravel'. A position
+%   of that id) and until 'confirm' on a position step (the operator ends
+%   the move, or it ends on arrival). A position
 %   or pressure target may be a function handle @(values, cfg) returning a
 %   finite scalar, evaluated when the step issues its operation. A step may
 %   give record (a number above 0, or 'off'; absent: the procedure's), and a
@@ -44,10 +40,7 @@ function p = procNew(proc, cfg, values)
 %   a procedure that cannot run: unknown type, op, unit or until, a missing
 %   title or target, a target or key that names no parameter, a duplicate
 %   id, a repeatFrom that does not name an earlier step, a skipTo that does
-%   not name a later one or that is given with repeatFrom, a capture that
-%   names no pressure parameter or is not on a confirm step, a wait target
-%   off a settled wait, a volume wait without a volume above 0 or a volume
-%   reference before it, too many checks or
+%   not name a later one or that is given with repeatFrom, too many checks or
 %   parameters, an unknown sink or kind, a pressure parameter with a unit,
 %   keep on a step that cannot hold or on a move the operator ends, a
 %   speed, pressureMax or alsoWhen where it does not apply, a target function that fails on the parameters'
@@ -205,12 +198,10 @@ ts = struct('id', '', 'section', '', 'title', '', 'text', '', 'type', '', ...
     'duration', NaN, 'timeout', Inf, 'timerStart', false, ...
     'timerStop', false, 'zeroVolume', false, 'mixer', '', ...
     'speed', NaN, 'pressureMax', Inf, 'alsoWhen', '', ...
-    'volume', NaN, 'capture', '', ...
     'mode', '', 'signal', [], 'relative', false, 'record', NaN);
 steps = repmat(ts, 1, 0);
 section = '';
 pressureHold = false;   % an earlier pressure step has keep
-volumeRef = false;      % this or an earlier step takes the volume reference
 for k = 1:numel(rawSteps)
     r = rawSteps{k};
     s = fillFields(ts, r, sprintf('step %d', k));
@@ -260,16 +251,6 @@ for k = 1:numel(rawSteps)
             bad('skipTo must be the id of a later step');
         end
     end
-    if ~isempty(s.capture)
-        if ~strcmp(s.type, 'confirm')
-            bad('capture only applies to a confirm step');
-        end
-        if ~ischar(s.capture) || ~any(strcmp(s.capture, keys)) || ...
-                ~strcmp(params(strcmp(s.capture, keys)).kind, 'pressure')
-            bad('capture must name a pressure parameter');
-        end
-    end
-    volumeRef = volumeRef || s.zeroVolume;
     if ~isempty(s.mixer) && ~any(strcmp(s.mixer, [{'on', 'off'}, keys]))
         bad('mixer "%s" is neither on, off nor a parameter', s.mixer);
     end
@@ -360,42 +341,11 @@ for k = 1:numel(rawSteps)
             pressureHold = true;
         end
     elseif strcmp(s.type, 'wait')
-        if ~any(strcmp(s.until, {'', 'settled', 'volume', 'endOfTravel'}))
+        if ~any(strcmp(s.until, {'', 'settled'}))
             bad('unknown until "%s" for a wait', s.until);
         end
-        if ~isempty(s.op)
-            bad('op only applies to a machine step');
-        end
-        if ~isempty(s.target)
-            if ~strcmp(s.until, 'settled')
-                bad('a wait takes a target only when it is settled');
-            end
-            if ischar(s.target)
-                if ~any(strcmp(s.target, keys))
-                    bad('target "%s" names no parameter', s.target);
-                end
-            elseif ~(isnumeric(s.target) && isscalar(s.target) && ...
-                    isfinite(s.target))
-                bad('a settled wait''s target is a number or a parameter key');
-            end
-        elseif strcmp(s.until, 'settled') && ~pressureHold
-            bad(['a settled wait needs a target or an earlier pressure ' ...
-                'step with keep']);
-        end
-        if strcmp(s.until, 'volume')
-            q = s.volume;
-            if ischar(q)
-                if ~any(strcmp(q, keys))
-                    bad('volume "%s" names no parameter', q);
-                end
-                q = defaults.(q);
-            end
-            if ~(isnumeric(q) && isscalar(q) && isfinite(q) && q > 0)
-                bad('a volume wait needs a volume above 0');
-            end
-            if ~volumeRef
-                bad('a volume wait needs zeroVolume on it or an earlier step');
-            end
+        if strcmp(s.until, 'settled') && ~pressureHold
+            bad('a settled wait needs an earlier pressure step with keep');
         end
         if isempty(s.until)
             d = s.duration;
@@ -409,10 +359,6 @@ for k = 1:numel(rawSteps)
                 bad('a timed wait needs a duration');
             end
         end
-    end
-    if ~(isequaln(s.volume, NaN) || (strcmp(s.type, 'wait') && ...
-            strcmp(s.until, 'volume')))
-        bad('volume only applies to a volume wait');
     end
     if ischar(s.duration) && ~((strcmp(s.type, 'wait') && isempty(s.until)) ...
             || (strcmp(s.type, 'machine') && strcmp(s.op, 'track')))
