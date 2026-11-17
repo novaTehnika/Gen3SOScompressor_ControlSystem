@@ -1,7 +1,7 @@
 function smokeProcedureEngine()
 %SMOKEPROCEDUREENGINE Run the procedure engine (procNew/procAction/procStep/
 %   procView, opTrack) against a stand-in for the model's status, and the
-%   seed procedure through procNew.
+%   SOP procedure through procNew.
 %
 %   The stand-in reproduces the status codes the operator app sees for each
 %   operation, with injectable failures; it is not the master state machine.
@@ -27,7 +27,8 @@ testFunctionTarget(0.05);
 testSpeed(0.05);
 testPressureGuards(0.05);
 testAlsoWhen(0.05);
-testSeedWalk(0.1);
+testSeedWalk(0.1, false);
+testSeedWalk(0.1, true);
 testRecordField(0.05);
 testTrackValidation();
 testTrackOwn(0.05);
@@ -40,6 +41,8 @@ testEarlyEnd(0.05);
 testBackgroundLost(0.05);
 testTimeout(0.05);
 testRepeat(0.05);
+testSkip(0.05);
+testOperatorEndsMove(0.05);
 testWrongState(0.05);
 testPurity();
 testView();
@@ -83,25 +86,46 @@ assert(strcmp(p.state, 'idle'));
 for k = 1:numel(p.def.steps)
     assert(~isempty(p.def.steps(k).title));
 end
-assert(numel(p.def.steps) == 21 && numel(p.def.params) == 6);
+assert(numel(p.def.steps) == 48 && numel(p.def.params) == 6);
+ids = {p.def.steps.id};
 % The oxygen fill target on the defaults: the saline plus the oxygen at
-% the loading pressure (ideal gas at room temperature).
-st = p.def.steps(13);
+% the loading pressure (ideal gas at room temperature), 5 mm past it on
+% the retract.
+k5 = 5 * mLPerMm(cfg);
+want = 343 + 343 * (1 / 7) * 293.15 / 273.15;
+st = p.def.steps(29);
 assert(strcmp(st.op, 'position') && strcmp(st.unit, 'mL'));
-want = 343 + 343 * (1 / 7.8) * 293.15 / 273.15;
 assert(abs(st.target(p.values, p.cfg) - want) < 1e-9);
-% A charge the chamber cannot hold is reported by the target.
+assert(abs(p.def.steps(28).target(p.values, p.cfg) - (want + k5)) < 1e-9);
+assert(abs(p.def.steps(32).target(p.values, p.cfg) - want) < 1e-9);
+assert(abs(p.def.steps(24).target(p.values, p.cfg) - (343 + k5)) < 1e-9);
+% The second loading pressure moves the piston for the pressure read.
+v = p.values;
+v.oxygenLoadPressure = 7.5;
+assert(abs(p.def.steps(32).target(v, p.cfg) ...
+    - (343 + 343 * (1 / 7.5) * 293.15 / 273.15)) < 1e-9);
+% The homing question skips to the flush; the operator-ended moves.
+assert(strcmp(p.def.steps(2).skipTo, 'flushPrepare') ...
+    && find(strcmp(ids, 'flushPrepare')) == 9);
+assert(strcmp(p.def.steps(5).op, 'home'));
+assert(strcmp(p.def.steps(21).until, 'confirm') ...
+    && strcmp(p.def.steps(44).until, 'confirm'));
+assert(p.def.steps(44).target == 150);
+% A charge the chamber cannot hold is reported by the saline draw, before
+% any saline is drawn, and by the oxygen fill.
 v = p.values;
 v.salineVolume = 900;
 v.oxygenRatio = 4;
 v.oxygenLoadPressure = 2;
-try
-    st.target(v, p.cfg);
-    error('smoke:noError', 'the oxygen fill target accepted too large a charge');
-catch err
-    assert(~isempty(strfind(err.message, 'more than the chamber holds')), err.message);
+for j = [24 28 29 32]
+    try
+        p.def.steps(j).target(v, p.cfg);
+        error('smoke:noError', 'step %d accepted too large a charge', j);
+    catch err
+        assert(~isempty(strfind(err.message, 'more than the chamber holds')), err.message);
+    end
 end
-fprintf('ok  seed procedure validates (%d steps, %d parameters)\n', ...
+fprintf('ok  SOP procedure validates (%d steps, %d parameters)\n', ...
     numel(p.def.steps), numel(p.def.params));
 
 base = mk({ ...
@@ -116,6 +140,8 @@ procNew(setStep(base, 4, 'pressureMax', 5), cfg);
 procNew(setStep(base, 1, 'alsoWhen', 'endOfTravel'), cfg);
 procNew(setStep(base, 2, 'alsoWhen', 'endOfTravel'), cfg);
 procNew(setStep(base, 4, 'target', @(v, c) c.deadVolume + v.vol), cfg);
+procNew(setStep(base, 4, 'until', 'confirm'), cfg);
+procNew(setStep(setStep(base, 4, 'id', 'z'), 1, 'skipTo', 'z'), cfg);
 bad = {};
 bad{end+1} = setStep(base, 1, 'type', 'bogus');
 bad{end+1} = setStep(base, 4, 'op', 'bogus');
@@ -147,6 +173,14 @@ bad{end+1} = setStep(base, 1, 'pressureMax', 5);    % pressureMax on a confirm
 bad{end+1} = setStep(base, 4, 'alsoWhen', 'bogus');
 bad{end+1} = setStep(base, 4, 'alsoWhen', 'endOfTravel');   % on a position step
 bad{end+1} = setStep(base, 3, 'alsoWhen', 'endOfTravel');   % on a wait
+bad{end+1} = setStep(base, 1, 'skipTo', 'a');          % not a later step
+bad{end+1} = setStep(base, 1, 'skipTo', 'nope');
+bad{end+1} = setStep(setStep(base, 4, 'id', 'z'), 3, 'skipTo', 'z');   % on a wait
+bad{end+1} = mk({struct('id', 'a', 'type', 'confirm', 'title', 'A'), ...
+    struct('type', 'confirm', 'title', 'B', 'repeatFrom', 'a', 'skipTo', 'c'), ...
+    struct('id', 'c', 'type', 'confirm', 'title', 'C')});
+bad{end+1} = setStep(setStep(base, 4, 'until', 'confirm'), 4, 'keep', true);
+bad{end+1} = setStep(base, 2, 'until', 'confirm');   % on a pressure step
 bad{end+1} = setParam(base, 2, 'kind', 'bogus');
 bad{end+1} = setParam(base, 1, 'kind', 'pressure');         % with a unit
 many = base;
@@ -651,6 +685,77 @@ assert(all(h.p.stepDone));
 fprintf('ok  repeat jumps back, clears ticks and done marks, and the run completes\n');
 end
 
+function testSkip(dt)
+% skipTo: the second button jumps forward; the step is answered and the
+% steps jumped over stay not done. Confirm still takes the next step.
+proc = mk({struct('type', 'confirm', 'title', 'A', 'skipTo', 'c', ...
+        'skipLabel', 'Skip It', 'confirmLabel', 'Do It'), ...
+    struct('type', 'machine', 'title', 'Move', 'op', 'position', 'target', 280), ...
+    struct('id', 'c', 'type', 'confirm', 'title', 'C')});
+h = newHost(proc, dt);
+h = act(h, 'start');
+h = tick(h);
+v = procView(h.p);
+assert(v.repeat.visible && strcmp(v.repeat.label, 'Skip It'));
+assert(v.confirm.visible && strcmp(v.confirm.label, 'Do It'));
+h = act(h, 'repeat');
+h = tick(h);
+assert(h.p.k == 3 && isequal(h.p.stepDone, [true false false]));
+assert(isempty(h.events));
+h = act(h, 'confirm');
+h = tick(h);
+assert(strcmp(h.p.outcome, 'completed') && isequal(h.p.stepDone, [true false true]));
+assert(~procView(h.p).repeat.visible);
+% Confirm takes the step after it.
+h = newHost(proc, dt);
+h = act(h, 'start');
+h = tick(h);
+h = act(h, 'confirm');
+h = runUntil(h, @(h) h.p.k == 3, 10);
+assert(isequal(h.events(:, 2)', [2 -1]) && all(h.p.stepDone(1:2)));
+fprintf('ok  skipTo jumps forward and leaves the steps jumped over undone\n');
+end
+
+function testOperatorEndsMove(dt)
+% until 'confirm' on a position move: the operator ends it with Confirm (a
+% stop, then the next step), or it ends on arrival with a note.
+proc = mk({struct('type', 'machine', 'title', 'Push', 'op', 'position', ...
+        'target', 0, 'until', 'confirm', 'confirmLabel', 'Stop Here'), ...
+    struct('type', 'confirm', 'title', 'C')});
+h = newHost(proc, dt);
+h = act(h, 'start');
+h = tick(h);                              % enters the step
+h = refuse(h, 'confirm');                 % not yet issued
+h = tick(h);
+assert(strcmp(h.p.phase, 'track'));
+v = procView(h.p);
+assert(v.confirm.visible && v.confirm.enable && strcmp(v.confirm.label, 'Stop Here'));
+assert(~v.repeat.visible);
+h = runFor(h, 1);
+h = act(h, 'confirm');
+h = tick(h);
+assert(isequal(h.events(:, 2)', [2 -1]) && strcmp(h.p.phase, 'stopping'));
+assert(~procView(h.p).confirm.visible);
+h = runUntil(h, @(h) h.p.k == 2, 5);
+assert(h.m.d > 100 && isempty(h.p.note), 'the move stopped short of its target');
+% Paused: no confirm; resumed, the move is issued again.
+h = newHost(proc, dt);
+h = act(h, 'start');
+h = runFor(h, 0.5);
+h = act(h, 'pause');
+h = tick(h);
+assert(strcmp(h.p.state, 'paused') && ~procView(h.p).confirm.visible);
+h = refuse(h, 'confirm');
+h = act(h, 'resume');
+h = runFor(h, 0.5);
+assert(strcmp(h.p.phase, 'track') && sum(h.events(:, 2) == 2) == 2);
+% Left alone, it ends on arrival.
+h = runUntil(h, @(h) h.p.k == 2, 20);
+assert(abs(h.m.d) < 0.5);
+assert(~isempty(strfind(h.p.note, 'Push reached its target')), h.p.note);
+fprintf('ok  until confirm: the operator ends the move, or it ends on arrival\n');
+end
+
 function testWrongState(dt)
 proc = mk({struct('type', 'machine', 'title', 'Move', 'op', 'position', 'target', 100), ...
     struct('type', 'confirm', 'title', 'C')});
@@ -914,19 +1019,25 @@ for i = 1:numel(f)
 end
 end
 
-function testSeedWalk(dt)
-% The seed procedure through the stand-in: every machine step's request,
-% the speed of the two pushes and the order of the operations.
+function testSeedWalk(dt, skipHoming)
+% The SOP procedure through the stand-in, homing or skipping it: every
+% machine step's request, the speed of the pushes and the order of the
+% operations. The mixing time is shortened to keep the walk short.
 proc = sopProcedure();
 h = newHost(proc, dt);
 cfg = h.cfg;
+h.p.values.mixTime = 3;
 h = act(h, 'start');
 guard = 0;
-while ~strcmp(h.p.state, 'done') && guard < 4000
+while ~strcmp(h.p.state, 'done') && guard < 8000
     h = tick(h);
     guard = guard + 1;
     if strcmp(h.p.state, 'waitOperator')
         st = h.p.def.steps(h.p.k);
+        if skipHoming && ~isempty(st.skipTo)
+            h = act(h, 'repeat');
+            continue
+        end
         for i = 1:numel(st.checks)
             h = act(h, 'check', i, true);
         end
@@ -934,19 +1045,42 @@ while ~strcmp(h.p.state, 'done') && guard < 4000
     end
 end
 assert(strcmp(h.p.state, 'done') && strcmp(h.p.outcome, 'completed'));
-assert(all(h.p.stepDone));
 ops = h.events(:, 2)';
-assert(isequal(ops, [2 -1 2 -1 2 -1 2 -1 2 -1 4 -1]), mat2str(ops));
+mvs = repmat([2 -1], 1, 10);
+tail = [4 -1 2 -1 2 -1 4 -1];
+if skipHoming
+    assert(isequal(find(~h.p.stepDone), 3:8));
+    assert(isequal(ops, [mvs tail]), mat2str(ops));
+else
+    assert(all(h.p.stepDone));
+    assert(isequal(ops, [1 2 -1 mvs tail]), mat2str(ops));
+end
+k5 = 5 * mLPerMm(cfg);
+o2 = 343 + 343 * (1 / 7) * 293.15 / 273.15;
 mv = h.events(h.events(:, 2) == 2, :);
-assert(abs(mv(1, 4) - (cfg.deadVolume + 100)) < 1e-9);
-assert(mv(2, 4) == 0 && mv(2, 3) == 0.5);
-assert(abs(mv(3, 4) - (343 + 30)) < 1e-9);
-assert(abs(mv(4, 4) - 343) < 1e-9 && mv(4, 3) == 0.5);
-assert(abs(mv(5, 4) - (343 + 343 * (1 / 7.8) * 293.15 / 273.15)) < 1e-9);
-assert(all(isnan(mv([1 3 5], 3))));
+if ~skipHoming
+    assert(mv(1, 4) == 0 && isnan(mv(1, 3)));   % back into the chamber
+    mv = mv(2:end, :);
+end
+% target and speed of each move (NaN: the operator's)
+want = [0 NaN; 20 NaN; 0 2; 30 NaN; 0 2; 343 + k5 NaN; 343 2; ...
+    o2 + k5 NaN; o2 NaN; o2 NaN; 0 NaN; 150 2];
+assert(size(mv, 1) == size(want, 1));
+assert(all(abs(mv(:, 4) - want(:, 1)) < 1e-9));
+assert(isequaln(mv(:, 3), want(:, 2)));
+pr = h.events(h.events(:, 2) == 4, 4)';
+assert(isequal(pr, [100 100]));
 assert(isequal(h.params{1}, struct('SalineVolume', 343, 'OxygenRatio', 1)));
-assert(isequal(h.records, {cfg.procRecordDefault}) && h.recordEnds == 1);
-fprintf('ok  the seed procedure walks to the end (%d operations)\n', size(h.events, 1));
+assert(isequal(h.records, {cfg.procRecordDefault, 10, cfg.procRecordDefault}) ...
+    && h.recordEnds == 1);
+assert(isequal(h.mixer(:, 2)', [1 0]));
+assert(h.zero == 2);
+fprintf('ok  the SOP procedure walks to the end, %s (%d operations)\n', ...
+    ifElse(skipHoming, 'skipping homing', 'homing'), size(h.events, 1));
+end
+
+function s = ifElse(c, a, b)
+if c, s = a; else, s = b; end
 end
 
 function testPressureView()

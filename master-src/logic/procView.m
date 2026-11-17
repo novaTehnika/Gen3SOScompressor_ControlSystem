@@ -21,8 +21,11 @@ function v = procView(p, opts)
 %                    maxs (a pressure parameter's in the display unit) and
 %                    editable (true only for the keys of the current param
 %                    step)
-%     confirm        visible, enable, label of the Confirm button
-%     repeat         visible, label of the Repeat button
+%     confirm        visible, enable, label of the Confirm button; also
+%                    shown while a position step with until 'confirm'
+%                    moves, to end the move
+%     repeat         visible, label of the second button: Repeat (repeatFrom)
+%                    or Skip (skipTo)
 %     pause          enable, label ('Pause' or 'Resume'); Resume is
 %                    disabled while a pause reason (E-STOP, link lost,
 %                    model stopped, slave fault) holds, and enabled once it
@@ -171,12 +174,20 @@ label = 'Confirm';
 if ~isempty(st)
     label = st.confirmLabel;
 end
-v.confirm = struct('visible', operator && (isConfirm || isParam), ...
+endsMove = strcmp(p.state, 'running') && ~isempty(st) && ...
+    strcmp(st.type, 'machine') && strcmp(st.until, 'confirm') && ...
+    strcmp(p.phase, 'track');
+if endsMove
+    enable = true;
+end
+v.confirm = struct('visible', (operator && (isConfirm || isParam)) || endsMove, ...
     'enable', enable, 'label', label);
-hasRepeat = isConfirm && ~isempty(st.repeatFrom);
+hasRepeat = isConfirm && (~isempty(st.repeatFrom) || ~isempty(st.skipTo));
 rlabel = 'Repeat';
-if hasRepeat
+if hasRepeat && ~isempty(st.repeatFrom)
     rlabel = st.repeatLabel;
+elseif hasRepeat
+    rlabel = st.skipLabel;
 end
 v.repeat = struct('visible', operator && hasRepeat, 'label', rlabel);
 if strcmp(p.state, 'paused')

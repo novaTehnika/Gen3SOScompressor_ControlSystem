@@ -5,9 +5,11 @@ function [p, ok, msg] = procAction(p, action, varargin)
 %   [p, ok, msg] = procAction(p, 'setParam', key, value)
 %
 %   action   'start' (idle), 'confirm' (waitOperator: every check ticked, or
-%            every parameter of the step in range), 'repeat' (waitOperator
-%            on a step with repeatFrom), 'check' (tick or untick item i of
-%            the current confirm step), 'setParam' (set a parameter the
+%            every parameter of the step in range; or running a position
+%            step with until 'confirm' whose move has been sent: ends the
+%            move), 'repeat' (waitOperator on a step with repeatFrom or
+%            skipTo: the second button, which jumps back or forward),
+%            'check' (tick or untick item i of the current confirm step), 'setParam' (set a parameter the
 %            current param step lists), 'pause' (running or waitOperator),
 %            'resume' (paused), 'abort' (running, waitOperator or paused)
 %            and 'reset' (done: back to idle, parameter values kept)
@@ -39,7 +41,10 @@ switch action
             msg = 'The procedure is already started';
         end
     case 'confirm'
-        if ~strcmp(p.state, 'waitOperator')
+        if operatorEndsMove(p, st)
+            p.intent = 'confirm';
+            ok = true;
+        elseif ~strcmp(p.state, 'waitOperator')
             msg = 'Nothing to confirm now';
         elseif strcmp(st.type, 'confirm') && ~all(p.checks)
             msg = 'Tick every item first';
@@ -56,7 +61,8 @@ switch action
             end
         end
     case 'repeat'
-        if strcmp(p.state, 'waitOperator') && ~isempty(st.repeatFrom)
+        if strcmp(p.state, 'waitOperator') && ...
+                (~isempty(st.repeatFrom) || ~isempty(st.skipTo))
             p.intent = 'repeat';
             ok = true;
         else
@@ -128,6 +134,12 @@ switch action
     otherwise
         msg = sprintf('Unknown action "%s"', action);
 end
+end
+
+function tf = operatorEndsMove(p, st)
+% The current step is a move the operator ends, and it is under way.
+tf = strcmp(p.state, 'running') && strcmp(st.type, 'machine') ...
+    && strcmp(st.until, 'confirm') && strcmp(p.phase, 'track');
 end
 
 function bad = outOfRange(p, st)

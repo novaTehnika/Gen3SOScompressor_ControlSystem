@@ -22,7 +22,10 @@ function p = procNew(proc, cfg, values)
 %   "Procedure (non-manual mode)" section of master-src/README.md. Fields a
 %   step does not give take their defaults. New step fields: speed (mm/s,
 %   a position step), pressureMax (atm absolute, a machine step) and
-%   alsoWhen ('endOfTravel', a confirm step or a pressure step). A position
+%   alsoWhen ('endOfTravel', a confirm step or a pressure step), skipTo and
+%   skipLabel (a confirm step: the second button jumps forward to the step
+%   of that id) and until 'confirm' on a position step (the operator ends
+%   the move, or it ends on arrival). A position
 %   or pressure target may be a function handle @(values, cfg) returning a
 %   finite scalar, evaluated when the step issues its operation. A step may
 %   give record (a number above 0, or 'off'; absent: the procedure's), and a
@@ -36,10 +39,11 @@ function p = procNew(proc, cfg, values)
 %   in the fields documented in procStep.m. procNew raises 'procNew:bad' for
 %   a procedure that cannot run: unknown type, op, unit or until, a missing
 %   title or target, a target or key that names no parameter, a duplicate
-%   id, a repeatFrom that does not name an earlier step, too many checks or
+%   id, a repeatFrom that does not name an earlier step, a skipTo that does
+%   not name a later one or that is given with repeatFrom, too many checks or
 %   parameters, an unknown sink or kind, a pressure parameter with a unit,
-%   keep on a step that cannot hold, a speed, pressureMax or alsoWhen where
-%   it does not apply, a target function that fails on the parameters'
+%   keep on a step that cannot hold or on a move the operator ends, a
+%   speed, pressureMax or alsoWhen where it does not apply, a target function that fails on the parameters'
 %   defaults, a settled wait with no earlier pressure step that has keep, a
 %   record that is not a number above 0 or 'off', a duration key that names
 %   no parameter, a track without mode, signal or duration, a track with
@@ -188,7 +192,8 @@ if isempty(rawSteps)
 end
 ts = struct('id', '', 'section', '', 'title', '', 'text', '', 'type', '', ...
     'checks', {{}}, 'confirmLabel', 'Confirm', 'repeatFrom', '', ...
-    'repeatLabel', 'Repeat', 'params', {{}}, 'op', '', 'target', [], ...
+    'repeatLabel', 'Repeat', 'skipTo', '', 'skipLabel', 'Skip', ...
+    'params', {{}}, 'op', '', 'target', [], ...
     'unit', '', 'until', '', 'keep', false, 'tolerance', NaN, ...
     'duration', NaN, 'timeout', Inf, 'timerStart', false, ...
     'timerStop', false, 'zeroVolume', false, 'mixer', '', ...
@@ -233,6 +238,17 @@ for k = 1:numel(rawSteps)
         end
         if isempty(find(strcmp(s.repeatFrom, {steps.id}), 1))
             bad('repeatFrom "%s" is not an earlier step', s.repeatFrom);
+        end
+    end
+    if ~isempty(s.skipTo)
+        if ~strcmp(s.type, 'confirm')
+            bad('skipTo only applies to a confirm step');
+        end
+        if ~isempty(s.repeatFrom)
+            bad('a step gives repeatFrom or skipTo, not both');
+        end
+        if ~ischar(s.skipTo)
+            bad('skipTo must be the id of a later step');
         end
     end
     if ~isempty(s.mixer) && ~any(strcmp(s.mixer, [{'on', 'off'}, keys]))
@@ -308,7 +324,7 @@ for k = 1:numel(rawSteps)
             bad('unit only applies to a position step');
         end
         switch s.op
-            case 'position', allowed = {'arrive'};
+            case 'position', allowed = {'arrive', 'confirm'};
             case {'home', 'goHome'}, allowed = {'ended'};
             case 'pressure', allowed = {'running', 'settled'};
             case 'track', allowed = {'elapsed'};
@@ -317,6 +333,9 @@ for k = 1:numel(rawSteps)
         if isempty(s.until), s.until = allowed{1}; end
         if ~any(strcmp(s.until, allowed))
             bad('unknown until "%s" for op %s', s.until, s.op);
+        end
+        if strcmp(s.until, 'confirm') && s.keep
+            bad('keep does not apply to a move the operator ends');
         end
         if strcmp(s.op, 'pressure') && s.keep
             pressureHold = true;
@@ -407,6 +426,16 @@ for k = 1:numel(rawSteps)
         if isnan(s.duration), s.duration = cfg.procSettleTime; end
     end
     steps(k) = s;
+end
+% A skip jumps forward, so its target is checked once every id is known.
+for k = 1:numel(steps)
+    if ~isempty(steps(k).skipTo)
+        j = find(strcmp(steps(k).skipTo, {steps.id}), 1);
+        if isempty(j) || j <= k
+            error('procNew:bad', 'step %d (%s): skipTo "%s" is not a later step', ...
+                k, steps(k).id, steps(k).skipTo);
+        end
+    end
 end
 def.steps = steps;
 def.normalized = true;

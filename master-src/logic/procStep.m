@@ -247,11 +247,24 @@ switch intent
                 req.params = sinkParams(p, st);
             end
             [p, req] = completeStep(p, req, in);
+        elseif strcmp(p.state, 'running') && strcmp(st.type, 'machine') ...
+                && strcmp(st.until, 'confirm') && strcmp(p.phase, 'track')
+            % The operator ends the move: stop it, then complete.
+            p.phase = 'stopping';
+            p.stepT = 0;
+            req.stop = true;
         end
     case 'repeat'
         if strcmp(p.state, 'waitOperator') && ~isempty(st.repeatFrom)
             j = find(strcmp(st.repeatFrom, {p.def.steps.id}), 1);
             p.stepDone(j:end) = false;
+            p.returnTo = 0;
+            [p, req] = enterStep(p, req, in, j);
+        elseif strcmp(p.state, 'waitOperator') && ~isempty(st.skipTo)
+            % Forward: the step is answered, the steps jumped over stay
+            % not done.
+            j = find(strcmp(st.skipTo, {p.def.steps.id}), 1);
+            p.stepDone(p.k) = true;
             p.returnTo = 0;
             [p, req] = enterStep(p, req, in, j);
         end
@@ -437,6 +450,9 @@ switch p.phase
                 done = p.trk.t >= p.trk.duration - 1e-9;
             case 'position'
                 done = late && status == 3;
+                if done && strcmp(st.until, 'confirm')
+                    p.note = sprintf('%s reached its target', st.title);
+                end
             case 'pressure'
                 if strcmp(st.until, 'running')
                     done = late && tr.confirmed;

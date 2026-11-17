@@ -213,10 +213,16 @@ the reference for each) and confirm:
       the held pressure label in the unit; a slave fault pausing the
       procedure ("Paused: Slave fault N"), Resume refused until the reset
       has gone through, then the step issued again; the delivery step
-      ending at the end of travel with its note. Tune `PUSH_SPEED` and
-      `PUSH_PRESSURE_MAX` in `sopProcedure.m` against the real discharge
-      line, and the oxygen loading pressure default against the
-      regulator.
+      ending at the end of travel with its note. Tune `PUSH_SPEED`,
+      `SALINE_PUSH_MAX` and `HOSE_PUSH_MAX` in `sopProcedure.m` against the
+      stopcock and the hose, and the oxygen loading pressure default
+      against the regulator.
+- [ ] Walk the SOP procedure on the lab PC with water: the second button
+      reading "Skip Homing" and jumping to the flush; the Confirm button
+      appearing during the hose fill ("Saline at Needle") and the rinse
+      draw ("Water Drawn"), stopping the move when pressed; the physical
+      emergency stop during "Free the chamber" (whether the procedure
+      pauses and what has to be reset before Resume).
 - [ ] Relaunch the operator app and check the new speed control (percent field and presets).
       Outside a procedure the trace's `salineVolume_mL` and `oxygenRatio`
       hold the `buildShell` defaults (`masterConfig.m`: 343 mL, 1.0).

@@ -284,8 +284,9 @@ read from the model (`connected`, `statusCode`, `faultCode`, `estop`, `pressure`
 returned requests in this order (`params`, `mixer`, `stop`, `track`, `op` with
 `target`, `unit` and `speed`, `zeroVolume`, `record`, `recordEnd`) through its
 own operation requests, so the interlocks stay in one place. `procAction` only records the operator's
-intent (start, confirm, repeat, check, setParam, pause, resume, abort, reset)
-and refuses an action the state does not allow; `procView` gives what the panel
+intent (start, confirm, repeat, check, setParam, pause, resume, abort, reset;
+repeat is the second button, which jumps back or, with `skipTo`, forward, and
+confirm also ends a move with `until` `'confirm'`) and refuses an action the state does not allow; `procView` gives what the panel
 shows. `tests/smokeProcedureEngine.m` runs all of it against a stand-in for the
 model's status. `procView(p, opts)` takes the display options of
 `pressureUnitInfo` and shows pressure parameters, texts and the held pressure
@@ -366,9 +367,11 @@ fields it uses (`procNew` fills the defaults).
 | `text` | all | `''` | instruction; `{key}` is replaced by the parameter value |
 | `type` | all | required | `confirm`, `param`, `machine` or `wait` |
 | `checks` | confirm | `{}` | checklist; Confirm is enabled when every item is ticked (at most `cfg.procMaxChecks`) |
-| `confirmLabel` | confirm, param | `'Confirm'` | label of the Confirm button |
+| `confirmLabel` | confirm, param, position with `until` `'confirm'` | `'Confirm'` | label of the Confirm button |
 | `repeatFrom` | confirm | `''` | id of an earlier step; shows a second button that jumps back to it |
 | `repeatLabel` | confirm | `'Repeat'` | label of that button |
+| `skipTo` | confirm | `''` | id of a later step; shows the second button, which jumps forward to it (not with `repeatFrom`) |
+| `skipLabel` | confirm | `'Skip'` | label of that button |
 | `params` | param | required | keys entered and confirmed in this step |
 | `op` | machine | required | `home`, `goHome`, `position`, `pressure`, `track` or `stop` |
 | `mode` | track | required | `pressure` (atm absolute) or `position` (mm from the end of travel) |
@@ -389,7 +392,9 @@ fields it uses (`procNew` fills the defaults).
 | `zeroVolume` | all | `false` | on entering the step, take the reference of the volume-discharged readout |
 | `mixer` | all | `''` | `on`, `off` or a parameter key (0/1), applied on entering the step |
 
-Completion: `position` `arrive` is status 3; `home`/`goHome` `ended` is the
+Completion: `position` `arrive` is status 3, and `confirm` is the operator's
+Confirm while the move runs (the move is stopped, then the step completes) or
+status 3 (the note reads "<title> reached its target"); `home`/`goHome` `ended` is the
 operation confirmed, its status gone and the master back at status 0;
 `pressure` `running` is status 5 seen, and `settled` also needs the pressure
 within `tolerance` of the target for `duration`; `stop` `stopped` is a status
@@ -400,7 +405,7 @@ status.
 
 A target function that fails when the step issues pauses it with "Step target
 could not be computed: " and the function's message, and nothing is sent; the
-oxygen fill of the seed procedure does this when the charge does not fit the
+oxygen fill of the SOP procedure does this when the charge does not fit the
 chamber. While a machine step tracks or settles, `pressure` above its
 `pressureMax` pauses it with "Pressure above the step's limit" and
 `PressureBlock` pauses it with "Pressure ceiling reached" (every op but
@@ -415,9 +420,10 @@ app, a `speed` caps `PositionSpeed` for the step ("(step)" after the speed
 readout) and the operator's speed is restored when the operation ends.
 `procNew` rejects a procedure that cannot run (unknown type, op, unit,
 `until`; missing title or target; a key that names no parameter; duplicate id;
-a `repeatFrom` that is not an earlier step; too many checks or parameters; an
+a `repeatFrom` that is not an earlier step; a `skipTo` that is not a later step,
+or one with `repeatFrom`; too many checks or parameters; an
 unknown sink or kind; a pressure parameter with a unit; `keep` on a step that
-cannot hold; `speed` outside a position step or not above 0; `pressureMax` not
+cannot hold or on a move with `until` `'confirm'`; `speed` outside a position step or not above 0; `pressureMax` not
 above 0; an unknown `alsoWhen` or one on another step; a target function that
 fails on the defaults; a settled wait with no earlier pressure step with `keep`;
 a `record` that is not a number above 0 or `'off'`; a `duration` key that names
@@ -564,13 +570,20 @@ Edit `procedure/sopProcedure.m` (or add a file there and set `cfg.procedure` in
 `tests/run_all.sh smokeProcedureEngine`: it validates the shipped procedure
 through `procNew` and walks it against the stand-in. Pressure parameters are
 `kind = 'pressure'` in atm absolute; a pressure `{key}` renders with its unit,
-so write `Holding {dischargePressure}.` and not `... atm.`. The seed procedure
-computes the oxygen fill volume from its parameters in a function target
-(`oxygenFillVolume`, with its equation in the comment) and writes the saline
-volume and the oxygen ratio to the shell's `SalineVolume` and
-`OxygenRatio` blocks (sinks), which the trace records; its constants `FILL_EXCESS`,
-`PUSH_SPEED` and `PUSH_PRESSURE_MAX` are at the top of the file; the seed
-procedure records each run at 1 s (`record`).
+so write `Holding {targetPressure}.` and not `... atm.`. The shipped procedure
+follows the lab's SOP from the reset of a previous experiment to the clean-up
+(the SOP's start-up comes before Start Procedure). Its first operator step
+offers to skip the homing (`skipTo`), and the hose fill and the rinse draw are
+moves the operator ends (`until` `'confirm'`). It computes the saline draw and
+the oxygen fill volumes from its parameters in function targets
+(`salineDrawVolume`, `oxygenFillVolume`, with the equation in the comment),
+moves again for the oxygen loading pressure the operator reads off the
+regulator, and writes the saline volume and the oxygen ratio to the shell's
+`SalineVolume` and `OxygenRatio` blocks (sinks), which the trace records; its
+constants (the 5 mm drawn past a fill and pushed back, the push speed, the
+pressure guards of the pushes, the flush, hose and rinse positions and the
+rinse pressure) are at the top of the file. It records each run at 1 s and the
+mixing at 10 s (`record`).
 
 `procedure/experimentTemplate.m` is the file to copy from for an experiment: it
 sets the record interval for the run and per step, has one step of each kind
