@@ -218,11 +218,18 @@ the reference for each) and confirm:
       stopcock and the hose, and the oxygen loading pressure default
       against the regulator.
 - [ ] Walk the SOP procedure on the lab PC with water: the second button
-      reading "Skip Homing" and jumping to the flush; the Confirm button
-      appearing during the hose fill ("Saline at Needle") and the rinse
-      draw ("Water Drawn"), stopping the move when pressed; the physical
-      emergency stop during "Free the chamber" (whether the procedure
-      pauses and what has to be reset before Resume).
+      reading "Skip Homing" and jumping to the flush; each draw ending
+      once the pressure settles back at ambient (`SETTLE_TOL`,
+      `SETTLE_TIME` against the bag's head and the transducer's noise);
+      the hose fill under pressure control reaching the needle at
+      `HOSE_FILL`; the purge's volume progress; "Take Reading" storing
+      the regulator's pressure; the physical emergency stop during "Vent
+      and free the chamber" (whether the procedure pauses and what has to
+      be reset before Resume). The pushes out of the stopcock pause above
+      `PUSH_GUARD` (0.5 atm gauge), but the engine sees the pressure only
+      at the app's poll: against a blocked outlet with a liquid-full
+      chamber the pressure overshoots it, and only the slave's ceiling
+      bounds it.
 - [ ] Relaunch the operator app and check the new speed control (percent field and presets).
       Outside a procedure the trace's `salineVolume_mL` and `oxygenRatio`
       hold the `buildShell` defaults (`masterConfig.m`: 343 mL, 1.0).
@@ -503,7 +510,11 @@ specified here; the implementation plan decides the files.
       of 0.2 mm (Cv about 0.0013, five seconds to fill the hose) opened
       ahead of the ball valve (`study_hose_opening.py`). The purge must
       carry the slug that degassed entering the hose, 4 to 6 mL behind
-      the 58 mL of virgin saline.
+      the 58 mL of virgin saline. Opened slowly by hand and stopped as
+      soon as it cracks, the proximal valve has given opening dips under
+      10 atm at 100 atm in a bench capture, against the model's drop to
+      4.3 MPa for an opening in one scan; find the capture and compare it
+      with `study_hose_opening.py`.
 - [ ] The hose model's inputs that only the procedure can give: whether
       the whole 58 mL is purged, the pause between purge and delivery,
       whether the tube drains in it (`Scenario.tube_refills` in

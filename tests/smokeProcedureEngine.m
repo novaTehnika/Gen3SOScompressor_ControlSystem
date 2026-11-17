@@ -43,6 +43,8 @@ testTimeout(0.05);
 testRepeat(0.05);
 testSkip(0.05);
 testOperatorEndsMove(0.05);
+testWaits(0.05);
+testCapture(0.05);
 testWrongState(0.05);
 testPurity();
 testView();
@@ -86,41 +88,47 @@ assert(strcmp(p.state, 'idle'));
 for k = 1:numel(p.def.steps)
     assert(~isempty(p.def.steps(k).title));
 end
-assert(numel(p.def.steps) == 48 && numel(p.def.params) == 6);
+assert(numel(p.def.steps) == 54 && numel(p.def.params) == 8);
 ids = {p.def.steps.id};
+st = @(title) p.def.steps(find(strcmp({p.def.steps.title}, title), 1));
+% No move in the default procedure is ended by the operator.
+assert(~any(strcmp({p.def.steps.until}, 'confirm')));
 % The oxygen fill target on the defaults: the saline plus the oxygen at
 % the loading pressure (ideal gas at room temperature), 5 mm past it on
 % the retract.
 k5 = 5 * mLPerMm(cfg);
 want = 343 + 343 * (1 / 7) * 293.15 / 273.15;
-st = p.def.steps(29);
-assert(strcmp(st.op, 'position') && strcmp(st.unit, 'mL'));
-assert(abs(st.target(p.values, p.cfg) - want) < 1e-9);
-assert(abs(p.def.steps(28).target(p.values, p.cfg) - (want + k5)) < 1e-9);
-assert(abs(p.def.steps(32).target(p.values, p.cfg) - want) < 1e-9);
-assert(abs(p.def.steps(24).target(p.values, p.cfg) - (343 + k5)) < 1e-9);
-% The second loading pressure moves the piston for the pressure read.
+back = st('Come back to the oxygen position');
+assert(strcmp(back.op, 'position') && strcmp(back.unit, 'mL'));
+assert(abs(back.target(p.values, p.cfg) - want) < 1e-9);
+assert(abs(st('Retract past the oxygen position').target(p.values, p.cfg) ...
+    - (want + k5)) < 1e-9);
+assert(abs(st('Draw the fill').target(p.values, p.cfg) - (343 + k5)) < 1e-9);
+% The captured loading pressure moves the piston for the pressure read.
+assert(strcmp(st('Set the loading pressure').capture, 'oxygenLoadPressure'));
+adj = st('Adjust for the loading pressure');
 v = p.values;
 v.oxygenLoadPressure = 7.5;
-assert(abs(p.def.steps(32).target(v, p.cfg) ...
-    - (343 + 343 * (1 / 7.5) * 293.15 / 273.15)) < 1e-9);
-% The homing question skips to the flush; the operator-ended moves.
+assert(abs(adj.target(v, p.cfg) - (343 + 343 * (1 / 7.5) * 293.15 / 273.15)) < 1e-9);
+% The homing question skips to the flush; the hose is filled and purged
+% by volume under pressure control.
 assert(strcmp(p.def.steps(2).skipTo, 'flushPrepare') ...
-    && find(strcmp(ids, 'flushPrepare')) == 9);
-assert(strcmp(p.def.steps(5).op, 'home'));
-assert(strcmp(p.def.steps(21).until, 'confirm') ...
-    && strcmp(p.def.steps(44).until, 'confirm'));
-assert(p.def.steps(44).target == 150);
+    && find(strcmp(ids, 'flushPrepare')) == 8);
+fill = st('Filling the hose');
+assert(strcmp(fill.until, 'volume') && fill.volume == 63);
+assert(strcmp(st('Purging the hose').volume, 'purgeVolume'));
+assert(strcmp(st('Fill the hose').op, 'pressure') && st('Fill the hose').zeroVolume);
 % A charge the chamber cannot hold is reported by the saline draw, before
 % any saline is drawn, and by the oxygen fill.
 v = p.values;
 v.salineVolume = 900;
 v.oxygenRatio = 4;
 v.oxygenLoadPressure = 2;
-for j = [24 28 29 32]
+for t = {'Draw the fill', 'Retract past the oxygen position', ...
+        'Come back to the oxygen position', 'Adjust for the loading pressure'}
     try
-        p.def.steps(j).target(v, p.cfg);
-        error('smoke:noError', 'step %d accepted too large a charge', j);
+        st(t{1}).target(v, p.cfg);
+        error('smoke:noError', '%s accepted too large a charge', t{1});
     catch err
         assert(~isempty(strfind(err.message, 'more than the chamber holds')), err.message);
     end
@@ -141,6 +149,16 @@ procNew(setStep(base, 1, 'alsoWhen', 'endOfTravel'), cfg);
 procNew(setStep(base, 2, 'alsoWhen', 'endOfTravel'), cfg);
 procNew(setStep(base, 4, 'target', @(v, c) c.deadVolume + v.vol), cfg);
 procNew(setStep(base, 4, 'until', 'confirm'), cfg);
+procNew(setStep(base, 3, 'target', 2), cfg);
+procNew(setStep(base, 3, 'until', 'endOfTravel'), cfg);
+procNew(setStep(setStep(setStep(base, 3, 'until', 'volume'), 3, 'volume', 5), ...
+    3, 'zeroVolume', true), cfg);
+basep = base;
+basep.params{end+1} = struct('key', 'pp', 'kind', 'pressure', 'value', 3, ...
+    'min', 1, 'max', 10);
+procNew(setStep(basep, 1, 'capture', 'pp'), cfg);
+q = mk({struct('type', 'wait', 'title', 'W', 'until', 'settled', 'target', 'pTarget')});
+procNew(q, cfg);    % a settled wait with a target needs no hold
 procNew(setStep(setStep(base, 4, 'id', 'z'), 1, 'skipTo', 'z'), cfg);
 bad = {};
 bad{end+1} = setStep(base, 1, 'type', 'bogus');
@@ -181,6 +199,21 @@ bad{end+1} = mk({struct('id', 'a', 'type', 'confirm', 'title', 'A'), ...
     struct('id', 'c', 'type', 'confirm', 'title', 'C')});
 bad{end+1} = setStep(setStep(base, 4, 'until', 'confirm'), 4, 'keep', true);
 bad{end+1} = setStep(base, 2, 'until', 'confirm');   % on a pressure step
+bad{end+1} = setStep(base, 3, 'until', 'volume');    % no volume
+bad{end+1} = setStep(setStep(base, 3, 'until', 'volume'), 3, 'volume', 5);  % no reference
+bad{end+1} = setStep(setStep(setStep(base, 3, 'until', 'volume'), 3, ...
+    'volume', 0), 3, 'zeroVolume', true);
+bad{end+1} = setStep(setStep(setStep(base, 3, 'until', 'volume'), 3, ...
+    'volume', 'noSuchKey'), 3, 'zeroVolume', true);
+bad{end+1} = setStep(base, 4, 'volume', 5);          % volume off a volume wait
+bad{end+1} = setStep(base, 3, 'until', 'bogus');
+bad{end+1} = setStep(setStep(setStep(base, 3, 'until', ''), 3, 'duration', 1), ...
+    3, 'target', 2);                                  % a timed wait with a target
+bad{end+1} = setStep(base, 3, 'target', 'noSuchKey');
+bad{end+1} = setStep(base, 3, 'op', 'position');
+bad{end+1} = setStep(basep, 1, 'capture', 'vol');    % not a pressure parameter
+bad{end+1} = setStep(basep, 1, 'capture', 'noSuchKey');
+bad{end+1} = setStep(basep, 4, 'capture', 'pp');     % not on a confirm step
 bad{end+1} = setParam(base, 2, 'kind', 'bogus');
 bad{end+1} = setParam(base, 1, 'kind', 'pressure');         % with a unit
 many = base;
@@ -756,6 +789,90 @@ assert(~isempty(strfind(h.p.note, 'Push reached its target')), h.p.note);
 fprintf('ok  until confirm: the operator ends the move, or it ends on arrival\n');
 end
 
+function testWaits(dt)
+% The waits a procedure uses to avoid the operator's judgement: settled
+% about a given pressure with no hold, a volume discharged and the end of
+% travel.
+conf = @(t, varargin) struct('type', 'confirm', 'title', t, varargin{:});
+% Settled about a target (no pressure control); a timeout pauses and
+% resume restarts it.
+proc = mk({struct('type', 'wait', 'title', 'Fill', 'until', 'settled', ...
+        'target', 1, 'tolerance', 0.2, 'duration', 1, 'timeout', 3), ...
+    conf('C')});
+h = newHost(proc, dt);
+h.m.relax = true;
+h.m.pressure = 0.3;          % a draw has left the chamber under vacuum
+h.m.restP = 0.3;             % the clamp is shut: it does not refill
+h = act(h, 'start');
+h = runUntil(h, @(h) strcmp(h.p.state, 'paused'), 5);
+assert(~isempty(strfind(h.p.message, 'did not settle')), h.p.message);
+assert(isempty(h.events));
+h.m.restP = 1.05;            % the clamp opened: the bag refills it
+h = act(h, 'resume');
+h = runUntil(h, @(h) h.p.k == 2, 5);
+assert(isempty(h.events), 'the wait sends nothing');
+
+% A volume after the step's zeroVolume, with its progress; the end of
+% travel first pauses.
+params = {struct('key', 'pv', 'value', 30, 'min', 1, 'max', 500)};
+proc = mk({struct('type', 'machine', 'title', 'Hold', 'op', 'pressure', ...
+        'target', 5, 'keep', true, 'zeroVolume', true), ...
+    struct('type', 'wait', 'title', 'Purge', 'until', 'volume', 'volume', 'pv'), ...
+    struct('type', 'wait', 'title', 'Rest', 'until', 'endOfTravel'), ...
+    struct('type', 'machine', 'title', 'Stop', 'op', 'stop')}, params);
+h = newHost(proc, dt);
+h = act(h, 'start');
+h = runUntil(h, @(h) h.p.k == 2, 5);
+assert(strcmp(procView(h.p).stepProgress, '0 / 30 mL'), procView(h.p).stepProgress);
+h.m.flow = 2;                % mm/s out of the open outlet
+h = runFor(h, 2);
+assert(h.p.k == 2);
+pv = procView(h.p).stepProgress;
+assert(~isempty(regexp(pv, '^\d+ / 30 mL$', 'once')), pv);
+h = runUntil(h, @(h) h.p.k == 3, 10);
+assert(h.p.volumeDischarged >= 30 && h.p.volumeDischarged < 32);
+h.m.flow = 20;
+h = runUntil(h, @(h) h.p.k == 4, 30);
+assert(h.m.d * mLPerMm(h.cfg) <= h.cfg.procEndVolume);
+h = runUntil(h, @(h) strcmp(h.p.state, 'done'), 5);
+assert(isequal(h.events(:, 2)', [4 -1]));
+h = newHost(proc, dt);
+h.m.d = 5;                   % too little left for the volume
+h = act(h, 'start');
+h = runUntil(h, @(h) h.p.k == 2, 5);
+h.m.flow = 5;
+h = runUntil(h, @(h) strcmp(h.p.state, 'paused'), 10);
+assert(strcmp(h.p.message, 'End of travel before the volume was reached'));
+fprintf('ok  waits: settled about a target, a volume discharged, the end of travel\n');
+end
+
+function testCapture(dt)
+% A confirm step with capture stores the pressure reading in its pressure
+% parameter on confirm; a reading out of range is refused and the step
+% waits on.
+params = {struct('key', 'pLoad', 'label', 'Loading', 'kind', 'pressure', ...
+        'value', 7, 'min', 2, 'max', 14.6)};
+proc = mk({struct('type', 'confirm', 'title', 'Read', 'capture', 'pLoad'), ...
+    struct('type', 'machine', 'title', 'Move', 'op', 'position', ...
+        'unit', 'mm', 'target', @(v, c) 10 * v.pLoad)}, params);
+h = newHost(proc, dt);
+h = act(h, 'start');
+h = tick(h);
+h.m.pressure = 1;            % the regulator not yet open
+h = act(h, 'confirm');
+h = tick(h);
+assert(h.p.k == 1 && strcmp(h.p.state, 'waitOperator'));
+assert(strcmp(h.p.message, 'Loading reading is out of range'));
+assert(h.p.values.pLoad == 7);
+h.m.pressure = 7.4;
+h = act(h, 'confirm');
+h = tick(h);
+assert(h.p.k == 2 && abs(h.p.values.pLoad - 7.4) < 1e-12);
+h = runUntil(h, @(h) strcmp(h.p.state, 'done'), 20);
+assert(abs(h.events(1, 4) - 74) < 1e-9);
+fprintf('ok  capture takes the pressure reading into its parameter\n');
+end
+
 function testWrongState(dt)
 proc = mk({struct('type', 'machine', 'title', 'Move', 'op', 'position', 'target', 100), ...
     struct('type', 'confirm', 'title', 'C')});
@@ -1022,21 +1139,34 @@ end
 function testSeedWalk(dt, skipHoming)
 % The SOP procedure through the stand-in, homing or skipping it: every
 % machine step's request, the speed of the pushes and the order of the
-% operations. The mixing time is shortened to keep the walk short.
+% operations. The walker plays the operator and the plant: it confirms
+% every operator step, lets a draw's pressure relax to ambient, sets the
+% regulator before the reading is taken and opens the outlet while a wait
+% counts a volume or waits for the end of travel. The mixing time is
+% shortened to keep the walk short.
 proc = sopProcedure();
 h = newHost(proc, dt);
 cfg = h.cfg;
 h.p.values.mixTime = 3;
+h.m.relax = true;
 h = act(h, 'start');
 guard = 0;
 while ~strcmp(h.p.state, 'done') && guard < 8000
+    st = h.p.def.steps(max(h.p.k, 1));
+    outlet = strcmp(st.type, 'wait') && any(strcmp(st.until, {'volume', 'endOfTravel'}));
+    h.m.flow = 10 * outlet;
     h = tick(h);
     guard = guard + 1;
+    assert(~strcmp(h.p.state, 'paused'), 'paused at step %d: %s', h.p.k, h.p.message);
     if strcmp(h.p.state, 'waitOperator')
         st = h.p.def.steps(h.p.k);
         if skipHoming && ~isempty(st.skipTo)
             h = act(h, 'repeat');
             continue
+        end
+        if ~isempty(st.capture)
+            h.m.restP = 7.2;          % the regulator
+            h.m.pressure = 7.2;
         end
         for i = 1:numel(st.checks)
             h = act(h, 'check', i, true);
@@ -1046,35 +1176,37 @@ while ~strcmp(h.p.state, 'done') && guard < 8000
 end
 assert(strcmp(h.p.state, 'done') && strcmp(h.p.outcome, 'completed'));
 ops = h.events(:, 2)';
-mvs = repmat([2 -1], 1, 10);
-tail = [4 -1 2 -1 2 -1 4 -1];
+mv2 = @(n) repmat([2 -1], 1, n);
+body = [mv2(4) 4 -1 mv2(5) 4 -1 mv2(2) 4 -1];
 if skipHoming
-    assert(isequal(find(~h.p.stepDone), 3:8));
-    assert(isequal(ops, [mvs tail]), mat2str(ops));
+    assert(isequal(find(~h.p.stepDone), 3:7));
+    assert(isequal(ops, body), mat2str(ops));
 else
     assert(all(h.p.stepDone));
-    assert(isequal(ops, [1 2 -1 mvs tail]), mat2str(ops));
+    assert(isequal(ops, [1 2 -1 body]), mat2str(ops));
 end
 k5 = 5 * mLPerMm(cfg);
 o2 = 343 + 343 * (1 / 7) * 293.15 / 273.15;
+o2read = 343 + 343 * (1 / 7.2) * 293.15 / 273.15;
 mv = h.events(h.events(:, 2) == 2, :);
 if ~skipHoming
     assert(mv(1, 4) == 0 && isnan(mv(1, 3)));   % back into the chamber
     mv = mv(2:end, :);
 end
 % target and speed of each move (NaN: the operator's)
-want = [0 NaN; 20 NaN; 0 2; 30 NaN; 0 2; 343 + k5 NaN; 343 2; ...
-    o2 + k5 NaN; o2 NaN; o2 NaN; 0 NaN; 150 2];
+want = [0 2; 20 NaN; 0 2; 30 NaN; 343 + k5 NaN; 343 2; ...
+    o2 + k5 NaN; o2 NaN; o2read NaN; 0 NaN; cfg.deadVolume + 250 2];
 assert(size(mv, 1) == size(want, 1));
 assert(all(abs(mv(:, 4) - want(:, 1)) < 1e-9));
 assert(isequaln(mv(:, 3), want(:, 2)));
+assert(abs(h.p.values.oxygenLoadPressure - 7.2) < 1e-12);
 pr = h.events(h.events(:, 2) == 4, 4)';
-assert(isequal(pr, [100 100]));
+assert(isequal(pr, [100 100 100]));
 assert(isequal(h.params{1}, struct('SalineVolume', 343, 'OxygenRatio', 1)));
 assert(isequal(h.records, {cfg.procRecordDefault, 10, cfg.procRecordDefault}) ...
     && h.recordEnds == 1);
 assert(isequal(h.mixer(:, 2)', [1 0]));
-assert(h.zero == 2);
+assert(h.zero == 3);
 fprintf('ok  the SOP procedure walks to the end, %s (%d operations)\n', ...
     ifElse(skipHoming, 'skipping homing', 'homing'), size(h.events, 1));
 end
@@ -1831,7 +1963,8 @@ function m = modelInit(cfg)
 m = struct('status', 0, 'mode', 'idle', 'tm', 0, 'op', 0, 'unit', 'mm', ...
     'target', 0, 'constTarget', 0, 'trk', [], 'd', 300, 'speed', 50, 'homeT', 1.0, 'pressure', 1, ...
     'connected', true, 'estop', false, 'faultCode', 0, 'inject', '', ...
-    'force', [], 'pressureBlock', false, 'atEnd', false);
+    'force', [], 'pressureBlock', false, 'atEnd', false, ...
+    'relax', false, 'restP', 1, 'flow', 0);
 m.cfg = cfg;
 end
 
@@ -1916,6 +2049,7 @@ switch m.mode
             case 4
                 m.status = 5;
                 m.pressure = m.pressure + (m.target - m.pressure) * min(1, dt / 0.3);
+                m.d = max(0, m.d - m.flow * dt);   % the outlet open
             otherwise
                 if m.op == 1, m.status = 1; else, m.status = 8; end
                 if m.tm >= m.homeT
@@ -1940,6 +2074,10 @@ switch m.mode
         m.status = 33;
     case 'stuck'
         m.status = 2;
+end
+if m.relax && ~(strcmp(m.mode, 'run') && m.op == 4)
+    % Without pressure control the chamber settles to the line feeding it.
+    m.pressure = m.pressure + (m.restP - m.pressure) * min(1, dt / 0.3);
 end
 if ~isempty(m.force)
     m.status = m.force;

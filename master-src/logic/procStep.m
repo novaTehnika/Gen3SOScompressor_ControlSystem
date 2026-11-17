@@ -55,6 +55,10 @@ function [p, req] = procStep(p, in, dt)
 %   fault (status 10, then 9 while resetting and 32 if the reset failed)
 %   pause the procedure with reason set; resume is refused until the
 %   condition has gone, and abort ends at once if the model is not running.
+%   A confirm step with capture stores the pressure reading in its
+%   parameter on confirm (a reading out of range is refused). Waits are
+%   timed, settled (about their target, or the background hold's), volume
+%   (the volume discharged since the last zeroVolume) or endOfTravel.
 %   Two guards pause a machine step without a reason: the pressure above
 %   the step's pressureMax and the slave's pressure block. A target given as
 %   a function is evaluated when the step issues its operation. Fields of p:
@@ -245,6 +249,20 @@ switch intent
         if strcmp(p.state, 'waitOperator')
             if strcmp(st.type, 'param')
                 req.params = sinkParams(p, st);
+            end
+            if ~isempty(st.capture)
+                % The reading becomes the parameter's value; one outside
+                % its range is refused and the step waits on.
+                q = p.def.params(strcmp(st.capture, {p.def.params.key}));
+                v = in.pressure;
+                if ~(isfinite(v) && v >= q.min && v <= q.max)
+                    p.message = sprintf('%s reading is out of range', q.label);
+                    return
+                end
+                p.values.(q.key) = v;
+                if ~isempty(q.sink)
+                    req.params = struct(q.sink, v);
+                end
             end
             [p, req] = completeStep(p, req, in);
         elseif strcmp(p.state, 'running') && strcmp(st.type, 'machine') ...
@@ -525,18 +543,49 @@ end
 end
 
 function [p, req] = waitWork(p, req, in, dt, st)
-if isempty(st.until)
-    if p.stepT >= stepDuration(p, st)
-        [p, req] = completeStep(p, req, in);
-    end
-    return
+switch st.until
+    case ''
+        if p.stepT >= stepDuration(p, st)
+            [p, req] = completeStep(p, req, in);
+        end
+        return
+    case 'volume'
+        if isnan(p.volumeDischarged)
+            [p, req] = pauseNow(p, req, 'No volume reference', false);
+        elseif p.volumeDischarged >= stepVolume(p, st)
+            [p, req] = completeStep(p, req, in);
+        elseif atEnd(in, p.c)
+            [p, req] = pauseNow(p, req, ...
+                'End of travel before the volume was reached', false);
+        elseif p.stepT >= st.timeout
+            [p, req] = pauseNow(p, req, timeoutMsg(st), false);
+            p.stepT = 0;
+        end
+        return
+    case 'endOfTravel'
+        if atEnd(in, p.c)
+            [p, req] = completeStep(p, req, in);
+        elseif p.stepT >= st.timeout
+            [p, req] = pauseNow(p, req, timeoutMsg(st), false);
+            p.stepT = 0;
+        end
+        return
 end
-% Settled about the background pressure target.
-if p.bg.op ~= 4 || p.bg.lost
+% Settled about the step's own target, or about the background pressure
+% target.
+if ~isempty(st.target)
+    if ischar(st.target)
+        target = p.values.(st.target);
+    else
+        target = st.target;
+    end
+elseif p.bg.op ~= 4 || p.bg.lost
     [p, req] = pauseNow(p, req, 'No pressure control to settle on', false);
     return
+else
+    target = p.bg.target;
 end
-if abs(in.pressure - p.bg.target) <= st.tolerance
+if abs(in.pressure - target) <= st.tolerance
     p.settleT = p.settleT + dt;
 else
     p.settleT = 0;
@@ -888,6 +937,15 @@ function T = stepDuration(p, st)
 T = st.duration;
 if ischar(T)
     T = p.values.(T);
+end
+end
+
+function V = stepVolume(p, st)
+% A volume wait's volume in mL: a number, or the value of the parameter it
+% names.
+V = st.volume;
+if ischar(V)
+    V = p.values.(V);
 end
 end
 
